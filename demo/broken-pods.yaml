@@ -63,6 +63,43 @@ spec:
         - name: bad-image
           image: nginx:this-tag-does-not-exist
 ---
+# Backed by pods that never become ready -> a service with zero ready
+# endpoints, which is reachable in name only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: crasher-svc
+  namespace: demo
+spec:
+  selector: { app: crasher }
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# The other classic: a selector that matches nothing at all, usually a typo.
+apiVersion: v1
+kind: Service
+metadata:
+  name: typo-svc
+  namespace: demo
+spec:
+  selector: { app: web-frontend }
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# A healthy service, as a control
+apiVersion: v1
+kind: Service
+metadata:
+  name: healthy-web
+  namespace: demo
+spec:
+  selector: { app: healthy-web }
+  ports:
+    - port: 80
+      targetPort: 80
+---
 # A healthy control, so not everything is broken
 apiVersion: apps/v1
 kind: Deployment

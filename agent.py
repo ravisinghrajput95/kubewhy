@@ -24,6 +24,9 @@ from routers.k8s_pods_info import (
     describe_pod,
     get_pod_events,
     get_pod_logs,
+    list_nodes,
+    list_deployments,
+    get_service_endpoints,
 )
 
 # OLLAMA_HOST is read by the ollama client itself; in a container it needs to
@@ -44,6 +47,9 @@ TOOLS = {
     "describe_pod": describe_pod,
     "get_pod_events": get_pod_events,
     "get_pod_logs": get_pod_logs,
+    "list_nodes": list_nodes,
+    "list_deployments": list_deployments,
+    "get_service_endpoints": get_service_endpoints,
 }
 
 SYSTEM_PROMPT = """You are a triage assistant. You can inspect two separate
@@ -64,6 +70,13 @@ unhealthy, then describe_pod for the termination reason and resource limits,
 then get_pod_events or get_pod_logs for the underlying cause. Do not stop at
 the status name -- OOMKilled or CrashLoopBackOff is the symptom, and the user
 wants the reason behind it.
+
+For a service that is unreachable, start with get_service_endpoints: a service
+with no ready endpoints has nowhere to send traffic, and the matching pods are
+what to inspect next. For a workload that is degraded rather than dead, use
+list_deployments to compare ready against desired replicas. If pods are
+Pending or being evicted, check list_nodes for pressure before blaming the
+workload.
 
 When reporting a problem, name the specific pod or process responsible, give
 the measured figure, and say what you would change. Be concise -- a few

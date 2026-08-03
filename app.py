@@ -12,6 +12,9 @@ from routers.k8s_pods_info import (
     describe_pod,
     get_pod_events,
     get_pod_logs,
+    list_nodes,
+    list_deployments,
+    get_service_endpoints,
 )
 
 app = FastAPI(title="System stats")
@@ -51,6 +54,18 @@ def pod_events(name: str, namespace: str = "default", limit: int = 10):
 @app.get("/pods/{name}/logs")
 def pod_logs(name: str, namespace: str = "default", tail: int = 20):
     return get_pod_logs(name, namespace, tail)
+
+@app.get("/nodes")
+def nodes():
+    return list_nodes()
+
+@app.get("/deployments")
+def deployments(namespace: str = "default"):
+    return list_deployments(namespace)
+
+@app.get("/services/{name}/endpoints")
+def service_endpoints(name: str, namespace: str = "default"):
+    return get_service_endpoints(name, namespace)
 
 class Question(BaseModel):
     question: str

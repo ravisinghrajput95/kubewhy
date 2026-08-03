@@ -8,9 +8,14 @@ It triages in the medical sense — it works out what is wrong and how bad it is
 It never scales, restarts or deletes anything; every tool is read-only by
 design.
 
+Unlike [k8sgpt](https://github.com/k8sgpt-ai/k8sgpt), which is more mature and
+built for cluster-wide scanning, this runs entirely on your own hardware with
+no cloud API key, covers the host alongside the cluster, and returns the tool
+calls behind every answer so you can check what it actually measured.
+
 Both surfaces are exposed as a FastAPI service and as tools the model can call:
 host stats (CPU, memory, disk, processes) and cluster state (pods, events,
-logs, resource limits).
+logs, nodes, deployments, service endpoints).
 
 Given a namespace it has never seen, it works down the chain from symptom to
 root cause on its own:
@@ -34,6 +39,21 @@ $ python agent.py "Something is wrong in the demo namespace. What is broken and 
 
 Note that it reports the *reason* behind each failure, not just the status
 name — the database error came from reading the crashed container's logs.
+
+It follows the same chain across resource types. Asked why a *service* is
+unreachable, it goes from the service to its backing pods to their logs:
+
+```
+$ python agent.py "The crasher-svc service in the demo namespace is unreachable. Why?"
+  -> get_service_endpoints({'name': 'crasher-svc', 'namespace': 'demo'})
+  -> list_pods({'namespace': 'demo', 'only_unhealthy': True})
+  -> describe_pod({'name': 'crasher-5964d99948-28p5k', ...})
+  -> get_pod_logs({'name': 'crasher-5964d99948-28p5k', 'tail': 100, ...})
+
+crasher-svc is unreachable because its pod is crashing with exit code 1,
+repeatedly restarting due to a database connection failure. The logs show it
+cannot connect to db:5432, which is refused.
+```
 
 ## Requirements
 
@@ -79,9 +99,10 @@ kubectl get pods -n demo        # wait for the failure states to appear
 ```
 
 That manifest creates one pod per common failure mode — `CrashLoopBackOff`,
-`OOMKilled`, `ImagePullBackOff` — plus a healthy deployment as a control, so
-the agent has to distinguish broken from working rather than calling
-everything broken.
+`OOMKilled`, `ImagePullBackOff` — plus two broken services (one whose selector
+matches nothing, one whose pods never become ready) and healthy deployments and
+services as controls, so the agent has to distinguish broken from working
+rather than calling everything broken.
 
 Tear it down with `kind delete cluster --name triage-demo`.
 
@@ -126,6 +147,9 @@ All take `?namespace=` (default `default`).
 | GET    | `/pods/{name}`       | Images, requests/limits, and last termination reason and exit code |
 | GET    | `/pods/{name}/events`| Recent Warning events only                        |
 | GET    | `/pods/{name}/logs`  | Last N lines, falling back to the crashed container's previous run |
+| GET    | `/nodes`             | Ready state, active pressure conditions, allocatable CPU/memory |
+| GET    | `/deployments`       | Desired vs ready vs available replicas, and images |
+| GET    | `/services/{name}/endpoints` | Selector, ports, and ready/not-ready backing pods |
 
 ```bash
 curl 'http://127.0.0.1:8000/pods?namespace=demo&only_unhealthy=true'
@@ -148,6 +172,29 @@ curl -X POST http://127.0.0.1:8000/ask \
 
 The `tool_calls` array is the audit trail — it tells you which measurements the
 answer was actually built from.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+No cluster and no model are needed — the Kubernetes API and `ollama.chat` are
+both mocked. The suite covers three things:
+
+- **Projections stay small and keep the diagnostic fields.** One test asserts
+  a token ceiling directly, so a projection that regresses to returning raw
+  objects fails the build rather than silently exhausting the context window.
+- **Status precedence.** A `CrashLoopBackOff` pod reports phase `Running`;
+  tests pin the rule that the container's waiting or terminated reason wins,
+  because reporting the phase would tell you everything is fine.
+- **Failures stay contained.** Unreachable clusters, 403s, unknown tools and
+  exceptions inside a tool must all come back as data, never raise, so the
+  agent can report and carry on.
+
+Fixtures use real `V1*` client models rather than bare mocks, so a projection
+that reaches for a field the API does not have fails the test.
 
 ## Running in Docker
 
@@ -208,8 +255,9 @@ answer.
 
 ```
 agent.py          tool-calling loop, system prompt, tool registry
-app.py            FastAPI routes (raw stats, pod state, /ask)
+app.py            FastAPI routes (raw stats, cluster state, /ask)
 routers/          the collectors, one per concern
+tests/            pytest suite, no cluster or model required
 demo/             deliberately broken manifests to diagnose against
 ```
 
