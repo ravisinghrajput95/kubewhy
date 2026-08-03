@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+# Exits immediately with a non-zero code -> CrashLoopBackOff
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crasher
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: crasher }
+  template:
+    metadata:
+      labels: { app: crasher }
+    spec:
+      containers:
+        - name: crasher
+          image: busybox:1.36
+          command: ["sh", "-c", "echo 'connecting to database...'; sleep 2; echo 'FATAL: could not connect to db:5432: connection refused' >&2; exit 1"]
+---
+# Allocates far more than its limit -> OOMKilled
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-hog
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: memory-hog }
+  template:
+    metadata:
+      labels: { app: memory-hog }
+    spec:
+      containers:
+        - name: hog
+          image: polinux/stress
+          command: ["stress"]
+          args: ["--vm", "1", "--vm-bytes", "250M", "--vm-hang", "0"]
+          resources:
+            requests: { memory: "32Mi", cpu: "50m" }
+            limits: { memory: "64Mi", cpu: "100m" }
+---
+# References an image that does not exist -> ImagePullBackOff
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-image
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: bad-image }
+  template:
+    metadata:
+      labels: { app: bad-image }
+    spec:
+      containers:
+        - name: bad-image
+          image: nginx:this-tag-does-not-exist
+---
+# A healthy control, so not everything is broken
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthy-web
+  namespace: demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: healthy-web }
+  template:
+    metadata:
+      labels: { app: healthy-web }
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          resources:
+            requests: { memory: "32Mi", cpu: "50m" }
+            limits: { memory: "128Mi", cpu: "200m" }

@@ -1,0 +1,41 @@
+services:
+  local-triage-agent:
+    build: .
+    image: local-triage-agent:latest
+    ports:
+      - "8000:8000"
+    environment:
+      # Ollama runs on the host, not in this container, so it keeps GPU/Metal
+      # acceleration. Point at the host gateway rather than localhost.
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      TRIAGE_MODEL: ${TRIAGE_MODEL:-qwen3}
+    extra_hosts:
+      # Defined natively on Docker Desktop; this makes it work on Linux too.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Read-only: the pod tools never write to the cluster. See the README
+      # for why a kind cluster needs its server address rewritten.
+      - ${KUBECONFIG:-${HOME}/.kube/config}:/home/triage/.kube/config:ro
+    restart: unless-stopped
+    # To reach a kind cluster, join its network and mount the internal
+    # kubeconfig instead -- see "Talking to a kind cluster" in the README.
+    # networks: [default, kind]
+
+  # Optional: run Ollama in a container too, for a fully self-contained stack.
+  #   docker compose --profile with-ollama up
+  # On macOS this is CPU-only -- Metal is not available to containers -- so it
+  # is markedly slower than running Ollama natively. Prefer the host install.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["with-ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama-models:
+# networks:
+#   kind:
+#     external: true
