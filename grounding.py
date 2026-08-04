@@ -11,6 +11,18 @@ returned.
 It is deliberately a lint, not a gate. A flagged claim means "the model did
 not read this anywhere", which is usually a fabrication and occasionally
 arithmetic it did itself.
+
+Known weakness -- incidental numbers launder fabrications. Tool output is full
+of digits that mean nothing to the claim: timestamps, IP addresses, pod name
+hashes, ports. A fabricated figure that happens to collide with one of them is
+reported as grounded. This is not hypothetical: CI caught the fabricated
+"18 days" test case passing on a runner whose boot timestamp was 18:12, since
+"18" appeared in the measured text. Matching numbers to the units and context
+they were stated in would fix it and is not implemented.
+
+The practical consequence is that a `grounded` verdict is weaker evidence than
+a `partial` one. `partial` reliably means something was not measured;
+`grounded` means nothing contradicted the answer.
 """
 
 import re

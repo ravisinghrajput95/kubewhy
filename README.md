@@ -238,12 +238,23 @@ So every answer is checked against the tool output behind it:
 | `partial` | some claims appear nowhere in the tool output |
 | `ungrounded` | the model answered having called no tools at all |
 
-**What it cannot do.** This is lexical matching over numbers and status names.
-It catches an invented uptime or a fabricated `OOMKilled`. It **cannot verify
-reasoning** — *"the OOM is caused by a memory leak"* passes, because it
-contains no unsupported figure. It exempts markdown list numbering and values
-inside recommendations (*"raise the limit to 128Mi"* proposes a number rather
-than claiming one). Treat it as a smoke alarm, not a proof.
+**What it cannot do.** This is lexical matching over numbers and status names,
+and it has two real limits:
+
+- It **cannot verify reasoning.** *"The OOM is caused by a memory leak"*
+  passes, because it contains no unsupported figure.
+- **Incidental numbers launder fabrications.** Tool output is full of digits
+  that mean nothing to the claim — timestamps, IPs, pod name hashes. A
+  fabricated figure colliding with one reads as grounded. CI caught exactly
+  this: the fabricated *"18 days"* test case passed on a runner whose boot
+  timestamp was 18:12.
+
+So `partial` is the stronger signal. It reliably means something was not
+measured; `grounded` only means nothing contradicted the answer. Treat it as a
+smoke alarm, not a proof.
+
+It exempts markdown list numbering and values inside recommendations
+(*"raise the limit to 128Mi"* proposes a number rather than claiming one).
 
 ## HTTP API
 

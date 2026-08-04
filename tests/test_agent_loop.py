@@ -149,12 +149,21 @@ class TestAskLoop:
         assert result["confidence"] in {"grounded", "partial", "ungrounded"}
 
     def test_invented_figure_is_flagged(self):
-        """End to end: a claim no tool produced comes back as unverified."""
+        """
+        End to end: a claim no tool produced comes back as unverified.
+
+        The tool is stubbed rather than real. Calling the real one made this
+        test depend on the wall clock: on a runner at 18:12 UTC the boot
+        timestamp contains "18", which silently grounded the fabricated
+        "18 days" and turned a genuine assertion into a coin flip.
+        """
         responses = [
             reply(calls=[tool_call("get_platform_info", {})]),
             reply(content="This host has been up for 18 days."),
         ]
-        with mock_chat(side_effect=responses):
+        stub = {"get_platform_info": lambda: {"Uptime": "4:36:25"}}
+
+        with patch.dict(agent.TOOLS, stub), mock_chat(side_effect=responses):
             result = agent.ask("how long has it been up?")
 
         assert result["confidence"] == "partial"
