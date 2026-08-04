@@ -1,5 +1,7 @@
 # local-triage-agent
 
+[![tests](https://github.com/ravisinghrajput95/local-triage-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/ravisinghrajput95/local-triage-agent/actions/workflows/tests.yml)
+
 Diagnoses failing Kubernetes pods and host resource problems using a local LLM
 via [Ollama](https://ollama.com). Reads logs, events and resource limits to
 find root causes. Nothing leaves your machine.
@@ -195,6 +197,9 @@ both mocked. The suite covers three things:
 
 Fixtures use real `V1*` client models rather than bare mocks, so a projection
 that reaches for a field the API does not have fails the test.
+
+CI runs the suite on Python 3.11–3.13 and separately builds the container and
+checks it serves, on every push and pull request.
 
 ## Running in Docker
 

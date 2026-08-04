@@ -1,0 +1,56 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every failing version, rather than stopping at the first.
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        # The suite mocks the Kubernetes API and ollama.chat, so no cluster
+        # and no model are needed here.
+        run: pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build image
+        run: docker build -t local-triage-agent:ci .
+
+      - name: Check the service starts and serves
+        # Guards the container entrypoint, which the pytest job never touches.
+        run: |
+          docker run -d --name ci-check -p 8000:8000 local-triage-agent:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/platform > /dev/null; then
+              echo "service is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "service did not come up in time"
+          docker logs ci-check
+          exit 1
