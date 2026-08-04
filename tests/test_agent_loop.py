@@ -122,6 +122,52 @@ class TestAskLoop:
 
         assert chat.call_args.kwargs["messages"][0]["role"] == "system"
 
+    def test_answer_carries_a_confidence_verdict(self):
+        responses = [
+            reply(calls=[tool_call("get_system_info", {})]),
+            reply(content="cpu is fine"),
+        ]
+        with patch("agent.ollama.chat", side_effect=responses):
+            result = agent.ask("q")
+
+        assert result["confidence"] in {"grounded", "partial", "ungrounded"}
+
+    def test_invented_figure_is_flagged(self):
+        """End to end: a claim no tool produced comes back as unverified."""
+        responses = [
+            reply(calls=[tool_call("get_platform_info", {})]),
+            reply(content="This host has been up for 18 days."),
+        ]
+        with patch("agent.ollama.chat", side_effect=responses):
+            result = agent.ask("how long has it been up?")
+
+        assert result["confidence"] == "partial"
+        assert "18" in result["unverified"]
+
+    def test_answer_with_no_tools_is_ungrounded(self):
+        with patch("agent.ollama.chat", return_value=reply(content="CPU is 42%.")):
+            result = agent.ask("q")
+
+        assert result["confidence"] == "ungrounded"
+
+    def test_falls_back_when_model_has_no_thinking_mode(self):
+        """llama3.2 rejects think=True with a 400; that must not be fatal."""
+        import ollama as ollama_mod
+
+        error = ollama_mod.ResponseError("llama3.2 does not support thinking")
+        with patch("agent.ollama.chat", side_effect=[error, reply(content="ok")]) as chat:
+            result = agent.ask("q", model="llama3.2")
+
+        assert result["answer"] == "ok"
+        assert chat.call_args.kwargs["think"] is False
+
+    def test_other_response_errors_still_raise(self):
+        import ollama as ollama_mod
+
+        with patch("agent.ollama.chat", side_effect=ollama_mod.ResponseError("model not found")):
+            with pytest.raises(ollama_mod.ResponseError):
+                agent.ask("q")
+
     def test_thinking_enabled_by_default(self):
         # Without it qwen3 answers multi-part questions from the first tool
         # only and invents the rest.

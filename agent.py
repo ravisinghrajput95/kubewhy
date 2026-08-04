@@ -14,6 +14,7 @@ import sys
 
 import ollama
 
+import grounding
 from routers.platform_info import get_platform_info
 from routers.system_info import get_system_info
 from routers.process_info import get_processes
@@ -83,6 +84,26 @@ the measured figure, and say what you would change. Be concise -- a few
 sentences, not a report."""
 
 
+def _chat(model, messages, think):
+    """
+    One model call, degrading gracefully when the model has no thinking mode.
+
+    Only some models support it -- llama3.2 rejects the request outright with
+    a 400 -- so rather than making thinking a hard requirement, fall back and
+    let the caller decide whether the answers are good enough.
+    """
+    try:
+        return ollama.chat(
+            model=model, messages=messages, tools=list(TOOLS.values()), think=think
+        ), think
+    except ollama.ResponseError as exc:
+        if think and "does not support thinking" in str(exc):
+            return ollama.chat(
+                model=model, messages=messages, tools=list(TOOLS.values()), think=False
+            ), False
+        raise
+
+
 def _run_tool(name, arguments):
     """Execute one tool call, returning its result as a JSON string."""
     func = TOOLS.get(name)
@@ -106,27 +127,35 @@ def ask(question, model=MODEL, verbose=False, think=True):
     think defaults to True: without it qwen3 tends to answer multi-part
     questions from only the first tool it calls and invent the rest. It costs
     a few seconds per round. Returns
-    {"answer": str, "tool_calls": [{"name":..., "arguments":...}]}.
+
+        {"answer": str,
+         "tool_calls": [{"name":..., "arguments":...}],
+         "confidence": "grounded" | "partial" | "ungrounded",
+         "unverified": [claims not found in any tool result]}
+
+    See grounding.py for what confidence means and why it is a lint rather
+    than a gate.
     """
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": question},
     ]
     trace = []
+    outputs = []
 
     for _ in range(MAX_ROUNDS):
-        response = ollama.chat(
-            model=model,
-            messages=messages,
-            tools=list(TOOLS.values()),
-            think=think,
-        )
+        response, think = _chat(model, messages, think)
         message = response.message
         messages.append(message)
 
         calls = message.tool_calls
         if not calls:
-            return {"answer": (message.content or "").strip(), "tool_calls": trace}
+            answer = (message.content or "").strip()
+            return {
+                "answer": answer,
+                "tool_calls": trace,
+                **grounding.check(answer, outputs),
+            }
 
         for call in calls:
             name = call.function.name
@@ -136,17 +165,17 @@ def ask(question, model=MODEL, verbose=False, think=True):
             if verbose:
                 print(f"  -> {name}({arguments})", file=sys.stderr)
 
+            output = _run_tool(name, arguments)
+            outputs.append(output)
             messages.append(
-                {
-                    "role": "tool",
-                    "tool_name": name,
-                    "content": _run_tool(name, arguments),
-                }
+                {"role": "tool", "tool_name": name, "content": output}
             )
 
     return {
         "answer": f"Gave up after {MAX_ROUNDS} rounds of tool calls.",
         "tool_calls": trace,
+        "confidence": "ungrounded",
+        "unverified": [],
     }
 
 
@@ -157,3 +186,12 @@ if __name__ == "__main__":
 
     result = ask(" ".join(sys.argv[1:]), verbose=True)
     print(result["answer"])
+
+    # Surface unsupported claims rather than leaving them to be spotted by
+    # eye; stderr so piping the answer stays clean.
+    if result["unverified"]:
+        print(
+            f"\n[{result['confidence']}] not found in any tool result: "
+            + ", ".join(result["unverified"]),
+            file=sys.stderr,
+        )

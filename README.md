@@ -168,12 +168,40 @@ curl -X POST http://127.0.0.1:8000/ask \
 ```json
 {
   "answer": "The process using the most CPU is com.apple.Virtualization.VirtualMachine (PID 2485) with 8.0% CPU utilization.",
-  "tool_calls": [{ "name": "get_top_cpu_processes", "arguments": { "limit": 1 } }]
+  "tool_calls": [{ "name": "get_top_cpu_processes", "arguments": { "limit": 1 } }],
+  "confidence": "grounded",
+  "unverified": []
 }
 ```
 
 The `tool_calls` array is the audit trail — it tells you which measurements the
 answer was actually built from.
+
+## Checking the model's claims
+
+The model is told never to invent a figure, but asking is not enforcing. In
+testing, qwen3 once reported an uptime of *18 days* for a host that had been up
+four hours, having never called the tool that reports uptime.
+
+So every answer is checked against the tool output behind it. Numbers and
+status names are pulled out of the answer and looked up in what the tools
+actually returned:
+
+| `confidence` | Meaning                                            |
+| ------------ | -------------------------------------------------- |
+| `grounded`   | every claim traces back to a tool result            |
+| `partial`    | some claims appear nowhere in the tool output       |
+| `ungrounded` | the model answered having called no tools at all    |
+
+Anything unsupported is listed in `unverified`, and the CLI prints it to
+stderr. On the real hallucination above, the check returns
+`partial` with `unverified: ["18"]`.
+
+It is a lint, not a gate — it flags claims the model did not read anywhere,
+which is usually fabrication and occasionally arithmetic it did itself. Two
+deliberate exemptions keep it quiet enough to be worth reading: markdown list
+numbering, and values in recommendations (*"raise the limit to 128Mi"* proposes
+a number rather than claiming one).
 
 ## Tests
 
@@ -200,6 +228,41 @@ that reaches for a field the API does not have fails the test.
 
 CI runs the suite on Python 3.11–3.13 and separately builds the container and
 checks it serves, on every push and pull request.
+
+### Evals: does it actually diagnose?
+
+The unit tests prove the code is correct. They say nothing about whether the
+agent reaches the right conclusion — so there is a second suite that asks the
+real model real questions against the deliberately broken demo cluster, where
+every fault is known in advance.
+
+```bash
+kind create cluster --name triage-demo
+kubectl apply -f demo/broken-pods.yaml
+python evals/run_eval.py                          # defaults to qwen3
+python evals/run_eval.py --model llama3.2 --repeat 3
+```
+
+Cases assert on substance rather than wording — the root cause, the tools it
+should have used, and for the healthy control, what it must *not* claim. Since
+the model is non-deterministic, `--repeat` reports a pass rate; one failure is
+noise, a low rate is a finding.
+
+Measured on the demo cluster, one run per case:
+
+| Model      | Score      | Avg per case | Notes                                   |
+| ---------- | ---------- | ------------ | --------------------------------------- |
+| `qwen3`    | 7/7 (100%) | 56s          | Reaches every root cause                 |
+| `llama3.2` | 4/7 (57%)  | 4.4s         | 13× faster, stops at the symptom         |
+
+The split is informative: llama3.2 handles the shallow cases — a service with
+no endpoints, telling host from cluster — but fails the ones needing a drill
+down into logs or resource limits. It reports *that* a pod is failing without
+finding *why*. If you want fast triage of obvious faults it is usable; for root
+causes, qwen3 earns its latency.
+
+This suite lives outside `tests/` and never runs in CI, since it needs a
+cluster and a model.
 
 ## Running in Docker
 
@@ -260,9 +323,11 @@ answer.
 
 ```
 agent.py          tool-calling loop, system prompt, tool registry
+grounding.py      checks answers against the tool output behind them
 app.py            FastAPI routes (raw stats, cluster state, /ask)
 routers/          the collectors, one per concern
 tests/            pytest suite, no cluster or model required
+evals/            scored runs against the demo cluster and a real model
 demo/             deliberately broken manifests to diagnose against
 ```
 
@@ -318,9 +383,9 @@ agent that works and one that runs out of context on its first call.
 - **Answers vary between runs.** The same question can produce a different
   chain of tool calls. In one run the agent read the crasher's logs and quoted
   the exact database error; in another it stopped at the status and said the
-  pod was "likely OOMKilled" without checking. Hedged wording like "likely" is
-  a good signal the model inferred rather than measured — the `tool_calls`
-  trace tells you which.
+  pod was "likely OOMKilled" without checking. The `confidence` field and the
+  `tool_calls` trace tell you which happened, and `evals/` measures how often
+  it gets there at all.
 
 ## Configuration
 
