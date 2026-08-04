@@ -33,6 +33,33 @@ def apps_api():
         yield mock
 
 
+@pytest.fixture
+def discovery_api():
+    mock = MagicMock()
+    with patch.object(k8s, "_discovery_api", return_value=mock):
+        yield mock
+
+
+def endpoint_slice(ready_ips=(), not_ready_ips=()):
+    """Build an EndpointSlice with ready and not-ready addresses."""
+    endpoints = [
+        client.V1Endpoint(
+            addresses=[ip], conditions=client.V1EndpointConditions(ready=True)
+        )
+        for ip in ready_ips
+    ] + [
+        client.V1Endpoint(
+            addresses=[ip], conditions=client.V1EndpointConditions(ready=False)
+        )
+        for ip in not_ready_ips
+    ]
+    return client.V1EndpointSlice(
+        address_type="IPv4",
+        metadata=client.V1ObjectMeta(name="web-abc"),
+        endpoints=endpoints,
+    )
+
+
 class TestPodStatus:
     """_pod_status has to match what kubectl shows, not the raw phase."""
 
@@ -263,16 +290,11 @@ class TestServiceEndpoints:
             ),
         )
 
-    def test_distinguishes_unready_pods_from_no_match(self, api):
+    def test_distinguishes_unready_pods_from_no_match(self, api, discovery_api):
         """The two causes need different fixes, so they must read differently."""
         api.read_namespaced_service.return_value = self._service()
-        api.read_namespaced_endpoints.return_value = client.V1Endpoints(
-            subsets=[
-                client.V1EndpointSubset(
-                    addresses=[],
-                    not_ready_addresses=[client.V1EndpointAddress(ip="10.0.0.1")],
-                )
-            ]
+        discovery_api.list_namespaced_endpoint_slice.return_value = (
+            client.V1EndpointSliceList(items=[endpoint_slice(not_ready_ips=["10.0.0.1"])])
         )
 
         result = k8s.get_service_endpoints("web", "demo")
@@ -280,34 +302,64 @@ class TestServiceEndpoints:
         assert "readiness probe" in result["diagnosis"]
         assert "1 pod(s) match" in result["diagnosis"]
 
-    def test_selector_matching_nothing_says_so(self, api):
+    def test_selector_matching_nothing_says_so(self, api, discovery_api):
         api.read_namespaced_service.return_value = self._service()
-        api.read_namespaced_endpoints.return_value = client.V1Endpoints(subsets=[])
+        discovery_api.list_namespaced_endpoint_slice.return_value = (
+            client.V1EndpointSliceList(items=[endpoint_slice()])
+        )
 
         result = k8s.get_service_endpoints("web", "demo")
         assert "matches no pods at all" in result["diagnosis"]
 
-    def test_healthy_service_has_no_diagnosis(self, api):
+    def test_healthy_service_has_no_diagnosis(self, api, discovery_api):
         api.read_namespaced_service.return_value = self._service()
-        api.read_namespaced_endpoints.return_value = client.V1Endpoints(
-            subsets=[
-                client.V1EndpointSubset(
-                    addresses=[client.V1EndpointAddress(ip="10.0.0.1")]
-                )
-            ]
+        discovery_api.list_namespaced_endpoint_slice.return_value = (
+            client.V1EndpointSliceList(items=[endpoint_slice(ready_ips=["10.0.0.1"])])
         )
 
         result = k8s.get_service_endpoints("web", "demo")
         assert result["ready_endpoints"] == ["10.0.0.1"]
         assert "diagnosis" not in result
 
-    def test_missing_endpoints_object_is_handled(self, api):
+    def test_no_endpointslice_at_all_is_handled(self, api, discovery_api):
         api.read_namespaced_service.return_value = self._service()
-        api.read_namespaced_endpoints.side_effect = ApiException(status=404)
+        discovery_api.list_namespaced_endpoint_slice.return_value = (
+            client.V1EndpointSliceList(items=[])
+        )
 
         result = k8s.get_service_endpoints("web", "demo")
         assert result["ready_endpoints"] == []
-        assert "no endpoints object" in result["diagnosis"]
+        assert "no EndpointSlice" in result["diagnosis"]
+
+    def test_addresses_split_across_multiple_slices(self, api, discovery_api):
+        """Large services are sharded across slices; all must be counted."""
+        api.read_namespaced_service.return_value = self._service()
+        discovery_api.list_namespaced_endpoint_slice.return_value = (
+            client.V1EndpointSliceList(
+                items=[
+                    endpoint_slice(ready_ips=["10.0.0.1", "10.0.0.2"]),
+                    endpoint_slice(ready_ips=["10.0.0.3"], not_ready_ips=["10.0.0.4"]),
+                ]
+            )
+        )
+
+        result = k8s.get_service_endpoints("web", "demo")
+        assert len(result["ready_endpoints"]) == 3
+        assert result["not_ready_endpoints"] == ["10.0.0.4"]
+
+    def test_missing_ready_condition_counts_as_ready(self, api, discovery_api):
+        # Per the EndpointSlice spec, an absent ready condition means ready.
+        api.read_namespaced_service.return_value = self._service()
+        slice_ = client.V1EndpointSlice(
+            address_type="IPv4",
+            metadata=client.V1ObjectMeta(name="web-abc"),
+            endpoints=[client.V1Endpoint(addresses=["10.0.0.9"], conditions=None)],
+        )
+        discovery_api.list_namespaced_endpoint_slice.return_value = (
+            client.V1EndpointSliceList(items=[slice_])
+        )
+
+        assert k8s.get_service_endpoints("web", "demo")["ready_endpoints"] == ["10.0.0.9"]
 
 
 class TestErrorHandling:

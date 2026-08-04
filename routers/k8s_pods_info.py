@@ -10,11 +10,23 @@ All functions return a dict with an "error" key instead of raising when the
 cluster is unreachable, so the agent can report the problem and move on.
 """
 
+import logging
+import os
+
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
+from redaction import redact
+
+log = logging.getLogger(__name__)
+
+# Every call is bounded. An unreachable API server otherwise hangs the whole
+# agent loop with no way out, since the model is waiting on the tool result.
+TIMEOUT = int(os.getenv("K8S_TIMEOUT", "15"))
+
 _core_v1 = None
 _apps_v1 = None
+_discovery_v1 = None
 
 
 def _load_config():
@@ -40,6 +52,15 @@ def _apps_api():
         _load_config()
         _apps_v1 = client.AppsV1Api()
     return _apps_v1
+
+
+def _discovery_api():
+    """DiscoveryV1Api, for EndpointSlices."""
+    global _discovery_v1
+    if _discovery_v1 is None:
+        _load_config()
+        _discovery_v1 = client.DiscoveryV1Api()
+    return _discovery_v1
 
 
 def _handle(exc):
@@ -77,7 +98,7 @@ def list_pods(namespace: str = "default", only_unhealthy: bool = False):
     get_pod_logs.
     """
     try:
-        pods = _api().list_namespaced_pod(namespace)
+        pods = _api().list_namespaced_pod(namespace, _request_timeout=TIMEOUT)
     except Exception as exc:
         return _handle(exc)
 
@@ -115,7 +136,7 @@ def describe_pod(name: str, namespace: str = "default"):
     Args: name -- the pod name; namespace -- defaults to "default".
     """
     try:
-        pod = _api().read_namespaced_pod(name, namespace)
+        pod = _api().read_namespaced_pod(name, namespace, _request_timeout=TIMEOUT)
     except Exception as exc:
         return _handle(exc)
 
@@ -174,6 +195,7 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
         events = _api().list_namespaced_event(
             namespace,
             field_selector=f"involvedObject.name={name}",
+            _request_timeout=TIMEOUT,
         )
     except Exception as exc:
         return _handle(exc)
@@ -190,7 +212,8 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
             {
                 "reason": e.reason,
                 "count": e.count,
-                "message": (e.message or "")[:300],
+                # Events echo container args, which sometimes carry secrets.
+                "message": redact((e.message or "")[:300]),
             }
             for e in warnings[:limit]
         ],
@@ -221,6 +244,7 @@ def get_pod_logs(name: str, namespace: str = "default", tail: int = 20):
             tail_lines=tail,
             previous=previous,
             _preload_content=False,
+            _request_timeout=TIMEOUT,
         )
         return resp.data.decode("utf-8", errors="replace")
 
@@ -243,7 +267,13 @@ def get_pod_logs(name: str, namespace: str = "default", tail: int = 20):
     if not logs:
         return {"result": f"no logs available for pod {name}"}
 
-    return {"pod": name, "source": source, "logs": logs}
+    # Logs are the most likely place for a credential to surface. Redact
+    # before this reaches the model context or the user's scrollback.
+    cleaned = redact(logs)
+    if cleaned != logs:
+        log.warning("redacted secrets from logs of pod %s/%s", namespace, name)
+
+    return {"pod": name, "source": source, "logs": cleaned}
 
 
 def list_nodes():
@@ -257,7 +287,7 @@ def list_nodes():
     application faults.
     """
     try:
-        nodes = _api().list_node()
+        nodes = _api().list_node(_request_timeout=TIMEOUT)
     except Exception as exc:
         return _handle(exc)
 
@@ -295,7 +325,7 @@ def list_deployments(namespace: str = "default"):
     Args: namespace -- which namespace to inspect, defaults to "default".
     """
     try:
-        deployments = _apps_api().list_namespaced_deployment(namespace)
+        deployments = _apps_api().list_namespaced_deployment(namespace, _request_timeout=TIMEOUT)
     except Exception as exc:
         return _handle(exc)
 
@@ -330,7 +360,7 @@ def get_service_endpoints(name: str, namespace: str = "default"):
     api = _api()
 
     try:
-        svc = api.read_namespaced_service(name, namespace)
+        svc = api.read_namespaced_service(name, namespace, _request_timeout=TIMEOUT)
     except Exception as exc:
         return _handle(exc)
 
@@ -345,21 +375,35 @@ def get_service_endpoints(name: str, namespace: str = "default"):
         ],
     }
 
+    # EndpointSlice, not the v1 Endpoints resource: Endpoints is deprecated
+    # and silently truncates above 1000 addresses, which would quietly
+    # misdiagnose exactly the large services that matter most.
     try:
-        endpoints = api.read_namespaced_endpoints(name, namespace)
-    except ApiException as exc:
-        if exc.status == 404:
-            info["ready_endpoints"] = []
-            info["diagnosis"] = "no endpoints object exists for this service"
-            return info
-        return _handle(exc)
+        slices = _discovery_api().list_namespaced_endpoint_slice(
+            namespace,
+            label_selector=f"kubernetes.io/service-name={name}",
+            _request_timeout=TIMEOUT,
+        )
     except Exception as exc:
         return _handle(exc)
 
+    if not slices.items:
+        info["ready_endpoints"] = []
+        info["not_ready_endpoints"] = []
+        info["diagnosis"] = (
+            "no EndpointSlice exists for this service -- nothing has ever "
+            "matched its selector"
+        )
+        return info
+
     ready, not_ready = [], []
-    for subset in endpoints.subsets or []:
-        ready += [a.ip for a in (subset.addresses or [])]
-        not_ready += [a.ip for a in (subset.not_ready_addresses or [])]
+    for endpoint_slice in slices.items:
+        for endpoint in endpoint_slice.endpoints or []:
+            # conditions.ready is None on older API servers; absent means
+            # ready, per the EndpointSlice spec.
+            conditions = endpoint.conditions
+            is_ready = conditions is None or conditions.ready in (True, None)
+            (ready if is_ready else not_ready).extend(endpoint.addresses or [])
 
     info["ready_endpoints"] = ready
     info["not_ready_endpoints"] = not_ready

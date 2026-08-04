@@ -15,6 +15,7 @@ and reports a pass rate. A single failure is noise; a low rate is a finding.
 """
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -62,6 +63,7 @@ def main():
     parser.add_argument("--model", default=agent.MODEL)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--case", help="run only this case by name")
+    parser.add_argument("--json", help="write per-run results to this file")
     args = parser.parse_args()
 
     cases = [c for c in CASES if not args.case or c["name"] == args.case]
@@ -74,6 +76,7 @@ def main():
     total_passes = total_runs = 0
     ungrounded = 0
     rows = []
+    records = []
 
     for case in cases:
         passes = 0
@@ -101,6 +104,16 @@ def main():
             if result.get("confidence") != "grounded":
                 ungrounded += 1
 
+            records.append({
+                "case": case["name"],
+                "model": args.model,
+                "passed": bool(ok),
+                "seconds": round(time.time() - started, 1),
+                "confidence": result.get("confidence"),
+                "tools": [c["name"] for c in result.get("tool_calls", [])],
+                "failures": why,
+            })
+
         total_passes += passes
         total_runs += args.repeat
         rows.append((case["name"], passes, args.repeat, elapsed / args.repeat, reasons))
@@ -109,6 +122,11 @@ def main():
         print(f"{mark:6} {case['name']:32} {passes}/{args.repeat}  {elapsed/args.repeat:5.1f}s")
         for reason in dict.fromkeys(reasons):
             print(f"         - {reason}")
+
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump(records, fh, indent=1)
+        print(f"\nwrote {len(records)} runs to {args.json}")
 
     rate = total_passes / total_runs * 100 if total_runs else 0
     print(f"\nscore: {total_passes}/{total_runs} ({rate:.0f}%)")

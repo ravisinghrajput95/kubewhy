@@ -19,7 +19,12 @@ USER triage
 
 EXPOSE 8000
 
+# Liveness only: /healthz has no dependencies, so a transient Ollama or API
+# server outage does not get the container killed.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/platform')"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"
 
+# Binds all interfaces *inside the container* only. The port is published to
+# 127.0.0.1 by compose, and TRIAGE_API_TOKEN gates every endpoint -- see the
+# security section of the README before exposing this further.
 CMD ["fastapi", "run", "app.py", "--host", "0.0.0.0", "--port", "8000"]

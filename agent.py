@@ -9,12 +9,15 @@ Ollama model call them to work out what is wrong and why.
 """
 
 import json
+import logging
 import os
 import sys
+import time
 
 import ollama
 
 import grounding
+import observability
 from routers.platform_info import get_platform_info
 from routers.system_info import get_system_info
 from routers.process_info import get_processes
@@ -33,6 +36,13 @@ from routers.k8s_pods_info import (
 # OLLAMA_HOST is read by the ollama client itself; in a container it needs to
 # point back at the host, e.g. http://host.docker.internal:11434
 MODEL = os.getenv("TRIAGE_MODEL", "qwen3")
+
+# A hung model would otherwise block the loop forever, with the caller holding
+# an HTTP request open. Generous, because a cold model load plus a deep chain
+# is legitimately slow.
+TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+
+log = logging.getLogger("triage.agent")
 
 # Max tool-calling rounds before we give up. Guards against a model that
 # keeps calling tools without ever settling on an answer.
@@ -92,13 +102,14 @@ def _chat(model, messages, think):
     a 400 -- so rather than making thinking a hard requirement, fall back and
     let the caller decide whether the answers are good enough.
     """
+    client = ollama.Client(timeout=TIMEOUT)
     try:
-        return ollama.chat(
+        return client.chat(
             model=model, messages=messages, tools=list(TOOLS.values()), think=think
         ), think
     except ollama.ResponseError as exc:
         if think and "does not support thinking" in str(exc):
-            return ollama.chat(
+            return client.chat(
                 model=model, messages=messages, tools=list(TOOLS.values()), think=False
             ), False
         raise
@@ -165,8 +176,19 @@ def ask(question, model=MODEL, verbose=False, think=True):
             if verbose:
                 print(f"  -> {name}({arguments})", file=sys.stderr)
 
+            started = time.perf_counter()
             output = _run_tool(name, arguments)
             outputs.append(output)
+
+            log.info(
+                "tool_call",
+                extra={
+                    "tool": name,
+                    "arguments": arguments,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "result_chars": len(output),
+                },
+            )
             messages.append(
                 {"role": "tool", "tool_name": name, "content": output}
             )

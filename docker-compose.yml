@@ -3,12 +3,18 @@ services:
     build: .
     image: local-triage-agent:latest
     ports:
-      - "8000:8000"
+      # Loopback only. These endpoints expose cluster state, pod logs and the
+      # host process table; publishing them on 0.0.0.0 hands that to the LAN.
+      - "127.0.0.1:8000:8000"
     environment:
       # Ollama runs on the host, not in this container, so it keeps GPU/Metal
       # acceleration. Point at the host gateway rather than localhost.
       OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
       TRIAGE_MODEL: ${TRIAGE_MODEL:-qwen3}
+      # Set this to require `Authorization: Bearer <token>` on every endpoint.
+      # Mandatory if you change the port binding above.
+      TRIAGE_API_TOKEN: ${TRIAGE_API_TOKEN:-}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
     extra_hosts:
       # Defined natively on Docker Desktop; this makes it work on Linux too.
       - "host.docker.internal:host-gateway"

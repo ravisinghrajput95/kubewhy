@@ -1,14 +1,15 @@
 """
 Tests for the tool-calling loop.
 
-No model is involved: ollama.chat is mocked, so these assert the mechanics --
-that tools are dispatched, results fed back, failures contained, and runaway
-loops stopped.
+No model is involved: the ollama client is mocked, so these assert the
+mechanics -- that tools are dispatched, results fed back, failures contained,
+and runaway loops stopped.
 """
 
+import contextlib
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,6 +22,21 @@ def tool_call(name, arguments):
 
 def reply(content=None, calls=None):
     return SimpleNamespace(message=SimpleNamespace(content=content, tool_calls=calls))
+
+
+@contextlib.contextmanager
+def mock_chat(**kwargs):
+    """
+    Patch the ollama client and yield its .chat mock.
+
+    The agent builds a Client per call so it can set a timeout, so patching
+    ollama.chat directly would silently miss and hit a real model -- which is
+    exactly the failure this indirection prevents.
+    """
+    client = MagicMock()
+    client.chat = MagicMock(**kwargs)
+    with patch("agent.ollama.Client", return_value=client):
+        yield client.chat
 
 
 class TestToolRegistry:
@@ -68,7 +84,7 @@ class TestRunTool:
 
 class TestAskLoop:
     def test_answers_without_tools(self):
-        with patch("agent.ollama.chat", return_value=reply(content="all fine")):
+        with mock_chat(return_value=reply(content="all fine")):
             result = agent.ask("how are things?")
 
         assert result["answer"] == "all fine"
@@ -79,7 +95,7 @@ class TestAskLoop:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="cpu is low"),
         ]
-        with patch("agent.ollama.chat", side_effect=responses):
+        with mock_chat(side_effect=responses):
             result = agent.ask("is the cpu busy?")
 
         assert result["answer"] == "cpu is low"
@@ -90,7 +106,7 @@ class TestAskLoop:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="done"),
         ]
-        with patch("agent.ollama.chat", side_effect=responses) as chat:
+        with mock_chat(side_effect=responses) as chat:
             agent.ask("q")
 
         sent = chat.call_args.kwargs["messages"]
@@ -102,7 +118,7 @@ class TestAskLoop:
             reply(calls=[tool_call("describe_pod", {"name": "p", "namespace": "demo"})]),
             reply(content="OOMKilled"),
         ]
-        with patch("agent.ollama.chat", side_effect=responses):
+        with mock_chat(side_effect=responses):
             result = agent.ask("what is broken?")
 
         assert [c["name"] for c in result["tool_calls"]] == ["list_pods", "describe_pod"]
@@ -110,14 +126,14 @@ class TestAskLoop:
     def test_runaway_loop_is_stopped(self):
         """A model that never stops calling tools must not hang forever."""
         forever = reply(calls=[tool_call("get_system_info", {})])
-        with patch("agent.ollama.chat", return_value=forever) as chat:
+        with mock_chat(return_value=forever) as chat:
             result = agent.ask("q")
 
         assert "Gave up" in result["answer"]
         assert chat.call_count == agent.MAX_ROUNDS
 
     def test_system_prompt_is_sent_first(self):
-        with patch("agent.ollama.chat", return_value=reply(content="x")) as chat:
+        with mock_chat(return_value=reply(content="x")) as chat:
             agent.ask("q")
 
         assert chat.call_args.kwargs["messages"][0]["role"] == "system"
@@ -127,7 +143,7 @@ class TestAskLoop:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="cpu is fine"),
         ]
-        with patch("agent.ollama.chat", side_effect=responses):
+        with mock_chat(side_effect=responses):
             result = agent.ask("q")
 
         assert result["confidence"] in {"grounded", "partial", "ungrounded"}
@@ -138,14 +154,14 @@ class TestAskLoop:
             reply(calls=[tool_call("get_platform_info", {})]),
             reply(content="This host has been up for 18 days."),
         ]
-        with patch("agent.ollama.chat", side_effect=responses):
+        with mock_chat(side_effect=responses):
             result = agent.ask("how long has it been up?")
 
         assert result["confidence"] == "partial"
         assert "18" in result["unverified"]
 
     def test_answer_with_no_tools_is_ungrounded(self):
-        with patch("agent.ollama.chat", return_value=reply(content="CPU is 42%.")):
+        with mock_chat(return_value=reply(content="CPU is 42%.")):
             result = agent.ask("q")
 
         assert result["confidence"] == "ungrounded"
@@ -155,7 +171,7 @@ class TestAskLoop:
         import ollama as ollama_mod
 
         error = ollama_mod.ResponseError("llama3.2 does not support thinking")
-        with patch("agent.ollama.chat", side_effect=[error, reply(content="ok")]) as chat:
+        with mock_chat(side_effect=[error, reply(content="ok")]) as chat:
             result = agent.ask("q", model="llama3.2")
 
         assert result["answer"] == "ok"
@@ -164,14 +180,14 @@ class TestAskLoop:
     def test_other_response_errors_still_raise(self):
         import ollama as ollama_mod
 
-        with patch("agent.ollama.chat", side_effect=ollama_mod.ResponseError("model not found")):
+        with mock_chat(side_effect=ollama_mod.ResponseError("model not found")):
             with pytest.raises(ollama_mod.ResponseError):
                 agent.ask("q")
 
     def test_thinking_enabled_by_default(self):
         # Without it qwen3 answers multi-part questions from the first tool
         # only and invents the rest.
-        with patch("agent.ollama.chat", return_value=reply(content="x")) as chat:
+        with mock_chat(return_value=reply(content="x")) as chat:
             agent.ask("q")
 
         assert chat.call_args.kwargs["think"] is True
