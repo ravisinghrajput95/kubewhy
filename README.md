@@ -181,7 +181,40 @@ python evals/run_eval.py --repeat 10 --json results/qwen3.json
 python evals/summarise.py results/*.json
 ```
 
-<!--BENCHMARK-->
+Measured on the demo cluster, 7 cases, repeated:
+
+| Model | Pass rate (95% CI) | n | Median | p95 | Fully grounded |
+| --- | --- | --- | --- | --- | --- |
+| `qwen3:8b` | **100%** — CI [85–100] | 21 | 46s | 76s | 10/21 |
+| `llama3.2:3b` | **54%** — CI [38–70] | 35 | 3.2s | 6.1s | 20/35 |
+
+The interval matters more than the headline: 21 runs cannot distinguish a
+perfect agent from one that fails 15% of the time. `summarise.py` reports
+Wilson intervals precisely so the number is not read as more precise than it
+is.
+
+The per-case split is the useful part:
+
+| Case | `qwen3` | `llama3.2` |
+| --- | --- | --- |
+| oomkill_root_cause | 3/3 | **0/5** |
+| crashloop_root_cause | 3/3 | **0/5** |
+| image_pull_failure | 3/3 | 3/5 |
+| service_unreachable_chain | 3/3 | 5/5 |
+| service_selector_typo | 3/3 | 5/5 |
+| healthy_not_reported_broken | 3/3 | 4/5 |
+| host_not_cluster | 3/3 | 2/5 |
+
+llama3.2 is 14× faster and solves the shallow cases — a service whose selector
+matches nothing is visible in one call. It scores **zero** on the two that
+require drilling from a status into termination reasons or container logs. It
+reports *that* a pod is failing without finding *why*, which is the entire
+point. Speed is not the tradeoff; depth is.
+
+Note also that only 10 of 21 correct `qwen3` answers were **fully** grounded.
+The rest contained at least one figure the checker could not trace — usually
+arithmetic the model did itself. Correct and fully-traceable are different
+bars, and the gap between them is worth watching.
 
 Cases assert on substance — the root cause and the tools used — not wording.
 One case is a control: an agent that calls everything broken is worse than
