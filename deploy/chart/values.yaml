@@ -1,0 +1,75 @@
+image:
+  repository: local-triage-agent
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+# Where diagnoses go. "stdout" is the safe default: it proves the controller
+# works before you point it at a channel people read.
+sink:
+  type: stdout       # stdout | slack
+  slack:
+    # Prefer existingSecret. A webhook URL is a credential -- anyone holding
+    # it can post to your channel -- and putting it here puts it in your
+    # values file, your shell history and probably a git repo.
+    existingSecret: ""
+    secretKey: webhook-url
+    webhookUrl: ""
+
+model:
+  # The controller does not run a model. Point this at an Ollama reachable
+  # from the cluster: a node with a GPU, a sidecar, or a host address.
+  ollamaHost: http://ollama.ollama.svc.cluster.local:11434
+  name: qwen3
+  timeoutSeconds: 300
+
+watch:
+  # Empty means all namespaces. Narrow this in a large cluster: every pod
+  # event is delivered to the controller regardless of what it acts on.
+  namespaces: []
+  # Per-workload silence after a finding. Thirty minutes is deliberately long
+  # -- a crashlooping pod is still crashlooping a minute later, and repeating
+  # yourself is how a bot gets muted.
+  cooldownSeconds: 1800
+  # Hard ceiling across all workloads. During a node failure dozens of pods
+  # break at once and none of those messages help.
+  maxPerHour: 12
+  # Pods already broken at startup are usually known problems.
+  skipExisting: true
+
+rbac:
+  create: true
+  # pods/log is the sensitive grant: logs carry credentials. Redaction runs
+  # first, but it is pattern matching. Set false to diagnose without logs.
+  allowPodLogs: true
+
+serviceAccount:
+  create: true
+  name: ""
+
+logFormat: json
+logLevel: INFO
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# Read-only root, no privilege escalation, non-root user. The controller only
+# needs outbound HTTP to the API server and to Ollama.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

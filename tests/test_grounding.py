@@ -74,6 +74,17 @@ class TestFalsePositives:
         tools = [json.dumps({"status": "Running"})]
         assert grounding.check("Everything looks fine.", tools)["confidence"] == "grounded"
 
+    def test_ordinary_english_status_words_are_not_claims(self):
+        """
+        Found in production output: a correct diagnosis saying "ensure the
+        database service is running" was flagged, because "running" is both an
+        English word and a Kubernetes status.
+        """
+        tools = [json.dumps({"logs": "connection refused"})]
+        answer = "Ensure the database service is running and reachable."
+
+        assert grounding.check(answer, tools)["unverified"] == []
+
     def test_values_inside_strings_count_as_measured(self):
         # Ports and exit codes appear inside log text, not as JSON numbers.
         tools = [json.dumps({"logs": "could not connect to db:5432: refused"})]

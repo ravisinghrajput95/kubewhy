@@ -1,0 +1,22 @@
+{{ .Chart.Name }} is watching {{ if .Values.watch.namespaces }}{{ join ", " .Values.watch.namespaces }}{{ else }}all namespaces{{ end }}.
+
+Findings go to: {{ .Values.sink.type }}
+Model:          {{ .Values.model.name }} at {{ .Values.model.ollamaHost }}
+
+Check it started cleanly:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -f
+
+{{- if eq .Values.sink.type "stdout" }}
+
+Findings print to those logs. Set sink.type=slack once you trust what it says.
+{{- end }}
+
+Nothing will be reported until a pod actually fails. To prove it end to end,
+deploy a workload that breaks on purpose:
+
+  kubectl apply -f https://raw.githubusercontent.com/ravisinghrajput95/local-triage-agent/main/demo/broken-pods.yaml
+
+A diagnosis takes tens of seconds -- the controller is not waiting on anyone,
+so latency is not a problem here. Findings are capped at
+{{ .Values.watch.maxPerHour }}/hour with a {{ .Values.watch.cooldownSeconds }}s
+per-workload cooldown.

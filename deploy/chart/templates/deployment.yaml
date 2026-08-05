@@ -1,0 +1,86 @@
+{{- $name := default (printf "%s" .Release.Name) .Values.serviceAccount.name -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+spec:
+  # Deliberately 1. Two controllers watching the same cluster would diagnose
+  # and post everything twice; the dedup state is in-process, not shared.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: controller
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "controller.py"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: OLLAMA_HOST
+              value: {{ .Values.model.ollamaHost | quote }}
+            - name: TRIAGE_MODEL
+              value: {{ .Values.model.name | quote }}
+            - name: OLLAMA_TIMEOUT
+              value: {{ .Values.model.timeoutSeconds | quote }}
+            - name: TRIAGE_NAMESPACES
+              value: {{ join "," .Values.watch.namespaces | quote }}
+            - name: TRIAGE_COOLDOWN
+              value: {{ .Values.watch.cooldownSeconds | quote }}
+            - name: TRIAGE_MAX_PER_HOUR
+              value: {{ .Values.watch.maxPerHour | quote }}
+            - name: TRIAGE_SKIP_EXISTING
+              value: {{ .Values.watch.skipExisting | quote }}
+            - name: TRIAGE_SINK
+              value: {{ .Values.sink.type | quote }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logFormat | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+          {{- if eq .Values.sink.type "slack" }}
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.sink.slack.existingSecret | default (printf "%s-slack" .Release.Name) }}
+                  key: {{ .Values.sink.slack.secretKey }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # readOnlyRootFilesystem is on, and Python still wants somewhere
+            # to write.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

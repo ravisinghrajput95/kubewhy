@@ -1,0 +1,54 @@
+{{- $name := default (printf "%s" .Release.Name) .Values.serviceAccount.name -}}
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+{{- if .Values.rbac.create }}
+---
+# Read-only by construction. The agent has no mutating tool, and this role
+# makes that a property the API server enforces rather than a promise the
+# code keeps.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-readonly
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "events", "namespaces"]
+    verbs: ["get", "list", "watch"]
+{{- if .Values.rbac.allowPodLogs }}
+  # Logs are where root causes live, and also where credentials live.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+{{- end }}
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-readonly
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-readonly
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

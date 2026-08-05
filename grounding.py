@@ -29,6 +29,12 @@ import re
 
 # Status words worth checking. A model that reports OOMKilled when no tool
 # said so is making exactly the mistake this module exists to catch.
+#
+# Only distinctive ones. "Running", "Pending", "Failed" and "Unknown" are
+# ordinary English words as well as Kubernetes statuses, and checking them
+# flagged every answer containing a phrase like "the database service is
+# running" -- a false positive on a correct answer, which is the fastest way
+# to make this signal worth ignoring.
 KNOWN_STATUSES = {
     "oomkilled",
     "crashloopbackoff",
@@ -37,12 +43,6 @@ KNOWN_STATUSES = {
     "containercreating",
     "createcontainerconfigerror",
     "evicted",
-    "pending",
-    "running",
-    "succeeded",
-    "failed",
-    "unknown",
-    "terminating",
     "notready",
     "memorypressure",
     "diskpressure",

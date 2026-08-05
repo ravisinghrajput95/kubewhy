@@ -31,6 +31,42 @@ cannot connect to db:5432, which is refused.
 [grounded] every figure traced to a tool result
 ```
 
+## Or don't ask at all
+
+Asking requires you to already know something is wrong, be at a terminal, and
+know what to ask — and anyone who satisfies all three is faster typing
+`kubectl describe`. So the controller inverts it: it watches the cluster,
+notices a pod going unhealthy, diagnoses it unprompted, and delivers the root
+cause somewhere people already look.
+
+```bash
+helm install triage deploy/chart --set sink.type=slack \
+  --set sink.slack.existingSecret=slack-webhook
+```
+
+```
+:boom: payments-api is unhealthy in prod — 3 pods affected
+The pod was terminated for exceeding its 64Mi memory limit (exit 137). The
+stress the container is under needs roughly 250Mi. Raise the limit or cap the
+workload.
+OOMKilled · grounded
+```
+
+**Inference latency stops mattering here.** A diagnosis lands about a minute
+after the pod broke, and nobody was waiting on it — which removes the one
+thing that makes the interactive mode hard to justify against `kubectl`.
+
+The hard part is not the watching, it is not becoming noise. Three mechanisms:
+findings are grouped by owning **workload** rather than pod, so ten crashing
+replicas produce one message; each workload gets a **cooldown** (30 min by
+default); and there is a **global hourly ceiling**, because during a node
+failure dozens of pods break at once and none of those messages help.
+
+Findings are also deduped by *fault*, not status — a bad image reports
+`ErrImagePull` then `ImagePullBackOff`, and an OOM-killed pod restarts into
+`CrashLoopBackOff`. Both were producing duplicate messages until a live run
+caught it.
+
 Three properties it is built around:
 
 - **Read-only.** No tool scales, restarts or deletes anything, and
@@ -138,6 +174,32 @@ python mcp_server.py --http     # streamable HTTP on :8765
 
 All 12 tools are exposed with schemas derived from their signatures. The
 read-only guarantee and log redaction apply identically here.
+
+## Deploying the controller
+
+```bash
+helm install triage deploy/chart --namespace triage --create-namespace
+kubectl logs -n triage -l app.kubernetes.io/instance=triage -f
+```
+
+Defaults to `stdout`, so you can read what it would have said before pointing
+it at a channel. The chart creates the read-only ServiceAccount and
+ClusterRole, runs non-root with a read-only root filesystem, and pins one
+replica — two controllers would diagnose and post everything twice, since the
+dedup state is in-process.
+
+| Value | Default | Purpose |
+| --- | --- | --- |
+| `sink.type` | `stdout` | `stdout` or `slack` |
+| `sink.slack.existingSecret` | — | Secret holding the webhook. Preferred over `webhookUrl`, which lands in your values file and release history. |
+| `model.ollamaHost` | in-cluster svc | The controller runs no model; point this at an Ollama it can reach |
+| `watch.namespaces` | all | Narrow this on a large cluster |
+| `watch.cooldownSeconds` | `1800` | Silence per workload after a finding |
+| `watch.maxPerHour` | `12` | Global ceiling across all workloads |
+| `watch.skipExisting` | `true` | Don't diagnose everything already broken at startup |
+| `rbac.allowPodLogs` | `true` | Set false to diagnose without reading logs |
+
+Run it locally against your current kubecontext with `python controller.py`.
 
 ## Security
 
@@ -343,8 +405,11 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
 
 ## Limitations
 
-- **One namespace at a time.** No cluster-wide scan yet; that is the biggest
-  functional gap against k8sgpt.
+- **One namespace at a time** for interactive questions. The controller
+  watches all namespaces, but there is still no cluster-wide *scan* command;
+  that is the biggest functional gap against k8sgpt.
+- **The controller holds dedup state in memory**, so a restart forgets what it
+  already reported and it cannot be run with more than one replica.
 - **Latency.** Tens of seconds per diagnosis. `kubectl describe` is faster
   when you already know where to look.
 - **`/ask` is synchronous** and holds a request open for the whole run.
