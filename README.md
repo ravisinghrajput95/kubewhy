@@ -205,6 +205,60 @@ dedup state is in-process.
 
 Run it locally against your current kubecontext with `python controller.py`.
 
+## Managed clusters (EKS, GKE, AKS)
+
+All three authenticate with **exec credential plugins**, which the Kubernetes
+Python client supports and refreshes automatically — an expired token is
+re-fetched when the next request is built. Long-lived watches reconnect every
+300s, comfortably inside EKS's 15-minute token lifetime, so the controller
+survives token rotation.
+
+The plugin binary has to be on `PATH`, and authorization is a separate step
+from RBAC on every provider. This trips people up: applying the ClusterRole is
+not enough if your cloud identity was never mapped to a Kubernetes subject.
+
+| | Plugin needed | Authorization step people forget |
+| --- | --- | --- |
+| **EKS** | `aws` CLI | Map the IAM principal via EKS access entries or the `aws-auth` ConfigMap |
+| **GKE** | `gke-gcloud-auth-plugin` | Bootstrap yourself as admin before you can create ClusterRoles: `kubectl create clusterrolebinding me --clusterrole=cluster-admin --user=$(gcloud config get-value account)` |
+| **AKS** | `kubelogin` (AAD clusters) | Bind the AAD group or object ID, not the username |
+
+Check what you are pointed at before running anything:
+
+```bash
+kubectl config current-context
+kubectl auth can-i --list --as=system:serviceaccount:triage:triage-agent
+```
+
+### Running against a remote cluster from your laptop
+
+Works today, with three things to set:
+
+- **`watch.namespaces`** — the default watches everything, and on a production
+  cluster every pod event in the cluster is streamed to your machine.
+- **`K8S_TIMEOUT`** — 15s is generous on localhost and tight over a VPN.
+- **`rbac.allowPodLogs=false`** if production logs must not reach your
+  terminal. Redaction is pattern matching, not a guarantee.
+
+Private control planes (EKS/GKE private endpoints) need VPN, a bastion or a
+peered network. No configuration here substitutes for connectivity.
+
+### Running the controller inside a managed cluster
+
+The controller runs no model — it needs an Ollama it can reach, which in a
+managed cluster means a **GPU node pool**. That cost is the main barrier to
+this mode, and it is worth being clear-eyed about:
+
+| Shape | Trade-off |
+| --- | --- |
+| Controller + Ollama both in-cluster, GPU node pool | Correct, and costs real money |
+| Controller on your laptop watching the remote cluster | Free, works today, stops when you close the lid |
+| Controller in-cluster, Ollama over VPN | Cluster data leaves the cluster, which defeats the point |
+
+**Not yet tested against a real EKS, GKE or AKS cluster** — the auth path was
+verified by reading the client, and everything else was exercised against
+`kind`. Treat this section as informed expectation, not a support matrix.
+
 ## Security
 
 **Read the [security policy](SECURITY.md) before pointing this at anything you
@@ -414,6 +468,9 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
   that is the biggest functional gap against k8sgpt.
 - **The controller holds dedup state in memory**, so a restart forgets what it
   already reported and it cannot be run with more than one replica.
+- **Untested on managed clusters.** Everything here was exercised against
+  `kind`; EKS/GKE/AKS auth was verified by reading the client, not by running
+  against a real cluster.
 - **Latency.** Tens of seconds per diagnosis. `kubectl describe` is faster
   when you already know where to look.
 - **`/ask` is synchronous** and holds a request open for the whole run.

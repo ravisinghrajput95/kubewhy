@@ -127,7 +127,9 @@ class Controller:
         # rather than growing a queue that delivers stale findings later.
         self.work = queue.Queue(maxsize=32)
         self.stopping = threading.Event()
-        self.seen_uids = set()
+        # Bounded by the number of pods present at startup, and never added
+        # to after that window closes.
+        self.preexisting_uids = set()
 
     # -- detection ----------------------------------------------------------
 
@@ -266,12 +268,21 @@ class Controller:
             if NAMESPACES and pod.metadata.namespace not in NAMESPACES:
                 continue
 
-            first_sight = pod.metadata.uid not in self.seen_uids
-            self.seen_uids.add(pod.metadata.uid)
-
-            # On startup the watch replays every existing pod as ADDED.
-            if SKIP_EXISTING and first_sight and self.started_recently():
-                continue
+            # On startup the watch replays every existing pod as ADDED, and
+            # diagnosing that backlog is the fastest way to get muted. Record
+            # those uids once and suppress them for the process lifetime.
+            #
+            # Only recorded during the startup window: adding on every event
+            # grew the set forever, which on a cluster with Job churn is a
+            # slow leak for no benefit -- after the window the membership test
+            # changed nothing.
+            if self.in_startup_window():
+                self.preexisting_uids.add(pod.metadata.uid)
+                if SKIP_EXISTING:
+                    continue
+            elif self.preexisting_uids and SKIP_EXISTING:
+                if pod.metadata.uid in self.preexisting_uids:
+                    continue
 
             status = self.interesting(pod)
             if status and self.enqueue(pod, status):
@@ -284,7 +295,8 @@ class Controller:
                     },
                 )
 
-    def started_recently(self, window=10):
+    def in_startup_window(self, window=10):
+        """Whether the watch is still replaying pods that predate us."""
         return time.monotonic() - self.start_time < window
 
     def run(self):

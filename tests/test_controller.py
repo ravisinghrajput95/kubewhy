@@ -193,6 +193,79 @@ class TestQueue:
         assert controller.enqueue(pod, "CrashLoopBackOff") is False
 
 
+class TestStartupSuppression:
+    """
+    Pods already broken at boot are known problems; diagnosing the backlog on
+    startup is how a bot gets muted in its first minute.
+    """
+
+    def test_records_uids_only_during_startup_window(self, controller):
+        controller.start_time = ctrl.time.monotonic()  # window is open
+        assert controller.in_startup_window() is True
+
+        controller.start_time = ctrl.time.monotonic() - 999
+        assert controller.in_startup_window() is False
+
+    def test_uid_set_stops_growing_after_startup(self, controller):
+        """
+        The set used to be added to on every event forever, which on a cluster
+        with Job churn leaks for no benefit -- after the window the
+        membership test changes nothing.
+        """
+        controller.start_time = ctrl.time.monotonic() - 999  # window closed
+
+        api = MagicMock()
+        events = [
+            {"object": owned_pod(name=f"pod-{i}")} for i in range(200)
+        ]
+        with patch.object(ctrl.watch, "Watch") as w:
+            w.return_value.stream.return_value = events
+            controller.watch_once(api)
+
+        assert controller.preexisting_uids == set()
+
+    def test_preexisting_pods_stay_suppressed_after_window(self, controller):
+        controller.start_time = ctrl.time.monotonic()
+        broken = owned_pod(
+            name="already-broken",
+            statuses=[container_status(ready=False, waiting_reason="CrashLoopBackOff")],
+        )
+
+        api = MagicMock()
+        with patch.object(ctrl.watch, "Watch") as w:
+            w.return_value.stream.return_value = [{"object": broken}]
+            controller.watch_once(api)
+
+        assert "already-broken" in controller.preexisting_uids
+
+        # The same pod reappearing later must still be ignored: it was broken
+        # before we arrived, and nothing has changed.
+        controller.start_time = ctrl.time.monotonic() - 999
+        with patch.object(ctrl.watch, "Watch") as w, patch.object(
+            controller, "enqueue"
+        ) as enqueue:
+            w.return_value.stream.return_value = [{"object": broken}]
+            controller.watch_once(api)
+
+        enqueue.assert_not_called()
+
+    def test_new_pod_after_startup_is_diagnosed(self, controller):
+        controller.start_time = ctrl.time.monotonic() - 999
+        fresh = owned_pod(
+            name="broke-just-now",
+            statuses=[container_status(ready=False, waiting_reason="CrashLoopBackOff")],
+        )
+
+        api = MagicMock()
+        with patch.object(ctrl.watch, "Watch") as w, patch.object(
+            controller, "enqueue", return_value=True
+        ) as enqueue:
+            w.return_value.stream.return_value = [{"object": fresh}]
+            controller.watch_once(api)
+
+        enqueue.assert_called_once()
+
+
 class TestDiagnosis:
     def test_builds_finding_from_agent_result(self, controller):
         pod = owned_pod(
