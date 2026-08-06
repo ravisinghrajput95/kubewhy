@@ -36,7 +36,12 @@ rules:
   # Pods, nodes, services and events. No create/update/patch/delete anywhere.
   - apiGroups: [""]
     resources: ["pods", "nodes", "services", "events", "namespaces"]
-    verbs: ["get", "list"]
+    # watch is required by controller.py, which streams pod events rather
+    # than polling. Without it the interactive agent works fine and the
+    # controller 403s on its very first watch -- a split that went unnoticed
+    # until this was applied to a real cluster, because the Helm chart's copy
+    # of these rules already had it.
+    verbs: ["get", "list", "watch"]
 
   # Container logs -- see the note above.
   - apiGroups: [""]

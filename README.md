@@ -255,9 +255,17 @@ this mode, and it is worth being clear-eyed about:
 | Controller on your laptop watching the remote cluster | Free, works today, stops when you close the lid |
 | Controller in-cluster, Ollama over VPN | Cluster data leaves the cluster, which defeats the point |
 
-**Not yet tested against a real EKS, GKE or AKS cluster** — the auth path was
-verified by reading the client, and everything else was exercised against
-`kind`. Treat this section as informed expectation, not a support matrix.
+**Tested on AKS** (Kubernetes v1.35, single node, non-AAD): the agent, the
+EndpointSlice path, the controller watch under the ServiceAccount, and watch
+reconnection after the 300s stream cycle all work, with ~0.7s API latency from
+a laptop on another continent. That run found a real bug — `deploy/rbac.yaml`
+was missing the `watch` verb, so the controller 403'd on its first watch while
+the interactive agent worked fine.
+
+**Not tested on EKS or GKE**, and **the exec-plugin path is still untested**:
+a non-AAD AKS cluster authenticates with a client certificate, not
+`kubelogin`. Token refresh was verified by reading the client, not by
+watching a token expire. Treat those parts as informed expectation.
 
 ## Security
 
