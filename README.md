@@ -178,9 +178,13 @@ read-only guarantee and log redaction apply identically here.
 ## Deploying the controller
 
 ```bash
-helm install triage deploy/chart --namespace triage --create-namespace
+helm install triage oci://ghcr.io/ravisinghrajput95/charts/local-triage-agent \
+  --namespace triage --create-namespace
 kubectl logs -n triage -l app.kubernetes.io/instance=triage -f
 ```
+
+The image and chart are published to GHCR on every `v*` tag, multi-arch
+(`amd64`/`arm64`). To install from a checkout instead, use `deploy/chart`.
 
 Defaults to `stdout`, so you can read what it would have said before pointing
 it at a channel. The chart creates the read-only ServiceAccount and
