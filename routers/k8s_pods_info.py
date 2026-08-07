@@ -10,6 +10,8 @@ All functions return a dict with an "error" key instead of raising when the
 cluster is unreachable, so the agent can report the problem and move on.
 """
 
+import datetime as dt
+import json
 import logging
 import os
 
@@ -142,10 +144,46 @@ def _discovery_api():
     return _discovery_v1
 
 
+def _api_message(exc):
+    """The API server's explanation, which is the part worth reading."""
+    try:
+        return json.loads(exc.body or "{}").get("message", "")
+    except (TypeError, ValueError):
+        return (exc.body or "").strip()[:300]
+
+
 def _handle(exc):
     if isinstance(exc, ApiException):
-        return {"error": f"kubernetes API error {exc.status}: {exc.reason}"}
+        # reason alone is "Bad Request", which explains nothing. The body says
+        # which container and why -- "is waiting to start: image can't be
+        # pulled" is the whole diagnosis, and discarding it sent the model a
+        # dead end instead.
+        detail = _api_message(exc) or exc.reason
+        return {"error": f"kubernetes API error {exc.status}: {detail}"}
     return {"error": f"cluster unreachable: {type(exc).__name__}: {exc}"}
+
+
+def _age(when):
+    """
+    Compact age, the way kubectl prints it.
+
+    Events are history, not state. A FailedScheduling warning from before a pod
+    was scheduled sits in its event list forever, so a projection without an
+    age presents a resolved 27-minute-old problem as if it were happening now.
+    """
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+
+    seconds = max(int((dt.datetime.now(dt.timezone.utc) - when).total_seconds()), 0)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
 
 
 # One fault surfaces under several status names as a pod transitions, so
@@ -461,6 +499,13 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
     Events explain scheduling failures, image pull errors and repeated
     restarts that the pod object itself does not spell out. Normal events are
     filtered out because they are rarely relevant to a fault.
+
+    Each event carries an age, and it matters: events are history, not current
+    state. A pod that waited on a taint before being scheduled keeps that
+    FailedScheduling warning for its whole life, so a warning here does not
+    mean the pod is failing now. Check the age against the pod's status before
+    concluding anything -- a 27-minute-old warning on a Running pod is
+    something that already resolved.
     Args: name -- the pod name; namespace -- defaults to "default";
     limit -- how many events to return, default 10.
     """
@@ -485,6 +530,7 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
             {
                 "reason": e.reason,
                 "count": e.count,
+                "age": _age(e.last_timestamp or e.event_time),
                 # Events echo container args, which sometimes carry secrets.
                 "message": redact((e.message or "")[:300]),
             }
@@ -535,6 +581,19 @@ def get_pod_logs(name: str, namespace: str = "default", tail: int = 20):
             logs = _read(previous=True).strip()
             source = "previous (crashed) container"
         except Exception:
+            # A container that never started has no logs and never will. That
+            # is an expected state for ImagePullBackOff or a failing init
+            # container, not a failure of this tool -- reporting it as an API
+            # error told the reader nothing and sent the model to a dead end.
+            detail = _api_message(exc) if isinstance(exc, ApiException) else str(exc)
+            if "waiting to start" in detail or "ContainerCreating" in detail:
+                return {
+                    "result": (
+                        f"no logs for pod {name}: its container has never "
+                        f"started ({detail.split(': ')[-1].strip()}). Use "
+                        "describe_pod or get_pod_events to find out why."
+                    )
+                }
             return _handle(exc)
 
     if not logs:

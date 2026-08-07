@@ -107,6 +107,19 @@ anywhere else.
   remaining loosenesses fail toward silence rather than false alarms.
 - **Test fixture `exit_code or 1`** turned every successful termination into a
   failure, which is why the init-container case looked correct at first.
+- **API errors discarded the server's explanation.** `_handle` reported only
+  `reason`, so asking for the logs of an `ImagePullBackOff` pod gave
+  "kubernetes API error 400: Bad Request" while the response body said
+  `container "app" ... is waiting to start: image can't be pulled`. The body is
+  the diagnosis; it is now kept.
+- **"No logs yet" is no longer reported as a failure.** A container that never
+  started has no logs and never will, which is an expected state for
+  `ImagePullBackOff` or a failing init container. It now returns a result
+  naming the reason and pointing at `describe_pod` / `get_pod_events`.
+- **Events carry an age.** Events are history, not state: a `FailedScheduling`
+  warning from before a pod was scheduled stays in its list forever, so an
+  ageless projection showed a 27-minute-resolved problem on a Running pod as
+  though it were current.
 
 ## [0.1.0] — 2026-08-04
 

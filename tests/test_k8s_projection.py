@@ -7,6 +7,7 @@ that silently starts returning raw objects would blow the model's context
 window, so size is asserted explicitly.
 """
 
+import datetime as dt
 import json
 from unittest.mock import MagicMock, patch
 
@@ -182,6 +183,68 @@ class TestClusterNativeWorkloads:
         ]
 
         assert k8s._pod_status(pod) == "Running"
+
+
+class TestErrorsExplainThemselves:
+    """
+    Both found by looking at the UI against a real cluster.
+
+    The API server explains itself well; the value is in not discarding what
+    it said.
+    """
+
+    def test_api_error_keeps_the_servers_message(self, api):
+        # "Bad Request" alone is useless. The body names the container and the
+        # reason, which is the entire diagnosis.
+        api.read_namespaced_pod.side_effect = ApiException(
+            status=400, reason="Bad Request"
+        )
+        api.read_namespaced_pod.side_effect.body = json.dumps(
+            {"message": 'container "app" in pod "x" is waiting to start: image can\'t be pulled'}
+        )
+
+        assert "waiting to start" in k8s.describe_pod("x", "demo")["error"]
+
+    def test_a_container_that_never_started_is_not_an_error(self, api):
+        """
+        ImagePullBackOff means there are no logs and never will be. Reporting
+        that as "kubernetes API error 400: Bad Request" told the reader nothing
+        and pointed the model at a dead end.
+        """
+        failure = ApiException(status=400, reason="Bad Request")
+        failure.body = json.dumps(
+            {"message": 'container "app" in pod "x" is waiting to start: image can\'t be pulled'}
+        )
+        api.read_namespaced_pod_log.side_effect = failure
+
+        result = k8s.get_pod_logs("x", "demo")
+
+        assert "error" not in result
+        assert "never started" in result["result"]
+        # Names where to look instead.
+        assert "describe_pod" in result["result"]
+
+
+class TestEventAge:
+    def test_events_carry_an_age(self, api):
+        """
+        Events are history. A FailedScheduling warning from before a pod was
+        scheduled stays in its list forever, so without an age a resolved
+        problem reads as a current one -- seen on a Running pod whose only
+        warning was 27 minutes old.
+        """
+        event = client.CoreV1Event(
+            metadata=client.V1ObjectMeta(name="e1"),
+            involved_object=client.V1ObjectReference(name="web"),
+            type="Warning",
+            reason="FailedScheduling",
+            count=1,
+            message="0/1 nodes are available",
+            last_timestamp=dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=27),
+        )
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=[event])
+
+        assert k8s.get_pod_events("web", "demo")["events"][0]["age"] == "27m"
 
 
 class TestActiveContext:
