@@ -69,7 +69,7 @@ async def lifespan(_app):
 
 
 app = FastAPI(
-    title="local-triage-agent",
+    title="kubewhy",
     description="Read-only host and Kubernetes diagnostics, answered by a local model.",
     lifespan=lifespan,
 )

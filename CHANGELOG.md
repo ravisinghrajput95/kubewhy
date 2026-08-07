@@ -6,6 +6,18 @@ signatures and response shapes may still change.
 
 ## [Unreleased]
 
+### Changed — breaking
+
+- **Renamed from `local-triage-agent` to `kubewhy`.** "Agent" had become one of
+  five surfaces, and the old name never said Kubernetes. The GitHub repository
+  redirects; **published artifacts do not**. Until the next `v*` tag the image
+  and chart exist only at the old paths:
+  `ghcr.io/ravisinghrajput95/local-triage-agent` and
+  `oci://ghcr.io/…/charts/local-triage-agent`. `TRIAGE_*` variables, the
+  `triage` namespace, the `triage-agent` ServiceAccount and the `triage.*`
+  logger names are deliberately unchanged — renaming them would break every
+  existing deployment for no benefit.
+
 ### Added
 
 - **Cluster-wide scan** (`scan_cluster`) — finds failing workloads across every
@@ -105,5 +117,5 @@ local model, with claim verification and a scored eval suite.
 - Claim verification is lexical and cannot check reasoning.
 - Cumulative context across a long chain is unbounded.
 
-[Unreleased]: https://github.com/ravisinghrajput95/local-triage-agent/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/ravisinghrajput95/local-triage-agent/releases/tag/v0.1.0
+[Unreleased]: https://github.com/ravisinghrajput95/kubewhy/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ravisinghrajput95/kubewhy/releases/tag/v0.1.0

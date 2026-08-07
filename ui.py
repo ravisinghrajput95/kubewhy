@@ -87,7 +87,7 @@ def _unwrap(result, tool):
     return result
 
 
-st.set_page_config(page_title="local-triage-agent", page_icon="🩺", layout="wide")
+st.set_page_config(page_title="kubewhy", page_icon="🩺", layout="wide")
 
 with st.sidebar:
     st.subheader("Cluster")
@@ -126,7 +126,7 @@ with st.sidebar:
         st.cache_data.clear()
     st.caption(f"Results cached {CACHE_TTL}s.")
 
-st.title("local-triage-agent")
+st.title("kubewhy")
 
 findings = _unwrap(_scan(only_unhealthy, limit), f"scan_cluster(only_unhealthy={only_unhealthy}, limit={limit})")
 

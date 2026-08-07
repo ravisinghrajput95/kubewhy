@@ -16,7 +16,7 @@ Register with a stdio client by pointing it at this file:
 
     {
       "mcpServers": {
-        "local-triage-agent": {
+        "kubewhy": {
           "command": "/path/to/.venv/bin/python",
           "args": ["/path/to/mcp_server.py"]
         }
@@ -50,7 +50,7 @@ observability.configure()
 log = logging.getLogger("triage.mcp")
 
 mcp = FastMCP(
-    "local-triage-agent",
+    "kubewhy",
     instructions=(
         "Read-only diagnostics for a Kubernetes cluster and the local host.\n\n"
         "For a question about the cluster as a whole with no namespace named, "
