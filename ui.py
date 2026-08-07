@@ -311,29 +311,40 @@ st.caption(
 # whole cluster and answered about everything -- the selection was on screen
 # and nowhere else.
 subject = st.session_state.get("subject")
-if subject:
-    st.caption(
-        f"Questions are asked about **{subject['workload']}** "
-        f"(pod `{subject['pod']}`) unless you name something else."
+
+# A form, so Enter in the box submits. A question typed and then apparently
+# ignored until you find the button is the kind of thing that makes a tool feel
+# broken.
+with st.form("ask", clear_on_submit=False):
+    question = st.text_input(
+        "Question",
+        placeholder=(
+            f"why is {subject['workload']} failing?" if subject
+            else "why is payments-api failing in staging?"
+        ),
+        label_visibility="collapsed",
     )
+    scoped = (
+        st.checkbox(
+            f"About the selected workload ({subject['workload']})", value=True
+        )
+        if subject
+        else False
+    )
+    submitted = st.form_submit_button("Diagnose", type="primary")
 
-question = st.text_input(
-    "Question",
-    placeholder=(
-        f"why is {subject['workload']} failing?" if subject
-        else "why is payments-api failing in staging?"
-    ),
-    label_visibility="collapsed",
-)
-
-if st.button("Diagnose", type="primary", disabled=not question):
-    if subject:
-        # Naming the subject explicitly, rather than hoping the model infers
-        # it, is the difference between an answer and a cluster-wide list.
+if submitted and question:
+    if scoped:
+        # Context, not an instruction. Prepending "Regarding demo/backup:"
+        # hijacked questions that were deliberately broad -- "diagnose all
+        # cluster resources" came back as a report on demo/backup alone. Say
+        # what is on screen and let the question decide its own scope.
         question = (
-            f"Regarding the workload {subject['workload']} in namespace "
-            f"{subject['namespace']} (for example pod {subject['pod']}): "
-            f"{question}"
+            f"Context: the user is looking at workload {subject['workload']} "
+            f"in namespace {subject['namespace']} (for example pod "
+            f"{subject['pod']}). If the question below does not name a "
+            f"workload and is not about the cluster as a whole, it refers to "
+            f"that one.\n\nQuestion: {question}"
         )
     steps = st.status("Thinking...", expanded=True)
     try:
