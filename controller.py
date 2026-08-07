@@ -31,7 +31,7 @@ from kubernetes import client, config, watch
 import agent
 import observability
 import sinks
-from routers.k8s_pods_info import FAULT_CLASS, _pod_status, workload_of
+from routers.k8s_pods_info import base_status, fault_of, _pod_status, workload_of
 
 observability.configure()
 log = logging.getLogger("triage.controller")
@@ -108,7 +108,10 @@ class Controller:
             return None
 
         status = _pod_status(pod)
-        if status not in WATCHED:
+        # base_status, not status: an init container crashlooping reports as
+        # Init:CrashLoopBackOff, which is just as worth waking someone for and
+        # would otherwise never match this set at all.
+        if base_status(status) not in WATCHED:
             return None
 
         # A pod that restarted once an hour ago and is running now is not a
@@ -121,7 +124,7 @@ class Controller:
 
     def enqueue(self, pod, status):
         scope = workload_of(pod) or pod.metadata.name
-        fault = FAULT_CLASS.get(status, status)
+        fault = fault_of(status)
         key = f"{pod.metadata.namespace}/{scope}/{fault}"
         if not self.budget.allow(key):
             return False

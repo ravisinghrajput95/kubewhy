@@ -120,3 +120,111 @@ spec:
           resources:
             requests: { memory: "32Mi", cpu: "50m" }
             limits: { memory: "128Mi", cpu: "200m" }
+---
+# Everything below exists because a cluster of five Deployments hid real bugs.
+# Each shape here broke the agent in a way the Deployments above could not:
+# completed Jobs were reported as failures, init container failures were
+# invisible, CronJob runs each counted as a new workload, static pods grouped
+# under their node, and sidecars made log reads fail outright.
+#
+# A CronJob that succeeds. Its finished pods must NOT be reported as broken --
+# on a real cluster these are most of the non-Running pods.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup
+  namespace: demo
+spec:
+  schedule: "*/1 * * * *"
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: busybox:1.36
+              command: ["/bin/sh", "-c", "echo backup complete"]
+---
+# A CronJob that fails every run. Must be ONE finding named "nightly-sync",
+# not a new workload per scheduled run.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-sync
+  namespace: demo
+spec:
+  schedule: "*/1 * * * *"
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: busybox:1.36
+              command: ["/bin/sh", "-c", "echo 'FATAL: upstream returned 503'; exit 1"]
+---
+# An init container waiting on a dependency that never arrives. Reports phase
+# Pending with no app container status, so it used to read as "Pending" and the
+# controller ignored it entirely.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: needs-db
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: needs-db}
+  template:
+    metadata:
+      labels: {app: needs-db}
+    spec:
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command: ["/bin/sh", "-c", "echo 'cannot resolve postgres.data.svc'; exit 1"]
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["/bin/sh", "-c", "sleep 3600"]
+---
+# A node-scoped workload, so DaemonSet ownership is exercised.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: log-shipper
+  namespace: demo
+spec:
+  selector:
+    matchLabels: {app: log-shipper}
+  template:
+    metadata:
+      labels: {app: log-shipper}
+    spec:
+      containers:
+        - name: shipper
+          image: busybox:1.36
+          command: ["/bin/sh", "-c", "echo 'no sink configured'; exit 2"]
+---
+# Two containers, as anything behind a service mesh has. The API refuses to
+# guess which one's logs you want, so this pod made get_pod_logs fail outright.
+# The application is the interesting one; the proxy is noise.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-app
+  namespace: demo
+  labels: {app: sidecar-app}
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["/bin/sh", "-c", "echo 'APP: connection refused to db:5432'; sleep 3600"]
+    - name: istio-proxy
+      image: busybox:1.36
+      command: ["/bin/sh", "-c", "echo 'PROXY: ready'; sleep 3600"]

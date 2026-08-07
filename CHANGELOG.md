@@ -78,12 +78,70 @@ by a repository rename.
   `routers/k8s_pods_info.py`. The scan and the controller have to agree on what
   counts as the same problem, and two copies would drift.
 
-### Known issues
+### Added — working at cluster scale
 
-- The claim checker flattens all tool output into one blob, so a status
-  measured for one workload supports the same status claimed about another.
-  The cluster-wide scan widens each result and therefore weakens this check;
-  confirmed against a live cluster and pinned in `tests/test_grounding.py`.
+- **`scan_cluster(namespaces=…)`** and paged fetching. Pods are read a page at
+  a time, so no single request has to carry a multi-megabyte response inside
+  `K8S_TIMEOUT`; a single namespace becomes a namespaced query rather than a
+  cluster-wide one. The browser UI exposes the same filter plus a name search,
+  because a flat list of a thousand workloads is not navigable in either
+  surface.
+- **`scan_cluster(workload=…)`** reports one workload's state whether or not it
+  is broken. Without it there was no way to answer "is X healthy?" with "yes":
+  the scan returned only failures, so a question about a healthy workload found
+  nothing and the model answered with a *different* workload's problem —
+  confidently, and marked `grounded`, because every claim was true of the
+  workload it had substituted. The system prompt now also says to report a
+  healthy workload as healthy and never to describe one that was not asked
+  about.
+- **`get_pod_logs` reports which container it read**, and takes an explicit
+  `container` argument.
+- **The demo cluster grew the shapes that were hiding bugs**: a succeeding and
+  a failing CronJob, a failing init container, a DaemonSet, and a
+  two-container pod. Every fix below was invisible against five Deployments.
+
+### Fixed — detection on real clusters
+
+The demo cluster is five Deployments, so every assumption that holds only for
+Deployments went unnoticed. None of these are visible there; all are ordinary
+anywhere else.
+
+- **Completed Jobs were reported as failures.** A Succeeded pod is not Running
+  and has no ready containers, so a readiness-only check called every finished
+  CronJob run broken. Seen directly: a scan of a real cluster listed two
+  `Completed` pods as unhealthy.
+- **Failing init containers were invisible.** A crashlooping "wait for the
+  database" init container reports phase `Pending` with no app container
+  status, so it read as `Pending` and the controller ignored it entirely.
+  `_pod_status` now reports `Init:<reason>` as kubectl does, and it classifies
+  and dedups as the same fault as any other crash.
+- **Static pods were grouped by node.** `kube-apiserver`, `etcd` and
+  `kube-scheduler` are owned by the Node they run on, so every control-plane
+  component on a node collapsed into one finding named after the node.
+- **Every CronJob run was a new workload.** Jobs created by a CronJob are
+  `<name>-<timestamp>`; keeping the timestamp meant the per-workload cooldown
+  never applied and an hourly failure would report hourly, forever.
+- **The claim checker scopes claims to the entity they name.** A status
+  measured for one workload no longer supports the same status asserted about
+  another — the weakness `scan_cluster` made worse by returning every failing
+  workload in one result. A clause naming no entity still falls back to
+  checking against everything, and entity matching is substring, so both
+  remaining loosenesses fail toward silence rather than false alarms.
+- **Test fixture `exit_code or 1`** turned every successful termination into a
+  failure, which is why the init-container case looked correct at first.
+- **API errors discarded the server's explanation.** `_handle` reported only
+  `reason`, so asking for the logs of an `ImagePullBackOff` pod gave
+  "kubernetes API error 400: Bad Request" while the response body said
+  `container "app" ... is waiting to start: image can't be pulled`. The body is
+  the diagnosis; it is now kept.
+- **"No logs yet" is no longer reported as a failure.** A container that never
+  started has no logs and never will, which is an expected state for
+  `ImagePullBackOff` or a failing init container. It now returns a result
+  naming the reason and pointing at `describe_pod` / `get_pod_events`.
+- **Events carry an age.** Events are history, not state: a `FailedScheduling`
+  warning from before a pod was scheduled stays in its list forever, so an
+  ageless projection showed a 27-minute-resolved problem on a Running pod as
+  though it were current.
 
 ## [0.1.0] — 2026-08-04
 

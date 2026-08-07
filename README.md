@@ -65,6 +65,24 @@ python agent.py --scan --explain 2
 That split is deliberate. The listing is cheap and complete; the explanation
 costs tens of seconds each, so it is bounded rather than applied to everything.
 
+### Asking about one workload, including a healthy one
+
+`scan_cluster(workload="payments-api")` reports that workload's state whether
+or not anything is wrong with it. That sounds redundant and is not: without it
+the scan returned only failures, so a question about a healthy workload found
+nothing — and the model answered with some *other* workload's problem instead,
+confidently and marked `grounded`, because every claim it made was true of the
+workload it had substituted. "It is running normally" has to be an available
+answer, or the gap gets filled with something worse.
+
+### On a large cluster
+
+Pods are fetched a page at a time, so no single request has to carry a
+multi-megabyte response inside `K8S_TIMEOUT`. Narrow with `namespaces=` — a
+single namespace becomes a namespaced query rather than a cluster-wide one —
+and the browser UI exposes the same filter plus a name search, because a flat
+list of a thousand workloads is not navigable in either surface.
+
 Measured on a 19-pod kind cluster: **146 tokens against 33,042 raw**. That raw
 figure is 83% of qwen3's entire 40k window spent on one call, before the model
 has reasoned about anything — and at ~1,739 tokens per pod, a 24-pod cluster
@@ -151,6 +169,15 @@ a model whose `ollama show` capabilities include `tools`.
 `OOMKilled`, `ImagePullBackOff` — two broken services (one selector matching
 nothing, one whose pods never become ready), plus healthy deployments and
 services as controls, so the agent has to tell broken from working.
+
+It also deploys the shapes a cluster of plain Deployments never produces, and
+each one is there because it broke something: a **CronJob that succeeds**
+(finished pods were reported as failures), a **CronJob that fails** (every run
+counted as a new workload, so the cooldown never applied), a **failing init
+container** (reported as `Pending`, so the controller ignored it), a
+**DaemonSet**, and a **two-container pod** (the API refuses to guess which
+container's logs you want, so reads failed outright). A demo that is only
+Deployments hides bugs rather than finding them.
 
 ```bash
 kind create cluster --name triage-demo
@@ -256,6 +283,31 @@ kubectl logs -n triage -l app.kubernetes.io/instance=triage -f
 The image and chart are published to GHCR on every `v*` tag, multi-arch
 (`amd64`/`arm64`). To install from a checkout instead, use `deploy/chart`.
 
+Two ways to reach Slack. An **incoming webhook** is bound to the channel it was
+created for. A **bot token** (`xoxb-…`) posts via `chat.postMessage` to any
+channel the bot is invited to, reports a real error when it refuses, and is
+what you want if findings should ever be routed by namespace or team:
+
+```bash
+kubectl create secret generic kubewhy-slack -n triage \
+  --from-literal=bot-token="$SLACK_BOT_TOKEN"
+
+helm install kubewhy deploy/chart --set sink.type=slack \
+  --set sink.slack.existingSecret=kubewhy-slack \
+  --set sink.slack.channel='#kubernetes-events'
+```
+
+`chat.postMessage` answers HTTP 200 even when it refuses — a channel typo or a
+missing invite returns `{"ok": false}` — so the sink reads the body rather than
+the status code. Trusting the status means the alert is never seen and nothing
+says so.
+
+**This is one-way.** The controller posts; nothing reads Slack back. Replies,
+buttons and slash commands need an endpoint Slack can reach, verified with the
+signing secret — which means exposing this to the internet, a decision that
+deserves its own thought rather than arriving as a side effect of posting
+messages.
+
 Defaults to `stdout`, so you can read what it would have said before pointing
 it at a channel. The chart creates the read-only ServiceAccount and
 ClusterRole, runs non-root with a read-only root filesystem, and pins one
@@ -265,7 +317,8 @@ dedup state is in-process.
 | Value | Default | Purpose |
 | --- | --- | --- |
 | `sink.type` | `stdout` | `stdout` or `slack` |
-| `sink.slack.existingSecret` | — | Secret holding the webhook. Preferred over `webhookUrl`, which lands in your values file and release history. |
+| `sink.slack.existingSecret` | — | Secret holding the webhook or bot token. Preferred over `webhookUrl`, which lands in your values file and release history. |
+| `sink.slack.channel` | — | Set it, plus a bot token in the secret under `botTokenKey`, to post via `chat.postMessage` instead of a webhook. Preferred when both are configured. |
 | `model.ollamaHost` | in-cluster svc | The controller runs no model; point this at an Ollama it can reach |
 | `watch.namespaces` | all | Narrow this on a large cluster |
 | `watch.cooldownSeconds` | `1800` | Silence per workload after a finding |
@@ -478,13 +531,13 @@ and it has two real limits:
   fabricated figure colliding with one reads as grounded. CI caught exactly
   this: the fabricated *"18 days"* test case passed on a runner whose boot
   timestamp was 18:12.
-- **Claims are not tied to what they are about**, and the cluster-wide scan
-  makes that worse. Every tool result is checked as one blob, so a status
-  measured for one workload supports the same status claimed about another.
-  Seen on a live cluster: the model attributed `ErrImagePull` to a workload
-  the scan reported as `ImagePullBackOff`, and it passed as `grounded` because
-  a *different* workload in the same result was in `ErrImagePull`. The wider
-  the tool result, the weaker this check gets.
+- **Scoping is best-effort.** Claims are checked against the measurements for
+  the entity they name — a fix for the case where a status measured on one
+  workload validated the same status asserted about another, seen live once
+  `scan_cluster` started returning every failing workload in one result. But a
+  sentence naming no entity still falls back to checking against everything,
+  and entity matching is substring, so a short name inside a longer one widens
+  the scope. Both fail toward silence rather than false alarms.
 
 So `partial` is the stronger signal. It reliably means something was not
 measured; `grounded` only means nothing contradicted the answer. Treat it as a
@@ -508,7 +561,7 @@ Kubernetes endpoints take `?namespace=` (default `default`).
 | --- | --- |
 | `GET /healthz` | Liveness. No dependencies. |
 | `GET /readyz` | Readiness. Checks the model backend. |
-| `GET /scan` | Failing workloads across every namespace, grouped. `?only_unhealthy=` `?limit=` |
+| `GET /scan` | Failing workloads across every namespace, grouped. `?only_unhealthy=` `?limit=` `?namespaces=` `?workload=` |
 | `GET /pods` | Status, ready, restarts, node. `?only_unhealthy=true` |
 | `GET /pods/{name}` | Images, requests/limits, last termination reason and exit code |
 | `GET /pods/{name}/events` | Recent Warning events |
@@ -642,6 +695,9 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
 | `K8S_TIMEOUT` | `15` | Seconds before a cluster call is abandoned |
 | `TRIAGE_API_TOKEN` | *unset* | Bearer token; unset means no auth |
 | `KUBECONFIG` | `~/.kube/config` | Cluster credentials |
+| `SLACK_WEBHOOK_URL` | *unset* | Incoming webhook, bound to one channel |
+| `SLACK_BOT_TOKEN` | *unset* | Bot token (`xoxb-…`). With `SLACK_CHANNEL`, posts via `chat.postMessage` and wins over a webhook |
+| `SLACK_CHANNEL` | *unset* | Channel for the bot token, e.g. `#kubernetes-events` |
 | `LOG_FORMAT` | `json` | `text` for human-readable logs |
 | `LOG_LEVEL` | `INFO` | Standard Python levels |
 

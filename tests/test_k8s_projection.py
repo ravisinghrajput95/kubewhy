@@ -7,6 +7,7 @@ that silently starts returning raw objects would blow the model's context
 window, so size is asserted explicitly.
 """
 
+import datetime as dt
 import json
 from unittest.mock import MagicMock, patch
 
@@ -96,6 +97,308 @@ def crashing(name, workload, namespace, reason="CrashLoopBackOff"):
         owner=workload,
         statuses=[container_status(ready=False, waiting_reason=reason)],
     )
+
+
+def owned_by(kind, owner, name, namespace="kube-system"):
+    pod = make_pod(name=name, namespace=namespace)
+    pod.metadata.owner_references = [
+        client.V1OwnerReference(
+            api_version="v1", kind=kind, name=owner, uid=f"uid-{owner}", controller=True
+        )
+    ]
+    return pod
+
+
+class TestClusterNativeWorkloads:
+    """
+    The demo cluster is five Deployments, so every assumption that only holds
+    for Deployments passed unnoticed. A real cluster is mostly not that: the
+    control plane runs as static pods, networking and logging as DaemonSets,
+    backups as CronJobs.
+    """
+
+    def test_static_pods_group_by_component_not_by_node(self):
+        # kube-apiserver and etcd are owned by the Node they run on. Returning
+        # the owner name files every control plane component on a node under
+        # one entry named after the node.
+        api_server = owned_by(
+            "Node", "ip-10-0-1-5", "kube-apiserver-ip-10-0-1-5"
+        )
+        etcd = owned_by("Node", "ip-10-0-1-5", "etcd-ip-10-0-1-5")
+
+        assert k8s.workload_of(api_server) == "kube-apiserver"
+        assert k8s.workload_of(etcd) == "etcd"
+
+    def test_cronjob_runs_collapse_to_the_cronjob(self):
+        """
+        Jobs made by a CronJob are "<name>-<timestamp>". Keeping the timestamp
+        makes every scheduled run a new workload, so the cooldown never applies
+        and an hourly failure reports hourly forever.
+        """
+        first = owned_by("Job", "backup-28912345", "backup-28912345-abcde", "prod")
+        second = owned_by("Job", "backup-28912405", "backup-28912405-fghij", "prod")
+
+        assert k8s.workload_of(first) == "backup"
+        assert k8s.workload_of(second) == "backup"
+
+    def test_a_standalone_job_keeps_its_name(self):
+        """Only a trailing timestamp is a CronJob; don't eat real names."""
+        pod = owned_by("Job", "migrate-v2", "migrate-v2-abcde", "prod")
+
+        assert k8s.workload_of(pod) == "migrate-v2"
+
+    def test_daemonsets_and_statefulsets_are_named_directly(self):
+        daemon = owned_by("DaemonSet", "kube-proxy", "kube-proxy-x7k2p")
+        stateful = owned_by("StatefulSet", "postgres", "postgres-0", "prod")
+
+        assert k8s.workload_of(daemon) == "kube-proxy"
+        assert k8s.workload_of(stateful) == "postgres"
+
+    def test_a_failing_init_container_is_the_reported_status(self):
+        """
+        "Wait for the database" crashlooping is one of the most common real
+        failures, and it reports phase Pending with no app container status --
+        so reading only container_statuses calls it "Pending".
+        """
+        pod = make_pod(name="api-abc123-xyz", namespace="prod", statuses=[])
+        pod.status.container_statuses = None
+        pod.status.init_container_statuses = [
+            container_status(
+                name="wait-for-db", ready=False, waiting_reason="CrashLoopBackOff"
+            )
+        ]
+
+        assert k8s._pod_status(pod) == "Init:CrashLoopBackOff"
+        # Same fault as any other crash: same grouping, same cooldown.
+        assert k8s.fault_of("Init:CrashLoopBackOff") == "crash"
+        assert k8s.base_status("Init:CrashLoopBackOff") == "CrashLoopBackOff"
+
+    def test_a_completed_init_container_is_not_the_status(self):
+        """An init container that finished is not the pod's problem."""
+        pod = make_pod(name="api-abc123-xyz", namespace="prod")
+        pod.status.init_container_statuses = [
+            container_status(
+                name="wait-for-db", terminated_reason="Completed", exit_code=0
+            )
+        ]
+
+        assert k8s._pod_status(pod) == "Running"
+
+
+class TestErrorsExplainThemselves:
+    """
+    Both found by looking at the UI against a real cluster.
+
+    The API server explains itself well; the value is in not discarding what
+    it said.
+    """
+
+    def test_api_error_keeps_the_servers_message(self, api):
+        # "Bad Request" alone is useless. The body names the container and the
+        # reason, which is the entire diagnosis.
+        api.read_namespaced_pod.side_effect = ApiException(
+            status=400, reason="Bad Request"
+        )
+        api.read_namespaced_pod.side_effect.body = json.dumps(
+            {"message": 'container "app" in pod "x" is waiting to start: image can\'t be pulled'}
+        )
+
+        assert "waiting to start" in k8s.describe_pod("x", "demo")["error"]
+
+    def test_a_container_that_never_started_is_not_an_error(self, api):
+        """
+        ImagePullBackOff means there are no logs and never will be. Reporting
+        that as "kubernetes API error 400: Bad Request" told the reader nothing
+        and pointed the model at a dead end.
+        """
+        failure = ApiException(status=400, reason="Bad Request")
+        failure.body = json.dumps(
+            {"message": 'container "app" in pod "x" is waiting to start: image can\'t be pulled'}
+        )
+        api.read_namespaced_pod_log.side_effect = failure
+
+        result = k8s.get_pod_logs("x", "demo")
+
+        assert "error" not in result
+        assert "never started" in result["result"]
+        # Names where to look instead.
+        assert "describe_pod" in result["result"]
+
+
+class TestScanAtScale:
+    """
+    A thousand workloads is the target, not five Deployments. The projection
+    already scales; fetching and narrowing are what did not.
+    """
+
+    def test_pods_are_fetched_in_pages(self, api):
+        """
+        One unbounded request for a huge cluster is a multi-megabyte response
+        that has to arrive inside K8S_TIMEOUT. Paging bounds each request.
+        """
+        first = client.V1PodList(
+            items=[crashing("a-abc123-1", "a-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue="token-1"),
+        )
+        second = client.V1PodList(
+            items=[crashing("b-abc123-1", "b-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+        api.list_pod_for_all_namespaces.side_effect = [first, second]
+
+        result = k8s.scan_cluster()
+
+        assert set(result) == {"prod/a", "prod/b"}
+        # Second call must carry the continue token, or it loops on page one.
+        assert api.list_pod_for_all_namespaces.call_args_list[1].kwargs["_continue"] == "token-1"
+
+    def test_a_single_namespace_uses_a_namespaced_query(self, api):
+        """Cheaper than listing the cluster and discarding almost all of it."""
+        api.list_namespaced_pod.return_value = client.V1PodList(
+            items=[crashing("web-abc123-1", "web-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert list(k8s.scan_cluster(namespaces="prod")) == ["prod/web"]
+        api.list_pod_for_all_namespaces.assert_not_called()
+        assert api.list_namespaced_pod.call_args.args[0] == "prod"
+
+    def test_several_namespaces_are_filtered(self, api):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[
+                crashing("web-abc123-1", "web-abc123", "prod"),
+                crashing("web-abc123-1", "web-abc123", "staging"),
+                crashing("web-abc123-1", "web-abc123", "sandbox"),
+            ],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert set(k8s.scan_cluster(namespaces="prod,staging")) == {
+            "prod/web",
+            "staging/web",
+        }
+
+
+class TestAskingAboutOneWorkload:
+    """
+    The bug this closes: asked about a healthy CronJob, the agent answered
+    with a different workload's problem, confidently and grounded. It had no
+    way to say "that one is fine" -- the scan returned only failures, so a
+    healthy workload simply was not there.
+    """
+
+    def test_a_healthy_workload_is_reported_not_omitted(self, api, healthy_pod):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod, crashing("web-abc123-1", "web-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        result = k8s.scan_cluster(workload="healthy")
+
+        assert list(result) == ["demo/healthy"]
+        assert result["demo/healthy"]["status"] == "Running"
+
+    def test_only_the_named_workload_comes_back(self, api, healthy_pod):
+        """Never hand back a different workload's problem."""
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod, crashing("web-abc123-1", "web-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert "prod/web" not in k8s.scan_cluster(workload="healthy")
+
+    def test_a_name_that_does_not_exist_says_so(self, api, healthy_pod):
+        """Distinct from "it is healthy", which returns a row."""
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod], metadata=client.V1ListMeta(_continue=None)
+        )
+
+        assert "no workload named" in k8s.scan_cluster(workload="ghost")["result"]
+
+    def test_a_namespaced_name_also_matches(self, api):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[crashing("web-abc123-1", "web-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert list(k8s.scan_cluster(workload="prod/web")) == ["prod/web"]
+
+
+class TestMultiContainerLogs:
+    """
+    Sidecars are the norm at scale -- a mesh proxy, a log shipper, a metrics
+    agent. The API refuses to guess and returns 400 listing the names, so
+    before this the log tool failed on most pods of a real cluster.
+    """
+
+    def test_picks_the_failing_container_not_the_first(self, api):
+        refusal = ApiException(status=400, reason="Bad Request")
+        refusal.body = json.dumps(
+            {
+                "message": "a container name must be specified for pod x, "
+                "choose one of: [istio-proxy app]"
+            }
+        )
+
+        pod = make_pod(name="x")
+        pod.status.container_statuses = [
+            container_status(name="istio-proxy", ready=True),
+            container_status(name="app", ready=False, terminated_reason="Error"),
+        ]
+        api.read_namespaced_pod.return_value = pod
+
+        body = MagicMock()
+        body.data = b"APP: connection refused to db:5432"
+        api.read_namespaced_pod_log.side_effect = [refusal, body]
+
+        result = k8s.get_pod_logs("x", "demo")
+
+        # The proxy is healthy and first; the application is what crashed.
+        assert result["container"] == "app"
+        assert "connection refused" in result["logs"]
+
+    def test_an_explicit_container_is_respected(self, api):
+        body = MagicMock()
+        body.data = b"PROXY: ready"
+        api.read_namespaced_pod_log.return_value = body
+
+        result = k8s.get_pod_logs("x", "demo", container="istio-proxy")
+
+        assert result["container"] == "istio-proxy"
+        assert api.read_namespaced_pod_log.call_args.kwargs["container"] == "istio-proxy"
+
+    def test_single_container_pods_need_no_extra_read(self, api):
+        """The common case must not pay for a pod read it does not need."""
+        body = MagicMock()
+        body.data = b"hello"
+        api.read_namespaced_pod_log.return_value = body
+
+        result = k8s.get_pod_logs("x", "demo")
+
+        assert "container" not in result
+        api.read_namespaced_pod.assert_not_called()
+
+
+class TestEventAge:
+    def test_events_carry_an_age(self, api):
+        """
+        Events are history. A FailedScheduling warning from before a pod was
+        scheduled stays in its list forever, so without an age a resolved
+        problem reads as a current one -- seen on a Running pod whose only
+        warning was 27 minutes old.
+        """
+        event = client.CoreV1Event(
+            metadata=client.V1ObjectMeta(name="e1"),
+            involved_object=client.V1ObjectReference(name="web"),
+            type="Warning",
+            reason="FailedScheduling",
+            count=1,
+            message="0/1 nodes are available",
+            last_timestamp=dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=27),
+        )
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=[event])
+
+        assert k8s.get_pod_events("web", "demo")["events"][0]["age"] == "27m"
 
 
 class TestActiveContext:
@@ -266,6 +569,33 @@ class TestScanCluster:
         assert "prod/big" in result
         assert "prod/small" not in result
         assert "1 more not shown" in result["_truncated"]
+
+    def test_ignores_completed_job_pods(self, api):
+        """
+        A CronJob that ran successfully leaves Succeeded pods behind. They are
+        not Running and have no ready containers, so a readiness-only check
+        calls every one of them broken -- which on a real cluster means the
+        scan is mostly finished Jobs. The demo cluster has none, so this only
+        showed up against a cluster with real workloads on it.
+        """
+        done = make_pod(name="nightly-import-abc", namespace="prod", phase="Succeeded")
+        done.status.container_statuses = [
+            container_status(ready=False, terminated_reason="Completed", exit_code=0)
+        ]
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[done, crashing("web-abc123-1", "web-abc123", "prod")]
+        )
+
+        assert list(k8s.scan_cluster()) == ["prod/web"]
+
+    def test_a_job_that_failed_is_still_reported(self):
+        """Succeeded is exempt; Failed is a real fault."""
+        failed = make_pod(name="nightly-import-xyz", namespace="prod", phase="Failed")
+        failed.status.container_statuses = [
+            container_status(ready=False, terminated_reason="Error", exit_code=1)
+        ]
+
+        assert not k8s._is_healthy(failed)
 
     def test_ignores_terminating_pods(self, api):
         pod = crashing("web-abc123-xyz", "web-abc123", "prod")

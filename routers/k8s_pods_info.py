@@ -10,6 +10,8 @@ All functions return a dict with an "error" key instead of raising when the
 cluster is unreachable, so the agent can report the problem and move on.
 """
 
+import datetime as dt
+import json
 import logging
 import os
 
@@ -47,6 +49,49 @@ def _load_config():
             _active_context = _requested_context or active["name"]
         except Exception:
             _active_context = _requested_context or "unknown"
+
+
+def list_namespaces():
+    """
+    Every namespace in the cluster.
+
+    Not a model tool -- a UI helper. Deriving the list from a scan only showed
+    namespaces that currently hold pods, so an empty namespace was unpickable
+    and the filter looked broken. This asks the API directly, which the
+    ClusterRole already allows and which costs one small request instead of a
+    cluster-wide pod read.
+    """
+    try:
+        found = _api().list_namespace(_request_timeout=TIMEOUT)
+    except Exception:
+        return []
+    return sorted(ns.metadata.name for ns in found.items)
+
+
+def workload_pods(namespace, workload):
+    """
+    Every pod belonging to one workload, not just the example the scan names.
+
+    A Deployment is its replicas: showing one pod's logs and calling that the
+    workload's story is wrong when three replicas fail for different reasons.
+    UI helper, so it returns enough to choose between them.
+    """
+    try:
+        pods = list(_iter_pods(namespace))
+    except Exception as exc:
+        return _handle(exc)
+
+    matched = [
+        {
+            "pod": pod.metadata.name,
+            "status": _pod_status(pod),
+            "ready": all(cs.ready for cs in (pod.status.container_statuses or [])),
+            "containers": [c.name for c in pod.spec.containers],
+        }
+        for pod in pods
+        if (workload_of(pod) or pod.metadata.name) == workload
+    ]
+    return matched
 
 
 def list_contexts():
@@ -142,10 +187,46 @@ def _discovery_api():
     return _discovery_v1
 
 
+def _api_message(exc):
+    """The API server's explanation, which is the part worth reading."""
+    try:
+        return json.loads(exc.body or "{}").get("message", "")
+    except (TypeError, ValueError):
+        return (exc.body or "").strip()[:300]
+
+
 def _handle(exc):
     if isinstance(exc, ApiException):
-        return {"error": f"kubernetes API error {exc.status}: {exc.reason}"}
+        # reason alone is "Bad Request", which explains nothing. The body says
+        # which container and why -- "is waiting to start: image can't be
+        # pulled" is the whole diagnosis, and discarding it sent the model a
+        # dead end instead.
+        detail = _api_message(exc) or exc.reason
+        return {"error": f"kubernetes API error {exc.status}: {detail}"}
     return {"error": f"cluster unreachable: {type(exc).__name__}: {exc}"}
+
+
+def _age(when):
+    """
+    Compact age, the way kubectl prints it.
+
+    Events are history, not state. A FailedScheduling warning from before a pod
+    was scheduled sits in its event list forever, so a projection without an
+    age presents a resolved 27-minute-old problem as if it were happening now.
+    """
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+
+    seconds = max(int((dt.datetime.now(dt.timezone.utc) - when).total_seconds()), 0)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
 
 
 # One fault surfaces under several status names as a pod transitions, so
@@ -176,6 +257,21 @@ def _pod_status(pod):
     A pod stuck in CrashLoopBackOff reports phase "Running", so the container
     waiting/terminated reason is the more truthful signal when present.
     """
+    # Init containers first, the way kubectl does it. A pod whose init
+    # container is crashlooping -- "wait for the database" is the usual one --
+    # has phase Pending and no app container status at all, so reading only
+    # container_statuses reports "Pending" and it looks like a pod waiting to
+    # be scheduled. The demo cluster has no init containers, so this was
+    # invisible there and would be common anywhere real.
+    for cs in pod.status.init_container_statuses or []:
+        state = cs.state
+        if state.terminated and state.terminated.exit_code == 0:
+            continue  # this one finished; the pod moved on to the next
+        if state.waiting and state.waiting.reason:
+            return f"Init:{state.waiting.reason}"
+        if state.terminated and state.terminated.reason:
+            return f"Init:{state.terminated.reason}"
+
     statuses = pod.status.container_statuses or []
     for cs in statuses:
         state = cs.state
@@ -186,8 +282,41 @@ def _pod_status(pod):
     return pod.status.phase or "Unknown"
 
 
+def base_status(status):
+    """The status without the Init: prefix, for classification."""
+    return status[5:] if status.startswith("Init:") else status
+
+
+def fault_of(status):
+    """
+    The fault class a status belongs to.
+
+    An init container crashlooping is the same fault as an app container
+    crashlooping: a different container, but the same problem and the same
+    place to look. Grouping them apart would report one workload twice and
+    give the init case no cooldown of its own.
+    """
+    return FAULT_CLASS.get(base_status(status), status)
+
+
 def _is_healthy(pod):
-    """Running with every container ready -- the bar list_pods uses."""
+    """
+    Whether this pod is fine, meaning "do not report it".
+
+    Running with every container ready is the obvious case. A Succeeded pod is
+    the one that is easy to get wrong: a Job or CronJob that finished cleanly
+    is not Running and has no ready containers, so a naive readiness check
+    calls it broken. On a demo cluster nothing is ever Succeeded and the bug is
+    invisible; on any real cluster every completed CronJob run would be
+    reported as a failure, which is the fastest possible way to become noise.
+    Observed exactly that against a cluster with finished Job pods on it.
+
+    Failed pods are deliberately not exempt -- a Job that ran to failure is a
+    real fault, and phase is Failed rather than Succeeded.
+    """
+    if pod.status.phase == "Succeeded":
+        return True
+
     statuses = pod.status.container_statuses or []
     return bool(statuses) and _pod_status(pod) == "Running" and all(
         cs.ready for cs in statuses
@@ -198,12 +327,32 @@ def workload_of(pod):
     """
     The owning workload, so ten crashing replicas count as one problem.
 
-    ReplicaSet names are the deployment name plus a hash suffix; trimming it
-    groups replicas of the same rollout together.
+    Deployments, DaemonSets and StatefulSets all name their owner usefully.
+    Three cases do not, and all three are ordinary on a real cluster:
+
+    - **ReplicaSet** names are the deployment plus a hash; trim it, or every
+      rollout looks like a new workload.
+    - **Job** names created by a CronJob end in a scheduling timestamp. Without
+      trimming, every scheduled run is a new workload, so the cooldown never
+      applies and a job failing hourly reports hourly, forever.
+    - **Node** means a static pod -- kube-apiserver, etcd, kube-scheduler.
+      They are owned by the node they run on, so returning the owner name files
+      every control plane component on that node under one entry, named after
+      the node. Their pod name is "<component>-<node>", so drop the suffix.
     """
     for ref in pod.metadata.owner_references or []:
         if ref.kind == "ReplicaSet":
             return ref.name.rsplit("-", 1)[0]
+
+        if ref.kind == "Job":
+            head, _, tail = ref.name.rpartition("-")
+            return head if head and tail.isdigit() else ref.name
+
+        if ref.kind == "Node":
+            name = pod.metadata.name
+            suffix = f"-{ref.name}"
+            return name[: -len(suffix)] if name.endswith(suffix) else name
+
         return ref.name
     return None
 
@@ -246,7 +395,42 @@ def list_pods(namespace: str = "default", only_unhealthy: bool = False):
     return result
 
 
-def scan_cluster(only_unhealthy: bool = True, limit: int = 20):
+def _iter_pods(namespace=None, page=500):
+    """
+    Every pod, fetched a page at a time.
+
+    One unbounded request for a large cluster is the wrong shape: at roughly
+    7KB per pod a 1,000-pod cluster is a ~7MB response that has to arrive
+    inside K8S_TIMEOUT, and a 10,000-pod cluster will not. Paging keeps each
+    request small and bounded regardless of cluster size; the total transferred
+    is the same, but no single call can time out on volume alone.
+    """
+    api = _api()
+    token = None
+
+    while True:
+        kwargs = {"limit": page, "_request_timeout": TIMEOUT}
+        if token:
+            kwargs["_continue"] = token
+
+        chunk = (
+            api.list_namespaced_pod(namespace, **kwargs)
+            if namespace
+            else api.list_pod_for_all_namespaces(**kwargs)
+        )
+        yield from chunk.items
+
+        token = (chunk.metadata._continue or None) if chunk.metadata else None
+        if not token:
+            return
+
+
+def scan_cluster(
+    only_unhealthy: bool = True,
+    limit: int = 20,
+    namespaces: str = "",
+    workload: str = "",
+):
     """
     Scans every namespace at once and reports failing workloads.
 
@@ -259,48 +443,76 @@ def scan_cluster(only_unhealthy: bool = True, limit: int = 20):
     example pod: pass that to describe_pod, get_pod_events or get_pod_logs.
     This tool tells you where to look and never why -- the cause always needs
     a follow-up call on the example pod.
+    To answer "is X healthy?" pass workload -- it reports that workload's state
+    whether or not anything is wrong with it, which is the only way to say a
+    thing is fine. Never answer about a different workload than the one asked
+    about; if it is not here, it does not exist under that name.
     Args: only_unhealthy -- when true, the default, omit workloads whose pods
     are all Running and Ready; limit -- how many workloads to return, largest
-    blast radius first, default 20.
+    blast radius first, default 20; namespaces -- comma-separated list to
+    restrict the scan to, which is what you want on a large cluster; workload
+    -- report only this workload, healthy or not.
     """
+    wanted = [n.strip() for n in namespaces.split(",") if n.strip()]
+
     try:
-        pods = _api().list_pod_for_all_namespaces(_request_timeout=TIMEOUT)
+        # One namespace is a much cheaper query than the whole cluster; take it
+        # when it is the only one asked for.
+        pods = list(_iter_pods(wanted[0] if len(wanted) == 1 else None))
     except Exception as exc:
         return _handle(exc)
 
     groups = {}
-    for pod in pods.items:
+    for pod in pods:
+        if wanted and pod.metadata.namespace not in wanted:
+            continue
         # A pod that is already terminating is not a fault to report; on a
         # busy cluster these are the majority of the non-Running pods.
         if pod.metadata.deletion_timestamp:
             continue
 
-        healthy = _is_healthy(pod)
-        if only_unhealthy and healthy:
+        namespace = pod.metadata.namespace
+        owner = workload_of(pod) or pod.metadata.name
+
+        if workload:
+            # Asked about one workload: report it whether or not it is broken.
+            # "It is healthy" is an answer, and without this there was no way
+            # to give it -- the scan returned only failures, so a question
+            # about a healthy workload found nothing and got answered with
+            # some other workload's problem instead.
+            if workload.lower() not in (
+                owner.lower(),
+                f"{namespace}/{owner}".lower(),
+                pod.metadata.name.lower(),
+            ):
+                continue
+        elif only_unhealthy and _is_healthy(pod):
             continue
 
         status = _pod_status(pod)
-        namespace = pod.metadata.namespace
-        workload = workload_of(pod) or pod.metadata.name
-        fault = FAULT_CLASS.get(status, status)
+        fault = fault_of(status)
 
         # Fault rather than status in the key: a rollout part-way through has
         # replicas reporting ErrImagePull and ImagePullBackOff at the same
         # instant, and splitting those would report one problem twice.
         entry = groups.setdefault(
-            (namespace, workload, fault),
+            (namespace, owner, fault),
             {"status": status, "pods": 0, "example": pod.metadata.name},
         )
         entry["pods"] += 1
-        if status in FAULT_CLASS:
+        if fault != status:
             # Only when it adds something: for Pending or Running the fault
             # class is just the status again, and the model pays for the
             # repetition in context.
             entry["fault"] = fault
 
     if not groups:
+        if workload:
+            # Distinct from "it is healthy", which now returns a row.
+            return {"result": f"no workload named {workload} exists in this cluster"}
+        where = f"namespace(s) {namespaces}" if wanted else "any namespace"
         scope = "unhealthy workloads" if only_unhealthy else "pods"
-        return {"result": f"no {scope} in any namespace"}
+        return {"result": f"no {scope} in {where}"}
 
     # Largest blast radius first, so what survives truncation is what matters.
     ordered = sorted(groups.items(), key=lambda kv: (-kv[1]["pods"], kv[0]))
@@ -393,6 +605,13 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
     Events explain scheduling failures, image pull errors and repeated
     restarts that the pod object itself does not spell out. Normal events are
     filtered out because they are rarely relevant to a fault.
+
+    Each event carries an age, and it matters: events are history, not current
+    state. A pod that waited on a taint before being scheduled keeps that
+    FailedScheduling warning for its whole life, so a warning here does not
+    mean the pod is failing now. Check the age against the pod's status before
+    concluding anything -- a 27-minute-old warning on a Running pod is
+    something that already resolved.
     Args: name -- the pod name; namespace -- defaults to "default";
     limit -- how many events to return, default 10.
     """
@@ -417,6 +636,7 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
             {
                 "reason": e.reason,
                 "count": e.count,
+                "age": _age(e.last_timestamp or e.event_time),
                 # Events echo container args, which sometimes carry secrets.
                 "message": redact((e.message or "")[:300]),
             }
@@ -425,24 +645,90 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
     }
 
 
-def get_pod_logs(name: str, namespace: str = "default", tail: int = 20):
+def _needs_container(exc):
+    """Whether the API refused because the pod has several containers."""
+    return (
+        isinstance(exc, ApiException)
+        and exc.status == 400
+        and "container name must be specified" in (_api_message(exc) or "")
+    )
+
+
+def _no_logs(name, exc):
+    """
+    Explain an absence of logs, distinguishing expected from broken.
+
+    A container that never started has no logs and never will -- normal for
+    ImagePullBackOff or a failing init container. Reporting that as an API
+    error tells the reader nothing and sends the model to a dead end.
+    """
+    detail = _api_message(exc) if isinstance(exc, ApiException) else str(exc)
+    if "waiting to start" in detail or "ContainerCreating" in detail:
+        return {
+            "result": (
+                f"no logs for pod {name}: its container has never started "
+                f"({detail.split(': ')[-1].strip()}). Use describe_pod or "
+                "get_pod_events to find out why."
+            )
+        }
+    return _handle(exc)
+
+
+def _failing_container(pod):
+    """
+    Which container's logs are worth reading in a multi-container pod.
+
+    Sidecars are the norm at any scale -- a service mesh proxy, a log shipper,
+    a metrics agent -- and the API refuses to guess: it returns 400 listing the
+    names. Guessing "the first one" would hand back the proxy's logs while the
+    application is the thing that crashed, which is worse than an error because
+    it looks like an answer.
+
+    So pick the container that is actually broken: not ready, or with a
+    termination on record. Falling back to the first only when everything looks
+    fine, where any choice is arbitrary anyway.
+    """
+    statuses = pod.status.container_statuses or []
+
+    for cs in statuses:
+        terminated = (cs.state and cs.state.terminated) or (
+            cs.last_state and cs.last_state.terminated
+        )
+        if not cs.ready or terminated:
+            return cs.name
+
+    if statuses:
+        return statuses[0].name
+    return pod.spec.containers[0].name if pod.spec.containers else None
+
+
+def get_pod_logs(
+    name: str, namespace: str = "default", tail: int = 20, container: str = ""
+):
     """
     Returns the last few log lines from a pod, including from a crashed
     container's previous run when the current one has no output.
 
     Use this to find the application-level error behind a crash, after
     describe_pod has told you the pod is restarting.
+
+    A pod with more than one container -- anything with a service mesh or
+    logging sidecar -- needs to know which one to read. Left unset, this picks
+    the container that is failing rather than an arbitrary one, and reports
+    which it chose. Pass container explicitly to read a specific one.
     Args: name -- the pod name; namespace -- defaults to "default";
     tail -- how many lines to return, capped at 100 to protect the context
-    window.
+    window; container -- which container, when the pod has several.
     """
     tail = min(tail, 100)
     api = _api()
+    chosen = container or None
 
     def _read(previous):
         # _preload_content=False returns the raw response. Without it the
         # client stringifies the body and the model sees a literal b'...'
         # repr instead of the log text.
+        kwargs = {"container": chosen} if chosen else {}
         resp = api.read_namespaced_pod_log(
             name,
             namespace,
@@ -450,24 +736,33 @@ def get_pod_logs(name: str, namespace: str = "default", tail: int = 20):
             previous=previous,
             _preload_content=False,
             _request_timeout=TIMEOUT,
+            **kwargs,
         )
         return resp.data.decode("utf-8", errors="replace")
 
-    try:
-        logs = _read(previous=False).strip()
-        source = "current"
-
+    def _attempt():
         # A container that just died usually has an empty current log; the
         # useful output belongs to the run that failed.
-        if not logs:
-            logs = _read(previous=True).strip()
-            source = "previous (crashed) container"
+        logs = _read(previous=False).strip()
+        if logs:
+            return logs, "current"
+        return _read(previous=True).strip(), "previous (crashed) container"
+
+    try:
+        logs, source = _attempt()
     except Exception as exc:
-        try:
-            logs = _read(previous=True).strip()
-            source = "previous (crashed) container"
-        except Exception:
-            return _handle(exc)
+        if chosen is None and _needs_container(exc):
+            # Multi-container pod. Resolve which one and try again -- only
+            # paying for the extra read when the pod turns out to need it.
+            try:
+                chosen = _failing_container(
+                    api.read_namespaced_pod(name, namespace, _request_timeout=TIMEOUT)
+                )
+                logs, source = _attempt()
+            except Exception as retry:
+                return _no_logs(name, retry)
+        else:
+            return _no_logs(name, exc)
 
     if not logs:
         return {"result": f"no logs available for pod {name}"}
@@ -478,7 +773,12 @@ def get_pod_logs(name: str, namespace: str = "default", tail: int = 20):
     if cleaned != logs:
         log.warning("redacted secrets from logs of pod %s/%s", namespace, name)
 
-    return {"pod": name, "source": source, "logs": cleaned}
+    result = {"pod": name, "source": source, "logs": cleaned}
+    if chosen:
+        # Say which container these came from, or a sidecar's output reads as
+        # the application's.
+        result["container"] = chosen
+    return result
 
 
 def list_nodes():

@@ -25,7 +25,9 @@ def container_status(
         )
     elif terminated_reason:
         state.terminated = client.V1ContainerStateTerminated(
-            reason=terminated_reason, exit_code=exit_code or 1
+            reason=terminated_reason,             # Not `exit_code or 1`: 0 is a real exit code and the falsy check
+            # turned every successful termination into a failure.
+            exit_code=1 if exit_code is None else exit_code
         )
     else:
         state.running = client.V1ContainerStateRunning()
@@ -33,7 +35,9 @@ def container_status(
     last_state = client.V1ContainerState()
     if terminated_reason:
         last_state.terminated = client.V1ContainerStateTerminated(
-            reason=terminated_reason, exit_code=exit_code or 1
+            reason=terminated_reason,             # Not `exit_code or 1`: 0 is a real exit code and the falsy check
+            # turned every successful termination into a failure.
+            exit_code=1 if exit_code is None else exit_code
         )
 
     return client.V1ContainerStatus(

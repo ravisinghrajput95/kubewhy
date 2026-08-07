@@ -1,0 +1,967 @@
+[
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 68.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The **memory-hog pod** keeps restarting because it is **OOMKilled** (Out-Of-Memory Killed) by the kubelet. Here's why:\n\n- **Root Cause**: The container uses more memory than its `memory:64Mi` limit, triggering a kernel OOM killer kill (`exit_code=137`).\n- **Resource Misconfiguration**: The pod's memory limit is too low for its workload (likely the `polinux/stress` image, which is designed to stress memory).\n- **Result**: The pod crashes, triggers `CrashLoopBackOff`, and restarts repeatedly.\n\n---\n\n**Fix**:  \nIncrease the memory limit in the pod's spec (e.g., to `256Mi` or higher) and ensure `requests` match the limit. Example:\n```yaml\nresources:\n  requests:\n    memory: \"256Mi\"\n  limits:\n    memory: \"512Mi\"\n```\nThis prevents OOM kills and stabilizes the pod.",
+  "chars": 766,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 61.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The **memory-hog pod** is restarting because it exceeds its memory limit of **64Mi**, triggering **OOMKilled** (Out-Of-Memory) by the kubelet. The container uses the `polinux/stress` image, which likely allocates more memory than the limit allows. \n\n### Key details:\n- **Memory limit**: 64Mi (too low for the workload).\n- **Exit code**: 137 (standard for OOMKilled).\n- **Restart count**: 5 (indicating persistent memory pressure).\n\n### Recommendation:\nIncrease the memory limit in the pod's configuration (e.g., set `limits.memory` to a higher value like `256Mi`) to prevent premature termination. If this is part of a deployment, adjust the resource limits across all replicas to ensure consistency. \n\nIf other pods in the namespace are also OOMKilled, run `scan_cluster` to check for broader resource allocation issues.",
+  "chars": 821,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 111.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the pod's application is unable to reach the database service on port 5432. Possible causes:\n1. The database service is not running or unreachable\n2. Network policies are blocking the connection\n3. Incorrect database endpoint configuration in the pod's environment\n\nCheck if the database service exists using `get_service_endpoints` and verify network connectivity between the pod and the database.",
+  "chars": 575,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 107.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher-5964d99948-6zmgf** pod is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is trying to connect to a database service on port `5432` (likely PostgreSQL) but is being **refused**.\n- This could mean:\n  - The database service is not running or unreachable.\n  - Network policies (e.g., firewalls, security groups) are blocking access.\n  - The database credentials or endpoint configuration in the pod's environment is incorrect.\n\n### Next Steps:\n1. Verify the database service is running and accessible (e.g., check `get_service_endpoints` for the database service).\n2. Ensure the pod's environment variables or configuration files have the correct database host, port, username, and password.\n3. Check for network issues (e.g., `kubectl describe pod` for IP conflicts or misconfigured `hostNetwork`).",
+  "chars": 937,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 76.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The pod `bad-image-647c5576d5-fcr4v` fails to start because the container image `nginx:this-tag-does-not-exist` cannot be pulled. The error `ErrImagePull: failed to resolve reference` confirms the image tag `this-tag-does-not-exist` is invalid or nonexistent in the registry. \n\n**Fix:**  \nUpdate the image tag in your deployment configuration to a valid tag (e.g., `nginx:latest`) or ensure the exact image name and tag exist in the registry. If the image is private, verify credentials are correctly configured.",
+  "chars": 512,
+  "hedges": []
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 46.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The pod **bad-image-647c5576d5-fcr4v** in the `demo` namespace fails to start because the container image `nginx:this-tag-does-not-exist` cannot be pulled. The error `ErrImagePull: failed to resolve reference` confirms the image tag is invalid or the image does not exist in the registry. \n\n**Solution**:  \nUpdate the image name or tag in the pod's configuration to a valid image (e.g., `nginx:latest` or a correct custom tag). Ensure the registry is accessible and the image exists there. If using a private registry, verify credentials are properly configured.",
+  "chars": 562,
+  "hedges": []
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 95.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher-svc service is unreachable because its pod **crasher-5964d99948-6zmgf** cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the pod is trying to connect to a database on port `5432` but is unable to establish a connection. This could mean:\n  - The database service is not running.\n  - The database is unreachable from the pod's network.\n  - The database credentials/host configuration is incorrect.\n  - A firewall or network policy is blocking the connection.\n\n### Next Steps:\n1. **Check the database service** (e.g., `db-service` in the same or another namespace) to ensure it is running and accessible.\n2. **Verify network policies** or firewall rules that might block traffic between the pod and the database.\n3. **Inspect the app's configuration** (e.g., database host, port, credentials) to ensure it matches the actual database setup.",
+  "chars": 950,
+  "hedges": []
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 71.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The `crasher-svc` service is unreachable because its backing pod `crasher-5964d99948-6zmgf` is failing to connect to a database on port 5432. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container cannot reach the database server, likely due to:\n  1. **Database service downtime** (e.g., the DB pod is not running or crashed).\n  2. **Network misconfiguration** (e.g., firewall rules, incorrect host/port in DB connection string).\n  3. **Database authentication issues** (e.g., invalid credentials, access restrictions).\n\n### Next Steps:\n1. Check if the database pod (e.g., `db-xyz`) is running and healthy.\n2. Verify the database is listening on port 5432 and accepts connections.\n3. Ensure the connection string in the `crasher` app uses the correct host/port.\n4. Inspect network policies or firewall rules blocking traffic between the pods.",
+  "chars": 929,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 37.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints"
+  ],
+  "failures": [],
+  "answer": "The service `typo-svc` in the `demo` namespace has no endpoints because its selector (`app=web-frontend`) matches no pods. This means either:\n\n1. **No pods exist** with the label `app=web-frontend` in the `demo` namespace.\n2. **Pods exist but are mislabeled** or the selector is incorrect.\n\n### Fix\nCheck if pods matching `app=web-frontend` exist in the `demo` namespace:\n```bash\nkubectl get pods -n demo --selector=app=web-frontend\n```\nIf no pods are listed, verify the deployment configuration (e.g., `Deployment` or `ReplicaSet`) for the `web-frontend` app to ensure labels match the selector.",
+  "chars": 596,
+  "hedges": []
+ },
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 62.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The `typo-svc` service in the `demo` namespace has no endpoints because its selector `app=web-frontend` does not match any pods. The `healthy-web` pods exist but likely have a different label (e.g., `app=web` instead of `app=web-frontend`). \n\n**Fix:**  \nUpdate the service's selector to match the actual pod labels. For example, change `app=web-frontend` to `app=web` in the service's YAML specification.",
+  "chars": 404,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "healthy_not_reported_broken",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 29.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The `healthy-web` deployment in the `demo` namespace is working correctly. It has 2 desired replicas, all of which are ready, available, and marked as healthy. The nginx container is running as expected with no reported issues.",
+  "chars": 227,
+  "hedges": []
+ },
+ {
+  "case": "healthy_not_reported_broken",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 18.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The `healthy-web` deployment in the `demo` namespace is working correctly. It has 2 desired replicas, all of which are ready and available, with the nginx image `nginx:1.27-alpine` running without issues. No errors or warnings are associated with this workload.",
+  "chars": 261,
+  "hedges": []
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 92.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster"
+  ],
+  "failures": [],
+  "answer": "The cluster has multiple failing workloads. Here are the key issues:\n\n1. **`demo/nightly-sync`** (2 pods crashing):  \n   - Example pod: `nightly-sync-29768559-dtc4l`  \n   - **Fix**: Check `describe_pod` for crash reasons (e.g., OOMKilled, app errors). Verify resource limits and logs.\n\n2. **`demo/bad-image`** (ImagePullBackOff):  \n   - Example pod: `bad-image-647c5576d5-fcr4v`  \n   - **Fix**: Correct the image name or ensure the image exists in the registry. Check pull secrets if needed.\n\n3. **`demo/crasher`** (CrashLoopBackOff):  \n   - Example pod: `crasher-5964d99948-6zmgf`  \n   - **Fix**: Inspect logs for runtime errors. Check if the app is misconfigured or missing dependencies.\n\n4. **`demo/memory-hog`** (CrashLoopBackOff):  \n   - Example pod: `memory-hog-bc76968c6-qjlcp`  \n   - **Fix**: Verify memory limits in the pod spec. If OOMKilled, increase limits or optimize the app.\n\n5. **`demo/needs-db`** (Init:CrashLoopBackOff):  \n   - Example pod: `needs-db-58886b67f-7vr9z`  \n   - **Fix**: Ensure the database is reachable. Check init container logs for connection errors.\n\n6. **`demo/nightly-sync`** (ContainerCreating):  \n   - Example pod: `nightly-sync-29768561-7kkrd`  \n   - **Fix**: Check events for image pull errors or scheduling issues. Verify node resources are available.",
+  "chars": 1293,
+  "hedges": []
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 35.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster"
+  ],
+  "failures": [],
+  "answer": "The scan identified several issues in the cluster. Here's a breakdown:\n\n1. **`demo/nightly-sync`** (2 pods crashing):  \n   - Example pod: `nightly-sync-29768560-jpjgn`  \n   - Likely cause: Application crash or misconfiguration. Use `describe_pod` to check exit codes or resource limits.\n\n2. **`demo/bad-image`** (image pull failure):  \n   - Example pod: `bad-image-647c5576d5-fcr4v`  \n   - Fix: Verify the image name/registry in the deployment spec. The pod is stuck pulling a non-existent image.\n\n3. **`demo/memory-hog`** (OOMKilled):  \n   - Example pod: `memory-hog-bc76968c6-qjlcp`  \n   - Action: Increase memory limits in the pod's resource requests or optimize the application's memory usage.\n\n4. **`demo/needs-db`** (init container failed):  \n   - Example pod: `needs-db-58886b67f-7vr9z`  \n   - Check: Inspect the init container's logs to determine why it failed (e.g., missing DB credentials, connection issues).\n\n5. **`demo/crasher`/`demo/log-shipper`** (crash loops):  \n   - Example pods: `crasher-5964d99948-6zmgf`, `log-shipper-8v64l`  \n   - Next step: Use `get_pod_logs` to find application-specific errors causing the crashes.",
+  "chars": 1139,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 12.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The **healthy-web** deployment in the **demo** namespace is running normally with 2 ready replicas. No issues detected.",
+  "chars": 119,
+  "hedges": []
+ },
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 27.9,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The \"healthy-web\" deployment in the **demo** namespace is running normally with 2 replicas ready and available. No issues detected.",
+  "chars": 131,
+  "hedges": []
+ },
+ {
+  "case": "host_not_cluster",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 20.9,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_system_info"
+  ],
+  "failures": [],
+  "answer": "The host is using 65.7% of its memory.",
+  "chars": 38,
+  "hedges": []
+ },
+ {
+  "case": "host_not_cluster",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 19.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_system_info"
+  ],
+  "failures": [],
+  "answer": "The host is using **66.5%** of its memory.",
+  "chars": 42,
+  "hedges": []
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 86.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The **memory-hog pod** keeps restarting because its container was **OOMKilled** (Out-Of-Memory Killed) with exit code 137. Here's why:\n\n- **Root Cause**: The container's memory limit (`64Mi`) is too low for its workload. The `polinux/stress` image aggressively uses memory, exceeding the limit and triggering the kubelet to kill the pod.\n- **Fix**: Increase the memory limit in the pod's spec (e.g., set `limits.memory` to `256Mi` or higher) to prevent OOM termination.  \n- **Next Step**: Check node memory pressure with `list_nodes` to ensure the cluster isn't under resource constraints.",
+  "chars": 589,
+  "hedges": []
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 84.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The **memory-hog pod** keeps restarting because it's being **OOMKilled** (Out-Of-Memory Killed) by the kubelet. Here's why:\n\n- **Resource Limits**: The pod is limited to **64Mi of memory** (`limits.memory: 64Mi`), but the `polinux/stress` container likely exceeds this limit during operation.\n- **Exit Code 137**: This is the standard exit code for processes killed by the OOM killer.\n- **CrashLoopBackOff**: The pod crashes, then Kubernetes retries after a 5-minute backoff, leading to repeated restarts.\n\n### Fix\nIncrease the memory limit in the pod's resource configuration (e.g., in the deployment YAML):\n```yaml\nresources:\n  limits:\n    memory: \"256Mi\"  # or higher, based on actual usage\n```\nMonitor memory usage with `get_top_memory_processes` on the host if the pod is still crashing after adjusting limits.",
+  "chars": 815,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 111.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because it cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod's application is trying to connect to a **PostgreSQL database** on port `5432`, but the connection is being refused.\n- This indicates the **database service is either not running**, **not reachable**, or **misconfigured** (e.g., incorrect hostname/port).\n\n### Next Steps:\n1. Check if the database pod/service exists and is running (`list_pods` or `get_service_endpoints`).\n2. Verify network policies or firewall rules blocking access to the database.\n3. Ensure the database is properly configured (e.g., listening on the correct interface/port).\n\nThe crasher pod will continue restarting until the database becomes available.",
+  "chars": 832,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 94.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container is attempting to connect to a database running on `db:5432` (likely PostgreSQL), but the connection is being refused.\n- This could mean:\n  - The **database service is not running** or unreachable.\n  - The **database is misconfigured** (e.g., incorrect host/port).\n  - A **network policy** or firewall is blocking access.\n  - The **database pod** is also failing (e.g., due to resource limits or configuration errors).\n\n### Next Steps:\n1. Check the status of the database pod (e.g., using `list_pods` in the same namespace).\n2. Verify the database service endpoints with `get_service_endpoints` to ensure it has valid, ready endpoints.\n3. Ensure the database is properly configured and accessible from the `crasher` pod's network.",
+  "chars": 958,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 68.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The pod `bad-image-647c5576d5-fcr4v` fails to start because the container image `nginx:this-tag-does-not-exist` cannot be pulled. The image tag `this-tag-does-not-exist` is invalid or non-existent in the registry. \n\n**Action needed:**  \nVerify the image tag in your deployment configuration. The correct tag (e.g., `nginx:latest` or a valid version) should be used. The pod will remain in `ImagePullBackOff` until the image is fixed.",
+  "chars": 433,
+  "hedges": []
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 61.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The pod \"bad-image-647c5576d5-fcr4v\" fails to start because the container image `nginx:this-tag-does-not-exist` cannot be pulled. The error indicates the image tag is invalid or the image does not exist in the registry. \n\n**Solution**:  \nVerify the image name and tag in the pod's specification. Ensure the tag (e.g., `this-tag-does-not-exist`) is correct and the image exists in the registry. If using a private registry, check authentication credentials. Replace the invalid tag with a valid one (e.g., `nginx:latest`).",
+  "chars": 521,
+  "hedges": []
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 134.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher-svc** service is unreachable because its dependent pods (like `crasher-5964d99948-6zmgf`) are failing to connect to a required database. Here's why:\n\n- **Root Cause**: The pod logs show `FATAL: could not connect to db:5432: connection refused`, indicating the database service is unreachable.\n- **Impact**: The crasher pod crashes immediately upon startup, triggering `CrashLoopBackOff` and preventing the service from handling traffic.\n- **Fix**: Ensure the database service (likely running on `db:5432`) is:\n  1. Running and accessible from the pod's network.\n  2. Exposed correctly (e.g., via a Kubernetes Service or host IP).\n  3. Configured with the right credentials and connection parameters in the crasher app.\n\nWithout the database, the service cannot function.",
+  "chars": 784,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 114.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The `crasher-svc` service is unreachable because its pod **`crasher-5964d99948-6zmgf`** is crashing with a database connection error. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod is attempting to connect to a PostgreSQL database at `db:5432` (default PostgreSQL port), but the connection is refused.\n- This indicates either:\n  1. **The database service (`db`)** is not running or unreachable.\n  2. **The service name (`db`)** is incorrect or misconfigured.\n  3. **Network policies** are blocking the connection.\n\n### Next Steps:\n1. Verify if the database service (`db`) is running using `get_service_endpoints` in its namespace.\n2. Check the pod's environment variables or configuration to confirm the correct database host/port.\n3. Ensure no firewall rules or network policies are blocking traffic between the pod and the database.",
+  "chars": 894,
+  "hedges": []
+ },
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 53.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints"
+  ],
+  "failures": [],
+  "answer": "The `typo-svc` service in the `demo` namespace has no endpoints because its selector (`app=web-frontend`) matches no pods. This means either:\n\n1. **No pods** with the label `app=web-frontend` exist in the `demo` namespace.\n2. **Incorrect labels** on existing pods (e.g., mismatched keys/values).\n\n### Next Steps\n- Check if the deployment/statefulset for `web-frontend` exists and is running:\n  ```bash\n  kubectl get deployments -n demo\n  kubectl get statefulsets -n demo\n  ```\n- Verify pod labels:\n  ```bash\n  kubectl get pods -n demo -o jsonpath='{.items[*].metadata.labels}'\n  ```\n- Ensure the service's selector matches pod labels exactly (case-sensitive).",
+  "chars": 659,
+  "hedges": []
+ },
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 141.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The `typo-svc` service in the `demo` namespace has no endpoints because its selector `app: web-frontend` does not match any pods. While the `healthy-web` pods are running and ready, they likely lack the `app: web-frontend` label required by the service. \n\n**Fix:**  \nUpdate the labels on the `healthy-web` pods to include `app: web-frontend` so the service can route traffic to them. Alternatively, adjust the service's selector to match the actual labels on the pods.",
+  "chars": 468,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "healthy_not_reported_broken",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 29.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The `healthy-web` deployment in the `demo` namespace is working correctly. It has 2 desired replicas, all of which are ready and available, with no reported issues. No further action is needed.",
+  "chars": 193,
+  "hedges": []
+ },
+ {
+  "case": "healthy_not_reported_broken",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 22.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The `healthy-web` deployment in the `demo` namespace is working correctly. It has 2 desired replicas, all of which are ready and available, with no reported issues. The associated containers use the `nginx:1.27-alpine` image and are currently healthy. No further investigation is needed.",
+  "chars": 287,
+  "hedges": []
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 66.6,
+  "confidence": "partial",
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster"
+  ],
+  "failures": [],
+  "answer": "The scan found several failing workloads in the cluster. Here are the key issues:\n\n1. **`demo/nightly-sync`**  \n   - 2 pods in **Error** state (crashed).  \n   - Example pod: `nightly-sync-29768579-rg2zt`  \n   - Action: Check `describe_pod` for crash reasons.\n\n2. **`demo/bad-image`**  \n   - 1 pod in **ImagePullBackOff** (image pull failure).  \n   - Example pod: `bad-image-647c5576d5-fcr4v`  \n   - Action: Verify image name/repository in the deployment spec.\n\n3. **`demo/crasher`**  \n   - 1 pod in **CrashLoopBackOff** (repeated crashes).  \n   - Example pod: `crasher-5964d99948-6zmgf`  \n   - Action: Inspect logs with `get_pod_logs` for crash causes.\n\n4. **`demo/log-shipper`**  \n   - 1 pod in **CrashLoopBackOff**.  \n   - Example pod: `log-shipper-8v64l`  \n   - Action: Check resource limits or application errors.\n\n5. **`demo/memory-hog`**  \n   - 1 pod in **CrashLoopBackOff** (likely OOMKilled).  \n   - Example pod: `memory-hog-bc76968c6-qjlcp`  \n   - Action: Verify memory limits in `describe_pod`.\n\n6. **`demo/needs-db`**  \n   - 1 pod in **Init:CrashLoopBackOff** (init container failed).  \n   - Example pod: `needs-db-58886b67f-7vr9z`  \n   - Action: Check init container logs with `get_pod_logs`.\n\nFor each, use `describe_pod` or `get_pod_logs` on the example pod to diagnose the root cause.",
+  "chars": 1299,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 41.2,
+  "confidence": "partial",
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster"
+  ],
+  "failures": [],
+  "answer": "The cluster has multiple failing workloads. Here are the key issues:\n\n1. **`demo/nightly-sync`** (2 pods crashing)  \n   - Example pod: `nightly-sync-29768581-tfrcx`  \n   - Next steps: Check container logs and resource limits with `describe_pod` and `get_pod_logs`.\n\n2. **`demo/bad-image`** (Image pull failure)  \n   - Example pod: `bad-image-647c5576d5-fcr4v`  \n   - Verify the image name and pull permissions with `get_pod_events`.\n\n3. **`demo/crasher`/`demo/log-shipper`/`demo/memory-hog`** (CrashLoopBackOff)  \n   - These pods crash on startup. Use `describe_pod` to check exit codes and resource constraints. Memory-hog may be OOMKilled.\n\n4. **`demo/needs-db`** (Init container failed)  \n   - Example pod: `needs-db-58886b67f-7vr9z`  \n   - Investigate init container logs to confirm if the database is unreachable or misconfigured.\n\nFor each, run `describe_pod` on the example pod to diagnose the root cause.",
+  "chars": 912,
+  "hedges": [
+   "may be"
+  ]
+ },
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 20.1,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The `healthy-web` deployment in the `demo` namespace is running normally with 2 ready replicas. It uses the `nginx:1.27-alpine` image and has no reported issues. No action is needed.",
+  "chars": 182,
+  "hedges": []
+ },
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 24.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The \"healthy-web\" deployment in the **demo** namespace is running normally with 2 replicas ready and available. No issues detected.",
+  "chars": 131,
+  "hedges": []
+ },
+ {
+  "case": "host_not_cluster",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 21.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_system_info"
+  ],
+  "failures": [],
+  "answer": "The host is using 73.9% of its memory.",
+  "chars": 38,
+  "hedges": []
+ },
+ {
+  "case": "host_not_cluster",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 23.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_system_info"
+  ],
+  "failures": [],
+  "answer": "The host is using **73.7% of its memory**.",
+  "chars": 42,
+  "hedges": []
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 86.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The **memory-hog pod** keeps restarting because it is being **OOMKilled** (Out-Of-Memory Killed) due to exceeding its memory limit. Here's why:\n\n- **Memory Limit**: The container is limited to **64MiB** of RAM (`limits.memory: 64Mi`), but the `polinux/stress` image likely allocates more memory than this, triggering the kernel's OOM killer.\n- **Restart Policy**: The pod is in `CrashLoopBackOff` mode, meaning it restarts repeatedly after failures.\n- **Exit Code**: The exit code `137` confirms it was killed by the OOM killer.\n\n### Fix\nIncrease the memory limit in the pod's configuration (e.g., in the Deployment YAML):\n```yaml\nresources:\n  limits:\n    memory: \"256Mi\"  # or higher, based on actual usage\n  requests:\n    memory: \"128Mi\"\n```\nAlso monitor actual memory usage to ensure the new limits are sufficient.",
+  "chars": 817,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 145.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The **memory-hog pod** is crashing due to **OOMKilled** (Out Of Memory), with an exit code of **137**. Here's why:\n\n- **Root Cause**: The pod's memory limit (`64Mi`) is exceeded. The container is using more memory than allocated, triggering the kernel's OOM killer.\n- **Resource Settings**: \n  - **Requests**: `32Mi` (minimum memory guaranteed)\n  - **Limits**: `64Mi` (maximum memory allowed)\n- **Fix**: Increase the memory limit in the pod's configuration (e.g., set `limits.memory` to `256Mi` or higher) to accommodate the workload. Also ensure `requests.memory` is set to a value closer to the actual usage to avoid scheduling issues.",
+  "chars": 637,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 111.0,
+  "confidence": "partial",
+  "unverified": [
+   "10"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod in the `demo` namespace is failing due to repeated container crashes and scheduling issues:\n\n1. **Crash Loop**:  \n   - The container exited with **code 1** (general error) and is restarting every 5\u201310 seconds (BackOff).  \n   - Check the container logs (`get_pod_logs`) for the root cause (e.g., application errors, missing dependencies, or invalid commands).\n\n2. **Scheduling Warning**:  \n   - A **FailedScheduling** event indicates the pod was initially denied due to untolerated taints on the node. This is likely resolved now, but verify the node\u2019s taints and the pod\u2019s tolerations.\n\n3. **Next Steps**:  \n   - Run `get_pod_logs` to debug the container\u2019s exit reason.  \n   - Ensure the `busybox` image\u2019s entry point/command is correct (e.g., `sh` or a valid script).  \n   - Check if resource limits or node taints are misconfigured.  \n\nThe pod is currently in a crash loop and requires fixing the application-specific error in the container.",
+  "chars": 980,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 99.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because it cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod's container is attempting to connect to a database at `db:5432` (likely a PostgreSQL instance), but the connection is being refused.\n- This could mean:\n  - The database service is not running or unreachable.\n  - The database host is misconfigured (e.g., wrong IP/hostname).\n  - Network policies or firewalls are blocking the connection.\n  - The database is not properly provisioned in the namespace.\n\n### Next Steps:\n1. Verify the database service is running (e.g., `kubectl get pods -l app=db`).\n2. Check if the database is accessible from the pod (e.g., `kubectl exec -it crasher-pod -- sh` and test connectivity).\n3. Ensure the database service is exposed correctly (e.g., via a Service or NodePort).",
+  "chars": 884,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 61.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The pod `bad-image-647c5576d5-fcr4v` fails to start because the container image `nginx:this-tag-does-not-exist` cannot be pulled. The error indicates the tag `this-tag-does-not-exist` is invalid or the image does not exist in the registry. \n\n**Fix:**  \nUpdate the image tag in the pod specification to a valid version (e.g., `nginx:latest`) or ensure the custom tag `this-tag-does-not-exist` is correctly pushed to the registry.",
+  "chars": 428,
+  "hedges": []
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 371.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The pod `bad-image-647c5576d5-fcr4v` fails to start because the image `nginx:this-tag-does-not-exist` cannot be pulled. The container image tag `this-tag-does-not-exist` is invalid or the image does not exist in the registry. \n\n**Solution**:  \nUpdate the image tag in your deployment configuration to a valid tag (e.g., `nginx:latest`) or ensure the image is correctly pushed to the registry. Verify the full image name syntax, including the registry (e.g., `docker.io/nginx:tag`).",
+  "chars": 481,
+  "hedges": []
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 110.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher-svc service is unreachable because its pod **crasher-5964d99948-6zmgf** cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container is failing to connect to the database at `db:5432` (likely a PostgreSQL service).\n- The database service is either:\n  1. **Not running** (e.g., the database pod is down or the service is misconfigured).\n  2. **Not accessible** (e.g., network policies block traffic, or the database host is unreachable).\n\n### Next Steps:\n1. **Check the database service** (e.g., `db-service` in the same namespace) for readiness using `get_service_endpoints`.\n2. **Verify connectivity** from the crasher pod to the database host (e.g., using `telnet` or `nc` in a debug pod).\n3. **Ensure correct credentials** and configuration in the crasher container (e.g., environment variables or config files).\n4. **Check for firewall rules** or network policies blocking the connection.\n\nThis is a **database connectivity issue**, not a Kubernetes problem. Fixing the database access will resolve the service unreachability.",
+  "chars": 1155,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 74.1,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher-svc service is unreachable because its pod `crasher-5964d99948-6zmgf` is crashing with a **database connection error**. Here's the breakdown:\n\n- **Root Cause**: The application in the pod is trying to connect to a database on `db:5432` but is being **refused** (likely due to a missing, misconfigured, or unreachable database service).\n- **Pod Status**: `CrashLoopBackOff` (repeated crashes, 15 restarts).\n- **Logs**: `FATAL: could not connect to db:5432: connection refused`.\n\n### Next Steps\n1. **Verify Database Availability**:\n   - Ensure the database service (e.g., `db`) is running and accessible.\n   - Check if the database is listening on port `5432` and the correct host.\n   - Confirm network policies (e.g., firewall rules, Kubernetes NetworkPolicies) allow traffic from the pod to the database.\n\n2. **Check Pod Configuration**:\n   - Validate environment variables or config files in the pod for correct database credentials, host, and port.\n   - If the database is in the same namespace, ensure the service name `db` resolves correctly (use `get_service_endpoints` for `db` if needed).\n\n3. **Database Logs**:\n   - Inspect the database logs to confirm it is running and accepting connections.\n\nThis error is not related to resource limits or Kubernetes node issues\u2014it\u2019s a **network/service dependency failure**. Fix the database connectivity to resolve the service outage.",
+  "chars": 1393,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 41.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods"
+  ],
+  "failures": [],
+  "answer": "The `typo-svc` service in the `demo` namespace has no endpoints because its selector (`app: web-frontend`) matches **no pods** at all. None of the listed pods in the namespace have the `app: web-frontend` label, so the service has nowhere to route traffic.\n\n**Fix:**  \nEnsure pods with the label `app: web-frontend` are running, or update the service's selector to match existing pods. For example, if the service should target the `bad-image` pod, change the selector to `app: bad-image` (or adjust pod labels accordingly).",
+  "chars": 524,
+  "hedges": []
+ },
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 57.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [],
+  "answer": "The `typo-svc` service in the `demo` namespace has no endpoints because its selector `app: web-frontend` does not match any pods. The existing pods (e.g., `healthy-web-6f79bc6fcb-92zzr`) likely have labels like `app: web` instead of `app: web-frontend`. \n\n**Solution:**  \nUpdate the service's selector to match the pod labels (e.g., `app: web`) or adjust the pod labels to match the service's selector. This mismatch prevents the service from routing traffic to any endpoints.",
+  "chars": 476,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "healthy_not_reported_broken",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 16.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The `healthy-web` deployment in the `demo` namespace is working correctly. It has 2 desired replicas, all of which are ready and available, with no reported issues. The pods are using the `nginx:1.27-alpine` image and are marked as healthy. No further action is needed.",
+  "chars": 269,
+  "hedges": []
+ },
+ {
+  "case": "healthy_not_reported_broken",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 41.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "scan_cluster"
+  ],
+  "failures": [],
+  "answer": "The `healthy-web` deployment in the `demo` namespace is running normally with 2 pods. No further action is required.",
+  "chars": 116,
+  "hedges": []
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 44.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster"
+  ],
+  "failures": [],
+  "answer": "The cluster has multiple failing workloads. Here are the key issues:\n\n1. **demo/nightly-sync** (2 pods):  \n   - Fault: Crash loop (example pod: `nightly-sync-29768603-d9r6g`).  \n   - Next step: Check container logs and resource limits.\n\n2. **demo/bad-image** (1 pod):  \n   - Fault: Image pull failure (example pod: `bad-image-647c5576d5-fcr4v`).  \n   - Next step: Verify image name/registry availability.\n\n3. **demo/crasher** (1 pod):  \n   - Fault: Crash (example pod: `crasher-5964d99948-6zmgf`).  \n   - Next step: Check container exit codes and logs.\n\n4. **demo/log-shipper** (1 pod):  \n   - Fault: Crash (example pod: `log-shipper-8v64l`).  \n   - Next step: Inspect logs for application errors.\n\n5. **demo/memory-hog** (1 pod):  \n   - Fault: OOMKilled (example pod: `memory-hog-bc76968c6-qjlcp`).  \n   - Next step: Increase memory limits or optimize resource usage.\n\n6. **demo/needs-db** (1 pod):  \n   - Fault: Init container crash (example pod: `needs-db-58886b67f-7vr9z`).  \n   - Next step: Check database connectivity and init container logs.\n\nWould you like to investigate any of these in detail?",
+  "chars": 1103,
+  "hedges": []
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 42.5,
+  "confidence": "partial",
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster"
+  ],
+  "failures": [],
+  "answer": "The cluster has multiple failing workloads. Here are the key issues:\n\n1. **`demo/nightly-sync`** (2 pods crashing):  \n   Example pod `nightly-sync-29768604-6tf86` is in an error state. Check `describe_pod` for crash reasons.\n\n2. **`demo/bad-image`** (image pull failure):  \n   Pod `bad-image-647c5576d5-fcr4v` cannot pull its image. Verify the image name/repository and pull secrets.\n\n3. **`demo/crasher`** (1 pod crashing):  \n   Pod `crasher-5964d99948-6zmgf` is crashing. Inspect logs for the root cause.\n\n4. **`demo/log-shipper`** (CrashLoopBackOff):  \n   Pod `log-shipper-8v64l` is restarting repeatedly. Check logs for application errors.\n\n5. **`demo/memory-hog`** (CrashLoopBackOff):  \n   Pod `memory-hog-bc76968c6-qjlcp` may be OOMKilled. Verify memory limits and resource requests.\n\n6. **`demo/needs-db`** (Init container failed):  \n   Pod `needs-db-58886b67f-7vr9z` failed during init. Check init container logs for database connection issues.\n\nPrioritize fixing the image pull failure and memory-related crashes first.",
+  "chars": 1028,
+  "hedges": [
+   "may be"
+  ]
+ },
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 45.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "scan_cluster"
+  ],
+  "failures": [],
+  "answer": "The `healthy-web` deployment in the `demo` namespace is running normally with 2 pods. No issues detected.",
+  "chars": 105,
+  "hedges": []
+ },
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 17.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "failures": [],
+  "answer": "The \"healthy-web\" deployment in the \"demo\" namespace is running normally with 2 ready replicas. It uses the nginx:1.27-alpine image and is fully functional. No action is required.",
+  "chars": 179,
+  "hedges": []
+ },
+ {
+  "case": "host_not_cluster",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 15.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_system_info"
+  ],
+  "failures": [],
+  "answer": "The host is using 59.8% of its memory. This reflects the current memory utilization as a percentage of the total available memory.",
+  "chars": 130,
+  "hedges": []
+ },
+ {
+  "case": "host_not_cluster",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 12.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "get_system_info"
+  ],
+  "failures": [],
+  "answer": "The host is using **59.9% of its memory**.",
+  "chars": 42,
+  "hedges": []
+ }
+]

@@ -110,6 +110,10 @@ def main():
                 "passed": bool(ok),
                 "seconds": round(time.time() - started, 1),
                 "confidence": result.get("confidence"),
+                # What was flagged, not just that something was: without this
+                # a rise in the unverified count cannot be told apart from the
+                # checker getting stricter.
+                "unverified": result.get("unverified", []),
                 "tools": [c["name"] for c in result.get("tool_calls", [])],
                 "failures": why,
             })

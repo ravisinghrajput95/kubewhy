@@ -86,16 +86,23 @@ class TestAuth:
 class TestScan:
     def test_passes_query_parameters_through(self, open_client):
         with patch.object(app_module, "scan_cluster", return_value={}) as scan:
-            open_client.get("/scan?only_unhealthy=false&limit=5")
+            open_client.get("/scan?only_unhealthy=false&limit=5&namespaces=prod,staging")
 
-        scan.assert_called_once_with(False, 5)
+        scan.assert_called_once_with(False, 5, "prod,staging", "")
 
     def test_defaults_to_unhealthy_only(self, open_client):
         """Cluster-wide including healthy workloads is the expensive call."""
         with patch.object(app_module, "scan_cluster", return_value={}) as scan:
             open_client.get("/scan")
 
-        scan.assert_called_once_with(True, 20)
+        scan.assert_called_once_with(True, 20, "", "")
+
+    def test_can_ask_about_one_workload(self, open_client):
+        """Reports its state healthy or not, so "it is fine" is answerable."""
+        with patch.object(app_module, "scan_cluster", return_value={}) as scan:
+            open_client.get("/scan?workload=payments-api")
+
+        assert scan.call_args.args[3] == "payments-api"
 
 
 def sse_events(text):
