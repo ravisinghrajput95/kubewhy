@@ -225,6 +225,61 @@ class TestErrorsExplainThemselves:
         assert "describe_pod" in result["result"]
 
 
+class TestMultiContainerLogs:
+    """
+    Sidecars are the norm at scale -- a mesh proxy, a log shipper, a metrics
+    agent. The API refuses to guess and returns 400 listing the names, so
+    before this the log tool failed on most pods of a real cluster.
+    """
+
+    def test_picks_the_failing_container_not_the_first(self, api):
+        refusal = ApiException(status=400, reason="Bad Request")
+        refusal.body = json.dumps(
+            {
+                "message": "a container name must be specified for pod x, "
+                "choose one of: [istio-proxy app]"
+            }
+        )
+
+        pod = make_pod(name="x")
+        pod.status.container_statuses = [
+            container_status(name="istio-proxy", ready=True),
+            container_status(name="app", ready=False, terminated_reason="Error"),
+        ]
+        api.read_namespaced_pod.return_value = pod
+
+        body = MagicMock()
+        body.data = b"APP: connection refused to db:5432"
+        api.read_namespaced_pod_log.side_effect = [refusal, body]
+
+        result = k8s.get_pod_logs("x", "demo")
+
+        # The proxy is healthy and first; the application is what crashed.
+        assert result["container"] == "app"
+        assert "connection refused" in result["logs"]
+
+    def test_an_explicit_container_is_respected(self, api):
+        body = MagicMock()
+        body.data = b"PROXY: ready"
+        api.read_namespaced_pod_log.return_value = body
+
+        result = k8s.get_pod_logs("x", "demo", container="istio-proxy")
+
+        assert result["container"] == "istio-proxy"
+        assert api.read_namespaced_pod_log.call_args.kwargs["container"] == "istio-proxy"
+
+    def test_single_container_pods_need_no_extra_read(self, api):
+        """The common case must not pay for a pod read it does not need."""
+        body = MagicMock()
+        body.data = b"hello"
+        api.read_namespaced_pod_log.return_value = body
+
+        result = k8s.get_pod_logs("x", "demo")
+
+        assert "container" not in result
+        api.read_namespaced_pod.assert_not_called()
+
+
 class TestEventAge:
     def test_events_carry_an_age(self, api):
         """

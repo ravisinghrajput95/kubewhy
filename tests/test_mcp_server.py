@@ -53,6 +53,8 @@ class TestSchemas:
             "name",
             "namespace",
             "tail",
+            # Multi-container pods need a choice; the API returns 400 without.
+            "container",
         }
 
     def test_required_arguments_are_marked(self):

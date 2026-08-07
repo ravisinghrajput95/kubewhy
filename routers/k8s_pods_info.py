@@ -539,24 +539,90 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
     }
 
 
-def get_pod_logs(name: str, namespace: str = "default", tail: int = 20):
+def _needs_container(exc):
+    """Whether the API refused because the pod has several containers."""
+    return (
+        isinstance(exc, ApiException)
+        and exc.status == 400
+        and "container name must be specified" in (_api_message(exc) or "")
+    )
+
+
+def _no_logs(name, exc):
+    """
+    Explain an absence of logs, distinguishing expected from broken.
+
+    A container that never started has no logs and never will -- normal for
+    ImagePullBackOff or a failing init container. Reporting that as an API
+    error tells the reader nothing and sends the model to a dead end.
+    """
+    detail = _api_message(exc) if isinstance(exc, ApiException) else str(exc)
+    if "waiting to start" in detail or "ContainerCreating" in detail:
+        return {
+            "result": (
+                f"no logs for pod {name}: its container has never started "
+                f"({detail.split(': ')[-1].strip()}). Use describe_pod or "
+                "get_pod_events to find out why."
+            )
+        }
+    return _handle(exc)
+
+
+def _failing_container(pod):
+    """
+    Which container's logs are worth reading in a multi-container pod.
+
+    Sidecars are the norm at any scale -- a service mesh proxy, a log shipper,
+    a metrics agent -- and the API refuses to guess: it returns 400 listing the
+    names. Guessing "the first one" would hand back the proxy's logs while the
+    application is the thing that crashed, which is worse than an error because
+    it looks like an answer.
+
+    So pick the container that is actually broken: not ready, or with a
+    termination on record. Falling back to the first only when everything looks
+    fine, where any choice is arbitrary anyway.
+    """
+    statuses = pod.status.container_statuses or []
+
+    for cs in statuses:
+        terminated = (cs.state and cs.state.terminated) or (
+            cs.last_state and cs.last_state.terminated
+        )
+        if not cs.ready or terminated:
+            return cs.name
+
+    if statuses:
+        return statuses[0].name
+    return pod.spec.containers[0].name if pod.spec.containers else None
+
+
+def get_pod_logs(
+    name: str, namespace: str = "default", tail: int = 20, container: str = ""
+):
     """
     Returns the last few log lines from a pod, including from a crashed
     container's previous run when the current one has no output.
 
     Use this to find the application-level error behind a crash, after
     describe_pod has told you the pod is restarting.
+
+    A pod with more than one container -- anything with a service mesh or
+    logging sidecar -- needs to know which one to read. Left unset, this picks
+    the container that is failing rather than an arbitrary one, and reports
+    which it chose. Pass container explicitly to read a specific one.
     Args: name -- the pod name; namespace -- defaults to "default";
     tail -- how many lines to return, capped at 100 to protect the context
-    window.
+    window; container -- which container, when the pod has several.
     """
     tail = min(tail, 100)
     api = _api()
+    chosen = container or None
 
     def _read(previous):
         # _preload_content=False returns the raw response. Without it the
         # client stringifies the body and the model sees a literal b'...'
         # repr instead of the log text.
+        kwargs = {"container": chosen} if chosen else {}
         resp = api.read_namespaced_pod_log(
             name,
             namespace,
@@ -564,37 +630,33 @@ def get_pod_logs(name: str, namespace: str = "default", tail: int = 20):
             previous=previous,
             _preload_content=False,
             _request_timeout=TIMEOUT,
+            **kwargs,
         )
         return resp.data.decode("utf-8", errors="replace")
 
-    try:
-        logs = _read(previous=False).strip()
-        source = "current"
-
+    def _attempt():
         # A container that just died usually has an empty current log; the
         # useful output belongs to the run that failed.
-        if not logs:
-            logs = _read(previous=True).strip()
-            source = "previous (crashed) container"
+        logs = _read(previous=False).strip()
+        if logs:
+            return logs, "current"
+        return _read(previous=True).strip(), "previous (crashed) container"
+
+    try:
+        logs, source = _attempt()
     except Exception as exc:
-        try:
-            logs = _read(previous=True).strip()
-            source = "previous (crashed) container"
-        except Exception:
-            # A container that never started has no logs and never will. That
-            # is an expected state for ImagePullBackOff or a failing init
-            # container, not a failure of this tool -- reporting it as an API
-            # error told the reader nothing and sent the model to a dead end.
-            detail = _api_message(exc) if isinstance(exc, ApiException) else str(exc)
-            if "waiting to start" in detail or "ContainerCreating" in detail:
-                return {
-                    "result": (
-                        f"no logs for pod {name}: its container has never "
-                        f"started ({detail.split(': ')[-1].strip()}). Use "
-                        "describe_pod or get_pod_events to find out why."
-                    )
-                }
-            return _handle(exc)
+        if chosen is None and _needs_container(exc):
+            # Multi-container pod. Resolve which one and try again -- only
+            # paying for the extra read when the pod turns out to need it.
+            try:
+                chosen = _failing_container(
+                    api.read_namespaced_pod(name, namespace, _request_timeout=TIMEOUT)
+                )
+                logs, source = _attempt()
+            except Exception as retry:
+                return _no_logs(name, retry)
+        else:
+            return _no_logs(name, exc)
 
     if not logs:
         return {"result": f"no logs available for pod {name}"}
@@ -605,7 +667,12 @@ def get_pod_logs(name: str, namespace: str = "default", tail: int = 20):
     if cleaned != logs:
         log.warning("redacted secrets from logs of pod %s/%s", namespace, name)
 
-    return {"pod": name, "source": source, "logs": cleaned}
+    result = {"pod": name, "source": source, "logs": cleaned}
+    if chosen:
+        # Say which container these came from, or a sidecar's output reads as
+        # the application's.
+        result["container"] = chosen
+    return result
 
 
 def list_nodes():
