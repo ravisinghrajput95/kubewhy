@@ -59,6 +59,22 @@ CASES = [
         "forbid": ["oomkilled", "crashloopbackoff", "imagepullbackoff"],
     },
     {
+        "name": "cluster_wide_scan",
+        "question": "Is anything broken anywhere in the cluster?",
+        # Names no namespace, which is the whole trigger for scan_cluster. The
+        # other cases all name one, so without this the tool is never exercised
+        # by the suite at all -- a 21/21 score said nothing about it.
+        "expect_tools": ["scan_cluster"],
+        # Must find faults in more than the one workload it happens to look at
+        # first. Deployment names rather than pod names: the pod suffix is a
+        # fresh hash on every apply.
+        "expect_all": [
+            ["memory-hog"],
+            ["crasher"],
+            ["bad-image"],
+        ],
+    },
+    {
         "name": "host_not_cluster",
         "question": "How much memory is this host using?",
         # Must answer from host tools; reaching for pod tools means the two

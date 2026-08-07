@@ -34,6 +34,93 @@ class TestRealHallucination:
         assert grounding.check(answer, tools)["confidence"] == "grounded"
 
 
+class TestRecommendationsAreNotClaims:
+    """
+    Observed in the browser UI against a live cluster: a correct OOM diagnosis
+    came back `partial`, flagging 128 and 256 -- both of which appeared only in
+    the suggested fix. The exemption for recommendations existed already, but
+    the clause splitter breaks on ":", so `limits.memory: 256Mi` tore the
+    numbers away from the verb proposing them.
+    """
+
+    def test_kubernetes_field_syntax_in_a_fix_is_exempt(self):
+        tools = [
+            json.dumps(
+                {
+                    "limits": {"memory": "64Mi"},
+                    "requests": {"memory": "32Mi"},
+                    "last_termination": {"reason": "OOMKilled", "exit_code": 137},
+                }
+            )
+        ]
+        answer = (
+            "The memory-hog pod is OOMKilled for exceeding its memory limit of "
+            "64Mi, and its request is 32Mi.\n"
+            "Fix: Increase the limits (e.g., limits.memory: 256Mi and "
+            "requests.memory: 128Mi) to match the workload."
+        )
+
+        result = grounding.check(answer, tools)
+
+        assert result["unverified"] == []
+        assert result["confidence"] == "grounded"
+
+    def test_a_measurement_before_the_fix_is_still_checked(self):
+        """The exemption starts at the recommendation, not at the line."""
+        tools = [json.dumps({"limits": {"memory": "64Mi"}})]
+        answer = "The pod has restarted 47 times. Raise the limit to 128Mi."
+
+        result = grounding.check(answer, tools)
+
+        # 47 was never measured and must still be caught; 128 is a proposal.
+        assert result["unverified"] == ["47"]
+
+
+class TestKnownWeakness:
+    """
+    Documented limits, pinned so they are visible rather than surprising.
+
+    These assert what the checker currently does, not what it should do. If a
+    change makes one fail, the checker got stronger -- update the test and the
+    docstring in grounding.py together.
+    """
+
+    def test_status_measured_for_one_workload_launders_another(self):
+        # Observed on a live cluster: scan_cluster returned ErrImagePull for
+        # staging/payments-api and ImagePullBackOff for demo/bad-image, and the
+        # model reported ErrImagePull for demo/bad-image. Claims are checked
+        # against every tool result at once, so the misattribution passes.
+        tools = [
+            json.dumps(
+                {
+                    "staging/payments-api": {"status": "ErrImagePull", "pods": 3},
+                    "demo/bad-image": {"status": "ImagePullBackOff", "pods": 1},
+                }
+            )
+        ]
+
+        assert (
+            grounding.check("demo/bad-image is in ErrImagePull.", tools)["confidence"]
+            == "grounded"
+        )
+
+    def test_but_a_status_no_workload_had_is_still_caught(self):
+        """The check is weakened by a wide result, not defeated by it."""
+        tools = [
+            json.dumps(
+                {
+                    "staging/payments-api": {"status": "ErrImagePull", "pods": 3},
+                    "demo/bad-image": {"status": "ImagePullBackOff", "pods": 1},
+                }
+            )
+        ]
+
+        result = grounding.check("demo/bad-image is Evicted.", tools)
+
+        assert result["confidence"] == "partial"
+        assert "evicted" in result["unverified"]
+
+
 class TestFalsePositives:
     """A noisy checker gets ignored, so these matter as much as detection."""
 

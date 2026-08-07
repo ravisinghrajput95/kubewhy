@@ -20,6 +20,17 @@ reported as grounded. This is not hypothetical: CI caught the fabricated
 "18" appeared in the measured text. Matching numbers to the units and context
 they were stated in would fix it and is not implemented.
 
+Known weakness -- claims are not tied to the thing they are about. Every tool
+result is flattened into one blob and each claim is checked against all of it,
+so a status measured for workload A supports the same status claimed about
+workload B. scan_cluster made this materially worse: one call now returns the
+statuses of every failing workload in the cluster, so nearly any status name
+the model uses appears somewhere in the measured text and passes. Verified on
+a live cluster -- an answer attributing ErrImagePull to a workload measured as
+ImagePullBackOff came back `grounded`, because a different workload in the same
+result was in ErrImagePull. Fixing this needs claims scoped to the entity they
+name, which is not implemented.
+
 The practical consequence is that a `grounded` verdict is weaker evidence than
 a `partial` one. `partial` reliably means something was not measured;
 `grounded` means nothing contradicted the answer.
@@ -65,12 +76,29 @@ _PRESCRIPTIVE = re.compile(
 
 
 def _claim_text(answer):
-    """Drop clauses that propose a value rather than report one."""
+    """
+    Drop the parts of an answer that propose a value rather than report one.
+
+    Once a line turns prescriptive it stays prescriptive to the end of that
+    line. Testing each fragment in isolation was a bug: the split includes ":",
+    so "Fix: Increase the limit (e.g. limits.memory: 256Mi)" breaks apart
+    inside the Kubernetes field name, leaving "256Mi and requests.memory:" as a
+    fragment containing no verb at all. Those numbers were then flagged as
+    unmeasured -- on a recommendation, which is exactly what the exemption
+    exists to avoid, and on `key: value` syntax, which is how every resource
+    recommendation this tool gives is written.
+
+    A measurement stated *before* the verb on the same line is still checked,
+    so "The pod uses 64Mi. Raise it to 128Mi." keeps the 64Mi claim. Only a
+    measurement stated after a recommendation begins is lost, which is the
+    rarer order and the price of not crying wolf on ordinary advice.
+    """
     keep = []
     for line in answer.splitlines():
         for clause in re.split(r"(?<=[.;:!?])\s+", line):
-            if not _PRESCRIPTIVE.search(clause):
-                keep.append(clause)
+            if _PRESCRIPTIVE.search(clause):
+                break
+            keep.append(clause)
     return "\n".join(keep)
 
 

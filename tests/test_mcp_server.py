@@ -45,6 +45,10 @@ class TestSchemas:
             "namespace",
             "only_unhealthy",
         }
+        assert set(by_name["scan_cluster"].inputSchema["properties"]) == {
+            "only_unhealthy",
+            "limit",
+        }
         assert set(by_name["get_pod_logs"].inputSchema["properties"]) == {
             "name",
             "namespace",

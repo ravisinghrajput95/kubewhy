@@ -6,6 +6,8 @@ Ollama model call them to work out what is wrong and why.
 
     python agent.py "why is this machine slow?"
     python agent.py "what is broken in the demo namespace?"
+    python agent.py --scan                 # every namespace, no model involved
+    python agent.py --scan --explain 3     # then diagnose the worst three
 """
 
 import json
@@ -24,6 +26,7 @@ from routers.process_info import get_processes
 from routers.top_cpu import get_top_cpu_processes
 from routers.top_memory import get_top_memory_processes
 from routers.k8s_pods_info import (
+    scan_cluster,
     list_pods,
     describe_pod,
     get_pod_events,
@@ -54,6 +57,7 @@ TOOLS = {
     "get_processes": get_processes,
     "get_top_cpu_processes": get_top_cpu_processes,
     "get_top_memory_processes": get_top_memory_processes,
+    "scan_cluster": scan_cluster,
     "list_pods": list_pods,
     "describe_pod": describe_pod,
     "get_pod_events": get_pod_events,
@@ -75,6 +79,11 @@ You answer by calling tools and reading the real values they return. Never
 invent a number or a status: if you have not called a tool for it, you do not
 know it. Answer every part of a multi-part question, calling one tool per part
 if needed.
+
+When the question is about the cluster as a whole and names no namespace, start
+with scan_cluster: it finds failing workloads across every namespace at once
+and names one example pod for each. Drill into that example pod from there. If
+a namespace is named, use list_pods instead.
 
 To diagnose a failing pod, work down the chain: list_pods to find what is
 unhealthy, then describe_pod for the termination reason and resource limits,
@@ -131,21 +140,25 @@ def _run_tool(name, arguments):
     return json.dumps(result, default=str)
 
 
-def ask(question, model=MODEL, verbose=False, think=True):
+def stream(question, model=MODEL, think=True):
     """
-    Answer a question about this host, letting the model call collectors.
+    Run the loop, yielding each step as it happens.
 
-    think defaults to True: without it qwen3 tends to answer multi-part
-    questions from only the first tool it calls and invent the rest. It costs
-    a few seconds per round. Returns
+    Every event is a dict with a "type":
 
-        {"answer": str,
-         "tool_calls": [{"name":..., "arguments":...}],
-         "confidence": "grounded" | "partial" | "ungrounded",
-         "unverified": [claims not found in any tool result]}
+        {"type": "tool_call",   "name":..., "arguments":...}
+        {"type": "tool_result", "name":..., "result": <json str>, "duration_ms":...}
+        {"type": "answer",      "answer":..., "tool_calls":[...],
+                                "confidence":..., "unverified":[...]}
 
-    See grounding.py for what confidence means and why it is a lint rather
-    than a gate.
+    Exactly one "answer" event is emitted, last. ask() is this drained to
+    completion, so the two cannot drift.
+
+    This exists because a diagnosis takes tens of seconds and the tool chain is
+    the product: a caller handed only the final answer has nothing to show for
+    minutes, and showing the chain live is what distinguishes this from waiting
+    on a spinner. The CLI's --verbose trace, the browser UI and any streaming
+    endpoint are all consumers of these events.
     """
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -162,30 +175,32 @@ def ask(question, model=MODEL, verbose=False, think=True):
         calls = message.tool_calls
         if not calls:
             answer = (message.content or "").strip()
-            return {
+            yield {
+                "type": "answer",
                 "answer": answer,
                 "tool_calls": trace,
                 **grounding.check(answer, outputs),
             }
+            return
 
         for call in calls:
             name = call.function.name
             arguments = dict(call.function.arguments or {})
             trace.append({"name": name, "arguments": arguments})
 
-            if verbose:
-                print(f"  -> {name}({arguments})", file=sys.stderr)
+            yield {"type": "tool_call", "name": name, "arguments": arguments}
 
             started = time.perf_counter()
             output = _run_tool(name, arguments)
             outputs.append(output)
+            duration_ms = round((time.perf_counter() - started) * 1000, 1)
 
             log.info(
                 "tool_call",
                 extra={
                     "tool": name,
                     "arguments": arguments,
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "duration_ms": duration_ms,
                     "result_chars": len(output),
                 },
             )
@@ -193,7 +208,15 @@ def ask(question, model=MODEL, verbose=False, think=True):
                 {"role": "tool", "tool_name": name, "content": output}
             )
 
-    return {
+            yield {
+                "type": "tool_result",
+                "name": name,
+                "result": output,
+                "duration_ms": duration_ms,
+            }
+
+    yield {
+        "type": "answer",
         "answer": f"Gave up after {MAX_ROUNDS} rounds of tool calls.",
         "tool_calls": trace,
         "confidence": "ungrounded",
@@ -201,19 +224,104 @@ def ask(question, model=MODEL, verbose=False, think=True):
     }
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(__doc__.strip(), file=sys.stderr)
-        raise SystemExit(1)
+def ask(question, model=MODEL, verbose=False, think=True):
+    """
+    Answer a question about this host, letting the model call collectors.
 
-    result = ask(" ".join(sys.argv[1:]), verbose=True)
-    print(result["answer"])
+    think defaults to True: without it qwen3 tends to answer multi-part
+    questions from only the first tool it calls and invent the rest. It costs
+    a few seconds per round. Returns
 
-    # Surface unsupported claims rather than leaving them to be spotted by
-    # eye; stderr so piping the answer stays clean.
+        {"answer": str,
+         "tool_calls": [{"name":..., "arguments":...}],
+         "confidence": "grounded" | "partial" | "ungrounded",
+         "unverified": [claims not found in any tool result]}
+
+    See grounding.py for what confidence means and why it is a lint rather
+    than a gate. Callers that need the steps as they happen want stream().
+    """
+    answer = None
+
+    for event in stream(question, model=model, think=think):
+        if verbose and event["type"] == "tool_call":
+            print(f"  -> {event['name']}({event['arguments']})", file=sys.stderr)
+        if event["type"] == "answer":
+            answer = event
+
+    # "type" is a routing field for stream() consumers, not part of this
+    # function's long-standing contract.
+    return {key: value for key, value in answer.items() if key != "type"}
+
+
+def _report_unverified(result):
+    """
+    Surface unsupported claims rather than leaving them to be spotted by eye.
+
+    stderr, so piping the answer stays clean. Every path that prints an answer
+    has to call this: a diagnosis shown without its confidence is the failure
+    mode grounding.py exists to prevent.
+    """
     if result["unverified"]:
         print(
             f"\n[{result['confidence']}] not found in any tool result: "
             + ", ".join(result["unverified"]),
             file=sys.stderr,
         )
+
+
+def scan(explain=0):
+    """
+    Print a cluster-wide scan, and optionally diagnose the worst findings.
+
+    The listing itself never touches the model: it is one API call and returns
+    in under a second, which is what makes it usable as a first look. Only
+    --explain pays for inference, and only for the workloads asked about.
+    """
+    findings = scan_cluster()
+
+    if "error" in findings:
+        print(findings["error"], file=sys.stderr)
+        return 1
+    if "result" in findings:
+        print(findings["result"])
+        return 0
+
+    truncated = findings.pop("_truncated", None)
+    width = max(len(key) for key in findings)
+    for key, entry in findings.items():
+        print(f"{key:<{width}}  {entry['status']:<20} {entry['pods']} pod(s)")
+    if truncated:
+        print(f"\n{truncated}")
+
+    for key, entry in list(findings.items())[:explain]:
+        # Keys are "namespace/workload", or "namespace/workload:fault" when one
+        # workload carries two faults at once.
+        namespace = key.split("/", 1)[0]
+        print(f"\n--- {key} ---")
+        result = ask(
+            f"Pod {entry['example']} in namespace {namespace} is "
+            f"{entry['status']}. Find the root cause and say what should change.",
+            verbose=True,
+        )
+        print(result["answer"])
+        _report_unverified(result)
+
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(__doc__.strip(), file=sys.stderr)
+        raise SystemExit(1)
+
+    if sys.argv[1] == "--scan":
+        rest = sys.argv[2:]
+        count = 0
+        if "--explain" in rest:
+            after = rest[rest.index("--explain") + 1 :]
+            count = int(after[0]) if after and after[0].isdigit() else 3
+        raise SystemExit(scan(explain=count))
+
+    result = ask(" ".join(sys.argv[1:]), verbose=True)
+    print(result["answer"])
+    _report_unverified(result)

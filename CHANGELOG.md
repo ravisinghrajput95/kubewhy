@@ -6,6 +6,58 @@ signatures and response shapes may still change.
 
 ## [Unreleased]
 
+### Added
+
+- **Cluster-wide scan** (`scan_cluster`) — finds failing workloads across every
+  namespace in one API call, closing the biggest functional gap against k8sgpt.
+  Exposed on all three surfaces: as a model tool, as `GET /scan`, and over MCP.
+  Results are grouped by owning workload and by *fault* rather than status
+  name, so three crashing replicas are one entry and a rollout with pods in
+  both `ErrImagePull` and `ImagePullBackOff` is one finding rather than two.
+  Measured on a 19-pod cluster: ~146 tokens against ~33,042 raw.
+- **`python agent.py --scan`** — prints the scan without involving the model,
+  returning in under a second; `--explain N` then spends a full diagnosis on
+  the N workloads with the largest blast radius.
+- **Browser UI** (`ui.py`, `requirements-ui.txt`) — the scan as a table, pod
+  drill-down, and an ask panel that renders the tool chain as it runs. Streamlit
+  telemetry and its bind-all-interfaces default are overridden in
+  `.streamlit/config.toml`; both would otherwise contradict the project's
+  claims. Tested headlessly with Streamlit's `AppTest` in a separate CI job, so
+  the default install and the main test matrix stay lean.
+- **`agent.stream()`** — the agent loop as an event generator
+  (`tool_call` / `tool_result` / `answer`). `ask()` is now this drained to
+  completion, so the two cannot drift. Needed for any surface that shows
+  progress, and the same shape a streaming `/ask` endpoint will want.
+- **Context selection** (`active_context`, `list_contexts`, `use_context`) —
+  report and switch the cluster a surface is bound to.
+
+### Fixed
+
+- **A surface could name the wrong cluster.** The client is built once and
+  cached, but the context was re-read from the kubeconfig on each render, so
+  creating a cluster in another shell — which rewrites `current-context` —
+  relabelled the UI while it kept querying the original cluster. Found live:
+  the page said `kind-loglens-cri` while showing pods that exist only in
+  `kind-triage-demo`.
+- **Recommendations were flagged as unmeasured claims.** The claim checker
+  splits on `:`, so `limits.memory: 256Mi` tore the proposed numbers away from
+  the verb proposing them and reported a correct answer as `partial`. That
+  fired on `key: value`, which is how every resource recommendation is written.
+  A line now stays prescriptive from its verb to the end of the line.
+
+### Changed
+
+- `workload_of` and `FAULT_CLASS` moved from `controller.py` into
+  `routers/k8s_pods_info.py`. The scan and the controller have to agree on what
+  counts as the same problem, and two copies would drift.
+
+### Known issues
+
+- The claim checker flattens all tool output into one blob, so a status
+  measured for one workload supports the same status claimed about another.
+  The cluster-wide scan widens each result and therefore weakens this check;
+  confirmed against a live cluster and pinned in `tests/test_grounding.py`.
+
 ## [0.1.0] — 2026-08-04
 
 First tagged release. Read-only Kubernetes and host diagnosis driven by a

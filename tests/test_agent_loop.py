@@ -200,3 +200,93 @@ class TestAskLoop:
             agent.ask("q")
 
         assert chat.call_args.kwargs["think"] is True
+
+
+class TestStream:
+    """
+    The event stream ask() is built on.
+
+    These matter because two callers now depend on the ordering: the UI renders
+    a step the moment it starts, and any streaming endpoint replays these
+    verbatim. A tool_call arriving only after its result would defeat both.
+    """
+
+    def test_emits_call_before_result(self):
+        responses = [
+            reply(calls=[tool_call("get_system_info", {})]),
+            reply(content="cpu is low"),
+        ]
+        with mock_chat(side_effect=responses):
+            events = list(agent.stream("q"))
+
+        kinds = [event["type"] for event in events]
+        assert kinds == ["tool_call", "tool_result", "answer"]
+
+    def test_answer_is_last_and_unique(self):
+        responses = [
+            reply(calls=[tool_call("list_pods", {"namespace": "demo"})]),
+            reply(calls=[tool_call("get_system_info", {})]),
+            reply(content="done"),
+        ]
+        with mock_chat(side_effect=responses):
+            events = list(agent.stream("q"))
+
+        assert [event["type"] for event in events].count("answer") == 1
+        assert events[-1]["type"] == "answer"
+
+    def test_answer_event_carries_the_full_result(self):
+        with mock_chat(return_value=reply(content="all fine")):
+            events = list(agent.stream("q"))
+
+        answer = events[-1]
+        assert set(answer) >= {"answer", "tool_calls", "confidence", "unverified"}
+
+    def test_result_is_the_serialised_tool_output(self):
+        responses = [
+            reply(calls=[tool_call("get_system_info", {})]),
+            reply(content="ok"),
+        ]
+        with mock_chat(side_effect=responses):
+            events = list(agent.stream("q"))
+
+        result = next(e for e in events if e["type"] == "tool_result")
+        # JSON, not a repr: the UI and a streaming endpoint both parse this.
+        assert isinstance(json.loads(result["result"]), dict)
+        assert result["duration_ms"] >= 0
+
+    def test_failing_tool_still_streams_a_result(self):
+        """The loop survives a failing tool, so the stream must show it."""
+        responses = [
+            reply(calls=[tool_call("no_such_tool", {})]),
+            reply(content="recovered"),
+        ]
+        with mock_chat(side_effect=responses):
+            events = list(agent.stream("q"))
+
+        result = next(e for e in events if e["type"] == "tool_result")
+        assert "error" in json.loads(result["result"])
+        assert events[-1]["answer"] == "recovered"
+
+    def test_runaway_loop_still_terminates_with_an_answer(self):
+        with mock_chat(return_value=reply(calls=[tool_call("get_system_info", {})])):
+            events = list(agent.stream("q"))
+
+        assert events[-1]["type"] == "answer"
+        assert "Gave up" in events[-1]["answer"]
+
+    def test_ask_matches_the_streams_answer(self):
+        """ask() is stream() drained; if these drift, one of them is a lie."""
+        def run(func):
+            with mock_chat(
+                side_effect=[
+                    reply(calls=[tool_call("get_system_info", {})]),
+                    reply(content="cpu is low"),
+                ]
+            ):
+                return func()
+
+        streamed = run(lambda: list(agent.stream("q"))[-1])
+        asked = run(lambda: agent.ask("q"))
+
+        assert asked == {k: v for k, v in streamed.items() if k != "type"}
+        assert "type" not in asked
