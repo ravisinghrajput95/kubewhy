@@ -70,6 +70,9 @@ mcp = FastMCP(
         "service with no ready endpoints has nowhere to send traffic. For a "
         "degraded workload use list_deployments. If pods are Pending or being "
         "evicted, check list_nodes for pressure before blaming the workload.\n\n"
+        "Never state an inference as if you measured it. If you read it from a "
+        "tool, say it plainly; if you are reasoning past what the tools showed, "
+        "mark it -- likely, probably, worth checking.\n\n"
         "Pod logs are redacted for common secret shapes, but treat their "
         "contents as sensitive regardless."
     ),

@@ -14,6 +14,37 @@ import urllib.request
 
 log = logging.getLogger("triage.sink")
 
+# Slack rejects a section block over 3000 characters, so the diagnosis has to
+# be bounded. Leaving room for the marker below.
+_SLACK_LIMIT = 2900
+
+
+def _fit(text, limit=_SLACK_LIMIT):
+    """
+    Trim a diagnosis to Slack's block limit without lying about it.
+
+    A hard slice cut mid-sentence and said nothing, so a truncated answer read
+    as a complete one that simply stopped making sense -- and the reader had no
+    way to know the rest existed. Cut at a paragraph or sentence boundary where
+    there is one nearby, and always say that something was dropped.
+    """
+    if len(text) <= limit:
+        return text
+
+    marker = "\n\n_… truncated, see the controller logs for the full diagnosis._"
+    room = limit - len(marker)
+    head = text[:room]
+
+    # Prefer a paragraph break, then a sentence end, but only if it is not so
+    # far back that it throws away most of the message.
+    for boundary in ("\n\n", ". "):
+        cut = head.rfind(boundary)
+        if cut > room * 0.6:
+            head = head[:cut]
+            break
+
+    return head.rstrip() + marker
+
 # Emoji by severity of what was found, so a channel can be skimmed.
 _ICON = {
     "OOMKilled": ":boom:",
@@ -76,7 +107,7 @@ class SlackSink:
                 {"type": "section", "text": {"type": "mrkdwn", "text": header}},
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": finding["diagnosis"][:2900]},
+                    "text": {"type": "mrkdwn", "text": _fit(finding["diagnosis"])},
                 },
                 {
                     "type": "context",

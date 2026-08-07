@@ -113,7 +113,12 @@ workload.
 
 When reporting a problem, name the specific pod or process responsible, give
 the measured figure, and say what you would change. Be concise -- a few
-sentences, not a report."""
+sentences, not a report.
+
+Never state an inference as if you measured it. If you read it from a tool,
+say it plainly; if you are reasoning past what the tools showed, mark it --
+"likely", "probably", "worth checking". A guess printed in the same voice as a
+measurement is the one thing a reader cannot recover from."""
 
 
 def _chat(model, messages, think):
