@@ -6,6 +6,12 @@ signatures and response shapes may still change.
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-08-07
+
+The rename release. Republishes the image and chart under the new name — v0.1.1
+and earlier exist only at the `local-triage-agent` paths, which are not moved
+by a repository rename.
+
 ### Changed — breaking
 
 - **Renamed from `local-triage-agent` to `kubewhy`.** "Agent" had become one of
@@ -117,5 +123,6 @@ local model, with claim verification and a scored eval suite.
 - Claim verification is lexical and cannot check reasoning.
 - Cumulative context across a long chain is unbounded.
 
-[Unreleased]: https://github.com/ravisinghrajput95/kubewhy/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ravisinghrajput95/kubewhy/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/ravisinghrajput95/kubewhy/compare/v0.1.1...v0.1.2
 [0.1.0]: https://github.com/ravisinghrajput95/kubewhy/releases/tag/v0.1.0
