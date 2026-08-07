@@ -3,6 +3,7 @@ Tests for the HTTP surface: auth, health split, and error shape.
 """
 
 import importlib
+import json
 from unittest.mock import patch
 
 import pytest
@@ -95,6 +96,84 @@ class TestScan:
             open_client.get("/scan")
 
         scan.assert_called_once_with(True, 20)
+
+
+def sse_events(text):
+    """Parse an SSE body into [(event, data), ...]."""
+    out = []
+    for frame in text.strip().split("\n\n"):
+        lines = dict(
+            line.split(": ", 1) for line in frame.splitlines() if ": " in line
+        )
+        if "event" in lines:
+            out.append((lines["event"], json.loads(lines["data"])))
+    return out
+
+
+class TestAskStream:
+    """
+    /ask/stream exists so a two-minute diagnosis is distinguishable from a
+    hang. The ordering is the contract: a caller must see a tool dispatched
+    before its result, and exactly one answer, last.
+    """
+
+    def test_streams_the_chain_then_the_answer(self, open_client):
+        events = [
+            {"type": "tool_call", "name": "list_pods", "arguments": {}},
+            {"type": "tool_result", "name": "list_pods", "result": "{}", "duration_ms": 3.0},
+            {
+                "type": "answer",
+                "answer": "all fine",
+                "tool_calls": [],
+                "confidence": "grounded",
+                "unverified": [],
+            },
+        ]
+        with patch.object(app_module, "stream", return_value=iter(events)):
+            response = open_client.post("/ask/stream", json={"question": "q"})
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+
+        parsed = sse_events(response.text)
+        assert [name for name, _ in parsed] == ["tool_call", "tool_result", "answer"]
+
+    def test_final_event_matches_what_ask_would_return(self, open_client):
+        """A client that reads only the last event is where /ask leaves it."""
+        answer = {
+            "type": "answer",
+            "answer": "memory-hog is OOMKilled",
+            "tool_calls": [{"name": "describe_pod", "arguments": {}}],
+            "confidence": "grounded",
+            "unverified": [],
+        }
+        with patch.object(app_module, "stream", return_value=iter([answer])):
+            response = open_client.post("/ask/stream", json={"question": "q"})
+
+        name, data = sse_events(response.text)[-1]
+        assert name == "answer"
+        # "type" is SSE framing, not part of the payload.
+        assert data == {k: v for k, v in answer.items() if k != "type"}
+
+    def test_a_mid_stream_failure_arrives_as_an_event(self, open_client):
+        """
+        The status line is long gone by then, so a failure that is not sent as
+        an event looks identical to a completed run.
+        """
+        def boom():
+            yield {"type": "tool_call", "name": "list_pods", "arguments": {}}
+            raise ConnectionError("ollama went away")
+
+        with patch.object(app_module, "stream", return_value=boom()):
+            response = open_client.post("/ask/stream", json={"question": "q"})
+
+        name, data = sse_events(response.text)[-1]
+        assert name == "error"
+        assert "ollama went away" in data["error"]
+
+    def test_is_guarded(self, secured_client):
+        response = secured_client.post("/ask/stream", json={"question": "q"})
+        assert response.status_code == 401
 
 
 class TestRequestLogging:
