@@ -9,10 +9,33 @@ the dedup and rate-limit state.
 import json
 import logging
 import os
+import ssl
 import urllib.error
 import urllib.request
 
 log = logging.getLogger("triage.sink")
+
+
+def _tls_context():
+    """
+    A verified TLS context that also works on a developer's laptop.
+
+    The container image has a system CA store and needs none of this. A
+    python.org build on macOS does not, so every Slack post failed there with
+    CERTIFICATE_VERIFY_FAILED while working fine in the cluster -- the worst
+    shape of bug, since it only appears where nobody is watching for it.
+
+    certifi arrives with the kubernetes client, so this is not a new
+    dependency; falling back to the system store keeps it optional rather than
+    required.
+    """
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
 
 # Slack rejects a section block over 3000 characters, so the diagnosis has to
 # be bounded. Leaving room for the marker below.
@@ -83,7 +106,9 @@ class SlackSink:
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(
+                request, timeout=self.timeout, context=_tls_context()
+            ) as response:
                 if response.status != 200:
                     log.warning("slack_rejected", extra={"status": response.status})
         except (urllib.error.URLError, OSError) as exc:
@@ -117,6 +142,56 @@ class SlackSink:
         }
 
 
+class SlackApiSink(SlackSink):
+    """
+    Posts with a bot token via chat.postMessage.
+
+    A webhook is bound to one channel chosen when it was created; a bot token
+    can post anywhere it has been invited, which is what makes routing by
+    namespace or team possible later. It also returns a real error body, so a
+    misconfiguration says what is wrong instead of failing silently.
+
+    The signing secret is not used here and is not needed: it verifies requests
+    coming *from* Slack. Nothing in this project accepts inbound requests, and
+    adding that means exposing an endpoint to the internet -- a separate
+    decision, not a side effect of posting messages.
+    """
+
+    API = "https://slack.com/api/chat.postMessage"
+
+    def __init__(self, token, channel, timeout=10):
+        super().__init__(webhook_url=self.API, timeout=timeout)
+        self.token = token
+        self.channel = channel
+
+    def send(self, finding):
+        body = self._blocks(finding)
+        body["channel"] = self.channel
+
+        request = urllib.request.Request(
+            self.API,
+            data=json.dumps(body).encode(),
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "Authorization": f"Bearer {self.token}",
+            },
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=self.timeout, context=_tls_context()
+            ) as response:
+                # chat.postMessage answers 200 even when it refuses; the truth
+                # is in the body, so a channel typo or a missing invite would
+                # otherwise look like a successful post.
+                payload = json.loads(response.read() or "{}")
+                if not payload.get("ok"):
+                    log.warning(
+                        "slack_rejected", extra={"error": payload.get("error")}
+                    )
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            log.warning("slack_delivery_failed", extra={"error": str(exc)})
+
+
 def format_text(finding):
     scope = finding["workload"] or finding["pod"]
     lines = [
@@ -133,12 +208,26 @@ def format_text(finding):
     return "\n".join(lines) + "\n"
 
 
-def build(name=None, webhook_url=None):
-    """Pick a sink from configuration, falling back to stdout."""
+def build(name=None, webhook_url=None, token=None, channel=None):
+    """
+    Pick a sink from configuration, falling back to stdout.
+
+    A bot token wins over a webhook when both are set: it is the more capable
+    of the two and the one someone configuring both almost certainly meant.
+    Credentials come from the environment only -- never an argument default,
+    never a file in this repo.
+    """
     name = (name or os.getenv("TRIAGE_SINK", "stdout")).lower()
     webhook_url = webhook_url or os.getenv("SLACK_WEBHOOK_URL", "")
+    token = token or os.getenv("SLACK_BOT_TOKEN", "")
+    channel = channel or os.getenv("SLACK_CHANNEL", "")
 
     if name == "slack":
+        if token and channel:
+            return SlackApiSink(token, channel)
+        if token and not channel:
+            log.warning("slack_bot_token_without_channel falling back to stdout")
+            return StdoutSink()
         if not webhook_url:
             log.warning("slack_sink_requested_without_url falling back to stdout")
             return StdoutSink()

@@ -342,24 +342,10 @@ with st.form("ask", clear_on_submit=False):
 
 if submitted and question:
     if scoped:
-        # The checkbox is the user's statement of scope, so this is directive.
-        # Phrasing it as a hint failed: "what is the issue here?" was read as
-        # cluster-wide, the model called scan_cluster() with its default
-        # only_unhealthy=True -- which by design omits a healthy workload --
-        # and reported the first failure it found instead.
-        #
-        # Naming the tool matters as much as naming the workload. Without
-        # workload=, there is no call that can see a healthy one, so "it is
-        # fine" is not an available answer and the gap gets filled.
-        question = (
-            f"Answer only about the workload {subject['workload']} in "
-            f"namespace {subject['namespace']} (for example pod "
-            f"{subject['pod']}). Start with "
-            f"scan_cluster(workload='{subject['workload']}') to read its "
-            f"current state, which reports it whether or not it is failing. "
-            f"If it is healthy, say so and stop. Do not report on any other "
-            f"workload, even if you find one that is broken.\n\n"
-            f"Question: {question}"
+        # Shared with the CLI, the REST API and the controller: see
+        # agent.scoped_question for why this is directive rather than a hint.
+        question = agent.scoped_question(
+            question, subject["workload"], subject["namespace"], subject["pod"]
         )
     steps = st.status("Thinking...", expanded=True)
     try:

@@ -158,6 +158,34 @@ def _run_tool(name, arguments):
     return json.dumps(result, default=str)
 
 
+def scoped_question(question, workload, namespace, pod=None):
+    """
+    Bind a question to one workload, for every surface that has a selection.
+
+    This lived in the browser UI, which meant the CLI, the REST API and an MCP
+    client had no way to say "answer about this one". A fix that only one of
+    five entry points benefits from is not a fix.
+
+    Directive on purpose. Phrasing it as a hint failed in testing: asked "what
+    is the issue here?" about a healthy workload, the model read the question as
+    cluster-wide, called scan_cluster() with its default only_unhealthy=True --
+    which by design omits a healthy workload -- and reported the first failure
+    it happened to find instead.
+
+    Naming the tool matters as much as naming the workload. Without workload=,
+    no call the model can make will see a healthy workload, so "it is fine" is
+    not an available answer and the silence gets filled with something else.
+    """
+    example = f" (for example pod {pod})" if pod else ""
+    return (
+        f"Answer only about the workload {workload} in namespace {namespace}"
+        f"{example}. Start with scan_cluster(workload='{workload}') to read its "
+        "current state, which reports it whether or not it is failing. If it is "
+        "healthy, say so and stop. Do not report on any other workload, even if "
+        f"you find one that is broken.\n\nQuestion: {question}"
+    )
+
+
 def stream(question, model=MODEL, think=True):
     """
     Run the loop, yielding each step as it happens.
@@ -317,8 +345,12 @@ def scan(explain=0):
         namespace = key.split("/", 1)[0]
         print(f"\n--- {key} ---")
         result = ask(
-            f"Pod {entry['example']} in namespace {namespace} is "
-            f"{entry['status']}. Find the root cause and say what should change.",
+            scoped_question(
+                "Find the root cause and say what should change.",
+                key.split(":", 1)[0],
+                namespace,
+                entry["example"],
+            ),
             verbose=True,
         )
         print(result["answer"])

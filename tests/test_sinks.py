@@ -126,7 +126,7 @@ class TestDeliveryFailuresAreSurvivable:
         sink = sinks.SlackSink("https://hooks.example.invalid/x")
         captured = {}
 
-        def capture(request, timeout=None):
+        def capture(request, timeout=None, **kwargs):
             captured["body"] = request.data
             response = MagicMock()
             response.status = 200
@@ -152,3 +152,69 @@ class TestSinkSelection:
 
     def test_default_is_stdout(self):
         assert isinstance(sinks.build(None, ""), sinks.StdoutSink)
+
+
+class TestSlackApiSink:
+    """
+    Bot token via chat.postMessage. A webhook is bound to the channel it was
+    created for; a token can post anywhere it is invited, which is what makes
+    routing by namespace possible later.
+    """
+
+    def test_posts_to_the_named_channel_with_a_bearer_token(self):
+        sink = sinks.SlackApiSink("xoxb-not-a-real-token", "#kubernetes-events")
+        captured = {}
+
+        def capture(request, timeout=None, **kwargs):
+            captured["headers"] = request.headers
+            captured["body"] = json.loads(request.data)
+            response = MagicMock()
+            response.read = lambda: b'{"ok": true}'
+            response.__enter__ = lambda self: response
+            response.__exit__ = lambda *a: False
+            return response
+
+        with patch("urllib.request.urlopen", side_effect=capture):
+            sink.send(finding())
+
+        assert captured["body"]["channel"] == "#kubernetes-events"
+        assert captured["headers"]["Authorization"].startswith("Bearer ")
+        assert captured["body"]["blocks"]
+
+    def test_a_refusal_is_noticed_even_though_slack_answers_200(self):
+        """
+        chat.postMessage returns HTTP 200 with {"ok": false} for a bad channel
+        or a missing invite. Trusting the status code makes that look like a
+        successful post and the alert is simply never seen.
+        """
+        sink = sinks.SlackApiSink("xoxb-not-a-real-token", "#nope")
+        response = MagicMock()
+        response.read = lambda: b'{"ok": false, "error": "channel_not_found"}'
+        response.__enter__ = lambda self: response
+        response.__exit__ = lambda *a: False
+
+        with patch("urllib.request.urlopen", return_value=response):
+            with patch.object(sinks.log, "warning") as warned:
+                sink.send(finding())
+
+        assert warned.called
+        assert warned.call_args.kwargs["extra"]["error"] == "channel_not_found"
+
+    def test_delivery_failure_does_not_raise(self):
+        sink = sinks.SlackApiSink("xoxb-not-a-real-token", "#x")
+        with patch("urllib.request.urlopen", side_effect=OSError("no route")):
+            sink.send(finding())
+
+    def test_a_bot_token_is_preferred_over_a_webhook(self):
+        """Someone who configured both meant the more capable one."""
+        built = sinks.build(
+            "slack",
+            webhook_url="https://hooks.slack.com/services/x",
+            token="xoxb-not-a-real-token",
+            channel="#kubernetes-events",
+        )
+        assert isinstance(built, sinks.SlackApiSink)
+
+    def test_a_token_without_a_channel_falls_back_rather_than_guessing(self):
+        built = sinks.build("slack", token="xoxb-not-a-real-token", channel="")
+        assert isinstance(built, sinks.StdoutSink)

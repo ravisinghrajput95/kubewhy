@@ -283,6 +283,31 @@ kubectl logs -n triage -l app.kubernetes.io/instance=triage -f
 The image and chart are published to GHCR on every `v*` tag, multi-arch
 (`amd64`/`arm64`). To install from a checkout instead, use `deploy/chart`.
 
+Two ways to reach Slack. An **incoming webhook** is bound to the channel it was
+created for. A **bot token** (`xoxb-…`) posts via `chat.postMessage` to any
+channel the bot is invited to, reports a real error when it refuses, and is
+what you want if findings should ever be routed by namespace or team:
+
+```bash
+kubectl create secret generic kubewhy-slack -n triage \
+  --from-literal=bot-token="$SLACK_BOT_TOKEN"
+
+helm install kubewhy deploy/chart --set sink.type=slack \
+  --set sink.slack.existingSecret=kubewhy-slack \
+  --set sink.slack.channel='#kubernetes-events'
+```
+
+`chat.postMessage` answers HTTP 200 even when it refuses — a channel typo or a
+missing invite returns `{"ok": false}` — so the sink reads the body rather than
+the status code. Trusting the status means the alert is never seen and nothing
+says so.
+
+**This is one-way.** The controller posts; nothing reads Slack back. Replies,
+buttons and slash commands need an endpoint Slack can reach, verified with the
+signing secret — which means exposing this to the internet, a decision that
+deserves its own thought rather than arriving as a side effect of posting
+messages.
+
 Defaults to `stdout`, so you can read what it would have said before pointing
 it at a channel. The chart creates the read-only ServiceAccount and
 ClusterRole, runs non-root with a read-only root filesystem, and pins one
@@ -292,7 +317,8 @@ dedup state is in-process.
 | Value | Default | Purpose |
 | --- | --- | --- |
 | `sink.type` | `stdout` | `stdout` or `slack` |
-| `sink.slack.existingSecret` | — | Secret holding the webhook. Preferred over `webhookUrl`, which lands in your values file and release history. |
+| `sink.slack.existingSecret` | — | Secret holding the webhook or bot token. Preferred over `webhookUrl`, which lands in your values file and release history. |
+| `sink.slack.channel` | — | Set it, plus a bot token in the secret under `botTokenKey`, to post via `chat.postMessage` instead of a webhook. Preferred when both are configured. |
 | `model.ollamaHost` | in-cluster svc | The controller runs no model; point this at an Ollama it can reach |
 | `watch.namespaces` | all | Narrow this on a large cluster |
 | `watch.cooldownSeconds` | `1800` | Silence per workload after a finding |
@@ -669,6 +695,9 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
 | `K8S_TIMEOUT` | `15` | Seconds before a cluster call is abandoned |
 | `TRIAGE_API_TOKEN` | *unset* | Bearer token; unset means no auth |
 | `KUBECONFIG` | `~/.kube/config` | Cluster credentials |
+| `SLACK_WEBHOOK_URL` | *unset* | Incoming webhook, bound to one channel |
+| `SLACK_BOT_TOKEN` | *unset* | Bot token (`xoxb-…`). With `SLACK_CHANNEL`, posts via `chat.postMessage` and wins over a webhook |
+| `SLACK_CHANNEL` | *unset* | Channel for the bot token, e.g. `#kubernetes-events` |
 | `LOG_FORMAT` | `json` | `text` for human-readable logs |
 | `LOG_LEVEL` | `INFO` | Standard Python levels |
 

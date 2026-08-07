@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import observability
-from agent import ask, stream
+from agent import ask, scoped_question, stream
 from routers.platform_info import get_platform_info
 from routers.system_info import get_system_info
 from routers.process_info import get_processes
@@ -205,6 +205,20 @@ def service_endpoints(name: str, namespace: str = "default"):
 
 class Question(BaseModel):
     question: str
+    # Optional scoping, so an API caller with a selection gets the same
+    # behaviour the browser UI does rather than a cluster-wide answer.
+    workload: str = ""
+    namespace: str = ""
+    pod: str = ""
+
+
+def _question(body):
+    """Apply workload scoping when the caller asked for it."""
+    if body.workload and body.namespace:
+        return scoped_question(
+            body.question, body.workload, body.namespace, body.pod or None
+        )
+    return body.question
 
 
 @app.post("/ask", dependencies=[Depends(require_token)], tags=["agent"])
@@ -216,7 +230,7 @@ def ask_agent(body: Question):
     normal, and a deep chain can exceed a minute. Set generous client
     timeouts, or use /ask/stream to see progress while it works.
     """
-    return ask(body.question)
+    return ask(_question(body))
 
 
 @app.post("/ask/stream", dependencies=[Depends(require_token)], tags=["agent"])
@@ -239,7 +253,7 @@ def ask_agent_streaming(body: Question):
 
     def events():
         try:
-            for event in stream(body.question):
+            for event in stream(_question(body)):
                 # SSE frames the type separately so a client can dispatch on it
                 # without parsing the payload first.
                 payload = json.dumps({k: v for k, v in event.items() if k != "type"})

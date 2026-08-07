@@ -61,6 +61,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.sink.slack.existingSecret | default (printf "%s-slack" .Release.Name) }}
                   key: {{ .Values.sink.slack.secretKey }}
+                  optional: true
+            {{- if .Values.sink.slack.channel }}
+            - name: SLACK_CHANNEL
+              value: {{ .Values.sink.slack.channel | quote }}
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.sink.slack.existingSecret | default (printf "%s-slack" .Release.Name) }}
+                  key: {{ .Values.sink.slack.botTokenKey }}
+                  optional: true
+            {{- end }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
