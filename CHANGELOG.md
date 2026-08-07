@@ -78,6 +78,28 @@ by a repository rename.
   `routers/k8s_pods_info.py`. The scan and the controller have to agree on what
   counts as the same problem, and two copies would drift.
 
+### Added — working at cluster scale
+
+- **`scan_cluster(namespaces=…)`** and paged fetching. Pods are read a page at
+  a time, so no single request has to carry a multi-megabyte response inside
+  `K8S_TIMEOUT`; a single namespace becomes a namespaced query rather than a
+  cluster-wide one. The browser UI exposes the same filter plus a name search,
+  because a flat list of a thousand workloads is not navigable in either
+  surface.
+- **`scan_cluster(workload=…)`** reports one workload's state whether or not it
+  is broken. Without it there was no way to answer "is X healthy?" with "yes":
+  the scan returned only failures, so a question about a healthy workload found
+  nothing and the model answered with a *different* workload's problem —
+  confidently, and marked `grounded`, because every claim was true of the
+  workload it had substituted. The system prompt now also says to report a
+  healthy workload as healthy and never to describe one that was not asked
+  about.
+- **`get_pod_logs` reports which container it read**, and takes an explicit
+  `container` argument.
+- **The demo cluster grew the shapes that were hiding bugs**: a succeeding and
+  a failing CronJob, a failing init container, a DaemonSet, and a
+  two-container pod. Every fix below was invisible against five Deployments.
+
 ### Fixed — detection on real clusters
 
 The demo cluster is five Deployments, so every assumption that holds only for

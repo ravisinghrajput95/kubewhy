@@ -65,6 +65,33 @@ class TestRecommendationsAreNotClaims:
         assert result["unverified"] == []
         assert result["confidence"] == "grounded"
 
+    def test_a_proposed_yaml_block_is_not_a_claim(self):
+        """
+        Models answer with corrected YAML, and its lines carry no verb of their
+        own -- so the values being proposed were checked as measurements and
+        flagged. Seen in 2 of 3 eval runs of the OOM case.
+        """
+        tools = [json.dumps({"limits": {"memory": "64Mi"}})]
+        answer = (
+            "The pod exceeds its memory limit of 64Mi.\n"
+            "Fix: raise the limit.\n"
+            "```yaml\n"
+            "resources:\n"
+            "  limits:\n"
+            "    memory: 256Mi\n"
+            "```"
+        )
+
+        assert grounding.check(answer, tools)["unverified"] == []
+
+    def test_a_quoted_block_of_evidence_is_still_checked(self):
+        """The exemption follows intent, not fences: a block introduced by
+        ordinary prose is evidence, and a fabricated figure in it must flag."""
+        tools = [json.dumps({"limits": {"memory": "64Mi"}})]
+        answer = "The container logged this before dying:\n```\nOOM killed after 9999 seconds\n```"
+
+        assert "9999" in grounding.check(answer, tools)["unverified"]
+
     def test_a_measurement_before_the_fix_is_still_checked(self):
         """The exemption starts at the recommendation, not at the line."""
         tools = [json.dumps({"limits": {"memory": "64Mi"}})]

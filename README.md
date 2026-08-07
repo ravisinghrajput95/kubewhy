@@ -65,6 +65,24 @@ python agent.py --scan --explain 2
 That split is deliberate. The listing is cheap and complete; the explanation
 costs tens of seconds each, so it is bounded rather than applied to everything.
 
+### Asking about one workload, including a healthy one
+
+`scan_cluster(workload="payments-api")` reports that workload's state whether
+or not anything is wrong with it. That sounds redundant and is not: without it
+the scan returned only failures, so a question about a healthy workload found
+nothing — and the model answered with some *other* workload's problem instead,
+confidently and marked `grounded`, because every claim it made was true of the
+workload it had substituted. "It is running normally" has to be an available
+answer, or the gap gets filled with something worse.
+
+### On a large cluster
+
+Pods are fetched a page at a time, so no single request has to carry a
+multi-megabyte response inside `K8S_TIMEOUT`. Narrow with `namespaces=` — a
+single namespace becomes a namespaced query rather than a cluster-wide one —
+and the browser UI exposes the same filter plus a name search, because a flat
+list of a thousand workloads is not navigable in either surface.
+
 Measured on a 19-pod kind cluster: **146 tokens against 33,042 raw**. That raw
 figure is 83% of qwen3's entire 40k window spent on one call, before the model
 has reasoned about anything — and at ~1,739 tokens per pod, a 24-pod cluster
@@ -151,6 +169,15 @@ a model whose `ollama show` capabilities include `tools`.
 `OOMKilled`, `ImagePullBackOff` — two broken services (one selector matching
 nothing, one whose pods never become ready), plus healthy deployments and
 services as controls, so the agent has to tell broken from working.
+
+It also deploys the shapes a cluster of plain Deployments never produces, and
+each one is there because it broke something: a **CronJob that succeeds**
+(finished pods were reported as failures), a **CronJob that fails** (every run
+counted as a new workload, so the cooldown never applied), a **failing init
+container** (reported as `Pending`, so the controller ignored it), a
+**DaemonSet**, and a **two-container pod** (the API refuses to guess which
+container's logs you want, so reads failed outright). A demo that is only
+Deployments hides bugs rather than finding them.
 
 ```bash
 kind create cluster --name triage-demo
@@ -508,7 +535,7 @@ Kubernetes endpoints take `?namespace=` (default `default`).
 | --- | --- |
 | `GET /healthz` | Liveness. No dependencies. |
 | `GET /readyz` | Readiness. Checks the model backend. |
-| `GET /scan` | Failing workloads across every namespace, grouped. `?only_unhealthy=` `?limit=` |
+| `GET /scan` | Failing workloads across every namespace, grouped. `?only_unhealthy=` `?limit=` `?namespaces=` `?workload=` |
 | `GET /pods` | Status, ready, restarts, node. `?only_unhealthy=true` |
 | `GET /pods/{name}` | Images, requests/limits, last termination reason and exit code |
 | `GET /pods/{name}/events` | Recent Warning events |

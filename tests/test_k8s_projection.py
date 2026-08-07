@@ -225,6 +225,105 @@ class TestErrorsExplainThemselves:
         assert "describe_pod" in result["result"]
 
 
+class TestScanAtScale:
+    """
+    A thousand workloads is the target, not five Deployments. The projection
+    already scales; fetching and narrowing are what did not.
+    """
+
+    def test_pods_are_fetched_in_pages(self, api):
+        """
+        One unbounded request for a huge cluster is a multi-megabyte response
+        that has to arrive inside K8S_TIMEOUT. Paging bounds each request.
+        """
+        first = client.V1PodList(
+            items=[crashing("a-abc123-1", "a-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue="token-1"),
+        )
+        second = client.V1PodList(
+            items=[crashing("b-abc123-1", "b-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+        api.list_pod_for_all_namespaces.side_effect = [first, second]
+
+        result = k8s.scan_cluster()
+
+        assert set(result) == {"prod/a", "prod/b"}
+        # Second call must carry the continue token, or it loops on page one.
+        assert api.list_pod_for_all_namespaces.call_args_list[1].kwargs["_continue"] == "token-1"
+
+    def test_a_single_namespace_uses_a_namespaced_query(self, api):
+        """Cheaper than listing the cluster and discarding almost all of it."""
+        api.list_namespaced_pod.return_value = client.V1PodList(
+            items=[crashing("web-abc123-1", "web-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert list(k8s.scan_cluster(namespaces="prod")) == ["prod/web"]
+        api.list_pod_for_all_namespaces.assert_not_called()
+        assert api.list_namespaced_pod.call_args.args[0] == "prod"
+
+    def test_several_namespaces_are_filtered(self, api):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[
+                crashing("web-abc123-1", "web-abc123", "prod"),
+                crashing("web-abc123-1", "web-abc123", "staging"),
+                crashing("web-abc123-1", "web-abc123", "sandbox"),
+            ],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert set(k8s.scan_cluster(namespaces="prod,staging")) == {
+            "prod/web",
+            "staging/web",
+        }
+
+
+class TestAskingAboutOneWorkload:
+    """
+    The bug this closes: asked about a healthy CronJob, the agent answered
+    with a different workload's problem, confidently and grounded. It had no
+    way to say "that one is fine" -- the scan returned only failures, so a
+    healthy workload simply was not there.
+    """
+
+    def test_a_healthy_workload_is_reported_not_omitted(self, api, healthy_pod):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod, crashing("web-abc123-1", "web-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        result = k8s.scan_cluster(workload="healthy")
+
+        assert list(result) == ["demo/healthy"]
+        assert result["demo/healthy"]["status"] == "Running"
+
+    def test_only_the_named_workload_comes_back(self, api, healthy_pod):
+        """Never hand back a different workload's problem."""
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod, crashing("web-abc123-1", "web-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert "prod/web" not in k8s.scan_cluster(workload="healthy")
+
+    def test_a_name_that_does_not_exist_says_so(self, api, healthy_pod):
+        """Distinct from "it is healthy", which returns a row."""
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod], metadata=client.V1ListMeta(_continue=None)
+        )
+
+        assert "no workload named" in k8s.scan_cluster(workload="ghost")["result"]
+
+    def test_a_namespaced_name_also_matches(self, api):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[crashing("web-abc123-1", "web-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert list(k8s.scan_cluster(workload="prod/web")) == ["prod/web"]
+
+
 class TestMultiContainerLogs:
     """
     Sidecars are the norm at scale -- a mesh proxy, a log shipper, a metrics

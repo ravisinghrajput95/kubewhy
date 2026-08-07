@@ -153,8 +153,13 @@ def top_memory(limit: int = 5):
 # --- kubernetes -------------------------------------------------------------
 
 @app.get("/scan", dependencies=[Depends(require_token)], tags=["kubernetes"])
-def scan(only_unhealthy: bool = True, limit: int = 20):
-    return scan_cluster(only_unhealthy, limit)
+def scan(
+    only_unhealthy: bool = True,
+    limit: int = 20,
+    namespaces: str = "",
+    workload: str = "",
+):
+    return scan_cluster(only_unhealthy, limit, namespaces, workload)
 
 
 @app.get("/pods", dependencies=[Depends(require_token)], tags=["kubernetes"])

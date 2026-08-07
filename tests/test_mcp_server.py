@@ -48,6 +48,11 @@ class TestSchemas:
         assert set(by_name["scan_cluster"].inputSchema["properties"]) == {
             "only_unhealthy",
             "limit",
+            # Narrowing, so a large cluster is navigable rather than truncated.
+            "namespaces",
+            # Reports one workload's state whether or not it is broken, which
+            # is the only way to answer "is X healthy?" with "yes".
+            "workload",
         }
         assert set(by_name["get_pod_logs"].inputSchema["properties"]) == {
             "name",

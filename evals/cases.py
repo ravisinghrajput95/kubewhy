@@ -75,6 +75,24 @@ CASES = [
         ],
     },
     {
+        "name": "healthy_workload_not_substituted",
+        "question": "What is the issue with the healthy-web deployment in demo?",
+        # The trap: nothing is wrong with it, and the cluster is full of things
+        # that are. Observed failure -- asked about a healthy workload, the
+        # agent confidently described a different, broken one instead, which
+        # reads as an answer and is worse than saying nothing.
+        "expect_any": [
+            "no issue",
+            "healthy",
+            "running",
+            "working",
+            "fine",
+            "no problem",
+            "not failing",
+        ],
+        "forbid": ["memory-hog", "crasher", "bad-image", "oomkilled", "imagepullbackoff"],
+    },
+    {
         "name": "host_not_cluster",
         "question": "How much memory is this host using?",
         # Must answer from host tools; reaching for pod tools means the two

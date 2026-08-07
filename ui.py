@@ -19,13 +19,17 @@ is one the MCP server already exposes to untrusted clients; this surface adds
 no capability, only a way to look at it.
 """
 
+import datetime as dt
+
 import streamlit as st
 
 import agent
 from routers.k8s_pods_info import (
     active_context,
     list_contexts,
+    list_namespaces,
     use_context,
+    workload_pods,
     describe_pod,
     get_pod_events,
     get_pod_logs,
@@ -41,8 +45,18 @@ CACHE_TTL = 10
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _scan(only_unhealthy, limit):
-    return scan_cluster(only_unhealthy, limit)
+def _scan(only_unhealthy, limit, namespaces):
+    return scan_cluster(only_unhealthy, limit, namespaces)
+
+
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def _namespaces():
+    return list_namespaces()
+
+
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def _workload_pods(namespace, workload):
+    return workload_pods(namespace, workload)
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
@@ -56,8 +70,8 @@ def _events(name, namespace):
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _logs(name, namespace, tail):
-    return get_pod_logs(name, namespace, tail)
+def _logs(name, namespace, tail, container=""):
+    return get_pod_logs(name, namespace, tail, container)
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
@@ -119,19 +133,56 @@ with st.sidebar:
     only_unhealthy = st.toggle(
         "Only unhealthy", value=True, help="Off lists every workload, which is slower and much longer."
     )
-    limit = st.slider("Max workloads", min_value=5, max_value=100, value=20, step=5)
+
+    # A cluster with a thousand workloads is unusable as one flat list, and
+    # the backend filter is cheaper than fetching everything and hiding rows:
+    # a single namespace is a namespaced query rather than a cluster-wide one.
+    chosen_namespaces = st.multiselect(
+        "Namespaces", _namespaces(), help="Empty scans the whole cluster."
+    )
+    search = st.text_input("Filter", placeholder="workload or pod name")
+
+    limit = st.slider("Max workloads", min_value=5, max_value=500, value=20, step=5)
     tail = st.slider("Log lines", min_value=10, max_value=100, value=40, step=10)
 
     if st.button("Refresh", width="stretch"):
         st.cache_data.clear()
-    st.caption(f"Results cached {CACHE_TTL}s.")
+        st.session_state["read_at"] = dt.datetime.now()
+
+    # "Cached 10s" told you the policy, not whether what you are looking at is
+    # current, which is the only thing that matters during an incident.
+    read_at = st.session_state.setdefault("read_at", dt.datetime.now())
+    st.caption(
+        f"Cluster read at {read_at:%H:%M:%S}. Results are reused for "
+        f"{CACHE_TTL}s so moving a slider does not re-read the cluster; "
+        "Refresh forces a new read."
+    )
 
 st.title("kubewhy")
 
-findings = _unwrap(_scan(only_unhealthy, limit), f"scan_cluster(only_unhealthy={only_unhealthy}, limit={limit})")
+namespaces = ",".join(chosen_namespaces)
+findings = _unwrap(
+    _scan(only_unhealthy, limit, namespaces),
+    f"scan_cluster(only_unhealthy={only_unhealthy}, limit={limit}"
+    + (f", namespaces={namespaces!r}" if namespaces else "")
+    + ")",
+)
 
 if findings:
     truncated = findings.pop("_truncated", None)
+
+    if search:
+        # Client-side, and only over what the scan already returned: the
+        # server has no name index to query, so a "search" that claimed to
+        # cover the whole cluster would be lying about its scope.
+        needle = search.lower()
+        findings = {
+            key: entry
+            for key, entry in findings.items()
+            if needle in key.lower() or needle in entry["example"].lower()
+        }
+        if not findings:
+            st.info(f"nothing matching {search!r} in the {limit} workloads scanned")
 
     st.dataframe(
         [
@@ -163,15 +214,41 @@ if findings:
     choice = st.selectbox("Workload", list(findings), label_visibility="collapsed")
     if choice:
         entry = findings[choice]
-        pod = entry["example"]
         # Keys are "namespace/workload", or "namespace/workload:fault" when one
         # workload carries two faults at once.
-        namespace = choice.split("/", 1)[0]
+        namespace, _, rest = choice.partition("/")
+        workload_name = rest.split(":", 1)[0]
 
-        if entry["pods"] > 1:
-            st.caption(
-                f"Showing `{pod}` — one of {entry['pods']} pods with this fault."
+        # A Deployment is its replicas. Showing only the example pod and
+        # calling it the workload's story is wrong when three replicas fail
+        # for different reasons.
+        replicas = _workload_pods(namespace, workload_name)
+        if isinstance(replicas, list) and len(replicas) > 1:
+            labels = {
+                f"{p['pod']}  —  {p['status']}{'' if p['ready'] else '  (not ready)'}": p
+                for p in replicas
+            }
+            picked = st.radio(
+                f"{len(replicas)} pods in this workload",
+                list(labels),
+                horizontal=False,
             )
+            selected = labels[picked]
+            pod = selected["pod"]
+            containers = selected["containers"]
+        else:
+            pod = entry["example"]
+            containers = next(
+                (p["containers"] for p in replicas if p["pod"] == pod), []
+            ) if isinstance(replicas, list) else []
+
+        # Hand the selection to the Ask panel below, which otherwise has no
+        # idea what "the selected workload" refers to.
+        st.session_state["subject"] = {
+            "namespace": namespace,
+            "workload": f"{namespace}/{workload_name}",
+            "pod": pod,
+        }
 
         detail, events, logs = st.tabs(["Detail", "Events", "Logs"])
 
@@ -181,16 +258,44 @@ if findings:
                 st.json(data)
 
         with events:
+            healthy_now = next(
+                (p["ready"] and p["status"] == "Running" for p in replicas if p["pod"] == pod),
+                False,
+            ) if isinstance(replicas, list) else False
+            if healthy_now:
+                # Events are history. A pod that waited on a taint keeps that
+                # warning for life, and without saying so the page presents a
+                # resolved problem as a current one.
+                st.info(
+                    f"`{pod}` is Running and ready **now**. Any warnings below "
+                    "already happened — check their age before acting."
+                )
+
             data = _unwrap(_events(pod, namespace), f"get_pod_events({pod!r}, {namespace!r})")
             if data:
                 st.dataframe(data["events"], width="stretch", hide_index=True)
 
         with logs:
-            data = _unwrap(_logs(pod, namespace, tail), f"get_pod_logs({pod!r}, {namespace!r}, tail={tail})")
+            # Sidecars mean "the pod's logs" is ambiguous; picking silently
+            # would show the proxy while the app is what broke.
+            container = ""
+            if len(containers) > 1:
+                container = st.radio(
+                    "Container", containers, horizontal=True, key=f"c-{pod}"
+                )
+
+            data = _unwrap(
+                _logs(pod, namespace, tail, container),
+                f"get_pod_logs({pod!r}, {namespace!r}, tail={tail}"
+                + (f", container={container!r}" if container else "")
+                + ")",
+            )
             if data:
                 st.caption(
-                    f"Source: {data['source']}. Secrets are redacted by pattern "
-                    "matching, which misses novel formats -- treat as sensitive."
+                    f"Source: {data['source']}"
+                    + (f", container `{data['container']}`" if data.get("container") else "")
+                    + ". Secrets are redacted by pattern matching, which misses "
+                    "novel formats -- treat as sensitive."
                 )
                 st.code(data["logs"], language=None)
 
@@ -201,13 +306,35 @@ st.caption(
     "tool chain appears as it happens rather than after."
 )
 
+# What is selected above is context the model never had. "What is wrong with
+# the selected workload?" has no referent on its own, so the model scanned the
+# whole cluster and answered about everything -- the selection was on screen
+# and nowhere else.
+subject = st.session_state.get("subject")
+if subject:
+    st.caption(
+        f"Questions are asked about **{subject['workload']}** "
+        f"(pod `{subject['pod']}`) unless you name something else."
+    )
+
 question = st.text_input(
     "Question",
-    placeholder="why is payments-api failing in staging?",
+    placeholder=(
+        f"why is {subject['workload']} failing?" if subject
+        else "why is payments-api failing in staging?"
+    ),
     label_visibility="collapsed",
 )
 
 if st.button("Diagnose", type="primary", disabled=not question):
+    if subject:
+        # Naming the subject explicitly, rather than hoping the model infers
+        # it, is the difference between an answer and a cluster-wide list.
+        question = (
+            f"Regarding the workload {subject['workload']} in namespace "
+            f"{subject['namespace']} (for example pod {subject['pod']}): "
+            f"{question}"
+        )
     steps = st.status("Thinking...", expanded=True)
     try:
         # stream() rather than ask(): the chain is the point, and a diagnosis
@@ -245,7 +372,12 @@ if answer:
     # Confidence is not a footnote: an answer shown without it is the failure
     # grounding.py exists to prevent.
     confidence = answer["confidence"]
-    if confidence == "grounded":
+    if not answer["tool_calls"]:
+        # "grounded" here means only that a reply with no figures contradicted
+        # nothing. Calling a clarifying question "grounded" implies it was
+        # checked against the cluster, and nothing was.
+        st.warning("no tools were called — nothing here was measured")
+    elif confidence == "grounded":
         st.success("grounded — every figure traced to a tool result")
     elif confidence == "partial":
         st.warning(

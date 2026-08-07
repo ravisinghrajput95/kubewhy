@@ -75,7 +75,7 @@ _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 # ignore this whole signal.
 _PRESCRIPTIVE = re.compile(
     r"\b(increase|raise|bump|set|change|update|adjust|scale|allocate|"
-    r"try|consider|recommend|suggest|should be|e\.g\.)\b",
+    r"try|consider|recommend|suggest|should be|fix|e\.g\.)\b",
     re.IGNORECASE,
 )
 
@@ -110,12 +110,39 @@ def _claims(answer):
     numbering gets reported as an unmeasured figure.
     """
     keep = []
+    in_block = False
+    block_is_proposal = False
+    previous_was_prescriptive = False
+
     for line in answer.splitlines():
-        line = _ORDINAL.sub(" ", line)
-        for clause in re.split(r"(?<=[.;:!?])\s+", line):
+        if line.strip().startswith("```"):
+            if not in_block:
+                # A fenced block inherits the intent of the prose introducing
+                # it. "Fix: ... ```yaml limits.memory: 256Mi``` " is one
+                # recommendation split across a fence, and its lines contain no
+                # verb of their own, so checking them as claims flags the very
+                # values being proposed. A block introduced by ordinary prose
+                # is still evidence and still checked.
+                block_is_proposal = previous_was_prescriptive
+            in_block = not in_block
+            continue
+
+        if in_block:
+            if not block_is_proposal:
+                keep.append(line)
+            continue
+
+        stripped = _ORDINAL.sub(" ", line)
+        prescriptive = False
+        for clause in re.split(r"(?<=[.;:!?])\s+", stripped):
             if _PRESCRIPTIVE.search(clause):
+                prescriptive = True
                 break
             keep.append(clause)
+
+        if line.strip():
+            previous_was_prescriptive = prescriptive
+
     return keep
 
 

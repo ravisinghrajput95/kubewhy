@@ -51,6 +51,49 @@ def _load_config():
             _active_context = _requested_context or "unknown"
 
 
+def list_namespaces():
+    """
+    Every namespace in the cluster.
+
+    Not a model tool -- a UI helper. Deriving the list from a scan only showed
+    namespaces that currently hold pods, so an empty namespace was unpickable
+    and the filter looked broken. This asks the API directly, which the
+    ClusterRole already allows and which costs one small request instead of a
+    cluster-wide pod read.
+    """
+    try:
+        found = _api().list_namespace(_request_timeout=TIMEOUT)
+    except Exception:
+        return []
+    return sorted(ns.metadata.name for ns in found.items)
+
+
+def workload_pods(namespace, workload):
+    """
+    Every pod belonging to one workload, not just the example the scan names.
+
+    A Deployment is its replicas: showing one pod's logs and calling that the
+    workload's story is wrong when three replicas fail for different reasons.
+    UI helper, so it returns enough to choose between them.
+    """
+    try:
+        pods = list(_iter_pods(namespace))
+    except Exception as exc:
+        return _handle(exc)
+
+    matched = [
+        {
+            "pod": pod.metadata.name,
+            "status": _pod_status(pod),
+            "ready": all(cs.ready for cs in (pod.status.container_statuses or [])),
+            "containers": [c.name for c in pod.spec.containers],
+        }
+        for pod in pods
+        if (workload_of(pod) or pod.metadata.name) == workload
+    ]
+    return matched
+
+
 def list_contexts():
     """
     Every context in the kubeconfig, for callers that let you choose one.
@@ -352,7 +395,42 @@ def list_pods(namespace: str = "default", only_unhealthy: bool = False):
     return result
 
 
-def scan_cluster(only_unhealthy: bool = True, limit: int = 20):
+def _iter_pods(namespace=None, page=500):
+    """
+    Every pod, fetched a page at a time.
+
+    One unbounded request for a large cluster is the wrong shape: at roughly
+    7KB per pod a 1,000-pod cluster is a ~7MB response that has to arrive
+    inside K8S_TIMEOUT, and a 10,000-pod cluster will not. Paging keeps each
+    request small and bounded regardless of cluster size; the total transferred
+    is the same, but no single call can time out on volume alone.
+    """
+    api = _api()
+    token = None
+
+    while True:
+        kwargs = {"limit": page, "_request_timeout": TIMEOUT}
+        if token:
+            kwargs["_continue"] = token
+
+        chunk = (
+            api.list_namespaced_pod(namespace, **kwargs)
+            if namespace
+            else api.list_pod_for_all_namespaces(**kwargs)
+        )
+        yield from chunk.items
+
+        token = (chunk.metadata._continue or None) if chunk.metadata else None
+        if not token:
+            return
+
+
+def scan_cluster(
+    only_unhealthy: bool = True,
+    limit: int = 20,
+    namespaces: str = "",
+    workload: str = "",
+):
     """
     Scans every namespace at once and reports failing workloads.
 
@@ -365,36 +443,60 @@ def scan_cluster(only_unhealthy: bool = True, limit: int = 20):
     example pod: pass that to describe_pod, get_pod_events or get_pod_logs.
     This tool tells you where to look and never why -- the cause always needs
     a follow-up call on the example pod.
+    To answer "is X healthy?" pass workload -- it reports that workload's state
+    whether or not anything is wrong with it, which is the only way to say a
+    thing is fine. Never answer about a different workload than the one asked
+    about; if it is not here, it does not exist under that name.
     Args: only_unhealthy -- when true, the default, omit workloads whose pods
     are all Running and Ready; limit -- how many workloads to return, largest
-    blast radius first, default 20.
+    blast radius first, default 20; namespaces -- comma-separated list to
+    restrict the scan to, which is what you want on a large cluster; workload
+    -- report only this workload, healthy or not.
     """
+    wanted = [n.strip() for n in namespaces.split(",") if n.strip()]
+
     try:
-        pods = _api().list_pod_for_all_namespaces(_request_timeout=TIMEOUT)
+        # One namespace is a much cheaper query than the whole cluster; take it
+        # when it is the only one asked for.
+        pods = list(_iter_pods(wanted[0] if len(wanted) == 1 else None))
     except Exception as exc:
         return _handle(exc)
 
     groups = {}
-    for pod in pods.items:
+    for pod in pods:
+        if wanted and pod.metadata.namespace not in wanted:
+            continue
         # A pod that is already terminating is not a fault to report; on a
         # busy cluster these are the majority of the non-Running pods.
         if pod.metadata.deletion_timestamp:
             continue
 
-        healthy = _is_healthy(pod)
-        if only_unhealthy and healthy:
+        namespace = pod.metadata.namespace
+        owner = workload_of(pod) or pod.metadata.name
+
+        if workload:
+            # Asked about one workload: report it whether or not it is broken.
+            # "It is healthy" is an answer, and without this there was no way
+            # to give it -- the scan returned only failures, so a question
+            # about a healthy workload found nothing and got answered with
+            # some other workload's problem instead.
+            if workload.lower() not in (
+                owner.lower(),
+                f"{namespace}/{owner}".lower(),
+                pod.metadata.name.lower(),
+            ):
+                continue
+        elif only_unhealthy and _is_healthy(pod):
             continue
 
         status = _pod_status(pod)
-        namespace = pod.metadata.namespace
-        workload = workload_of(pod) or pod.metadata.name
         fault = fault_of(status)
 
         # Fault rather than status in the key: a rollout part-way through has
         # replicas reporting ErrImagePull and ImagePullBackOff at the same
         # instant, and splitting those would report one problem twice.
         entry = groups.setdefault(
-            (namespace, workload, fault),
+            (namespace, owner, fault),
             {"status": status, "pods": 0, "example": pod.metadata.name},
         )
         entry["pods"] += 1
@@ -405,8 +507,12 @@ def scan_cluster(only_unhealthy: bool = True, limit: int = 20):
             entry["fault"] = fault
 
     if not groups:
+        if workload:
+            # Distinct from "it is healthy", which now returns a row.
+            return {"result": f"no workload named {workload} exists in this cluster"}
+        where = f"namespace(s) {namespaces}" if wanted else "any namespace"
         scope = "unhealthy workloads" if only_unhealthy else "pods"
-        return {"result": f"no {scope} in any namespace"}
+        return {"result": f"no {scope} in {where}"}
 
     # Largest blast radius first, so what survives truncation is what matters.
     ordered = sorted(groups.items(), key=lambda kv: (-kv[1]["pods"], kv[0]))
