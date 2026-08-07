@@ -25,6 +25,7 @@ from routers.process_info import get_processes
 from routers.top_cpu import get_top_cpu_processes
 from routers.top_memory import get_top_memory_processes
 from routers.k8s_pods_info import (
+    scan_cluster,
     list_pods,
     describe_pod,
     get_pod_events,
@@ -148,6 +149,11 @@ def top_memory(limit: int = 5):
 
 
 # --- kubernetes -------------------------------------------------------------
+
+@app.get("/scan", dependencies=[Depends(require_token)], tags=["kubernetes"])
+def scan(only_unhealthy: bool = True, limit: int = 20):
+    return scan_cluster(only_unhealthy, limit)
+
 
 @app.get("/pods", dependencies=[Depends(require_token)], tags=["kubernetes"])
 def pods(namespace: str = "default", only_unhealthy: bool = False):

@@ -31,7 +31,7 @@ from kubernetes import client, config, watch
 import agent
 import observability
 import sinks
-from routers.k8s_pods_info import _pod_status
+from routers.k8s_pods_info import FAULT_CLASS, _pod_status, workload_of
 
 observability.configure()
 log = logging.getLogger("triage.controller")
@@ -48,43 +48,12 @@ WATCHED = {
     "Evicted",
 }
 
-# One fault shows up under several status names as a pod transitions, and
-# deduping on the raw status posts a message for each. A bad image reports
-# ErrImagePull then ImagePullBackOff; a crashing container alternates between
-# Error and CrashLoopBackOff forever. Dedup on the fault, not the symptom.
-FAULT_CLASS = {
-    "ErrImagePull": "image-pull",
-    "ImagePullBackOff": "image-pull",
-    # OOMKilled belongs here too: a pod killed for memory restarts and enters
-    # CrashLoopBackOff, so treating them separately posted the OOM diagnosis
-    # and then a near-identical crash diagnosis a minute later.
-    "CrashLoopBackOff": "crash",
-    "Error": "crash",
-    "OOMKilled": "crash",
-    "Evicted": "evicted",
-    "CreateContainerConfigError": "config",
-}
-
 NAMESPACES = [n for n in os.getenv("TRIAGE_NAMESPACES", "").split(",") if n]
 COOLDOWN = int(os.getenv("TRIAGE_COOLDOWN", "1800"))
 MAX_PER_HOUR = int(os.getenv("TRIAGE_MAX_PER_HOUR", "12"))
 # A pod already broken when the controller starts is usually a known problem.
 # Diagnosing every one of them on boot is the fastest way to get muted.
 SKIP_EXISTING = os.getenv("TRIAGE_SKIP_EXISTING", "true").lower() == "true"
-
-
-def workload_of(pod):
-    """
-    The owning workload, so ten crashing replicas produce one finding.
-
-    ReplicaSet names are the deployment name plus a hash suffix; trimming it
-    groups replicas of the same rollout together.
-    """
-    for ref in pod.metadata.owner_references or []:
-        if ref.kind == "ReplicaSet":
-            return ref.name.rsplit("-", 1)[0]
-        return ref.name
-    return None
 
 
 class Budget:

@@ -89,6 +89,221 @@ class TestPodStatus:
         assert k8s._pod_status(pod) == "Pending"
 
 
+def crashing(name, workload, namespace, reason="CrashLoopBackOff"):
+    return make_pod(
+        name=name,
+        namespace=namespace,
+        owner=workload,
+        statuses=[container_status(ready=False, waiting_reason=reason)],
+    )
+
+
+class TestActiveContext:
+    """
+    Which cluster a surface says it is reading.
+
+    Found live rather than reasoned about: the browser UI labelled itself
+    kind-loglens-cri while showing pods that exist only in kind-triage-demo,
+    because a second kind cluster was created in another shell -- which
+    rewrites current-context -- after the process had already built its client.
+    """
+
+    def test_does_not_follow_a_later_kubeconfig_change(self):
+        with patch.object(k8s, "_active_context", "kind-triage-demo"), patch.object(
+            k8s.config,
+            "list_kube_config_contexts",
+            return_value=([], {"name": "kind-something-else"}),
+        ):
+            assert k8s.active_context() == "kind-triage-demo"
+
+    def test_binds_lazily_when_nothing_is_loaded_yet(self):
+        def load():
+            k8s._active_context = "kind-triage-demo"
+
+        with patch.object(k8s, "_active_context", None), patch.object(
+            k8s, "_api", side_effect=load
+        ):
+            assert k8s.active_context() == "kind-triage-demo"
+
+    def test_a_broken_kubeconfig_is_reported_not_raised(self):
+        """
+        `kind delete cluster` strips current-context from the kubeconfig, and
+        the browser UI asks for the context before any tool runs -- so raising
+        here replaced the entire page with a traceback.
+        """
+        with patch.object(k8s, "_active_context", None), patch.object(
+            k8s, "_api", side_effect=Exception("Invalid kube-config file")
+        ):
+            assert k8s.active_context() == "unavailable"
+
+    def test_switching_context_drops_the_cached_clients(self):
+        """Otherwise the label moves and the connection does not."""
+        with patch.object(k8s, "_core_v1", "stale"), patch.object(
+            k8s, "_apps_v1", "stale"
+        ), patch.object(k8s, "_discovery_v1", "stale"), patch.object(
+            k8s, "_requested_context", None
+        ), patch.object(k8s, "_active_context", "old"):
+            k8s.use_context("kind-other")
+
+            assert k8s._core_v1 is None
+            assert k8s._apps_v1 is None
+            assert k8s._discovery_v1 is None
+            assert k8s._requested_context == "kind-other"
+
+    def test_lists_contexts_and_survives_no_kubeconfig(self):
+        with patch.object(
+            k8s.config,
+            "list_kube_config_contexts",
+            return_value=([{"name": "a"}, {"name": "b"}], {"name": "a"}),
+        ):
+            assert k8s.list_contexts() == ["a", "b"]
+
+        # In-cluster there is no kubeconfig; that is not an error.
+        with patch.object(
+            k8s.config, "list_kube_config_contexts", side_effect=Exception("no config")
+        ):
+            assert k8s.list_contexts() == []
+
+
+class TestScanCluster:
+    """
+    Cluster-wide scan. The risk here is size: this is the one tool whose input
+    grows with the whole cluster rather than one namespace, so grouping and
+    truncation are the properties worth pinning down.
+    """
+
+    def test_groups_replicas_into_one_workload(self, api):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[
+                crashing(f"payments-api-6f79bc6fcb-{i}", "payments-api-6f79bc6fcb", "prod")
+                for i in range(10)
+            ]
+        )
+        result = k8s.scan_cluster()
+
+        # Ten crashing replicas are one problem, not ten.
+        assert list(result) == ["prod/payments-api"]
+        assert result["prod/payments-api"]["pods"] == 10
+
+    def test_stays_small_on_a_wide_failure(self, api):
+        """Fifty broken pods must not cost fifty pods' worth of context."""
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[
+                crashing(f"web-{w}-abc123-{i}", f"web-{w}-abc123", f"ns-{w}")
+                for w in range(5)
+                for i in range(10)
+            ]
+        )
+        tokens = len(json.dumps(k8s.scan_cluster())) // 4
+        assert tokens < 150, f"projection grew to {tokens} tokens"
+
+    def test_names_an_example_pod_to_drill_into(self, api):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[crashing("web-abc123-xyz", "web-abc123", "prod")]
+        )
+        entry = k8s.scan_cluster()["prod/web"]
+
+        # Without a real pod name the model cannot follow up with describe_pod,
+        # which makes the whole scan a dead end.
+        assert entry["example"] == "web-abc123-xyz"
+        assert entry["status"] == "CrashLoopBackOff"
+        assert entry["fault"] == "crash"
+
+    def test_excludes_healthy_workloads_by_default(self, api, healthy_pod):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod, crashing("web-abc123-xyz", "web-abc123", "prod")]
+        )
+        assert list(k8s.scan_cluster()) == ["prod/web"]
+
+    def test_includes_healthy_when_asked(self, api, healthy_pod):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod]
+        )
+        result = k8s.scan_cluster(only_unhealthy=False)
+
+        assert result["demo/healthy"]["status"] == "Running"
+        # No fault class for a healthy pod: it would just repeat the status.
+        assert "fault" not in result["demo/healthy"]
+
+    def test_one_fault_not_two_across_a_transition(self, api):
+        """
+        A rollout pulling a bad image has replicas in ErrImagePull and
+        ImagePullBackOff at the same instant. That is one problem.
+        """
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[
+                crashing("web-abc123-1", "web-abc123", "prod", reason="ErrImagePull"),
+                crashing("web-abc123-2", "web-abc123", "prod", reason="ImagePullBackOff"),
+            ]
+        )
+        result = k8s.scan_cluster()
+
+        assert list(result) == ["prod/web"]
+        assert result["prod/web"]["pods"] == 2
+        assert result["prod/web"]["fault"] == "image-pull"
+
+    def test_distinct_faults_on_one_workload_are_both_kept(self, api):
+        """A crashing old ReplicaSet and an unpullable new one are two faults."""
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[
+                crashing("web-abc123-1", "web-abc123", "prod"),
+                crashing("web-def456-1", "web-def456", "prod", reason="ErrImagePull"),
+            ]
+        )
+        result = k8s.scan_cluster()
+
+        assert set(result) == {"prod/web:crash", "prod/web:image-pull"}
+
+    def test_truncates_worst_first(self, api):
+        items = [crashing("small-abc123-1", "small-abc123", "prod")]
+        items += [
+            crashing(f"big-abc123-{i}", "big-abc123", "prod") for i in range(5)
+        ]
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(items=items)
+        result = k8s.scan_cluster(limit=1)
+
+        # Blast radius decides what survives the cut.
+        assert "prod/big" in result
+        assert "prod/small" not in result
+        assert "1 more not shown" in result["_truncated"]
+
+    def test_ignores_terminating_pods(self, api):
+        pod = crashing("web-abc123-xyz", "web-abc123", "prod")
+        pod.metadata.deletion_timestamp = "2026-01-01T00:00:00Z"
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(items=[pod])
+
+        assert "result" in k8s.scan_cluster()
+
+    def test_reports_a_clean_cluster(self, api, healthy_pod):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod]
+        )
+        assert k8s.scan_cluster() == {
+            "result": "no unhealthy workloads in any namespace"
+        }
+
+    def test_returns_error_data_rather_than_raising(self, api):
+        api.list_pod_for_all_namespaces.side_effect = ApiException(
+            status=403, reason="Forbidden"
+        )
+        assert "error" in k8s.scan_cluster()
+
+    def test_falls_back_to_pod_name_without_an_owner(self, api):
+        """A bare pod has no workload; it must still be reported."""
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[
+                make_pod(
+                    name="standalone",
+                    namespace="prod",
+                    statuses=[
+                        container_status(ready=False, waiting_reason="CrashLoopBackOff")
+                    ],
+                )
+            ]
+        )
+        assert "prod/standalone" in k8s.scan_cluster()
+
+
 class TestListPods:
     def test_projects_expected_fields_only(self, api, pod_list):
         api.list_namespaced_pod.return_value = pod_list

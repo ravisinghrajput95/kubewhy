@@ -28,12 +28,91 @@ _core_v1 = None
 _apps_v1 = None
 _discovery_v1 = None
 
+# Recorded at load time, never re-read. See active_context().
+_active_context = None
+
+# Set by use_context() to override the kubeconfig's current-context.
+_requested_context = None
+
 
 def _load_config():
+    global _active_context
     try:
         config.load_incluster_config()
+        _active_context = "in-cluster"
     except config.ConfigException:
-        config.load_kube_config()
+        config.load_kube_config(context=_requested_context)
+        try:
+            _, active = config.list_kube_config_contexts()
+            _active_context = _requested_context or active["name"]
+        except Exception:
+            _active_context = _requested_context or "unknown"
+
+
+def list_contexts():
+    """
+    Every context in the kubeconfig, for callers that let you choose one.
+
+    Empty in-cluster, where there is no kubeconfig and no choice to make.
+    """
+    try:
+        contexts, _ = config.list_kube_config_contexts()
+        return [context["name"] for context in contexts]
+    except Exception:
+        return []
+
+
+def use_context(name):
+    """
+    Rebind every client to a named context.
+
+    Working against two clusters at once is normal -- one being fixed, one
+    being compared against -- and the alternative is restarting the process to
+    look at the other. Dropping the cached clients is the whole job: they are
+    built once and would otherwise keep talking to the previous cluster.
+
+    Process-wide, deliberately: these clients are module state. That is fine
+    for a loopback single-user tool and wrong for a shared one, so if this ever
+    grows concurrent users the clients have to move into the session.
+    """
+    global _core_v1, _apps_v1, _discovery_v1, _requested_context, _active_context
+
+    _requested_context = name
+    _core_v1 = _apps_v1 = _discovery_v1 = None
+    _active_context = None
+
+
+def active_context():
+    """
+    Which cluster the API client is actually talking to.
+
+    Deliberately not "whatever current-context says now". The client is built
+    once and cached for the process, so a kubeconfig rewritten afterwards
+    moves the file without moving the client -- and `kind create cluster`
+    rewrites current-context as a side effect.
+
+    This is not cosmetic. It was observed: the browser UI labelled itself
+    kind-loglens-cri while displaying pods that exist only in kind-triage-demo,
+    because a second kind cluster had been created in another shell after the
+    process started. A surface that names the wrong cluster is worse than one
+    that names none, and SECURITY.md tells people to check this before
+    trusting what they see.
+    """
+    if _active_context is None:
+        # Nothing bound yet: force the lazy load so there is a real answer
+        # rather than a guess.
+        try:
+            _api()
+        except Exception:
+            # Errors are data everywhere else in this module, and a caller
+            # asking which cluster it is on must not be the one thing that
+            # raises -- the browser UI asks before any tool runs, so raising
+            # here replaces the whole page with a traceback.
+            #
+            # Not hypothetical: `kind delete cluster` removes current-context
+            # from the kubeconfig entirely, and the next render died on it.
+            return "unavailable"
+    return _active_context or "unavailable"
 
 
 def _api():
@@ -69,6 +148,27 @@ def _handle(exc):
     return {"error": f"cluster unreachable: {type(exc).__name__}: {exc}"}
 
 
+# One fault surfaces under several status names as a pod transitions, so
+# anything grouping or deduping findings has to work on the fault rather than
+# the symptom: a bad image reports ErrImagePull then ImagePullBackOff, and a
+# pod killed for memory restarts into CrashLoopBackOff. Lives here rather than
+# in controller.py because scan_cluster and the controller must agree on what
+# counts as the same problem.
+FAULT_CLASS = {
+    "ErrImagePull": "image-pull",
+    "ImagePullBackOff": "image-pull",
+    "CrashLoopBackOff": "crash",
+    "Error": "crash",
+    # OOMKilled belongs with the crashes: a pod killed for memory restarts and
+    # enters CrashLoopBackOff, so treating them separately made the controller
+    # post the OOM diagnosis and then a near-identical crash diagnosis a minute
+    # later.
+    "OOMKilled": "crash",
+    "Evicted": "evicted",
+    "CreateContainerConfigError": "config",
+}
+
+
 def _pod_status(pod):
     """
     The status a human would recognise, matching what kubectl displays.
@@ -84,6 +184,28 @@ def _pod_status(pod):
         if state.terminated and state.terminated.reason:
             return state.terminated.reason
     return pod.status.phase or "Unknown"
+
+
+def _is_healthy(pod):
+    """Running with every container ready -- the bar list_pods uses."""
+    statuses = pod.status.container_statuses or []
+    return bool(statuses) and _pod_status(pod) == "Running" and all(
+        cs.ready for cs in statuses
+    )
+
+
+def workload_of(pod):
+    """
+    The owning workload, so ten crashing replicas count as one problem.
+
+    ReplicaSet names are the deployment name plus a hash suffix; trimming it
+    groups replicas of the same rollout together.
+    """
+    for ref in pod.metadata.owner_references or []:
+        if ref.kind == "ReplicaSet":
+            return ref.name.rsplit("-", 1)[0]
+        return ref.name
+    return None
 
 
 def list_pods(namespace: str = "default", only_unhealthy: bool = False):
@@ -109,8 +231,7 @@ def list_pods(namespace: str = "default", only_unhealthy: bool = False):
         restarts = sum(cs.restart_count for cs in statuses)
         status = _pod_status(pod)
 
-        healthy = status == "Running" and ready == len(statuses) and statuses
-        if only_unhealthy and healthy:
+        if only_unhealthy and _is_healthy(pod):
             continue
 
         result[pod.metadata.name] = {
@@ -122,6 +243,90 @@ def list_pods(namespace: str = "default", only_unhealthy: bool = False):
 
     if not result:
         return {"result": f"no matching pods in namespace {namespace}"}
+    return result
+
+
+def scan_cluster(only_unhealthy: bool = True, limit: int = 20):
+    """
+    Scans every namespace at once and reports failing workloads.
+
+    This is the tool for a question about the cluster as a whole -- "is
+    anything broken?", "what is failing right now?" -- where no namespace was
+    named. Once you know which namespace to look in, use list_pods instead.
+
+    Results are grouped by owning workload rather than by pod, so a deployment
+    with ten crashing replicas is one entry, not ten. Each entry names one
+    example pod: pass that to describe_pod, get_pod_events or get_pod_logs.
+    This tool tells you where to look and never why -- the cause always needs
+    a follow-up call on the example pod.
+    Args: only_unhealthy -- when true, the default, omit workloads whose pods
+    are all Running and Ready; limit -- how many workloads to return, largest
+    blast radius first, default 20.
+    """
+    try:
+        pods = _api().list_pod_for_all_namespaces(_request_timeout=TIMEOUT)
+    except Exception as exc:
+        return _handle(exc)
+
+    groups = {}
+    for pod in pods.items:
+        # A pod that is already terminating is not a fault to report; on a
+        # busy cluster these are the majority of the non-Running pods.
+        if pod.metadata.deletion_timestamp:
+            continue
+
+        healthy = _is_healthy(pod)
+        if only_unhealthy and healthy:
+            continue
+
+        status = _pod_status(pod)
+        namespace = pod.metadata.namespace
+        workload = workload_of(pod) or pod.metadata.name
+        fault = FAULT_CLASS.get(status, status)
+
+        # Fault rather than status in the key: a rollout part-way through has
+        # replicas reporting ErrImagePull and ImagePullBackOff at the same
+        # instant, and splitting those would report one problem twice.
+        entry = groups.setdefault(
+            (namespace, workload, fault),
+            {"status": status, "pods": 0, "example": pod.metadata.name},
+        )
+        entry["pods"] += 1
+        if status in FAULT_CLASS:
+            # Only when it adds something: for Pending or Running the fault
+            # class is just the status again, and the model pays for the
+            # repetition in context.
+            entry["fault"] = fault
+
+    if not groups:
+        scope = "unhealthy workloads" if only_unhealthy else "pods"
+        return {"result": f"no {scope} in any namespace"}
+
+    # Largest blast radius first, so what survives truncation is what matters.
+    ordered = sorted(groups.items(), key=lambda kv: (-kv[1]["pods"], kv[0]))
+    shown, omitted = ordered[: max(limit, 1)], ordered[max(limit, 1) :]
+
+    # A workload can carry two distinct faults at once -- a bad rollout leaves
+    # the new ReplicaSet ImagePullBackOff while the old one still crashes --
+    # and an unqualified key would drop one of them silently.
+    seen = {}
+    for (namespace, workload, _), _entry in shown:
+        seen[(namespace, workload)] = seen.get((namespace, workload), 0) + 1
+
+    result = {}
+    for (namespace, workload, fault), entry in shown:
+        key = f"{namespace}/{workload}"
+        if seen[(namespace, workload)] > 1:
+            key = f"{key}:{fault}"
+        result[key] = entry
+
+    if omitted:
+        namespaces = {namespace for (namespace, _, _), _ in omitted}
+        result["_truncated"] = (
+            f"{len(omitted)} more not shown, across {len(namespaces)} "
+            f"namespace(s); raise limit, or use list_pods on one namespace"
+        )
+
     return result
 
 

@@ -71,7 +71,7 @@ class TestAuth:
         """A new endpoint added without the dependency would leak silently."""
         paths = [
             "/platform", "/system", "/processes", "/cpu", "/memory",
-            "/pods", "/pods/x", "/pods/x/events", "/pods/x/logs",
+            "/scan", "/pods", "/pods/x", "/pods/x/events", "/pods/x/logs",
             "/nodes", "/deployments", "/services/x/endpoints",
         ]
         unguarded = [p for p in paths if secured_client.get(p).status_code != 401]
@@ -80,6 +80,21 @@ class TestAuth:
     def test_ask_is_guarded(self, secured_client):
         response = secured_client.post("/ask", json={"question": "hi"})
         assert response.status_code == 401
+
+
+class TestScan:
+    def test_passes_query_parameters_through(self, open_client):
+        with patch.object(app_module, "scan_cluster", return_value={}) as scan:
+            open_client.get("/scan?only_unhealthy=false&limit=5")
+
+        scan.assert_called_once_with(False, 5)
+
+    def test_defaults_to_unhealthy_only(self, open_client):
+        """Cluster-wide including healthy workloads is the expensive call."""
+        with patch.object(app_module, "scan_cluster", return_value={}) as scan:
+            open_client.get("/scan")
+
+        scan.assert_called_once_with(True, 20)
 
 
 class TestRequestLogging:

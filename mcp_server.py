@@ -16,7 +16,7 @@ Register with a stdio client by pointing it at this file:
 
     {
       "mcpServers": {
-        "local-triage": {
+        "local-triage-agent": {
           "command": "/path/to/.venv/bin/python",
           "args": ["/path/to/mcp_server.py"]
         }
@@ -38,6 +38,7 @@ from routers.k8s_pods_info import (
     list_deployments,
     list_nodes,
     list_pods,
+    scan_cluster,
 )
 from routers.platform_info import get_platform_info
 from routers.process_info import get_processes
@@ -52,6 +53,9 @@ mcp = FastMCP(
     "local-triage-agent",
     instructions=(
         "Read-only diagnostics for a Kubernetes cluster and the local host.\n\n"
+        "For a question about the cluster as a whole with no namespace named, "
+        "start with scan_cluster: it reports failing workloads across every "
+        "namespace and names one example pod each to drill into.\n\n"
         "To diagnose a failing pod, work down the chain: list_pods to find "
         "what is unhealthy, then describe_pod for the termination reason and "
         "resource limits, then get_pod_events or get_pod_logs for the "
@@ -70,6 +74,7 @@ mcp = FastMCP(
 # the local agent and the FastAPI app can use unchanged. Docstrings become the
 # MCP tool descriptions exactly as they become ollama tool descriptions.
 for _tool in (
+    scan_cluster,
     list_pods,
     describe_pod,
     get_pod_events,

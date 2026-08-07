@@ -48,6 +48,21 @@ binding, set a token first.
 **Check your context before asking.** The agent uses whatever
 `kubectl config current-context` points at.
 
+**`--scan` reads every namespace.** The ClusterRole always permitted this, but
+until now nothing exercised it in one command: a scan lists pods across the
+whole cluster, including namespaces you did not have in mind.
+
+It never reads logs — those need a second, pod-specific call. It does fetch
+full pod objects from the API server, specs included, because no field
+selector can identify a failing pod server-side; what it *returns* is only
+workload names, statuses and counts, and nothing else is retained or printed.
+So a scan does not surface the material in the table above, but it does
+transfer pod specs over your network.
+
+On a shared or multi-tenant cluster, scope the credential with a namespaced
+Role instead of the ClusterRole. Verified: the scan then fails closed with
+`kubernetes API error 403` while the namespace-scoped tools keep working.
+
 ## Secret redaction, and its limits
 
 `redaction.py` strips recognisable secrets from pod logs and event messages

@@ -54,12 +54,27 @@ def make_pod(
     statuses=None,
     limits=None,
     requests=None,
+    namespace="demo",
+    owner=None,
 ):
     resources = client.V1ResourceRequirements(
         limits=limits or {}, requests=requests or {}
     )
+    metadata = client.V1ObjectMeta(name=name, namespace=namespace)
+    if owner:
+        # A real ReplicaSet reference: workload grouping trims the hash suffix
+        # off this name, so tests that skip it would not exercise the grouping.
+        metadata.owner_references = [
+            client.V1OwnerReference(
+                api_version="apps/v1",
+                kind="ReplicaSet",
+                name=owner,
+                uid=f"uid-{owner}",
+                controller=True,
+            )
+        ]
     return client.V1Pod(
-        metadata=client.V1ObjectMeta(name=name, namespace="demo"),
+        metadata=metadata,
         spec=client.V1PodSpec(
             node_name=node,
             containers=[

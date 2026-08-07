@@ -32,6 +32,33 @@ jobs:
         # and no model are needed here.
         run: pytest
 
+  ui:
+    # Separate job on one version, because the UI extra pulls numpy, pandas,
+    # pyarrow and friends. Installing that in the matrix above would make every
+    # run pay for it, which is exactly what requirements-ui.txt exists to
+    # avoid. Without this job the UI tests skip everywhere and test nothing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-ui.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-ui.txt
+          pip install pytest
+
+      - name: Run UI tests
+        # Fails rather than skips if streamlit is somehow absent, since a
+        # silently skipped suite is the failure this job exists to prevent.
+        run: |
+          python -c "import streamlit"
+          pytest tests/test_ui.py
+
   docker:
     runs-on: ubuntu-latest
     steps:

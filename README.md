@@ -5,10 +5,14 @@
 [![python](https://img.shields.io/badge/python-3.11%20--%203.13-blue.svg)](requirements.txt)
 [![MCP](https://img.shields.io/badge/MCP-server-8A2BE2.svg)](#use-it-from-claude-cursor-or-any-mcp-client)
 
-**Air-gapped Kubernetes triage.** Ask why a pod is broken and get the root
-cause — read from real logs, events and resource limits by a model running on
-your own hardware. No cloud API, no API key, no cluster data leaving your
-network.
+**Air-gapped Kubernetes root-cause analysis.** Everything tells you *what* is
+broken. `local-triage-agent` tells you **why** — reading the real logs, events and
+resource limits behind a failure with a model running on your own hardware. No
+cloud API, no API key, no cluster data leaving your network.
+
+Five surfaces on one set of read-only tools: a CLI, a cluster-wide scan, a REST
+API, an MCP server, a browser UI, and a controller that diagnoses failures
+without being asked.
 
 ![demo](docs/demo.gif)
 
@@ -30,6 +34,41 @@ cannot connect to db:5432, which is refused.
 
 [grounded] every figure traced to a tool result
 ```
+
+## When you don't know where to look
+
+Asking about a namespace assumes you know which one. `--scan` doesn't: it
+finds failing workloads across every namespace in a single API call, with no
+model involved, so it returns in well under a second.
+
+```
+$ python agent.py --scan
+staging/payments-api  ImagePullBackOff     3 pod(s)
+staging/orders        Error                2 pod(s)
+demo/bad-image        ImagePullBackOff     1 pod(s)
+demo/crasher          Error                1 pod(s)
+demo/memory-hog       OOMKilled            1 pod(s)
+```
+
+Findings are grouped by owning workload, so three crashing replicas are one
+line. They are also grouped by *fault* rather than status name: `payments-api`
+above had two pods in `ErrImagePull` and one in `ImagePullBackOff` at the same
+instant, which is one problem, not two.
+
+The scan tells you **where**, never **why** — each entry carries an example pod
+to drill into, and `--explain N` spends a full diagnosis on the worst N:
+
+```bash
+python agent.py --scan --explain 2
+```
+
+That split is deliberate. The listing is cheap and complete; the explanation
+costs tens of seconds each, so it is bounded rather than applied to everything.
+
+Measured on a 19-pod kind cluster: **146 tokens against 33,042 raw**. That raw
+figure is 83% of qwen3's entire 40k window spent on one call, before the model
+has reasoned about anything — and at ~1,739 tokens per pod, a 24-pod cluster
+exceeds the window outright.
 
 ## Or don't ask at all
 
@@ -86,11 +125,11 @@ This is different in three ways that matter if they matter to you:
 | Inference | Always local | Cloud by default |
 | Method | Chains tools to a root cause | Analyzers + one LLM pass |
 | Output | Reports confidence, flags unverified claims | Prose |
-| Coverage | One namespace at a time | Cluster-wide |
+| Coverage | Cluster-wide scan, then drills into one fault | Cluster-wide |
 | Maturity | Early | Production, large community |
 
-If you need cluster-wide scanning and integrations, use k8sgpt. If you cannot
-send cluster state to a third party, or you want to see and verify the
+If you need k8sgpt's analyzer coverage and integrations, use k8sgpt. If you
+cannot send cluster state to a third party, or you want to see and verify the
 reasoning, this exists for that.
 
 ## Quick start
@@ -144,6 +183,8 @@ The model has a fixed context budget, and everything follows from that:
 | --- | --- |
 | Raw `list_namespaced_pod`, 5 pods | ~7,560 |
 | `list_pods(only_unhealthy=True)` | ~91 |
+| Raw `list_pod_for_all_namespaces`, 19 pods | ~33,042 |
+| `scan_cluster()`, same cluster | ~146 |
 
 At ~1,500 tokens per raw pod, a 50-pod namespace would exceed qwen3's entire
 40k window in one call. Every tool returns only the fields a diagnosis needs,
@@ -164,7 +205,7 @@ python mcp_server.py --http     # streamable HTTP on :8765
 ```json
 {
   "mcpServers": {
-    "local-triage": {
+    "local-triage-agent": {
       "command": "/path/to/.venv/bin/python",
       "args": ["/path/to/mcp_server.py"]
     }
@@ -172,8 +213,37 @@ python mcp_server.py --http     # streamable HTTP on :8765
 }
 ```
 
-All 12 tools are exposed with schemas derived from their signatures. The
+All 13 tools are exposed with schemas derived from their signatures. The
 read-only guarantee and log redaction apply identically here.
+
+## Browser UI
+
+```bash
+pip install -r requirements-ui.txt
+streamlit run ui.py
+```
+
+The scan as a table, drill-down into any workload's detail, events and logs,
+and an ask panel that renders the tool chain **as it runs** rather than after —
+which matters when a diagnosis takes a minute. Every panel names the tool
+behind it, so the UI shows its working the same way the CLI does.
+
+Kept out of `requirements.txt` on purpose: Streamlit pulls numpy, pandas,
+pyarrow and friends — 13 packages against this tool's five — into a process
+holding cluster credentials. The agent, API, MCP server and controller should
+not pay for that.
+
+Two Streamlit defaults are overridden in `.streamlit/config.toml`, because both
+are wrong here: it otherwise **reports usage to streamlit.io** (this project's
+whole claim is that nothing leaves your network) and **binds every interface
+with no authentication** while rendering cluster state and pod logs. It is
+pinned to loopback. Don't put it behind a Service — unlike the API, it has no
+token to set.
+
+If you work against more than one cluster, the sidebar switches context and
+reports the one the client is actually **bound** to, which is not always what
+`current-context` says: creating a cluster in another shell rewrites that file
+without moving this process's connection.
 
 ## Deploying the controller
 
@@ -221,7 +291,29 @@ not enough if your cloud identity was never mapped to a Kubernetes subject.
 | --- | --- | --- |
 | **EKS** | `aws` CLI | Map the IAM principal via EKS access entries or the `aws-auth` ConfigMap |
 | **GKE** | `gke-gcloud-auth-plugin` | Bootstrap yourself as admin before you can create ClusterRoles: `kubectl create clusterrolebinding me --clusterrole=cluster-admin --user=$(gcloud config get-value account)` |
-| **AKS** | `kubelogin` (AAD clusters) | Bind the AAD group or object ID, not the username |
+| **AKS** | `kubelogin` (AAD clusters) — see below, the name is ambiguous | Bind the AAD group or object ID, not the username |
+
+**Install the right `kubelogin`.** Two unrelated tools share the name, and the
+obvious command installs the wrong one:
+
+```bash
+brew install Azure/kubelogin/kubelogin     # correct: Azure AD plugin
+brew install kubelogin                     # WRONG: int128's generic OIDC plugin
+```
+
+Homebrew's plain `kubelogin` formula is
+[int128/kubelogin](https://github.com/int128/kubelogin), a generic OIDC plugin
+for kubectl that cannot authenticate an AAD cluster. The one AKS needs is
+[Azure/kubelogin](https://github.com/Azure/kubelogin), which lives in its own
+tap. `az aks install-cli` also installs the correct one. Check what you got:
+
+```bash
+kubelogin --help | head -1     # Azure's says "azure active directory"
+```
+
+Azure's supports `--login azurecli`, which reuses an existing `az login`
+session instead of prompting for a device code — worth knowing if you are
+scripting this or running it somewhere without a browser.
 
 Check what you are pointed at before running anything:
 
@@ -237,6 +329,11 @@ Works today, with three things to set:
 - **`watch.namespaces`** — the default watches everything, and on a production
   cluster every pod event in the cluster is streamed to your machine.
 - **`K8S_TIMEOUT`** — 15s is generous on localhost and tight over a VPN.
+- **`--scan` pulls every pod object over the wire** — ~7KB each, so roughly
+  7MB on a 1,000-pod cluster, every scan. It returns 146 tokens, but it does
+  not *transfer* 146 tokens. No field selector can narrow it: a
+  CrashLoopBackOff pod has `phase: Running`, so the interesting pods are
+  indistinguishable server-side.
 - **`rbac.allowPodLogs=false`** if production logs must not reach your
   terminal. Redaction is pattern matching, not a guarantee.
 
@@ -286,7 +383,12 @@ get pods            -> yes      delete pods        -> no
 get pods/log        -> yes      create pods        -> no
 list endpointslices -> yes      patch deployments  -> no
 list deployments    -> yes      get secrets        -> no
+list pods (all ns)  -> yes      watch pods         -> yes
 ```
+
+The cluster-wide scan needs no additional grant: `list pods` at cluster scope
+is already covered. Verified by running `--scan` under a token minted for the
+`triage-agent` ServiceAccount, not by reading the YAML.
 
 **Authenticate the API.** Set `TRIAGE_API_TOKEN` and every endpoint requires
 `Authorization: Bearer <token>`. Unset, the API is open — acceptable only on
@@ -376,6 +478,13 @@ and it has two real limits:
   fabricated figure colliding with one reads as grounded. CI caught exactly
   this: the fabricated *"18 days"* test case passed on a runner whose boot
   timestamp was 18:12.
+- **Claims are not tied to what they are about**, and the cluster-wide scan
+  makes that worse. Every tool result is checked as one blob, so a status
+  measured for one workload supports the same status claimed about another.
+  Seen on a live cluster: the model attributed `ErrImagePull` to a workload
+  the scan reported as `ImagePullBackOff`, and it passed as `grounded` because
+  a *different* workload in the same result was in `ErrImagePull`. The wider
+  the tool result, the weaker this check gets.
 
 So `partial` is the stronger signal. It reliably means something was not
 measured; `grounded` only means nothing contradicted the answer. Treat it as a
@@ -399,6 +508,7 @@ Kubernetes endpoints take `?namespace=` (default `default`).
 | --- | --- |
 | `GET /healthz` | Liveness. No dependencies. |
 | `GET /readyz` | Readiness. Checks the model backend. |
+| `GET /scan` | Failing workloads across every namespace, grouped. `?only_unhealthy=` `?limit=` |
 | `GET /pods` | Status, ready, restarts, node. `?only_unhealthy=true` |
 | `GET /pods/{name}` | Images, requests/limits, last termination reason and exit code |
 | `GET /pods/{name}/events` | Recent Warning events |
@@ -471,9 +581,10 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
 
 ## Limitations
 
-- **One namespace at a time** for interactive questions. The controller
-  watches all namespaces, but there is still no cluster-wide *scan* command;
-  that is the biggest functional gap against k8sgpt.
+- **The scan reports where, never why.** `--scan` finds failing workloads
+  across every namespace in one API call, but the cause of any one of them
+  still costs a full diagnosis — so `--explain` is bounded to a few workloads
+  rather than the whole list.
 - **The controller holds dedup state in memory**, so a restart forgets what it
   already reported and it cannot be run with more than one replica.
 - **Untested on managed clusters.** Everything here was exercised against
