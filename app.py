@@ -6,6 +6,7 @@ process table, cluster state, pod logs. Bind to localhost, and set
 TRIAGE_API_TOKEN before exposing it anywhere else.
 """
 
+import json
 import logging
 import os
 import secrets
@@ -15,10 +16,11 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import observability
-from agent import ask
+from agent import ask, stream
 from routers.platform_info import get_platform_info
 from routers.system_info import get_system_info
 from routers.process_info import get_processes
@@ -207,6 +209,46 @@ def ask_agent(body: Question):
 
     Note this blocks for as long as the model takes -- tens of seconds is
     normal, and a deep chain can exceed a minute. Set generous client
-    timeouts; see the README for why this is not yet async.
+    timeouts, or use /ask/stream to see progress while it works.
     """
     return ask(body.question)
+
+
+@app.post("/ask/stream", dependencies=[Depends(require_token)], tags=["agent"])
+def ask_agent_streaming(body: Question):
+    """
+    The same answer, delivered as server-sent events while it is produced.
+
+    Emits one `tool_call` event as each tool is dispatched, one `tool_result`
+    when it returns, and a final `answer` event carrying the same body /ask
+    would have returned. A client that only wants the answer can skip to the
+    last event and be exactly where /ask leaves it.
+
+    This fixes the silence, not the blocking. The connection is still held for
+    the whole run -- what changes is that the caller sees the chain advancing
+    instead of a dead socket, which is what made a two-minute /ask
+    indistinguishable from a hang. Truly detaching the work needs a job store,
+    and a job store shared across replicas is the same unsolved problem as the
+    controller's in-memory dedup state.
+    """
+
+    def events():
+        try:
+            for event in stream(body.question):
+                # SSE frames the type separately so a client can dispatch on it
+                # without parsing the payload first.
+                payload = json.dumps({k: v for k, v in event.items() if k != "type"})
+                yield f"event: {event['type']}\ndata: {payload}\n\n"
+        except Exception as exc:
+            # The stream has already begun, so the status line is long gone --
+            # a failure has to arrive as an event or the client just sees the
+            # connection end and cannot tell success from collapse.
+            detail = json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+            yield f"event: error\ndata: {detail}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        # Proxies that buffer would defeat the entire point.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

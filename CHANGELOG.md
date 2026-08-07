@@ -6,6 +6,15 @@ signatures and response shapes may still change.
 
 ## [Unreleased]
 
+### Added
+
+- **`POST /ask/stream`** — the agent loop as server-sent events, one per tool
+  call and result, ending with the same body `/ask` returns. Fixes the silence
+  during a long diagnosis, not the blocking: the connection is still held for
+  the whole run, and detaching the work needs a job store that survives more
+  than one replica — the same unsolved problem as the controller's in-memory
+  dedup state.
+
 ## [0.1.2] — 2026-08-07
 
 The rename release. Republishes the image and chart under the new name — v0.1.1

@@ -518,6 +518,7 @@ Kubernetes endpoints take `?namespace=` (default `default`).
 | `GET /services/{name}/endpoints` | Selector, ports, ready/not-ready backing pods |
 | `GET /platform` `/system` `/processes` `/cpu` `/memory` | Host stats |
 | `POST /ask` | Natural-language question → answer, trace, confidence |
+| `POST /ask/stream` | The same, as server-sent events: one per tool call and result, then the answer |
 
 ```bash
 curl -X POST http://127.0.0.1:8000/ask \
@@ -534,6 +535,34 @@ curl -X POST http://127.0.0.1:8000/ask \
   "unverified": []
 }
 ```
+
+**`POST /ask/stream` shows its working while it works.** Same answer, delivered
+as server-sent events — a `tool_call` as each tool is dispatched, a
+`tool_result` when it returns, and a final `answer` identical to what `/ask`
+would have returned, so a client that reads only the last event loses nothing.
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/ask/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "why is memory-hog failing in demo?"}'
+```
+
+```
+event: tool_call
+data: {"name": "list_pods", "arguments": {"namespace": "demo"}}
+
+event: tool_result
+data: {"name": "list_pods", "result": "...", "duration_ms": 10.4}
+
+event: answer
+data: {"answer": "...", "confidence": "grounded", "unverified": []}
+```
+
+This fixes the silence, not the blocking — the connection is still held open
+for the whole run. What changes is that a two-minute diagnosis no longer looks
+identical to a hang. Detaching the work properly needs a job store, and a job
+store that survives more than one replica is the same unsolved problem as the
+controller's in-memory dedup state.
 
 **`POST /ask` blocks for as long as the model takes** — tens of seconds is
 normal, and a deep chain can exceed two minutes. Set generous client timeouts.
@@ -592,7 +621,8 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
   against a real cluster.
 - **Latency.** Tens of seconds per diagnosis. `kubectl describe` is faster
   when you already know where to look.
-- **`/ask` is synchronous** and holds a request open for the whole run.
+- **`/ask` still holds a request open** for the whole run. `/ask/stream` makes
+  the wait legible but does not detach the work; there is no job API.
 - **Answers vary between runs.** The same question can produce a different
   chain. The `confidence` field and `tool_calls` trace tell you which
   measurements an answer actually rests on.
