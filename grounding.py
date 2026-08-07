@@ -20,22 +20,27 @@ reported as grounded. This is not hypothetical: CI caught the fabricated
 "18" appeared in the measured text. Matching numbers to the units and context
 they were stated in would fix it and is not implemented.
 
-Known weakness -- claims are not tied to the thing they are about. Every tool
-result is flattened into one blob and each claim is checked against all of it,
-so a status measured for workload A supports the same status claimed about
-workload B. scan_cluster made this materially worse: one call now returns the
-statuses of every failing workload in the cluster, so nearly any status name
-the model uses appears somewhere in the measured text and passes. Verified on
-a live cluster -- an answer attributing ErrImagePull to a workload measured as
-ImagePullBackOff came back `grounded`, because a different workload in the same
-result was in ErrImagePull. Fixing this needs claims scoped to the entity they
-name, which is not implemented.
+Claims are scoped to the entity they name. A sentence about one workload is
+checked against the measurements for *that* workload, not against every
+measurement taken -- otherwise a status measured for workload A supports the
+same status asserted about workload B, and scan_cluster made that far worse by
+returning every failing workload in one result. Verified on a live cluster: an
+answer attributing ErrImagePull to a workload measured as ImagePullBackOff
+passed as grounded, because a different workload in the same result was in
+ErrImagePull.
+
+Two deliberate looseneses remain in that scoping, both erring toward silence
+rather than false alarms. A clause naming nothing recognisable is checked
+against everything, because scoping a summary sentence to nothing would flag
+every one of them. And entity matching is substring, so a short name inside a
+longer one widens the scope. Both can cause a miss; neither invents one.
 
 The practical consequence is that a `grounded` verdict is weaker evidence than
 a `partial` one. `partial` reliably means something was not measured;
 `grounded` means nothing contradicted the answer.
 """
 
+import json
 import re
 
 # Status words worth checking. A model that reports OOMKilled when no tool
@@ -93,13 +98,113 @@ def _claim_text(answer):
     measurement stated after a recommendation begins is lost, which is the
     rarer order and the price of not crying wolf on ordinary advice.
     """
+    return "\n".join(_claims(answer))
+
+
+def _claims(answer):
+    """
+    The reporting clauses of an answer, in order. See _claim_text.
+
+    List markers go before the split, not after: "1. first uses 19.66%" splits
+    on the "." into a bare "1." that no longer looks like enumeration, and the
+    numbering gets reported as an unmeasured figure.
+    """
     keep = []
     for line in answer.splitlines():
+        line = _ORDINAL.sub(" ", line)
         for clause in re.split(r"(?<=[.;:!?])\s+", line):
             if _PRESCRIPTIVE.search(clause):
                 break
             keep.append(clause)
-    return "\n".join(keep)
+    return keep
+
+
+# Keys whose value names the subject of a whole tool result: describe_pod
+# returns {"pod": "memory-hog-x", ...}, and everything in that document is
+# about that pod.
+_SUBJECT_KEYS = ("pod", "service", "node", "deployment", "workload")
+
+
+def _entity_index(tool_outputs):
+    """
+    Map each thing a tool described to the text describing *it*.
+
+    Two shapes cover every collector here. A document that names its subject
+    (describe_pod, get_pod_logs, get_service_endpoints) belongs wholly to that
+    subject. A document that is a mapping of name to detail (list_pods,
+    scan_cluster, list_nodes, list_deployments) contributes one entry per key.
+
+    scan_cluster keys look like "namespace/workload", so the trailing segment
+    is registered too -- an answer usually says "bad-image", not
+    "demo/bad-image".
+    """
+    index = {}
+
+    def add(name, text):
+        name = str(name).strip().lower()
+        if not name:
+            return
+        index.setdefault(name, []).append(text)
+
+        # Answers name the workload ("bad-image"), while the measurement is
+        # filed under the pod ("bad-image-647c5576d5-pxmvr"). Register the
+        # ReplicaSet-trimmed prefix as an alias, the same trimming
+        # workload_of() does, or scoping invents failures: a restart count read
+        # by describe_pod would not be in scope for a sentence about the
+        # workload that owns it.
+        parts = name.split("-")
+        if len(parts) >= 3:
+            index.setdefault("-".join(parts[:-2]), []).append(text)
+
+    for output in tool_outputs:
+        try:
+            data = json.loads(output)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        subject = next(
+            (data[key] for key in _SUBJECT_KEYS if isinstance(data.get(key), str)),
+            None,
+        )
+        if subject:
+            add(subject, output)
+            continue
+
+        for key, value in data.items():
+            if not isinstance(value, dict) or str(key).startswith("_"):
+                continue
+            if key in ("result", "error"):
+                continue
+            fragment = json.dumps({key: value})
+            add(key, fragment)
+            if "/" in str(key):
+                add(str(key).rsplit("/", 1)[-1], fragment)
+
+    return index
+
+
+def _scope(clause, index, everything):
+    """
+    The measurements that can support this clause.
+
+    Narrowed to the entities the clause actually names, which is the whole
+    point: a status measured for one workload must not validate the same
+    status asserted about a different one. A clause naming nothing recognisable
+    falls back to every measurement, because scoping it to nothing would flag
+    every summary sentence.
+
+    Matching is substring, so a short name inside a longer one ("web" within
+    "healthy-web") pulls in an extra entity. That widens the scope, which can
+    only cause a miss, never a false alarm -- the safe direction for a check
+    people are meant to trust.
+    """
+    lowered = clause.lower()
+    hits = [
+        text for name, texts in index.items() if name in lowered for text in texts
+    ]
+    return " ".join(hits) if hits else everything
 
 
 def _numbers(text, strip_ordinals=False):
@@ -147,21 +252,34 @@ def check(answer, tool_outputs):
         }
 
     measured_text = " ".join(tool_outputs)
-    measured_numbers = _numbers(measured_text)
-    measured_lower = measured_text.lower()
+    index = _entity_index(tool_outputs)
 
-    unverified = [
-        _format(claim)
-        for claim in sorted(_numbers(_claim_text(answer), strip_ordinals=True))
-        if not _matches(claim, measured_numbers)
-    ]
+    unverified = []
 
-    # Status names are checked as plain substrings; the model may style them
-    # as **OOMKilled** or `OOMKilled`, so compare against a lowered answer.
-    answer_lower = answer.lower()
-    for status in KNOWN_STATUSES:
-        if status in answer_lower and status not in measured_lower:
-            unverified.append(status)
+    def flag(item):
+        # One mention is enough; repeating a claim should not repeat the alarm.
+        if item not in unverified:
+            unverified.append(item)
+
+    for clause in _claims(answer):
+        # Each clause is checked against the measurements for the entity it
+        # names, not against every measurement taken. Otherwise a status
+        # measured for one workload silently supports the same status claimed
+        # about another -- and the wider the tool result, the more it covers.
+        scope = _scope(clause, index, measured_text)
+        scope_numbers = _numbers(scope)
+        scope_lower = scope.lower()
+
+        for claim in sorted(_numbers(clause, strip_ordinals=True)):
+            if not _matches(claim, scope_numbers):
+                flag(_format(claim))
+
+        # Status names are checked as plain substrings; the model may style
+        # them as **OOMKilled** or `OOMKilled`, so compare lowered.
+        lowered = clause.lower()
+        for status in KNOWN_STATUSES:
+            if status in lowered and status not in scope_lower:
+                flag(status)
 
     return {
         "confidence": "partial" if unverified else "grounded",

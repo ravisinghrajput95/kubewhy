@@ -176,6 +176,21 @@ def _pod_status(pod):
     A pod stuck in CrashLoopBackOff reports phase "Running", so the container
     waiting/terminated reason is the more truthful signal when present.
     """
+    # Init containers first, the way kubectl does it. A pod whose init
+    # container is crashlooping -- "wait for the database" is the usual one --
+    # has phase Pending and no app container status at all, so reading only
+    # container_statuses reports "Pending" and it looks like a pod waiting to
+    # be scheduled. The demo cluster has no init containers, so this was
+    # invisible there and would be common anywhere real.
+    for cs in pod.status.init_container_statuses or []:
+        state = cs.state
+        if state.terminated and state.terminated.exit_code == 0:
+            continue  # this one finished; the pod moved on to the next
+        if state.waiting and state.waiting.reason:
+            return f"Init:{state.waiting.reason}"
+        if state.terminated and state.terminated.reason:
+            return f"Init:{state.terminated.reason}"
+
     statuses = pod.status.container_statuses or []
     for cs in statuses:
         state = cs.state
@@ -186,8 +201,41 @@ def _pod_status(pod):
     return pod.status.phase or "Unknown"
 
 
+def base_status(status):
+    """The status without the Init: prefix, for classification."""
+    return status[5:] if status.startswith("Init:") else status
+
+
+def fault_of(status):
+    """
+    The fault class a status belongs to.
+
+    An init container crashlooping is the same fault as an app container
+    crashlooping: a different container, but the same problem and the same
+    place to look. Grouping them apart would report one workload twice and
+    give the init case no cooldown of its own.
+    """
+    return FAULT_CLASS.get(base_status(status), status)
+
+
 def _is_healthy(pod):
-    """Running with every container ready -- the bar list_pods uses."""
+    """
+    Whether this pod is fine, meaning "do not report it".
+
+    Running with every container ready is the obvious case. A Succeeded pod is
+    the one that is easy to get wrong: a Job or CronJob that finished cleanly
+    is not Running and has no ready containers, so a naive readiness check
+    calls it broken. On a demo cluster nothing is ever Succeeded and the bug is
+    invisible; on any real cluster every completed CronJob run would be
+    reported as a failure, which is the fastest possible way to become noise.
+    Observed exactly that against a cluster with finished Job pods on it.
+
+    Failed pods are deliberately not exempt -- a Job that ran to failure is a
+    real fault, and phase is Failed rather than Succeeded.
+    """
+    if pod.status.phase == "Succeeded":
+        return True
+
     statuses = pod.status.container_statuses or []
     return bool(statuses) and _pod_status(pod) == "Running" and all(
         cs.ready for cs in statuses
@@ -198,12 +246,32 @@ def workload_of(pod):
     """
     The owning workload, so ten crashing replicas count as one problem.
 
-    ReplicaSet names are the deployment name plus a hash suffix; trimming it
-    groups replicas of the same rollout together.
+    Deployments, DaemonSets and StatefulSets all name their owner usefully.
+    Three cases do not, and all three are ordinary on a real cluster:
+
+    - **ReplicaSet** names are the deployment plus a hash; trim it, or every
+      rollout looks like a new workload.
+    - **Job** names created by a CronJob end in a scheduling timestamp. Without
+      trimming, every scheduled run is a new workload, so the cooldown never
+      applies and a job failing hourly reports hourly, forever.
+    - **Node** means a static pod -- kube-apiserver, etcd, kube-scheduler.
+      They are owned by the node they run on, so returning the owner name files
+      every control plane component on that node under one entry, named after
+      the node. Their pod name is "<component>-<node>", so drop the suffix.
     """
     for ref in pod.metadata.owner_references or []:
         if ref.kind == "ReplicaSet":
             return ref.name.rsplit("-", 1)[0]
+
+        if ref.kind == "Job":
+            head, _, tail = ref.name.rpartition("-")
+            return head if head and tail.isdigit() else ref.name
+
+        if ref.kind == "Node":
+            name = pod.metadata.name
+            suffix = f"-{ref.name}"
+            return name[: -len(suffix)] if name.endswith(suffix) else name
+
         return ref.name
     return None
 
@@ -282,7 +350,7 @@ def scan_cluster(only_unhealthy: bool = True, limit: int = 20):
         status = _pod_status(pod)
         namespace = pod.metadata.namespace
         workload = workload_of(pod) or pod.metadata.name
-        fault = FAULT_CLASS.get(status, status)
+        fault = fault_of(status)
 
         # Fault rather than status in the key: a rollout part-way through has
         # replicas reporting ErrImagePull and ImagePullBackOff at the same
@@ -292,7 +360,7 @@ def scan_cluster(only_unhealthy: bool = True, limit: int = 20):
             {"status": status, "pods": 0, "example": pod.metadata.name},
         )
         entry["pods"] += 1
-        if status in FAULT_CLASS:
+        if fault != status:
             # Only when it adds something: for Pending or Running the fault
             # class is just the status again, and the model pays for the
             # repetition in context.

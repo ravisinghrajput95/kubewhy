@@ -78,12 +78,35 @@ by a repository rename.
   `routers/k8s_pods_info.py`. The scan and the controller have to agree on what
   counts as the same problem, and two copies would drift.
 
-### Known issues
+### Fixed — detection on real clusters
 
-- The claim checker flattens all tool output into one blob, so a status
-  measured for one workload supports the same status claimed about another.
-  The cluster-wide scan widens each result and therefore weakens this check;
-  confirmed against a live cluster and pinned in `tests/test_grounding.py`.
+The demo cluster is five Deployments, so every assumption that holds only for
+Deployments went unnoticed. None of these are visible there; all are ordinary
+anywhere else.
+
+- **Completed Jobs were reported as failures.** A Succeeded pod is not Running
+  and has no ready containers, so a readiness-only check called every finished
+  CronJob run broken. Seen directly: a scan of a real cluster listed two
+  `Completed` pods as unhealthy.
+- **Failing init containers were invisible.** A crashlooping "wait for the
+  database" init container reports phase `Pending` with no app container
+  status, so it read as `Pending` and the controller ignored it entirely.
+  `_pod_status` now reports `Init:<reason>` as kubectl does, and it classifies
+  and dedups as the same fault as any other crash.
+- **Static pods were grouped by node.** `kube-apiserver`, `etcd` and
+  `kube-scheduler` are owned by the Node they run on, so every control-plane
+  component on a node collapsed into one finding named after the node.
+- **Every CronJob run was a new workload.** Jobs created by a CronJob are
+  `<name>-<timestamp>`; keeping the timestamp meant the per-workload cooldown
+  never applied and an hourly failure would report hourly, forever.
+- **The claim checker scopes claims to the entity they name.** A status
+  measured for one workload no longer supports the same status asserted about
+  another — the weakness `scan_cluster` made worse by returning every failing
+  workload in one result. A clause naming no entity still falls back to
+  checking against everything, and entity matching is substring, so both
+  remaining loosenesses fail toward silence rather than false alarms.
+- **Test fixture `exit_code or 1`** turned every successful termination into a
+  failure, which is why the init-container case looked correct at first.
 
 ## [0.1.0] — 2026-08-04
 

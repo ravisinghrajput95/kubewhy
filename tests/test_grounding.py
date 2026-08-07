@@ -76,49 +76,104 @@ class TestRecommendationsAreNotClaims:
         assert result["unverified"] == ["47"]
 
 
-class TestKnownWeakness:
+SCAN = [
+    json.dumps(
+        {
+            "staging/payments-api": {"status": "ErrImagePull", "pods": 3},
+            "demo/bad-image": {"status": "ImagePullBackOff", "pods": 1},
+        }
+    )
+]
+
+
+class TestClaimsAreScopedToTheirEntity:
     """
-    Documented limits, pinned so they are visible rather than surprising.
-
-    These assert what the checker currently does, not what it should do. If a
-    change makes one fail, the checker got stronger -- update the test and the
-    docstring in grounding.py together.
+    Observed on a live cluster: scan_cluster reported ErrImagePull for
+    staging/payments-api and ImagePullBackOff for demo/bad-image, and the model
+    then attributed ErrImagePull to demo/bad-image. Checking every claim
+    against every measurement at once let that pass as grounded, and the wider
+    the tool result the more it covered.
     """
 
-    def test_status_measured_for_one_workload_launders_another(self):
-        # Observed on a live cluster: scan_cluster returned ErrImagePull for
-        # staging/payments-api and ImagePullBackOff for demo/bad-image, and the
-        # model reported ErrImagePull for demo/bad-image. Claims are checked
-        # against every tool result at once, so the misattribution passes.
-        tools = [
-            json.dumps(
-                {
-                    "staging/payments-api": {"status": "ErrImagePull", "pods": 3},
-                    "demo/bad-image": {"status": "ImagePullBackOff", "pods": 1},
-                }
-            )
-        ]
+    def test_a_status_belonging_to_another_workload_does_not_support_this_one(self):
+        result = grounding.check("demo/bad-image is in ErrImagePull.", SCAN)
 
+        assert result["confidence"] == "partial"
+        assert "errimagepull" in result["unverified"]
+
+    def test_the_status_that_workload_really_had_still_passes(self):
+        """Scoping must not make every status look fabricated."""
         assert (
-            grounding.check("demo/bad-image is in ErrImagePull.", tools)["confidence"]
+            grounding.check("demo/bad-image is ImagePullBackOff.", SCAN)["confidence"]
             == "grounded"
         )
 
-    def test_but_a_status_no_workload_had_is_still_caught(self):
-        """The check is weakened by a wide result, not defeated by it."""
-        tools = [
-            json.dumps(
-                {
-                    "staging/payments-api": {"status": "ErrImagePull", "pods": 3},
-                    "demo/bad-image": {"status": "ImagePullBackOff", "pods": 1},
-                }
-            )
-        ]
+    def test_each_workload_is_checked_against_its_own_measurement(self):
+        answer = (
+            "staging/payments-api is in ErrImagePull.\n"
+            "demo/bad-image is ImagePullBackOff."
+        )
 
-        result = grounding.check("demo/bad-image is Evicted.", tools)
+        assert grounding.check(answer, SCAN)["confidence"] == "grounded"
+
+    def test_a_figure_from_another_workload_does_not_support_this_one(self):
+        # payments-api has 3 pods; bad-image has 1.
+        result = grounding.check("demo/bad-image has 3 pods affected.", SCAN)
+
+        assert "3" in result["unverified"]
+
+    def test_a_status_no_workload_had_is_still_caught(self):
+        result = grounding.check("demo/bad-image is Evicted.", SCAN)
 
         assert result["confidence"] == "partial"
         assert "evicted" in result["unverified"]
+
+    def test_a_clause_naming_nothing_falls_back_to_every_measurement(self):
+        """
+        A summary sentence names no entity. Scoping it to nothing would flag
+        every such sentence, which is the fastest way to make this ignorable.
+        """
+        assert (
+            grounding.check("One workload is in ImagePullBackOff.", SCAN)["confidence"]
+            == "grounded"
+        )
+
+    def test_a_workload_name_reaches_its_pods_measurements(self):
+        """
+        Answers say "bad-image"; describe_pod files its result under
+        "bad-image-647c5576d5-pxmvr". Without an alias for the trimmed
+        workload name, scoping invents failures instead of catching them.
+        """
+        tools = [
+            json.dumps(
+                {
+                    "demo/bad-image": {
+                        "status": "ImagePullBackOff",
+                        "pods": 1,
+                        "example": "bad-image-647c5576d5-pxmvr",
+                    }
+                }
+            ),
+            json.dumps(
+                {
+                    "pod": "bad-image-647c5576d5-pxmvr",
+                    "containers": {"app": {"restarts": 7}},
+                }
+            ),
+        ]
+
+        assert grounding.check("bad-image has restarted 7 times.", tools)["unverified"] == []
+
+    def test_scoping_works_for_a_single_subject_document(self):
+        """describe_pod names its subject rather than mapping many."""
+        tools = [
+            json.dumps({"pod": "memory-hog", "status": "OOMKilled", "restarts": 4}),
+            json.dumps({"pod": "crasher", "status": "CrashLoopBackOff", "restarts": 9}),
+        ]
+
+        assert grounding.check("memory-hog is OOMKilled.", tools)["confidence"] == "grounded"
+        # crasher's restart count is not memory-hog's.
+        assert "9" in grounding.check("memory-hog restarted 9 times.", tools)["unverified"]
 
 
 class TestFalsePositives:

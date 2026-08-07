@@ -98,6 +98,92 @@ def crashing(name, workload, namespace, reason="CrashLoopBackOff"):
     )
 
 
+def owned_by(kind, owner, name, namespace="kube-system"):
+    pod = make_pod(name=name, namespace=namespace)
+    pod.metadata.owner_references = [
+        client.V1OwnerReference(
+            api_version="v1", kind=kind, name=owner, uid=f"uid-{owner}", controller=True
+        )
+    ]
+    return pod
+
+
+class TestClusterNativeWorkloads:
+    """
+    The demo cluster is five Deployments, so every assumption that only holds
+    for Deployments passed unnoticed. A real cluster is mostly not that: the
+    control plane runs as static pods, networking and logging as DaemonSets,
+    backups as CronJobs.
+    """
+
+    def test_static_pods_group_by_component_not_by_node(self):
+        # kube-apiserver and etcd are owned by the Node they run on. Returning
+        # the owner name files every control plane component on a node under
+        # one entry named after the node.
+        api_server = owned_by(
+            "Node", "ip-10-0-1-5", "kube-apiserver-ip-10-0-1-5"
+        )
+        etcd = owned_by("Node", "ip-10-0-1-5", "etcd-ip-10-0-1-5")
+
+        assert k8s.workload_of(api_server) == "kube-apiserver"
+        assert k8s.workload_of(etcd) == "etcd"
+
+    def test_cronjob_runs_collapse_to_the_cronjob(self):
+        """
+        Jobs made by a CronJob are "<name>-<timestamp>". Keeping the timestamp
+        makes every scheduled run a new workload, so the cooldown never applies
+        and an hourly failure reports hourly forever.
+        """
+        first = owned_by("Job", "backup-28912345", "backup-28912345-abcde", "prod")
+        second = owned_by("Job", "backup-28912405", "backup-28912405-fghij", "prod")
+
+        assert k8s.workload_of(first) == "backup"
+        assert k8s.workload_of(second) == "backup"
+
+    def test_a_standalone_job_keeps_its_name(self):
+        """Only a trailing timestamp is a CronJob; don't eat real names."""
+        pod = owned_by("Job", "migrate-v2", "migrate-v2-abcde", "prod")
+
+        assert k8s.workload_of(pod) == "migrate-v2"
+
+    def test_daemonsets_and_statefulsets_are_named_directly(self):
+        daemon = owned_by("DaemonSet", "kube-proxy", "kube-proxy-x7k2p")
+        stateful = owned_by("StatefulSet", "postgres", "postgres-0", "prod")
+
+        assert k8s.workload_of(daemon) == "kube-proxy"
+        assert k8s.workload_of(stateful) == "postgres"
+
+    def test_a_failing_init_container_is_the_reported_status(self):
+        """
+        "Wait for the database" crashlooping is one of the most common real
+        failures, and it reports phase Pending with no app container status --
+        so reading only container_statuses calls it "Pending".
+        """
+        pod = make_pod(name="api-abc123-xyz", namespace="prod", statuses=[])
+        pod.status.container_statuses = None
+        pod.status.init_container_statuses = [
+            container_status(
+                name="wait-for-db", ready=False, waiting_reason="CrashLoopBackOff"
+            )
+        ]
+
+        assert k8s._pod_status(pod) == "Init:CrashLoopBackOff"
+        # Same fault as any other crash: same grouping, same cooldown.
+        assert k8s.fault_of("Init:CrashLoopBackOff") == "crash"
+        assert k8s.base_status("Init:CrashLoopBackOff") == "CrashLoopBackOff"
+
+    def test_a_completed_init_container_is_not_the_status(self):
+        """An init container that finished is not the pod's problem."""
+        pod = make_pod(name="api-abc123-xyz", namespace="prod")
+        pod.status.init_container_statuses = [
+            container_status(
+                name="wait-for-db", terminated_reason="Completed", exit_code=0
+            )
+        ]
+
+        assert k8s._pod_status(pod) == "Running"
+
+
 class TestActiveContext:
     """
     Which cluster a surface says it is reading.
@@ -266,6 +352,33 @@ class TestScanCluster:
         assert "prod/big" in result
         assert "prod/small" not in result
         assert "1 more not shown" in result["_truncated"]
+
+    def test_ignores_completed_job_pods(self, api):
+        """
+        A CronJob that ran successfully leaves Succeeded pods behind. They are
+        not Running and have no ready containers, so a readiness-only check
+        calls every one of them broken -- which on a real cluster means the
+        scan is mostly finished Jobs. The demo cluster has none, so this only
+        showed up against a cluster with real workloads on it.
+        """
+        done = make_pod(name="nightly-import-abc", namespace="prod", phase="Succeeded")
+        done.status.container_statuses = [
+            container_status(ready=False, terminated_reason="Completed", exit_code=0)
+        ]
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[done, crashing("web-abc123-1", "web-abc123", "prod")]
+        )
+
+        assert list(k8s.scan_cluster()) == ["prod/web"]
+
+    def test_a_job_that_failed_is_still_reported(self):
+        """Succeeded is exempt; Failed is a real fault."""
+        failed = make_pod(name="nightly-import-xyz", namespace="prod", phase="Failed")
+        failed.status.container_statuses = [
+            container_status(ready=False, terminated_reason="Error", exit_code=1)
+        ]
+
+        assert not k8s._is_healthy(failed)
 
     def test_ignores_terminating_pods(self, api):
         pod = crashing("web-abc123-xyz", "web-abc123", "prod")

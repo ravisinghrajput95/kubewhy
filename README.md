@@ -478,13 +478,13 @@ and it has two real limits:
   fabricated figure colliding with one reads as grounded. CI caught exactly
   this: the fabricated *"18 days"* test case passed on a runner whose boot
   timestamp was 18:12.
-- **Claims are not tied to what they are about**, and the cluster-wide scan
-  makes that worse. Every tool result is checked as one blob, so a status
-  measured for one workload supports the same status claimed about another.
-  Seen on a live cluster: the model attributed `ErrImagePull` to a workload
-  the scan reported as `ImagePullBackOff`, and it passed as `grounded` because
-  a *different* workload in the same result was in `ErrImagePull`. The wider
-  the tool result, the weaker this check gets.
+- **Scoping is best-effort.** Claims are checked against the measurements for
+  the entity they name — a fix for the case where a status measured on one
+  workload validated the same status asserted about another, seen live once
+  `scan_cluster` started returning every failing workload in one result. But a
+  sentence naming no entity still falls back to checking against everything,
+  and entity matching is substring, so a short name inside a longer one widens
+  the scope. Both fail toward silence rather than false alarms.
 
 So `partial` is the stronger signal. It reliably means something was not
 measured; `grounded` only means nothing contradicted the answer. Treat it as a
