@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Open a [private security advisory](https://github.com/ravisinghrajput95/local-triage-agent/security/advisories/new).
+Open a [private security advisory](https://github.com/ravisinghrajput95/kubewhy/security/advisories/new).
 Please don't file a public issue for anything exploitable.
 
 ## What this tool touches

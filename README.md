@@ -1,12 +1,12 @@
-# local-triage-agent
+# kubewhy
 
-[![tests](https://github.com/ravisinghrajput95/local-triage-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/ravisinghrajput95/local-triage-agent/actions/workflows/tests.yml)
+[![tests](https://github.com/ravisinghrajput95/kubewhy/actions/workflows/tests.yml/badge.svg)](https://github.com/ravisinghrajput95/kubewhy/actions/workflows/tests.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.11%20--%203.13-blue.svg)](requirements.txt)
 [![MCP](https://img.shields.io/badge/MCP-server-8A2BE2.svg)](#use-it-from-claude-cursor-or-any-mcp-client)
 
 **Air-gapped Kubernetes root-cause analysis.** Everything tells you *what* is
-broken. `local-triage-agent` tells you **why** — reading the real logs, events and
+broken. `kubewhy` tells you **why** — reading the real logs, events and
 resource limits behind a failure with a model running on your own hardware. No
 cloud API, no API key, no cluster data leaving your network.
 
@@ -120,7 +120,7 @@ Three properties it is built around:
 k8sgpt is more mature, scans cluster-wide, and you should probably use it.
 This is different in three ways that matter if they matter to you:
 
-| | local-triage-agent | k8sgpt |
+| | kubewhy | k8sgpt |
 | --- | --- | --- |
 | Inference | Always local | Cloud by default |
 | Method | Chains tools to a root cause | Analyzers + one LLM pass |
@@ -205,7 +205,7 @@ python mcp_server.py --http     # streamable HTTP on :8765
 ```json
 {
   "mcpServers": {
-    "local-triage-agent": {
+    "kubewhy": {
       "command": "/path/to/.venv/bin/python",
       "args": ["/path/to/mcp_server.py"]
     }
@@ -248,7 +248,7 @@ without moving this process's connection.
 ## Deploying the controller
 
 ```bash
-helm install triage oci://ghcr.io/ravisinghrajput95/charts/local-triage-agent \
+helm install triage oci://ghcr.io/ravisinghrajput95/charts/kubewhy \
   --namespace triage --create-namespace
 kubectl logs -n triage -l app.kubernetes.io/instance=triage -f
 ```

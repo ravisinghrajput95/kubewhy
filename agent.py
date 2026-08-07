@@ -1,5 +1,5 @@
 """
-local-triage-agent.
+kubewhy.
 
 Wraps the host and Kubernetes collectors in routers/ as tools and lets a local
 Ollama model call them to work out what is wrong and why.
