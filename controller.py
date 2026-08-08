@@ -31,6 +31,7 @@ from kubernetes import client, config, watch
 import agent
 import observability
 import sinks
+import store
 from routers.k8s_pods_info import base_status, fault_of, _pod_status, workload_of
 
 observability.configure()
@@ -57,33 +58,40 @@ SKIP_EXISTING = os.getenv("TRIAGE_SKIP_EXISTING", "true").lower() == "true"
 
 
 class Budget:
-    """Cooldown per workload plus a global hourly ceiling."""
+    """
+    Cooldown per workload plus a global hourly ceiling.
 
-    def __init__(self, cooldown=COOLDOWN, max_per_hour=MAX_PER_HOUR):
+    State lives in a store, so with TRIAGE_STATE_DB set a restart no longer
+    forgets what it already reported. It used to: a rollout re-announced every
+    failure in the cluster, and the cooldown existed precisely to stop that.
+
+    Wall clock rather than monotonic. Monotonic is the better choice for a
+    duration inside one process and worthless across two -- it counts from an
+    arbitrary origin, so a persisted value read after a restart is either
+    eternally fresh or eternally stale depending on uptime.
+    """
+
+    def __init__(self, cooldown=COOLDOWN, max_per_hour=MAX_PER_HOUR, state=None):
         self.cooldown = cooldown
         self.max_per_hour = max_per_hour
-        self._last_seen = {}
-        self._recent = []
+        self.store = state if state is not None else store.build()
         self._lock = threading.Lock()
 
     def allow(self, key, now=None):
-        # Not `now or time.monotonic()`: a caller passing now=0 means time
-        # zero, not "unset", and the falsy check silently substituted the
-        # real clock -- which made every subsequent comparison nonsense.
-        now = time.monotonic() if now is None else now
+        # Not `now or store.now()`: a caller passing now=0 means time zero, not
+        # "unset", and the falsy check silently substituted the real clock --
+        # which made every subsequent comparison nonsense.
+        now = store.now() if now is None else now
         with self._lock:
-            self._recent = [t for t in self._recent if now - t < 3600]
-
-            if len(self._recent) >= self.max_per_hour:
+            if self.store.reports_since(now - 3600) >= self.max_per_hour:
                 log.warning("rate_limited", extra={"key": key})
                 return False
 
-            last = self._last_seen.get(key)
+            last = self.store.last_reported(key)
             if last is not None and now - last < self.cooldown:
                 return False
 
-            self._last_seen[key] = now
-            self._recent.append(now)
+            self.store.record_report(key, now)
             return True
 
 

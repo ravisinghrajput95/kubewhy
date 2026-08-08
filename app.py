@@ -9,6 +9,7 @@ TRIAGE_API_TOKEN before exposing it anywhere else.
 import json
 import logging
 import os
+import threading
 import secrets
 import time
 import uuid
@@ -20,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import observability
+import store
 from agent import ask, scoped_question, stream
 from routers.platform_info import get_platform_info
 from routers.system_info import get_system_info
@@ -69,6 +71,8 @@ async def lifespan(_app):
         )
     yield
 
+
+JOBS = store.build()
 
 app = FastAPI(
     title="kubewhy",
@@ -231,6 +235,58 @@ def ask_agent(body: Question):
     timeouts, or use /ask/stream to see progress while it works.
     """
     return ask(_question(body))
+
+
+@app.post("/ask/jobs", status_code=202, dependencies=[Depends(require_token)], tags=["agent"])
+def submit_job(body: Question):
+    """
+    Ask without holding the connection open. Returns immediately with an id.
+
+    /ask blocks for the whole diagnosis and /ask/stream makes that wait legible
+    without shortening it -- both need the caller to still be there minutes
+    later. This detaches the work: poll GET /ask/jobs/{id} until state is
+    "done", from a different process or a different day.
+
+    With TRIAGE_STATE_DB set the result survives a restart of this process. It
+    does not survive being answered by a *different* replica, which is why the
+    chart still pins one -- see store.py.
+    """
+    job_id = store.new_job_id()
+    question = _question(body)
+    JOBS.create_job(job_id, question, store.now())
+    # Expiry is charged to whoever submits, so an idle deployment does not need
+    # a reaper thread to stop the file growing forever.
+    JOBS.purge_jobs(store.now() - store.JOB_TTL_SECONDS)
+
+    def run():
+        JOBS.update_job(job_id, "running")
+        try:
+            result = ask(question)
+        except Exception as exc:  # noqa: BLE001 - a failed job must be readable
+            log.exception("job_failed")
+            JOBS.update_job(
+                job_id, "failed", {"error": str(exc)}, store.now()
+            )
+            return
+        JOBS.update_job(job_id, "done", result, store.now())
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"id": job_id, "state": "queued"}
+
+
+@app.get("/ask/jobs/{job_id}", dependencies=[Depends(require_token)], tags=["agent"])
+def job_status(job_id: str):
+    """
+    A job's state, and its answer once there is one.
+
+    404 rather than an empty job: an id that was never issued and one whose
+    result expired are the same thing to a caller, and inventing a "queued"
+    job for a typo would leave them polling forever.
+    """
+    job = JOBS.get_job(job_id)
+    if not job:
+        raise HTTPException(404, f"no job {job_id}")
+    return job
 
 
 @app.post("/ask/stream", dependencies=[Depends(require_token)], tags=["agent"])
