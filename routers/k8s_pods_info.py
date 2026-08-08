@@ -10,10 +10,12 @@ All functions return a dict with an "error" key instead of raising when the
 cluster is unreachable, so the agent can report the problem and move on.
 """
 
+import contextvars
 import datetime as dt
 import json
 import logging
 import os
+import threading
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -26,29 +28,60 @@ log = logging.getLogger(__name__)
 # agent loop with no way out, since the model is waiting on the tool result.
 TIMEOUT = int(os.getenv("K8S_TIMEOUT", "15"))
 
-_core_v1 = None
-_apps_v1 = None
-_discovery_v1 = None
+# Which context this caller asked for. A ContextVar rather than a global
+# because two browser sessions in one process are two callers: with a global,
+# one switching cluster switched it under the other, and the second session
+# kept rendering with a label naming the cluster it was no longer reading.
+_requested_context = contextvars.ContextVar("kubewhy_context", default=None)
 
-# Recorded at load time, never re-read. See active_context().
-_active_context = None
+# One set of clients per context, keyed by the requested name. Shared across
+# callers on purpose -- the clients are read-only and their connection pools
+# are worth reusing -- and cached rather than rebuilt, so switching back and
+# forth costs nothing.
+_bundles = {}
 
-# Set by use_context() to override the kubeconfig's current-context.
-_requested_context = None
+# Held across building a bundle, not just inserting it. load_kube_config sets
+# the client library's global default configuration, so two threads binding
+# different contexts at once can interleave between the load and the
+# construction and hand one thread a client pointed at the other's cluster.
+_bundle_lock = threading.Lock()
 
 
-def _load_config():
-    global _active_context
+def _build_bundle(requested):
+    """
+    Every client for one context, plus the context they are actually bound to.
+
+    new_client_from_config rather than load_kube_config: it returns an
+    ApiClient for the named context instead of mutating the library's global
+    default, which is what makes per-caller contexts possible at all.
+    """
     try:
         config.load_incluster_config()
-        _active_context = "in-cluster"
+        api_client = client.ApiClient()
+        active = "in-cluster"
     except config.ConfigException:
-        config.load_kube_config(context=_requested_context)
+        api_client = config.new_client_from_config(context=requested)
         try:
-            _, active = config.list_kube_config_contexts()
-            _active_context = _requested_context or active["name"]
+            _, current = config.list_kube_config_contexts()
+            active = requested or current["name"]
         except Exception:
-            _active_context = _requested_context or "unknown"
+            active = requested or "unknown"
+
+    return {
+        "core": client.CoreV1Api(api_client),
+        "apps": client.AppsV1Api(api_client),
+        "discovery": client.DiscoveryV1Api(api_client),
+        "active": active,
+    }
+
+
+def _bundle():
+    """The client bundle for this caller's context, built once and cached."""
+    requested = _requested_context.get()
+    with _bundle_lock:
+        if requested not in _bundles:
+            _bundles[requested] = _build_bundle(requested)
+        return _bundles[requested]
 
 
 def list_namespaces():
@@ -163,18 +196,20 @@ def use_context(name):
 
     Working against two clusters at once is normal -- one being fixed, one
     being compared against -- and the alternative is restarting the process to
-    look at the other. Dropping the cached clients is the whole job: they are
-    built once and would otherwise keep talking to the previous cluster.
+    look at the other.
 
-    Process-wide, deliberately: these clients are module state. That is fine
-    for a loopback single-user tool and wrong for a shared one, so if this ever
-    grows concurrent users the clients have to move into the session.
+    Scoped to the caller, not the process. Two browser sessions used to share
+    one setting, so switching cluster in one switched it in the other, and the
+    second went on labelling itself with a cluster it was no longer reading.
+    The clients themselves are still shared, keyed by context -- they are
+    read-only, and rebuilding a connection pool per session is waste.
+
+    Callers that live across requests must set this per request rather than
+    once: a ContextVar belongs to the context that set it, and Streamlit reruns
+    the script on a fresh thread. ui.py re-asserts it from session state on
+    every rerun for exactly that reason.
     """
-    global _core_v1, _apps_v1, _discovery_v1, _requested_context, _active_context
-
-    _requested_context = name
-    _core_v1 = _apps_v1 = _discovery_v1 = None
-    _active_context = None
+    _requested_context.set(name)
 
 
 def active_context():
@@ -182,9 +217,9 @@ def active_context():
     Which cluster the API client is actually talking to.
 
     Deliberately not "whatever current-context says now". The client is built
-    once and cached for the process, so a kubeconfig rewritten afterwards
-    moves the file without moving the client -- and `kind create cluster`
-    rewrites current-context as a side effect.
+    once and cached, so a kubeconfig rewritten afterwards moves the file
+    without moving the client -- and `kind create cluster` rewrites
+    current-context as a side effect.
 
     This is not cosmetic. It was observed: the browser UI labelled itself
     kind-loglens-cri while displaying pods that exist only in kind-triage-demo,
@@ -192,49 +227,36 @@ def active_context():
     process started. A surface that names the wrong cluster is worse than one
     that names none, and SECURITY.md tells people to check this before
     trusting what they see.
+
+    Answers for the caller asking, which is the point of scoping the context:
+    two sessions on two clusters each get their own name back.
     """
-    if _active_context is None:
-        # Nothing bound yet: force the lazy load so there is a real answer
-        # rather than a guess.
-        try:
-            _api()
-        except Exception:
-            # Errors are data everywhere else in this module, and a caller
-            # asking which cluster it is on must not be the one thing that
-            # raises -- the browser UI asks before any tool runs, so raising
-            # here replaces the whole page with a traceback.
-            #
-            # Not hypothetical: `kind delete cluster` removes current-context
-            # from the kubeconfig entirely, and the next render died on it.
-            return "unavailable"
-    return _active_context or "unavailable"
+    try:
+        return _bundle()["active"] or "unavailable"
+    except Exception:
+        # Errors are data everywhere else in this module, and a caller asking
+        # which cluster it is on must not be the one thing that raises -- the
+        # browser UI asks before any tool runs, so raising here replaces the
+        # whole page with a traceback.
+        #
+        # Not hypothetical: `kind delete cluster` removes current-context from
+        # the kubeconfig entirely, and the next render died on it.
+        return "unavailable"
 
 
 def _api():
-    """Lazily build a CoreV1Api, so importing this module never needs a cluster."""
-    global _core_v1
-    if _core_v1 is None:
-        _load_config()
-        _core_v1 = client.CoreV1Api()
-    return _core_v1
+    """CoreV1Api for this caller's context. Built on first use, then cached."""
+    return _bundle()["core"]
 
 
 def _apps_api():
-    """AppsV1Api, for deployments. Lazy for the same reason as _api()."""
-    global _apps_v1
-    if _apps_v1 is None:
-        _load_config()
-        _apps_v1 = client.AppsV1Api()
-    return _apps_v1
+    """AppsV1Api, for deployments."""
+    return _bundle()["apps"]
 
 
 def _discovery_api():
     """DiscoveryV1Api, for EndpointSlices."""
-    global _discovery_v1
-    if _discovery_v1 is None:
-        _load_config()
-        _discovery_v1 = client.DiscoveryV1Api()
-    return _discovery_v1
+    return _bundle()["discovery"]
 
 
 def _api_message(exc):

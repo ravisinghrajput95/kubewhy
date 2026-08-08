@@ -109,3 +109,50 @@ class TestRendersFindings:
         app = run(FINDINGS)
 
         assert any("scan_cluster" in element.value for element in app.caption)
+
+
+class TestContextIsPerSession:
+    """
+    Two browser sessions in one process are two callers. A process-wide context
+    meant one switching cluster switched it under the other, which then went on
+    rendering with a label naming a cluster it was no longer reading.
+    """
+
+    def test_each_session_binds_its_own_context(self):
+        import streamlit as st
+
+        st.cache_data.clear()
+        bound = []
+
+        with patch.object(k8s, "scan_cluster", return_value={}), patch.object(
+            k8s, "list_nodes", return_value={}
+        ), patch.object(k8s, "list_contexts", return_value=["cluster-a", "cluster-b"]), patch.object(
+            k8s, "use_context", side_effect=bound.append
+        ), patch.object(
+            k8s, "active_context", return_value="cluster-a"
+        ):
+            first = AppTest.from_file(UI, default_timeout=30)
+            first.session_state["context"] = "cluster-a"
+            first.run()
+
+            second = AppTest.from_file(UI, default_timeout=30)
+            second.session_state["context"] = "cluster-b"
+            second.run()
+
+        # Each run rebinds from its own session state rather than inheriting
+        # whatever the last session happened to select.
+        assert "cluster-a" in bound and "cluster-b" in bound
+        assert not first.exception and not second.exception
+
+    def test_the_context_is_part_of_every_cache_key(self):
+        """
+        st.cache_data is shared by the whole process, so without the context in
+        the key a session on one cluster serves another session's results.
+        """
+        import inspect
+
+        import ui
+
+        for name in ("_scan", "_namespaces", "_workload_pods", "_describe", "_events", "_logs", "_nodes"):
+            first = list(inspect.signature(getattr(ui, name)).parameters)[0]
+            assert first == "context", f"{name} is cached without the context in its key"

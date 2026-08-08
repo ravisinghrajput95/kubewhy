@@ -7,8 +7,10 @@ that silently starts returning raw objects would blow the model's context
 window, so size is asserted explicitly.
 """
 
+import contextvars
 import datetime as dt
 import json
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -411,8 +413,25 @@ class TestActiveContext:
     rewrites current-context -- after the process had already built its client.
     """
 
+    @pytest.fixture(autouse=True)
+    def clean_bundles(self):
+        """Each test starts with nothing bound, and leaves nothing behind."""
+        k8s._bundles.clear()
+        token = k8s._requested_context.set(None)
+        yield
+        k8s._requested_context.reset(token)
+        k8s._bundles.clear()
+
+    def _bundle(self, active):
+        return {"core": MagicMock(), "apps": MagicMock(), "discovery": MagicMock(), "active": active}
+
     def test_does_not_follow_a_later_kubeconfig_change(self):
-        with patch.object(k8s, "_active_context", "kind-triage-demo"), patch.object(
+        """The client is bound once; the file moving afterwards does not move it."""
+        with patch.object(k8s, "_build_bundle", return_value=self._bundle("kind-triage-demo")):
+            assert k8s.active_context() == "kind-triage-demo"
+
+        # The kubeconfig now says something else. The binding is already made.
+        with patch.object(
             k8s.config,
             "list_kube_config_contexts",
             return_value=([], {"name": "kind-something-else"}),
@@ -420,12 +439,7 @@ class TestActiveContext:
             assert k8s.active_context() == "kind-triage-demo"
 
     def test_binds_lazily_when_nothing_is_loaded_yet(self):
-        def load():
-            k8s._active_context = "kind-triage-demo"
-
-        with patch.object(k8s, "_active_context", None), patch.object(
-            k8s, "_api", side_effect=load
-        ):
+        with patch.object(k8s, "_build_bundle", return_value=self._bundle("kind-triage-demo")):
             assert k8s.active_context() == "kind-triage-demo"
 
     def test_a_broken_kubeconfig_is_reported_not_raised(self):
@@ -434,38 +448,74 @@ class TestActiveContext:
         the browser UI asks for the context before any tool runs -- so raising
         here replaced the entire page with a traceback.
         """
-        with patch.object(k8s, "_active_context", None), patch.object(
-            k8s, "_api", side_effect=Exception("Invalid kube-config file")
+        with patch.object(
+            k8s, "_build_bundle", side_effect=Exception("Invalid kube-config file")
         ):
             assert k8s.active_context() == "unavailable"
 
-    def test_switching_context_drops_the_cached_clients(self):
+    def test_switching_context_builds_a_client_for_it(self):
         """Otherwise the label moves and the connection does not."""
-        with patch.object(k8s, "_core_v1", "stale"), patch.object(
-            k8s, "_apps_v1", "stale"
-        ), patch.object(k8s, "_discovery_v1", "stale"), patch.object(
-            k8s, "_requested_context", None
-        ), patch.object(k8s, "_active_context", "old"):
+        built = []
+
+        def build(requested):
+            built.append(requested)
+            return self._bundle(requested or "default-ctx")
+
+        with patch.object(k8s, "_build_bundle", side_effect=build):
+            assert k8s.active_context() == "default-ctx"
             k8s.use_context("kind-other")
 
-            assert k8s._core_v1 is None
-            assert k8s._apps_v1 is None
-            assert k8s._discovery_v1 is None
-            assert k8s._requested_context == "kind-other"
+            assert k8s.active_context() == "kind-other"
+            assert built == [None, "kind-other"]
 
-    def test_lists_contexts_and_survives_no_kubeconfig(self):
+    def test_a_context_is_built_once_and_reused(self):
+        """Switching back and forth must not rebuild a connection pool."""
         with patch.object(
-            k8s.config,
-            "list_kube_config_contexts",
-            return_value=([{"name": "a"}, {"name": "b"}], {"name": "a"}),
-        ):
-            assert k8s.list_contexts() == ["a", "b"]
+            k8s, "_build_bundle", side_effect=lambda r: self._bundle(r)
+        ) as build:
+            k8s.use_context("a")
+            k8s.active_context()
+            k8s.use_context("b")
+            k8s.active_context()
+            k8s.use_context("a")
+            k8s.active_context()
 
-        # In-cluster there is no kubeconfig; that is not an error.
-        with patch.object(
-            k8s.config, "list_kube_config_contexts", side_effect=Exception("no config")
-        ):
-            assert k8s.list_contexts() == []
+            assert build.call_count == 2
+
+    def test_two_callers_hold_different_contexts(self):
+        """
+        The defect this scoping exists for: two browser sessions in one
+        process. One switching cluster used to switch it for the other, which
+        then went on rendering under a label naming a cluster it was no longer
+        reading.
+        """
+        seen = {}
+
+        def caller(name):
+            k8s.use_context(name)
+            # Something else switches in between, as the other session would.
+            seen[name] = k8s.active_context()
+
+        with patch.object(k8s, "_build_bundle", side_effect=lambda r: self._bundle(r)):
+            first = threading.Thread(target=caller, args=("cluster-a",))
+            second = threading.Thread(target=caller, args=("cluster-b",))
+            first.start()
+            first.join()
+            second.start()
+            second.join()
+
+            assert seen == {"cluster-a": "cluster-a", "cluster-b": "cluster-b"}
+
+    def test_one_caller_switching_does_not_move_another(self):
+        """The same property without threads: a ContextVar set in a copied
+        context does not leak back into the parent."""
+        with patch.object(k8s, "_build_bundle", side_effect=lambda r: self._bundle(r)):
+            k8s.use_context("cluster-a")
+
+            ctx = contextvars.copy_context()
+            ctx.run(k8s.use_context, "cluster-b")
+
+            assert k8s.active_context() == "cluster-a"
 
 
 class TestScanCluster:

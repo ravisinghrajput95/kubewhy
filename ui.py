@@ -44,38 +44,68 @@ from routers.k8s_pods_info import (
 CACHE_TTL = 10
 
 
+def _ctx():
+    """
+    This session's cluster, and the first argument to everything cached below.
+
+    st.cache_data is shared by every session in the process, so without the
+    context in the key two sessions on two clusters read each other's results.
+    Passing it explicitly is what keeps the cache honest; the collectors do
+    not take it, and do not need to.
+    """
+    return st.session_state.get("context") or ""
+
+
+def _bind(context):
+    """
+    Point this thread's collectors at the session's cluster.
+
+    Streamlit reruns the script on a fresh thread and runs a cache miss on
+    whichever thread asked, so the binding has to be re-asserted rather than
+    set once when the selector changed.
+    """
+    use_context(context or None)
+
+
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _scan(only_unhealthy, limit, namespaces):
+def _scan(context, only_unhealthy, limit, namespaces):
+    _bind(context)
     return scan_cluster(only_unhealthy, limit, namespaces)
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _namespaces():
+def _namespaces(context):
+    _bind(context)
     return list_namespaces()
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _workload_pods(namespace, workload):
+def _workload_pods(context, namespace, workload):
+    _bind(context)
     return workload_pods(namespace, workload)
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _describe(name, namespace):
+def _describe(context, name, namespace):
+    _bind(context)
     return describe_pod(name, namespace)
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _events(name, namespace):
+def _events(context, name, namespace):
+    _bind(context)
     return get_pod_events(name, namespace)
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _logs(name, namespace, tail, container=""):
+def _logs(context, name, namespace, tail, container=""):
+    _bind(context)
     return get_pod_logs(name, namespace, tail, container)
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _nodes():
+def _nodes(context):
+    _bind(context)
     return list_nodes()
 
 
@@ -103,6 +133,12 @@ def _unwrap(result, tool):
 
 st.set_page_config(page_title="kubewhy", page_icon="🩺", layout="wide")
 
+# Before anything reads the cluster. The context lives in session state and is
+# re-asserted on every rerun, because it is scoped to the caller now and
+# Streamlit gives each rerun a fresh thread -- a selection made last rerun is
+# not still in effect on this one.
+_bind(_ctx())
+
 with st.sidebar:
     st.subheader("Cluster")
 
@@ -117,10 +153,15 @@ with st.sidebar:
             label_visibility="collapsed",
         )
         if chosen != current:
-            # Rebinds the clients and drops every cached result, so nothing
-            # from the previous cluster survives on screen.
-            use_context(chosen)
-            st.cache_data.clear()
+            # Only this session moves. Another browser session on another
+            # cluster keeps reading its own, which a process-wide switch used
+            # to break underneath it.
+            #
+            # No cache clear either: the context is part of every cache key,
+            # so the new cluster cannot serve the old one's entries, and
+            # clearing would throw away a concurrent session's results.
+            st.session_state.context = chosen
+            _bind(chosen)
             st.rerun()
     else:
         st.code(current, language=None)
@@ -138,7 +179,7 @@ with st.sidebar:
     # the backend filter is cheaper than fetching everything and hiding rows:
     # a single namespace is a namespaced query rather than a cluster-wide one.
     chosen_namespaces = st.multiselect(
-        "Namespaces", _namespaces(), help="Empty scans the whole cluster."
+        "Namespaces", _namespaces(_ctx()), help="Empty scans the whole cluster."
     )
     search = st.text_input("Filter", placeholder="workload or pod name")
 
@@ -162,7 +203,7 @@ st.title("kubewhy")
 
 namespaces = ",".join(chosen_namespaces)
 findings = _unwrap(
-    _scan(only_unhealthy, limit, namespaces),
+    _scan(_ctx(), only_unhealthy, limit, namespaces),
     f"scan_cluster(only_unhealthy={only_unhealthy}, limit={limit}"
     + (f", namespaces={namespaces!r}" if namespaces else "")
     + ")",
@@ -222,7 +263,7 @@ if findings:
         # A Deployment is its replicas. Showing only the example pod and
         # calling it the workload's story is wrong when three replicas fail
         # for different reasons.
-        replicas = _workload_pods(namespace, workload_name)
+        replicas = _workload_pods(_ctx(), namespace, workload_name)
         if isinstance(replicas, list) and len(replicas) > 1:
             labels = {
                 f"{p['pod']}  —  {p['status']}{'' if p['ready'] else '  (not ready)'}": p
@@ -253,7 +294,7 @@ if findings:
         detail, events, logs = st.tabs(["Detail", "Events", "Logs"])
 
         with detail:
-            data = _unwrap(_describe(pod, namespace), f"describe_pod({pod!r}, {namespace!r})")
+            data = _unwrap(_describe(_ctx(), pod, namespace), f"describe_pod({pod!r}, {namespace!r})")
             if data:
                 st.json(data)
 
@@ -271,7 +312,7 @@ if findings:
                     "already happened — check their age before acting."
                 )
 
-            data = _unwrap(_events(pod, namespace), f"get_pod_events({pod!r}, {namespace!r})")
+            data = _unwrap(_events(_ctx(), pod, namespace), f"get_pod_events({pod!r}, {namespace!r})")
             if data:
                 st.dataframe(data["events"], width="stretch", hide_index=True)
 
@@ -285,7 +326,7 @@ if findings:
                 )
 
             data = _unwrap(
-                _logs(pod, namespace, tail, container),
+                _logs(_ctx(), pod, namespace, tail, container),
                 f"get_pod_logs({pod!r}, {namespace!r}, tail={tail}"
                 + (f", container={container!r}" if container else "")
                 + ")",
@@ -402,7 +443,7 @@ if answer:
 with st.expander("Nodes"):
     # Worth a click before blaming a workload: pods that are Pending or being
     # evicted are usually a node problem wearing a workload's name.
-    data = _unwrap(_nodes(), "list_nodes()")
+    data = _unwrap(_nodes(_ctx()), "list_nodes()")
     if data:
         st.dataframe(
             [
