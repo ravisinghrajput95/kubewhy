@@ -925,3 +925,133 @@ class TestErrorHandling:
     def test_errors_never_raise(self, api):
         api.read_namespaced_pod.side_effect = RuntimeError("boom")
         assert "error" in k8s.describe_pod("p", "demo")
+
+
+class TestWorkloadPods:
+    """
+    Every pod of one workload. The property under test is that narrowing by the
+    controller's label selector changed only how much is transferred, never
+    which pods come back -- the owner reference stays the definition of
+    membership.
+    """
+
+    def _deployment(self, match_labels=None, expressions=None):
+        selector = client.V1LabelSelector(
+            match_labels=match_labels, match_expressions=expressions
+        )
+        return client.V1Deployment(
+            metadata=client.V1ObjectMeta(name="web", namespace="demo"),
+            spec=client.V1DeploymentSpec(
+                replicas=1,
+                selector=selector,
+                template=client.V1PodTemplateSpec(
+                    spec=client.V1PodSpec(
+                        containers=[client.V1Container(name="web", image="nginx:1.27")]
+                    )
+                ),
+            ),
+        )
+
+    def _pods(self, api, *pods):
+        api.list_namespaced_pod.return_value = client.V1PodList(
+            items=list(pods), metadata=client.V1ListMeta(_continue=None)
+        )
+
+    def _not_found(self, apps_api):
+        for reader in (
+            apps_api.read_namespaced_deployment,
+            apps_api.read_namespaced_daemon_set,
+            apps_api.read_namespaced_stateful_set,
+        ):
+            reader.side_effect = ApiException(status=404, reason="Not Found")
+
+    def test_asks_the_api_server_to_filter(self, api, apps_api):
+        apps_api.read_namespaced_deployment.return_value = self._deployment(
+            match_labels={"app": "web", "tier": "front"}
+        )
+        self._pods(api, make_pod(name="web-abc-1", owner="web-abc"))
+
+        k8s.workload_pods("demo", "web")
+
+        # Sorted, so the selector string does not depend on dict ordering.
+        assert (
+            api.list_namespaced_pod.call_args.kwargs["label_selector"]
+            == "app=web,tier=front"
+        )
+
+    def test_reads_the_namespace_when_nothing_owns_the_name(self, api, apps_api):
+        # A CronJob's pods, a static pod and a bare pod all land here: there is
+        # no single selector, so the old full read is still correct.
+        self._not_found(apps_api)
+        self._pods(api, make_pod(name="backup-29768545-x", owner=None))
+
+        k8s.workload_pods("demo", "backup-29768545-x")
+
+        assert api.list_namespaced_pod.call_args.kwargs.get("label_selector") is None
+
+    def test_match_expressions_fall_back_rather_than_guess(self, api, apps_api):
+        # Serialising set-based requirements wrongly would drop pods silently.
+        apps_api.read_namespaced_deployment.return_value = self._deployment(
+            match_labels={"app": "web"},
+            expressions=[
+                client.V1LabelSelectorRequirement(
+                    key="tier", operator="In", values=["front"]
+                )
+            ],
+        )
+        self._pods(api, make_pod(name="web-abc-1", owner="web-abc"))
+
+        k8s.workload_pods("demo", "web")
+
+        assert api.list_namespaced_pod.call_args.kwargs.get("label_selector") is None
+
+    def test_selector_does_not_widen_membership(self, api, apps_api):
+        """
+        A selector can match a pod this workload does not own -- a hand-made
+        pod carrying the same labels, or two controllers sharing them. The
+        owner reference decides, or narrowing would quietly redefine what a
+        workload is.
+        """
+        apps_api.read_namespaced_deployment.return_value = self._deployment(
+            match_labels={"app": "web"}
+        )
+        self._pods(
+            api,
+            make_pod(name="web-abc-1", owner="web-abc"),
+            make_pod(name="impostor", owner="other-def"),
+        )
+
+        assert [p["pod"] for p in k8s.workload_pods("demo", "web")] == ["web-abc-1"]
+
+    def test_permission_error_is_not_a_silent_full_read(self, api, apps_api):
+        """
+        403 on the controller read means RBAC is wrong, and degrading to a
+        namespace-wide read would hide that as a slow page instead of an error.
+        """
+        apps_api.read_namespaced_deployment.side_effect = ApiException(
+            status=403, reason="Forbidden"
+        )
+
+        result = k8s.workload_pods("demo", "web")
+
+        assert "403" in result["error"]
+        api.list_namespaced_pod.assert_not_called()
+
+    def test_reports_each_pod_of_a_multi_container_workload(self, api, apps_api):
+        apps_api.read_namespaced_deployment.return_value = self._deployment(
+            match_labels={"app": "web"}
+        )
+        pod = make_pod(name="web-abc-1", owner="web-abc")
+        pod.spec.containers.append(client.V1Container(name="sidecar", image="envoy:1"))
+        pod.status.container_statuses = [
+            container_status(name="app", ready=True),
+            container_status(name="sidecar", ready=False),
+        ]
+        self._pods(api, pod)
+
+        result = k8s.workload_pods("demo", "web")
+
+        # One unready container makes the pod unready, and both are named so a
+        # caller can ask for the right one's logs.
+        assert result[0]["ready"] is False
+        assert result[0]["containers"] == ["app", "sidecar"]

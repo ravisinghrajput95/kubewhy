@@ -75,9 +75,16 @@ def workload_pods(namespace, workload):
     A Deployment is its replicas: showing one pod's logs and calling that the
     workload's story is wrong when three replicas fail for different reasons.
     UI helper, so it returns enough to choose between them.
+
+    Narrowed by the owning controller's label selector where there is one, so
+    the API server returns this workload's pods rather than the namespace's.
+    The owner check below still decides what belongs: the selector is a
+    transfer optimisation, and a selector that matched something extra would
+    otherwise silently redefine what a workload is.
     """
     try:
-        pods = list(_iter_pods(namespace))
+        selector = _workload_selector(namespace, workload)
+        pods = list(_iter_pods(namespace, label_selector=selector))
     except Exception as exc:
         return _handle(exc)
 
@@ -92,6 +99,49 @@ def workload_pods(namespace, workload):
         if (workload_of(pod) or pod.metadata.name) == workload
     ]
     return matched
+
+
+def _workload_selector(namespace, workload):
+    """
+    The owning controller's pod selector, as a label_selector string.
+
+    None when there is no single selector to find, which is ordinary rather
+    than exceptional: a CronJob selects nothing (its Jobs each carry their own
+    generated controller-uid), a static pod has no controller, and a bare pod
+    is its own workload. Every one of those falls back to reading the namespace
+    and filtering on owner references, which is what this function is an
+    optimisation over -- so a miss costs the old behaviour, never an answer.
+
+    A 404 is the normal negative result here, since the only way to learn which
+    kind a workload is, is to ask. Anything else is a real failure and is
+    raised, because silently degrading to a full namespace read would hide a
+    403 as a performance problem.
+    """
+    apps = _apps_api()
+    readers = (
+        apps.read_namespaced_deployment,
+        apps.read_namespaced_daemon_set,
+        apps.read_namespaced_stateful_set,
+    )
+
+    for read in readers:
+        try:
+            spec = read(workload, namespace, _request_timeout=TIMEOUT).spec
+        except ApiException as exc:
+            if exc.status == 404:
+                continue
+            raise
+
+        selector = spec.selector
+        # match_expressions can be serialised into the same string, but they
+        # are rare on controller pod selectors and getting the syntax subtly
+        # wrong would silently drop pods. Falling back reads everything, which
+        # is slower and right.
+        if not selector or not selector.match_labels or selector.match_expressions:
+            return None
+        return ",".join(f"{k}={v}" for k, v in sorted(selector.match_labels.items()))
+
+    return None
 
 
 def list_contexts():
@@ -395,7 +445,7 @@ def list_pods(namespace: str = "default", only_unhealthy: bool = False):
     return result
 
 
-def _iter_pods(namespace=None, page=500):
+def _iter_pods(namespace=None, page=500, label_selector=None):
     """
     Every pod, fetched a page at a time.
 
@@ -404,12 +454,19 @@ def _iter_pods(namespace=None, page=500):
     inside K8S_TIMEOUT, and a 10,000-pod cluster will not. Paging keeps each
     request small and bounded regardless of cluster size; the total transferred
     is the same, but no single call can time out on volume alone.
+
+    A label_selector is the one filter the API server can actually apply to
+    pods for us. Status cannot be narrowed server-side -- a CrashLoopBackOff
+    pod is phase: Running -- so the scan has to read everything, but a caller
+    that already knows which labels it wants should not.
     """
     api = _api()
     token = None
 
     while True:
         kwargs = {"limit": page, "_request_timeout": TIMEOUT}
+        if label_selector:
+            kwargs["label_selector"] = label_selector
         if token:
             kwargs["_continue"] = token
 
