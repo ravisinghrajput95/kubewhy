@@ -63,6 +63,13 @@ ui:
   image:
     repository: ""     # defaults to image.repository
     tag: ""            # defaults to "<image tag>-ui"
+  # These are requests, so they are a scheduling constraint rather than a cap
+  # -- the limit below is what actually bounds Streamlit. On a small managed
+  # node they are the whole story: a 2-vCPU/2GB GKE e2-small has roughly 940m
+  # and 1.36Gi allocatable, of which GKE's own system pods take ~750m and
+  # ~900Mi, so this pod does not fit on one and sits Pending with
+  # "Insufficient cpu, Insufficient memory". Give the UI a node with headroom,
+  # or lower these two values -- not the limit.
   resources:
     requests:
       cpu: 100m

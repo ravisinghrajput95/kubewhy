@@ -404,6 +404,10 @@ kubectl config current-context
 kubectl auth can-i --list --as=system:serviceaccount:triage:triage-agent
 ```
 
+Read that second command's output as a hint rather than an answer. On GKE it
+is actively misleading — see above — and the only check that settles it is
+minting a token and making the request.
+
 ### Running against a remote cluster from your laptop
 
 Works today, with three things to set:
@@ -441,10 +445,36 @@ a laptop on another continent. That run found a real bug — `deploy/rbac.yaml`
 was missing the `watch` verb, so the controller 403'd on its first watch while
 the interactive agent worked fine.
 
-**Not tested on EKS or GKE**, and **the exec-plugin path is still untested**:
-a non-AAD AKS cluster authenticates with a client certificate, not
-`kubelogin`. Token refresh was verified by reading the client, not by
-watching a token expire. Treat those parts as informed expectation.
+**Tested on GKE** (Kubernetes v1.35, one `e2-small` node, authenticating with
+`gke-gcloud-auth-plugin`) — which is the **exec credential plugin path**, the
+part that used to be informed expectation rather than measurement. In one
+session: `--scan` across every namespace, the read-only ClusterRole exercised
+under a token minted for the ServiceAccount, the controller watching and
+diagnosing six workloads end to end, and the browser UI running in-cluster
+behind a port-forward.
+
+**Token refresh is now measured rather than reasoned about.** The pod cache's
+watch ran for 2,050s under the exec plugin, crossing six 300s reconnects and a
+real credential expiry — the plugin issues roughly hour-long credentials, and
+one expired mid-run. Result: 103 samples, none stale, none falling back to a
+live read. Worth knowing, though, that the process paused **94 seconds** across
+the expiry against a 60s staleness bound. Nothing went stale, because the pause
+was in the sampling loop rather than the watch, but the margin is thinner than
+that clean result suggests.
+
+**Not tested on EKS.** The `aws` CLI plugin is the same shape as GKE's, so it
+is likely fine, but likely is not tested.
+
+**`kubectl auth can-i` is not a usable check on GKE.** Asked about a
+ServiceAccount with `--as`, it answered `no` for every permission the
+ServiceAccount demonstrably has, while warning `webhook authorizer does not
+support user rule resolution`. `--list` was closer but still omitted
+`pods/log`. Mint a token and make the request instead — that is the only
+answer that counts:
+
+```bash
+kubectl create token triage-agent -n triage --duration=8h
+```
 
 ## Security
 
@@ -698,9 +728,9 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
   rather than the whole list.
 - **The controller holds dedup state in memory**, so a restart forgets what it
   already reported and it cannot be run with more than one replica.
-- **Untested on managed clusters.** Everything here was exercised against
-  `kind`; EKS/GKE/AKS auth was verified by reading the client, not by running
-  against a real cluster.
+- **Untested on EKS.** AKS and GKE have both been run against for real,
+  including GKE's exec credential plugin and a live token expiry. EKS auth is
+  still verified by reading the client rather than by running against one.
 - **Latency.** Tens of seconds per diagnosis. `kubectl describe` is faster
   when you already know where to look.
 - **`/ask` still holds a request open** for the whole run. `/ask/stream` makes
