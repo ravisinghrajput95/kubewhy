@@ -1055,3 +1055,125 @@ class TestWorkloadPods:
         # caller can ask for the right one's logs.
         assert result[0]["ready"] is False
         assert result[0]["containers"] == ["app", "sidecar"]
+
+
+class TestProbes:
+    """
+    Probes are the only evidence for a pod that is Running and broken. Nothing
+    else in the projection distinguishes "not ready because a probe fails"
+    from "not ready for some reason we did not collect".
+    """
+
+    def _pod_with(self, api, probes, statuses=None):
+        pod = make_pod(name="web-1")
+        for attribute, probe in probes.items():
+            setattr(pod.spec.containers[0], attribute, probe)
+        if statuses is not None:
+            pod.status.container_statuses = statuses
+        api.read_namespaced_pod.return_value = pod
+        return k8s.describe_pod("web-1", "demo")["containers"]["app"]
+
+    def test_reports_what_a_readiness_probe_checks(self, api):
+        info = self._pod_with(
+            api,
+            {
+                "readiness_probe": client.V1Probe(
+                    http_get=client.V1HTTPGetAction(path="/healthz", port=8080),
+                    initial_delay_seconds=2,
+                    period_seconds=5,
+                    failure_threshold=3,
+                )
+            },
+        )
+
+        assert info["probes"]["readiness"]["check"] == "httpGet /healthz:8080"
+        assert info["probes"]["readiness"]["initial_delay"] == 2
+
+    def test_carries_the_timings_that_make_a_probe_the_fault(self, api):
+        """
+        A container needing 60s to start, killed at ~20s by its own liveness
+        probe, is reported as CrashLoopBackOff with exit 137 -- which reads as
+        an application crash, or worse as an OOM kill. The numbers are what
+        separate those, so they cannot be dropped from the projection.
+        """
+        info = self._pod_with(
+            api,
+            {
+                "liveness_probe": client.V1Probe(
+                    tcp_socket=client.V1TCPSocketAction(port=8080),
+                    initial_delay_seconds=5,
+                    period_seconds=5,
+                    failure_threshold=3,
+                )
+            },
+            statuses=[
+                container_status(
+                    ready=False, restart_count=4, terminated_reason="Error", exit_code=137
+                )
+            ],
+        )
+
+        liveness = info["probes"]["liveness"]
+        assert (liveness["initial_delay"], liveness["period"]) == (5, 5)
+        assert liveness["failure_threshold"] == 3
+        # The misleading half of the same picture has to survive alongside it.
+        assert info["last_termination"] == {"reason": "Error", "exit_code": 137}
+
+    def test_reports_all_three_kinds(self, api):
+        info = self._pod_with(
+            api,
+            {
+                "readiness_probe": client.V1Probe(
+                    tcp_socket=client.V1TCPSocketAction(port=1)
+                ),
+                "liveness_probe": client.V1Probe(
+                    tcp_socket=client.V1TCPSocketAction(port=2)
+                ),
+                "startup_probe": client.V1Probe(
+                    tcp_socket=client.V1TCPSocketAction(port=3)
+                ),
+            },
+        )
+
+        assert set(info["probes"]) == {"readiness", "liveness", "startup"}
+
+    def test_truncates_an_exec_probe(self, api):
+        """An exec probe can be a whole shell script; this is a projection."""
+        info = self._pod_with(
+            api,
+            {
+                "readiness_probe": client.V1Probe(
+                    _exec=client.V1ExecAction(command=["sh", "-c", "x" * 500])
+                )
+            },
+        )
+
+        assert len(info["probes"]["readiness"]["check"]) < 140
+
+    def test_a_pod_without_probes_carries_no_probe_key(self, api, healthy_pod):
+        """Most containers have none, and an empty dict each is pure cost."""
+        api.read_namespaced_pod.return_value = healthy_pod
+
+        assert "probes" not in k8s.describe_pod("healthy", "demo")["containers"]["app"]
+
+    def test_unset_timings_are_omitted(self, api):
+        info = self._pod_with(
+            api,
+            {"readiness_probe": client.V1Probe(tcp_socket=client.V1TCPSocketAction(port=8080))},
+        )
+
+        assert info["probes"]["readiness"] == {"check": "tcpSocket :8080"}
+
+    def test_probes_stay_within_the_projection_budget(self, api):
+        """A described pod is read on every diagnosis; probes must stay cheap."""
+        probe = client.V1Probe(
+            http_get=client.V1HTTPGetAction(path="/healthz", port=8080),
+            initial_delay_seconds=2,
+            period_seconds=5,
+            timeout_seconds=1,
+            failure_threshold=3,
+        )
+        self._pod_with(api, {"readiness_probe": probe, "liveness_probe": probe})
+        tokens = len(json.dumps(k8s.describe_pod("web-1", "demo"))) // 4
+
+        assert tokens < 150, f"describe_pod grew to {tokens} tokens"

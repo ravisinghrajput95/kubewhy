@@ -607,6 +607,13 @@ def describe_pod(name: str, namespace: str = "default"):
     state, and -- crucially -- the reason and exit code of the last
     termination. Use this after list_pods to explain a restart or a crash:
     an OOMKilled reason next to a low memory limit is the usual smoking gun.
+
+    Also reports each container's readiness, liveness and startup probes. A
+    container can be Running with nothing terminated and still be broken: if
+    it is not ready, its readiness probe is failing and the pod is receiving
+    no traffic. A restart count next to a liveness probe means the probe is
+    killing the container -- and an initial delay shorter than the app's start
+    time makes the probe the fault rather than the app.
     Args: name -- the pod name; namespace -- defaults to "default".
     """
     try:
@@ -624,6 +631,10 @@ def describe_pod(name: str, namespace: str = "default"):
             "requests": resources.requests or {},
             "limits": resources.limits or {},
         }
+
+        probes = _probes(spec)
+        if probes:
+            info["probes"] = probes
 
         cs = statuses.get(spec.name)
         if cs:
@@ -653,6 +664,63 @@ def describe_pod(name: str, namespace: str = "default"):
         "node": pod.spec.node_name,
         "containers": containers,
     }
+
+
+def _probe(probe):
+    """
+    One probe, projected to what decides whether it is the fault.
+
+    The handler says what is being checked, so a reader can run it themselves.
+    The timings are here because a probe is as often the cause as the symptom:
+    a container that needs 40s to start under a liveness probe with a 10s
+    initial delay and a 3-failure threshold is killed at 40s, forever, and the
+    pod looks like an application crash loop. Without the numbers that fault
+    is invisible -- the status only ever says CrashLoopBackOff.
+    """
+    if probe.http_get:
+        port = probe.http_get.port
+        handler = f"httpGet {probe.http_get.path or '/'}:{port}"
+    elif probe.tcp_socket:
+        handler = f"tcpSocket :{probe.tcp_socket.port}"
+    elif probe._exec:
+        # _exec, not exec: the generated client cannot use a Python keyword as
+        # an attribute name.
+        #
+        # Truncated, because an exec probe can carry a whole shell script and
+        # this is a projection.
+        handler = f"exec {' '.join(probe._exec.command or [])[:120]}"
+    elif probe.grpc:
+        handler = f"grpc :{probe.grpc.port}"
+    else:
+        handler = "unknown"
+
+    projected = {"check": handler}
+
+    # Only the values that were set. Defaulted timings are noise, and every
+    # container carrying five extra fields is how a projection stops being one.
+    for key, value in (
+        ("initial_delay", probe.initial_delay_seconds),
+        ("period", probe.period_seconds),
+        ("timeout", probe.timeout_seconds),
+        ("failure_threshold", probe.failure_threshold),
+    ):
+        if value is not None:
+            projected[key] = value
+
+    return projected
+
+
+def _probes(spec):
+    """Every probe configured on a container, keyed by kind."""
+    found = {}
+    for kind, probe in (
+        ("readiness", spec.readiness_probe),
+        ("liveness", spec.liveness_probe),
+        ("startup", spec.startup_probe),
+    ):
+        if probe:
+            found[kind] = _probe(probe)
+    return found
 
 
 def get_pod_events(name: str, namespace: str = "default", limit: int = 10):

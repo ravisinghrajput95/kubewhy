@@ -179,6 +179,15 @@ container** (reported as `Pending`, so the controller ignored it), a
 container's logs you want, so reads failed outright). A demo that is only
 Deployments hides bugs rather than finding them.
 
+Two of them are `Running` and broken, which is the case a status-only view
+cannot see at all. **`never-ready`** starts cleanly and never passes its
+readiness probe: phase `Running`, no restarts, no termination reason, and no
+traffic, because it is absent from its Service's endpoints. **`slow-starter`**
+needs 60s to start under a liveness probe that kills it at ~20s, so it reports
+`CrashLoopBackOff` with exit code 137 — which reads as an application crash,
+or as an OOM kill. Only the probe's own timings tell the two apart, which is
+why `describe_pod` reports them.
+
 ```bash
 kind create cluster --name triage-demo
 kubectl apply -f demo/broken-pods.yaml
