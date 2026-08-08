@@ -1,0 +1,1606 @@
+[
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 61.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its container cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the application in the `crasher` container is unable to reach the database server on port 5432. Possible causes:\n1. The database service is not running\n2. The database is unreachable from this pod's network\n3. The database port (5432) is blocked or misconfigured\n\nTo fix this, verify that the database service is running and accessible, and ensure the pod's network has proper connectivity to the database endpoint.",
+  "chars": 618,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 72.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because it cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod is attempting to connect to a database service on port `5432` (likely PostgreSQL), but the connection is being refused. This could mean:\n  - The database service is **not running**.\n  - The database service is **not reachable** from the pod's network.\n  - The database service is **misconfigured** (e.g., incorrect hostname, port, or credentials).\n\n### Next Steps:\n1. **Verify the database service** is running and accessible:\n   - Check if the database pod is healthy (`kubectl get pods -l app=db`).\n   - Ensure the database service has **ready endpoints** (`get_service_endpoints`).\n2. **Check network policies** or firewalls blocking port `5432`.\n3. **Validate configuration** (e.g., database URL, credentials) in the crasher pod's environment or secrets.\n\nThis is a **network/service dependency issue**, not a pod-specific problem. Fixing the database connection will resolve the crash loop.",
+  "chars": 1076,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 48.3,
+  "confidence": "partial",
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod is failing with exit code `1`, likely due to an application error in the `busybox:1.36` container. The pod has restarted **49 times**, indicating a persistent issue. \n\nTo diagnose further:\n- Check **container logs** with `get_pod_logs` to identify the exact error (e.g., a failed command or script).\n- Verify if resource limits or requests are missing, which might cause unexpected behavior in the minimal `busybox` image. \n\nNo OOMKilled or crash loop details were found in the pod description.",
+  "chars": 531,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 63.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod's application is trying to connect to a database at `db:5432` (likely PostgreSQL), but the connection is being refused.\n- This indicates the **database service is either unreachable, not running, or misconfigured** (e.g., wrong host/port).\n\n### Next Steps:\n1. Check if the database service (e.g., `db` service in the same namespace) is running and reachable.\n2. Verify network policies or firewall rules blocking access to the database.\n3. Ensure the database is properly exposed (e.g., via a Kubernetes Service).",
+  "chars": 733,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 110.1,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its application cannot connect to the database. Logs show:  \n`FATAL: could not connect to db:5432: connection refused`  \n\nThis indicates the pod's application is trying to connect to a PostgreSQL database (port 5432) but cannot reach it. Likely causes:  \n1. **Database service is unreachable** (down, firewall blocked, or misconfigured).  \n2. **Incorrect connection details** (wrong host/port in environment variables or config).  \n3. **Network policies** blocking communication between the pod and the database.  \n\nTo fix this:  \n- Verify the database service is running and accessible.  \n- Check environment variables or config files for correct host/port.  \n- Ensure network policies allow traffic between the pod and the database.  \n\nThe pod's container (busybox) likely lacks a specific command to interact with the database, or the application inside it is misconfigured.",
+  "chars": 912,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 75.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because it cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod's application is trying to connect to a database at `db:5432` (likely PostgreSQL), but the connection is being refused. This indicates the database service is either:\n  - Not running,\n  - Not reachable (network/firewall issue),\n  - Misconfigured (wrong hostname/port),\n  - Or the pod is starting before the database is ready.\n\n### Next Steps:\n1. **Check if the database service is running** (e.g., `db` service in the same namespace).\n2. **Verify network connectivity** between the pod and the database (e.g., using `kubectl exec` to test `nc db 5432`).\n3. **Ensure the database is properly configured** (e.g., correct credentials, port, and hostname in the app's config).\n\nThe pod is in a crash loop because it cannot establish the required database connection.",
+  "chars": 969,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 73.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod in the `demo` namespace is failing with exit code `1` after 50 restarts. This indicates an application-level error in the `crasher` container using the `busybox:1.36` image. The pod is not ready, and no specific resource limits or requests are defined, which may contribute to instability. To diagnose further:\n\n1. Check **pod events** for errors like failed pulls or scheduling issues.  \n2. Inspect **container logs** to identify the exact application error causing exit code `1`.  \n\nExample next steps:  \n```bash\nget_pod_events name=crasher-5964d99948-6zmgf namespace=demo\nget_pod_logs name=crasher-5964d99948-6zmgf namespace=demo\n```",
+  "chars": 673,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": false,
+  "seconds": 157.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod in the `demo` namespace is in a **CrashLoopBackOff** state with 50 restarts. The last termination had an exit code of **1** (general error) and no specific crash reason in events. \n\n### Likely Cause:\n- The container (using `busybox:1.36`) is failing to run successfully, likely due to an **application-level error** (e.g., missing command, invalid configuration, or runtime issue). \n- The `CrashLoopBackOff` indicates the kubelet is backing off after repeated crashes, but the exact error is hidden in the container logs.\n\n### Next Steps:\n1. **Check logs** with `get_pod_logs` to identify the root cause (e.g., missing files, failed commands).\n2. Verify the container's command and arguments in the deployment spec (ensure they\u2019re valid for `busybox`).\n3. Ensure the image `busybox:1.36` is correctly pulled and accessible. \n\nWithout logs, the exit code `1` is non-specific, but the crash loop confirms the container is failing to run.",
+  "chars": 972,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 153.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its container cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the application in the `crasher` container is unable to reach the database service (likely running on port 5432). The pod is restarting repeatedly (51 times) due to this failure. \n\n**Fix:** Ensure the database service is running and reachable from the pod. Check if the service is properly exposed (e.g., via a Kubernetes Service object) and verify network connectivity within the cluster.",
+  "chars": 592,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 149.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The app is trying to connect to a database service on port `5432` (common for PostgreSQL), but the connection is being refused.\n- This could mean:\n  - The database service is not running or unreachable.\n  - The database service is not properly exposed (e.g., no service selector matches pods, or endpoints are misconfigured).\n  - Network policies or firewall rules are blocking the connection.\n\n### Next Steps:\n1. Check if the database pod is running and healthy (`kubectl get pods -n <db-namespace>`).\n2. Verify the database service configuration (`kubectl get service -n <db-namespace>`).\n3. Ensure the database is accepting connections (e.g., check if it's listening on port 5432).\n4. Confirm there are no network issues (e.g., using `kubectl get endpoints` for the database service).",
+  "chars": 973,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 224.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container is attempting to connect to a database service on port `5432` but is being **refused** (likely due to the database being unreachable, misconfigured, or not running).\n\n### Next Steps:\n1. **Check the database service** (e.g., PostgreSQL) in the same namespace for readiness.\n2. **Verify network policies** or firewall rules blocking access to the database port (`5432`).\n3. **Inspect the app's configuration** (e.g., `db_host`, `db_port`, credentials) for correctness.\n4. **Ensure the database pod** (if in the same namespace) is running and has proper endpoints.\n\nThis is a **networking/configuration issue**, not a resource limit or application crash.",
+  "chars": 880,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 111.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container is attempting to connect to a database on port `5432` but is being refused. This indicates the database service is either:\n  - Not running,\n  - Not reachable (networking issue),\n  - Using a different port, or\n  - Blocked by firewall/security policies.\n\n### Next Steps:\n1. Check if the database service (e.g., PostgreSQL) is running and reachable from the pod.\n2. Verify the database port (`5432`) is open and not blocked.\n3. Ensure the database credentials and configuration in the app are correct.",
+  "chars": 725,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 70.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. Logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is attempting to connect to a database service on port `5432` but is being rejected (likely due to the database not running, network issues, or incorrect configuration).\n\n### Next Steps:\n1. Check if the database service (e.g., PostgreSQL) is running and accessible.\n2. Verify network policies or firewall rules blocking traffic to the database port.\n3. Ensure the database credentials and host configuration in the container's environment are correct.\n\nThis is a dependency issue, not a resource or code error in the crasher pod itself.",
+  "chars": 730,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 1013.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its application cannot connect to the database. The logs show:  \n`FATAL: could not connect to db:5432: connection refused`  \n\nThis indicates the database service is unreachable. Check if:  \n1. The database pod is running and accessible (use `get_service_endpoints` for the database service).  \n2. Network policies or firewalls block port 5432.  \n3. Database credentials or host configuration in the crasher pod are incorrect.  \n\nThe pod restarts repeatedly because the application exits with exit code 1 (general failure) after failing to connect.",
+  "chars": 582,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 472.8,
+  "confidence": "partial",
+  "unverified": [
+   "crashloopbackoff"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod is in a **CrashLoopBackOff** state due to repeated container crashes. Here's why:\n\n- **Exit code 1**: The container exited with a non-zero status, indicating a general failure (e.g., app error, missing files, or misconfiguration).\n- **93 restarts**: Kubernetes has restarted the container 93 times, triggering the `BackOff` mechanism to prevent overwhelming the system.\n- **No resource limits**: The pod has no CPU/memory limits, so resource exhaustion isn't the cause.\n\n### Next steps:\n1. Check **container logs** (`get_pod_logs`) for the exact error causing exit code 1.\n2. Verify the **busybox:1.36** image is correct and contains a functional entrypoint/script.\n3. Ensure no filesystem issues (e.g., missing files) are causing the crash. \n\nThe pod is not failing due to resource pressure or scheduling \u2014 it\u2019s crashing internally.",
+  "chars": 870,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 57.9,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. Logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is trying to connect to a PostgreSQL database (port 5432) but is being **rejected** by the host.\n- This could mean:\n  - The database service is not running or unreachable.\n  - Network policies are blocking the connection.\n  - The database is misconfigured (e.g., wrong host/port).\n\n### Next Steps:\n1. Verify the database service is running and accessible.\n2. Check network rules (e.g., `kubectl get svc` for the DB service).\n3. Ensure the DB pod is healthy and has no connectivity issues.",
+  "chars": 682,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 56.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container is attempting to connect to a database service on port `5432` but is being **rejected** (likely due to a misconfigured endpoint, unreachable service, or firewall rules).\n\n### Next Steps:\n1. **Verify the database service** (e.g., PostgreSQL) is running and accessible on `5432`.\n2. **Check network policies** or firewall rules to ensure the pod can reach the database.\n3. **Validate the connection string** in the application configuration (e.g., hostname, port, credentials).\n\nThis is a **network/service dependency issue**, not a Kubernetes or resource problem.",
+  "chars": 791,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 61.9,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its container cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the database service (likely PostgreSQL on port 5432) is either:\n1. Not running\n2. Not reachable from the pod\n3. Misconfigured in the connection parameters\n\nThe container exits with code 1 (general error) after failing to establish the database connection. To fix this, verify the database service is running and accessible, and check the connection settings in the pod's configuration.",
+  "chars": 589,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 72.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is trying to connect to a **PostgreSQL database** (port 5432) but is being **refused**.\n- This indicates a **networking issue** (e.g., the database is unreachable, the host is misconfigured, or the port is blocked).\n\n### Next Steps:\n1. **Check if the database service is running** (e.g., via `get_service_endpoints` for the database service).\n2. **Verify network policies** or firewall rules blocking traffic to port 5432.\n3. **Confirm the database host and port** in the pod's configuration (e.g., environment variables or config files).\n\nThe pod is stuck in a crash loop because it cannot establish the required database connection.",
+  "chars": 832,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 89.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is trying to connect to a database service on port `5432` (likely PostgreSQL) but is being **rejected**.\n- This indicates either:\n  1. The database service is **unreachable** (down, misconfigured, or not exposed).\n  2. A **network policy** or firewall is blocking access to the database port.\n  3. The database service **hostname/port** in the pod's configuration is incorrect.\n\n### Next Steps:\n1. Check if the database service (e.g., `db-service`) is running and accessible.\n2. Verify the database's endpoints using `get_service_endpoints` to ensure it has ready endpoints.\n3. Confirm network rules allow traffic from the pod's node to the database's node/port.",
+  "chars": 860,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 62.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because it cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod is trying to connect to a database service (likely PostgreSQL) on port 5432, but the connection is being refused. This could mean:\n  - The database service is not running or unreachable.\n  - The database host/port is misconfigured in the pod's environment.\n  - Network policies or firewall rules are blocking the connection.\n\n### Next Steps:\n1. Check if the database service (e.g., `db-service` or `postgres`) is running and accessible.\n2. Verify the database credentials and connection parameters in the pod's configuration (e.g., environment variables or config maps).\n3. Ensure no network policies are blocking traffic between the pod and the database.",
+  "chars": 836,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 64.4,
+  "confidence": "partial",
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod is failing due to **repeated container crashes** triggering a **BackOff** restart policy. Here's why:\n\n- **Exit code 1** (from `describe_pod`) indicates a general runtime error (not OOMKilled or crashloop specific to the image).\n- **103 restarts** (from `get_pod_events`) show the pod has been crashing repeatedly, exhausting its restart limit.\n- **No resource limits** (empty `limits` in `describe_pod`) suggest the container isn't constrained, but the root cause is likely an application-level error (e.g., missing dependencies, bad code, or infinite loops).\n\n### Next Steps\nCheck the container logs with `get_pod_logs` to identify the exact error. The `busybox` image is minimal, so ensure the container's entrypoint/script is correct and all required tools are present.",
+  "chars": 810,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 79.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod's container is trying to connect to a database on host `db` (default PostgreSQL port `5432`), but the connection is refused. This indicates:\n  - The **database service is not running** or unreachable.\n  - A **network policy** is blocking traffic between the pod and the database.\n  - The **database host** in the pod's configuration is incorrect (e.g., typo, wrong IP, or service name).\n\n### Next Steps:\n1. **Check if the database service is running** (e.g., `kubectl get pods -l app=db`).\n2. **Verify network connectivity** between the pod and the database (e.g., `kubectl exec -it crasher-pod -- ping db`).\n3. **Inspect the pod's environment variables or config** to confirm the database host/port.\n4. **Ensure the database port (5432)** is open in any firewall or network policy.\n\nThis is a **configuration or dependency issue**, not a resource limit or crashloopbackoff misconfiguration.",
+  "chars": 1085,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 82.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because it cannot connect to the database. The logs show a `FATAL: could not connect to db:5432: connection refused` error, indicating the database service is unreachable. This could be due to:\n\n1. **Database Not Running**: The database pod might not be deployed or is unhealthy.  \n2. **Network Issues**: The pod cannot reach the database (e.g., firewall rules, misconfigured DNS, or incorrect host/port).  \n3. **Authentication Errors**: Invalid credentials or permissions for the database user.  \n\n**Fix**:  \n- Verify the database pod's status and ensure it is running.  \n- Check the database service endpoints (`get_service_endpoints`) to confirm the selector matches pods.  \n- Validate the database connection details (host, port, username, password) in the crasher pod's configuration.  \n- Ensure the database is accessible from the pod's node (e.g., no network policies blocking traffic).",
+  "chars": 920,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 59.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher-5964d99948-6zmgf** pod is failing because its container cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is attempting to connect to a database service on port `5432` but is being **refused** (likely due to the database not running, incorrect endpoint, or network policies blocking access).\n\n### Next Steps:\n1. **Check if the database service is running** and accessible on `5432`.\n2. **Verify the database credentials** and endpoint configuration in the pod's environment variables or secrets.\n3. **Inspect network policies** or firewalls to ensure traffic to the database is allowed.\n4. **Restart the database service** if it is down, or update the pod's configuration to use the correct endpoint.",
+  "chars": 835,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 95.2,
+  "confidence": "partial",
+  "unverified": [
+   "crashloopbackoff"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher pod** in the `demo` namespace is failing due to a **repeated crash loop** (`CrashLoopBackOff`). Here's why:\n\n- **Exit Code 1**: The container exited with code `1`, indicating an application-level error (e.g., a missing file, invalid command, or misconfigured process).\n- **107 Restart Attempts**: Kubernetes automatically restarts the container after each crash, leading to the `BackOff` event. The pod has restarted **58 times**, suggesting the issue persists.\n- **BusyBox Image**: The container uses `busybox:1.36`, a minimal toolset. If no command is specified in the container's entry point, it defaults to a shell that exits immediately with code `1`.\n\n### Next Steps:\n1. **Check Logs**: Use `get_pod_logs` to identify the exact error (e.g., missing file, syntax error).\n2. **Verify Command**: Ensure the container's `command` or `entrypoint` is correctly configured in the deployment spec.\n3. **Resource Limits**: Confirm memory/cpu limits aren't causing unexpected termination (though exit code `1` suggests a different root cause).",
+  "chars": 1053,
+  "hedges": [
+   "suggests"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 53.5,
+  "confidence": "partial",
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod in the `demo` namespace is in a **CrashLoopBackOff** state with 58 restarts. The container exited with **exit code 1**, which typically indicates a general runtime error (e.g., application failure, missing commands, or invalid configuration). \n\n### Likely Causes:\n1. **Application Error**: The containerized application (using `busybox:1.36`) likely failed to execute properly. Verify the container's entry point or command (e.g., `sh`, `sleep`, or custom scripts) is correct.\n2. **Missing Dependencies**: BusyBox is minimal\u2014ensure all required tools or scripts are explicitly included in the image.\n3. **Resource Limits**: Check if memory/CPU limits (not shown here) are causing OOMKilled or other resource-related crashes.\n\n### Next Steps:\n- Run `get_pod_logs` to inspect the container's stdout/stderr for specific error messages.\n- Review the pod's resource requests/limits via `describe_pod` (currently unset).\n- Check for related events with `get_pod_events` to rule out image pull failures or scheduling issues.",
+  "chars": 1054,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 69.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. Logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container is attempting to connect to a database on port `5432` but is being **refused** (likely due to a misconfigured database, network policy, or unreachable service).\n- This causes the container to exit with **exit code 1** (general error), triggering the **CrashLoopBackOff** restart loop.\n\n### Next Steps:\n1. Verify the database service (e.g., PostgreSQL) is running and accessible on `5432`.\n2. Check if the database credentials or connection string in the app are correct.\n3. Ensure network policies or firewalls are not blocking traffic to the database port.",
+  "chars": 782,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 63.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is trying to connect to a database service on port `5432` (likely PostgreSQL) but is being **rejected**.\n- This indicates the **database is unreachable** (down, misconfigured, or not exposed).\n\n### Next Steps:\n1. Check if the database service (e.g., `db-service` or `postgres`) is running and accessible.\n2. Verify network policies or firewalls are not blocking traffic to port `5432`.\n3. Ensure the database host and port in the app's configuration are correct.\n\nThe pod will continue crashing until the database becomes available.",
+  "chars": 730,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 98.5,
+  "confidence": "partial",
+  "unverified": [
+   "5432"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** in the `demo` namespace is failing because its container is unable to connect to a database. Here's the breakdown:\n\n- **Root Cause**: The logs show the container is trying to connect to a database on port `5432` (default for PostgreSQL) but receives a `connection refused` error. This indicates the database service is either:\n  - Not running,\n  - Not accessible on the expected host/port,\n  - Or misconfigured in the pod's environment.\n\n- **Impact**: The container exits with **exit code 1** (general error), triggering Kubernetes' **CrashLoopBackOff** retry mechanism, which is why the pod has 58 restarts.\n\n- **Next Steps**:\n  1. Verify the database service (e.g., PostgreSQL) is running and accessible on the expected host/port.\n  2. Check if the database credentials or connection parameters in the pod's configuration are correct.\n  3. Ensure the database is properly exposed (e.g., via a service) and reachable from the pod's network.\n\nThis is a **network/service dependency issue**, not a resource or code bug in the container itself.",
+  "chars": 1062,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 83.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. Here's why:\n\n- **Logs show**: `FATAL: could not connect to db:5432: connection refused` \u2014 the app is trying to connect to a PostgreSQL database on port 5432 but is being refused.\n- **Cause**: The database service (likely PostgreSQL) is either:\n  - Not running,\n  - Not accessible on the network (firewall, misconfigured DNS, or node issues),\n  - Or not properly exposed via a service (e.g., missing `Service` resource for the DB).\n\n### Fix\n1. Check if the database pod/service exists and is running:\n   ```bash\n   kubectl get pods,services -n demo | grep db\n   ```\n2. Verify network connectivity from the crasher pod to the DB:\n   ```bash\n   kubectl exec -it crasher-5964d99948-6zmgf -n demo -- ping <db-service-name>\n   ```\n3. Ensure the DB service is correctly configured (e.g., `Service` object exposing port 5432).",
+  "chars": 905,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": false,
+  "seconds": 64.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod in the `demo` namespace is in a **CrashLoopBackOff** state with 59 restarts. The container exited with **exit code 1**, indicating a general runtime error. The pod is currently backing off (5m0s) before retrying, which is Kubernetes' default behavior for failed containers.\n\n### Key issues:\n1. **Exit code 1**: The container crashed due to an unhandled error (e.g., app crash, segmentation fault, or invalid command).\n2. **CrashLoopBackOff**: The pod is stuck in a loop of crashing and restarting. This could be caused by:\n   - A bug in the application (e.g., `busybox:1.36` is misconfigured or missing dependencies).\n   - Resource constraints (e.g., memory limits, CPU limits, or disk space).\n   - Missing environment variables or secrets required by the app.\n   - A failed dependency (e.g., a database or service the app depends on is unreachable).\n\n### Next steps:\n- Check **pod logs** (`get_pod_logs`) to identify the exact error message from the application.\n- Inspect **pod events** (`get_pod_events`) for warnings like \"FailedSync\" or \"ImagePullBackOff\" (though the pod is already in CrashLoopBackOff, events might show earlier issues).\n- Verify resource limits in the pod's spec (if missing, defaults might be insufficient).\n\nExample fix: If the app requires a specific environment variable, ensure it's set in the pod's configuration. If memory is the issue, set `memory-limit` in the container's resources.",
+  "chars": 1453,
+  "hedges": [
+   "might be"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 60.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the database server is either:\n1. Not running\n2. Not reachable via the network\n3. Using a different port than 5432\n\nCheck the database service's status and network connectivity. Ensure the database is properly configured and accessible from the pod's namespace. Verify port 5432 is open and the database is accepting connections.",
+  "chars": 508,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 54.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod is in **CrashLoopBackOff** due to repeated crashes (59 restarts). The container exited with **exit code 1**, which indicates a general error (not a specific system failure like OOMKilled). \n\nTo diagnose further:\n- Check **pod logs** for application-specific errors (e.g., missing files, failed commands).\n- Inspect **pod events** for scheduling or image pull issues.\n- Verify if the `busybox` image is configured with a valid command (e.g., `sh` or `sleep`).\n\nNext step: fetch logs or events to identify the exact cause.",
+  "chars": 557,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 63.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod is in a crash loop with 60 restarts. The container using the `busybox:1.36` image exited with **code 1**, and the kubelet is backing off (115 times) before retrying. This typically indicates:\n\n- **Missing or invalid command**: The container might lack a valid entrypoint/command. `busybox` is a minimal image; if no command is specified in the pod spec, it will exit immediately with code 1.\n- **Application error**: If a command is specified, it might be failing due to missing files, incorrect arguments, or runtime errors.\n\n### Next steps:\n1. **Check the container's command**: Verify the pod spec to ensure a valid command is set (e.g., `sh`, `echo`, or an application).\n2. **Inspect logs**: Use `get_pod_logs` to see if the container exited with a specific error message.\n3. **Resource limits**: Ensure no memory or CPU limits are causing the container to crash (check `describe_pod` for resource constraints).\n\nExample fix: If the pod is meant to run a script, ensure the command is explicitly set in the deployment/spec.",
+  "chars": 1064,
+  "hedges": [
+   "might be"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 69.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container is trying to connect to a database at `db:5432` (likely a PostgreSQL service), but the connection is being refused.\n- This indicates the **database service is either not running**, **not reachable**, or **misconfigured** (e.g., wrong hostname/port).\n\n### Next Steps:\n1. Verify the database service (e.g., `db` pod or external DB) is running and accessible.\n2. Check network policies or firewall rules blocking access to `db:5432`.\n3. Ensure the database is properly provisioned and accepts connections from the crasher pod.\n\nThe crash loop persists because the app cannot start without the database.",
+  "chars": 828,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 64.1,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is attempting to connect to a PostgreSQL database (port `5432`) but is being **refused**, indicating the database service is unreachable or misconfigured.\n\n### Next Steps:\n1. **Verify the database service** (e.g., PostgreSQL) is running and accessible on the correct host/port.\n2. Check if the database pod/service is also failing (use `get_service_endpoints` or `list_pods` for the database workload).\n3. Ensure the crasher pod's configuration (e.g., environment variables, secrets) points to the correct database address.\n\nThis is a **network/service dependency issue**, not a resource or code error in the crasher container.",
+  "chars": 851,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 56.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod is in **CrashLoopBackOff** with 60 restarts. The container exited with **code 1**, a generic error, likely due to an application-level failure. \n\n### Key findings:\n- **Image**: `busybox:1.36` (minimal base image, no specific app listed).\n- **Resource limits**: No memory/CPU limits set (could lead to unexpected crashes if the app exceeds defaults).\n- **Logs**: Missing application-specific error details (check `get_pod_logs` for exact cause).\n- **Probes**: No readiness/liveness probes configured, so crashes aren\u2019t tied to health checks.\n\n### Next steps:\n1. **Check logs**: Use `get_pod_logs` to find the app\u2019s exit reason (e.g., missing files, invalid commands).\n2. **Adjust limits**: If the app is memory-intensive, set `memory.limit` in the pod spec to prevent OOM kills.\n3. **Validate image**: Ensure the `busybox` image includes the correct application binary and dependencies.",
+  "chars": 922,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 48.9,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod in the `demo` namespace is in **CrashLoopBackOff** state due to a container exit code of **1**, indicating a non-zero termination status. Here's why:\n\n- **Exit Code 1**: The container failed to run successfully. For `busybox` (a minimal image), this often means the default command (e.g., `/bin/sh`) is misconfigured, missing, or encountering a fatal error in the application it's meant to run.\n- **No Resource Limits**: The container has no memory or CPU limits, so resource exhaustion isn't the cause.\n- **No Logs Yet**: The pod hasn't produced logs yet (or they\u2019re not visible), so the exact failure reason requires inspecting the container's logs.\n\n### Next Steps\nCheck the container's command (if custom) or verify if the image is configured to run a valid process. Use `get_pod_logs` for details.",
+  "chars": 839,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": false,
+  "seconds": 58.9,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod in the `demo` namespace is failing due to a **repeated crash loop** (exit code 1) with a **BackOff** restart policy. The container crashes, triggers a restart, and the kubelet delays further restarts to avoid overwhelming the system. \n\n### Key issues:\n- **Exit code 1**: Indicates an application-level error (e.g., crash, unhandled exception, or invalid command).\n- **119 restarts**: Suggests a persistent issue in the container's process (e.g., infinite loop, missing dependencies, or misconfiguration).\n- **No resource limits**: The `describe_pod` output shows no memory or CPU limits, so this is unlikely a resource exhaustion issue.\n\n### Next steps:\nCheck the container logs (`get_pod_logs`) to identify the root cause of the exit code 1. For example, a missing file, incorrect command, or application bug could be the culprit.",
+  "chars": 868,
+  "hedges": [
+   "suggests"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 85.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container is attempting to connect to a database at `db:5432` (likely PostgreSQL), but the connection is being refused.\n- This indicates the **database service is unreachable** from the pod's network context.\n\n### Next Steps:\n1. **Verify the database service** is running and accessible (check via `get_service_endpoints`).\n2. **Check network policies** or firewall rules blocking the connection.\n3. **Ensure the database** is properly deployed in the same namespace (`demo`) or resolve DNS/service discovery issues.\n\nThe pod itself is healthy (no OOM or resource limits exceeded), but the application failure is due to an external dependency issue.",
+  "chars": 894,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 66.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because it cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod's application is trying to connect to a database at `db:5432` (likely PostgreSQL), but the connection is being refused.\n- This indicates the **database service is either unreachable, not running, or misconfigured** (e.g., incorrect hostname/port).\n\n### Next Steps:\n1. Verify the database service is running in the `demo` namespace (e.g., using `get_service_endpoints` for the database service).\n2. Check if the database pod is healthy (e.g., using `list_pods` or `describe_pod` for the database workload).\n3. Ensure the database is properly exposed (e.g., via a service with correct endpoints).\n\nThe crash loop is directly caused by the application failing to connect to the database.",
+  "chars": 865,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 62.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its application cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the app is trying to connect to a PostgreSQL database on port 5432 but receiving a \"connection refused\" error. Possible causes:\n\n1. **Database not running** - The target database service (e.g. PostgreSQL) is not available\n2. **Network issue** - The pod cannot reach the database host/port\n3. **Firewall rules** - Network policies are blocking the connection\n4. **Incorrect credentials** - The app is using wrong authentication details\n\nVerify the database service is running and accessible from the pod's network. Check if the database host IP/port is correctly configured in the app's environment.",
+  "chars": 803,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 55.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The `crasher` pod is failing because it cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Likely Causes:\n1. **Database Service Unavailable**: The database server (likely running on `db:5432`) is not running or unreachable.\n2. **Network/Service Configuration**: The pod's configuration might be incorrect (e.g., wrong hostname, port, or credentials).\n3. **Firewall/Security Rules**: Network policies might block access to the database port (5432).\n\n### Next Steps:\n- Check if the database service is running and accessible from the pod's node.\n- Verify the database service's endpoints using `get_service_endpoints` to ensure it has valid, ready endpoints.\n- Confirm the pod's environment variables or configuration files for correct database connection details.",
+  "chars": 828,
+  "hedges": [
+   "likely",
+   "might be"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 76.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `busybox:1.36` container is attempting to connect to a database service (likely PostgreSQL) on port `5432`, but the connection is being refused. This could be due to:\n  - The database service not running or unreachable.\n  - Incorrect database credentials/host configuration.\n  - Network policies blocking access (e.g., firewall rules, Kubernetes NetworkPolicies).\n  - The database pod not being ready (e.g., due to its own failures or misconfiguration).\n\n### Next Steps:\n1. Check the status of the database pod (if it's part of the same cluster).\n2. Verify the database service endpoints and ensure they are reachable.\n3. Confirm the database credentials and connection parameters in the app's configuration.\n4. Investigate network policies or firewall rules that might block traffic between the crasher pod and the database.",
+  "chars": 1032,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 70.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. Here's why:\n\n- **Root Cause**: The logs show `FATAL: could not connect to db:5432: connection refused`, meaning the pod's application is trying to connect to a PostgreSQL database on port 5432 but cannot reach it.\n- **Impact**: This causes the container to exit with **exit code 1** (general error), triggering the **CrashLoopBackOff** restart loop.\n- **Next Steps**:\n  - Ensure the database service (e.g., a PostgreSQL pod or StatefulSet) is running and accessible.\n  - Verify the database is using port 5432 and is reachable from the pod's network.\n  - Check if the database is properly exposed via a Kubernetes Service (e.g., `db-service`), and ensure the crasher pod can resolve it (e.g., via DNS or environment variables).\n\nFixing the database connection will resolve the crash loop.",
+  "chars": 875,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 67.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the application is trying to connect to a PostgreSQL database at `db:5432` but is being blocked. Possible causes:\n1. The database service is not running\n2. The database service is unreachable (network/firewall issue)\n3. The database is not properly configured to accept connections\n\nThe pod's configuration likely assumes the database is available at `db:5432`, but this endpoint is not reachable. Verify the database service's status and network accessibility.",
+  "chars": 640,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 78.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because it cannot connect to the database. The logs show:  \n`FATAL: could not connect to db:5432: connection refused`  \n\nThis indicates the pod's application is unable to reach the database service (likely PostgreSQL) at host `db` on port `5432`. Possible causes:  \n- The database service is not running or unreachable.  \n- Incorrect database host/port configuration in the pod's environment.  \n- Network policies or firewall rules blocking the connection.  \n\nFix: Verify the database service's availability and ensure the pod's configuration uses the correct connection details.",
+  "chars": 606,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 90.3,
+  "confidence": "partial",
+  "unverified": [
+   "5432"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its container cannot connect to the database. The logs show a `connection refused` error when trying to connect to `db:5432`, which is the default PostgreSQL port. This indicates the database service is either unreachable, not running, or misconfigured. \n\n### Root Cause:\n- The pod's application is attempting to connect to a database (likely PostgreSQL) but cannot establish a connection. This could be due to:\n  - The database service being down or not accessible.\n  - Incorrect service name or network configuration (e.g., the `db` service is not reachable in the same namespace).\n  - Firewall rules or network policies blocking the connection.\n\n### Next Steps:\n1. Verify if the database service (e.g., `db` in the `demo` namespace) is running and has endpoints:\n   ```bash\n   kubectl get service db -n demo\n   kubectl get endpoints db -n demo\n   ```\n2. Check if the database pod is running and healthy:\n   ```bash\n   kubectl get pods -n demo | grep db\n   ```\n3. Ensure the database is listening on port 5432 and is reachable from the crasher pod's network.",
+  "chars": 1095,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 46.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod in the `demo` namespace is in **CrashLoopBackOff** state, meaning it crashes repeatedly and restarts. The last termination reason was **\"Error\"** with exit code **1**, which is a generic failure. \n\nTo diagnose further:\n- Check **container logs** with `get_pod_logs` to find the root cause (e.g., app errors, missing files, or misconfigurations).\n- Verify if the **image** (`busybox:1.36`) is correct and accessible.\n- Ensure **resource limits** (CPU/memory) aren't too restrictive, as exit code 1 can sometimes indicate resource exhaustion. \n\nNext step: fetch logs or events for more details.",
+  "chars": 629,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 463.1,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its container cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the application inside the container is trying to connect to a PostgreSQL database (port 5432) but is being denied. The pod is stuck in a crash loop because:\n\n1. The database service is either not running\n2. The database is unreachable (networking issue)\n3. The database is running but not listening on port 5432\n\nYou should check if the database service is deployed in the same namespace, verify its endpoints are reachable, and ensure the database is properly configured to accept connections.",
+  "chars": 698,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": false,
+  "seconds": 65.6,
+  "confidence": "partial",
+  "unverified": [
+   "crashloopbackoff"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher-5964d99948-6zmgf** pod is in a **CrashLoopBackOff** state due to repeated container failures. Here's why:\n\n- **Exit Code 1**: The container exited with a generic error (code 1), often caused by application failures, missing dependencies, or misconfigured entry points.\n- **131 Restart Attempts**: The pod has restarted 131 times in the last 8 minutes, indicating a persistent issue preventing it from staying running.\n- **BusyBox Image**: The `busybox:1.36` image is minimal, so the problem likely stems from:\n  - An invalid or missing command in the container's entry point.\n  - File/permission issues in the filesystem.\n  - Resource limits (CPU/memory) not being set, causing the container to fail silently.\n\n### Next Steps\n1. **Check Pod Logs**: Use `get_pod_logs` to identify the exact error from the container.\n2. **Review Pod Specs**: Ensure the `command` and `args` in the pod's configuration are valid and match the application's requirements.\n3. **Resource Limits**: Verify resource requests/limits are set appropriately to avoid OOMKilled or other resource-related crashes.",
+  "chars": 1097,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": false,
+  "seconds": 53.2,
+  "confidence": "partial",
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The `crasher` pod is in `CrashLoopBackOff` due to repeated crashes with exit code 1. Here's why:\n\n- **Exit Code 1**: Indicates a general runtime error (e.g., app crash, missing dependencies, or invalid configuration).\n- **Image**: Uses `busybox:1.36`, a minimal container, suggesting the issue is likely from the app's command/args or environment.\n- **No Resource Limits**: The container has no memory or CPU limits, so it's not OOMKilled.\n\n**Next Steps**:  \nCheck the container logs with `get_pod_logs` to identify the exact error. For example:  \n```bash\nget_pod_logs --name crasher-5964d99948-6zmgf --namespace demo --container crasher\n```  \nThis will reveal if the app failed to start, encountered a panic, or had a configuration error.",
+  "chars": 739,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 87.9,
+  "confidence": "partial",
+  "unverified": [
+   "5432"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. Here's why:\n\n- **Root Cause**: The logs show the container is trying to connect to a database at `db:5432` but receives a `connection refused` error. This indicates the database service is either unreachable, misconfigured, or not running.\n- **Impact**: The application exits with exit code `1` (general error), triggering the `CrashLoopBackOff` status and repeated restarts (131 total).\n- **Fix**: Verify the database service is running and accessible at `db:5432`. Check network policies, DNS resolution, and ensure the database is properly provisioned.",
+  "chars": 642,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 84.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because it cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod is trying to connect to a database service on port `5432` (typically PostgreSQL), but the connection is being **refused**.\n- This indicates the database service is **unreachable** from the pod's perspective (e.g., the service is down, misconfigured, or blocked by network policies).\n\n### Next Steps:\n1. Check if the database service (e.g., `db-service`) is running and accessible via `get_service_endpoints`.\n2. Verify network policies or firewalls are not blocking traffic between the pod and the database.\n3. Ensure the database is properly configured to accept connections from the pod's namespace.\n\nThis is a **networking or service availability issue**, not a pod-specific problem.",
+  "chars": 893,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 82.0,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` pod is trying to connect to a database service on port `5432` but is being **refused** (likely the database is unreachable, misconfigured, or not running).\n- This is a **networking issue** or **database service outage**, not a resource exhaustion problem (no OOMKilled or similar).\n\n### Next Steps:\n1. Check if the database service (e.g., PostgreSQL) is running and accessible on `5432` from the pod's node.\n2. Verify the database credentials, hostname, and port in the app's configuration.\n3. Ensure there are no firewall rules blocking access to the database port.\n4. If the database is in a different namespace, confirm the service is exposed correctly (e.g., via a `Service` object).",
+  "chars": 906,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 63.1,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its container cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the container is unable to reach the database service at `db:5432`. Possible causes:\n- The database service is not running or unreachable\n- Network policies are blocking traffic to the database\n- The database host/port configuration is incorrect\n\nTo fix this, verify the database service is running and accessible, check network policies, and confirm the connection parameters in the container's configuration.",
+  "chars": 613,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 64.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod's application is trying to connect to a database service at `db:5432` (likely PostgreSQL), but the database is unreachable.\n- This could mean:\n  - The database service is not running or misconfigured.\n  - The database service is not exposed correctly (e.g., no endpoints, firewall rules, or DNS issues).\n  - The pod is starting before the database is ready (e.g., missing readiness probes or startup delays).\n\n### Next Steps:\n1. Check if the database service exists and is running:  \n   `get_service_endpoints -n demo db`\n2. Verify database connectivity from the pod's node.\n3. Ensure the database service is properly configured (e.g., correct password, network policies).",
+  "chars": 866,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 79.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its container cannot connect to the database. Logs show:  \n`FATAL: could not connect to db:5432: connection refused`  \n\nThis indicates the application is trying to connect to a PostgreSQL database on port 5432 but cannot reach it. Possible causes:  \n1. The database service is not running or unreachable.  \n2. Missing environment variables for database credentials (host, port, user, password).  \n3. Network policies blocking access between the pod and the database.  \n\nFix: Verify the database service is running and accessible, and ensure the pod has correct connection parameters.",
+  "chars": 618,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 70.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is attempting to connect to a database at `db:5432` (likely using a service name like `db` in the same namespace), but the connection is being refused.\n- This indicates either:\n  1. The **database service is not running** or unreachable.\n  2. A **network policy** is blocking access to the database port (5432).\n  3. The **database host/port is misconfigured** in the pod's environment or configuration files.\n\n### Next Steps:\n1. Check if the database pod (e.g., `db-xyz`) is running and healthy.\n2. Verify the database is listening on port 5432 via `netstat` or `ss -lnt`.\n3. Ensure there are no network policies (e.g., Calico, Cilium) blocking traffic between the crasher pod and the database.",
+  "chars": 919,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 52.1,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its container cannot connect to the database. The logs show:  \n`FATAL: could not connect to db:5432: connection refused`  \n\nThis indicates the application inside the container is unable to reach the database service (likely PostgreSQL) on port 5432.  \n\n**Fix:**  \nCheck if the database service is running and accessible from the pod. Verify network policies, firewall rules, and database credentials. Ensure the database is properly provisioned and reachable via the pod's network.",
+  "chars": 516,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 59.6,
+  "confidence": "partial",
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its application cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the application is trying to connect to a PostgreSQL database (port 5432) but is being blocked. Possible causes:\n- The database server is not running\n- The database is in a different namespace (e.g. `production`) and the service isn't reachable\n- A network policy is blocking traffic to port 5432\n\nThe pod itself is healthy (no OOMKilled or crash loop beyond Kubernetes' control), but the application fails to establish its database connection.",
+  "chars": 649,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 79.4,
+  "confidence": "partial",
+  "unverified": [
+   "5432"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because it cannot connect to the database service. The logs show a \"connection refused\" error when attempting to connect to `db:5432`, indicating the database is unreachable. This could be due to:\n\n1. **Database Not Running**: The database service might not be active or listening on port 5432.\n2. **Network Isolation**: Network policies or firewalls might block traffic between the pod and the database.\n3. **Incorrect Service Configuration**: The database service might not be exposed correctly in the `demo` namespace, or the pod's configuration might use the wrong hostname/port.\n\n**Fix**:  \nVerify the database service's availability using `get_service_endpoints` in the `demo` namespace. Ensure the database is running and reachable, and check for network policies restricting access. If the database is on a different node, ensure the pod is scheduled to a node with network connectivity to the database.",
+  "chars": 938,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 72.8,
+  "confidence": "partial",
+  "unverified": [
+   "5432"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** in the `demo` namespace is failing because its application cannot connect to the database. Here's the breakdown:\n\n- **Root Cause**: The logs show the app is trying to connect to a database at `db:5432` but receives a `connection refused` error. This indicates the database service is unreachable.\n- **Immediate Fix**: Ensure the database service (e.g., PostgreSQL) is running and accessible. Check if the service exists in the same namespace (`demo`) and verify network connectivity (e.g., firewall rules, DNS resolution).\n- **Next Steps**: Confirm the database pod is healthy and the service endpoint is correctly configured using `get_service_endpoints db demo`. If the database is in a different namespace, adjust the service selector or use a headless service.",
+  "chars": 784,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 61.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nconnecting to database...\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is attempting to connect to a **PostgreSQL database** (port 5432) but is being **rejected** by the database server.\n- This indicates either:\n  - The **database service is not running** or unreachable.\n  - A **network policy** is blocking traffic to the database.\n  - The **database credentials** or configuration are incorrect.\n\n### Next Steps:\n1. Check if the database service (e.g., `postgres` or `db`) is running and accessible via `get_service_endpoints`.\n2. Verify network connectivity between the pod and the database (e.g., using `kubectl exec` to test `telnet` or `nc`).\n3. Ensure the database is properly configured with correct credentials and permissions.",
+  "chars": 890,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 65.7,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because it cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod is attempting to connect to a database service on port `5432` (likely PostgreSQL), but the connection is being refused. This indicates the database is either:\n  - Not running or unreachable (e.g., down, misconfigured, or firewall blocked).\n  - Not properly exposed as a service (e.g., `db` service not available in the same namespace).\n  - Blocked by network policies or security groups.\n\n### Next Steps:\n1. Check if the database service (e.g., `db` in the same namespace) is running and accessible.\n2. Verify the database's network configuration (e.g., `host`, `port`, `user`, `password` in the app's config).\n3. Ensure no firewall rules or network policies are blocking traffic between the pod and the database.",
+  "chars": 894,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 75.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because it cannot connect to the database. The logs show:  \n`FATAL: could not connect to db:5432: connection refused`  \n\nThis indicates the pod's application is unable to reach the database service (likely on port 5432). Verify:  \n1. Whether the database service is running and accessible within the cluster.  \n2. Whether the pod's configuration (e.g., environment variables, secrets) contains correct connection details.  \n3. Network policies or firewall rules blocking communication between the pod and the database.  \n\nThe pod will remain in `CrashLoopBackOff` until the database becomes reachable.",
+  "chars": 628,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 63.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The container is trying to connect to a database on **port 5432** but is being **refused**, indicating the database service is either:\n  - Not running,\n  - Not reachable on the network, or\n  - Misconfigured (e.g., incorrect host/port).\n\n### Next Steps:\n1. **Verify the database service** is running and accessible (e.g., check if the database pod is healthy).\n2. **Check network policies** or firewalls to ensure the pod can reach the database.\n3. **Validate the database connection string** in the app configuration (e.g., host, port, credentials).\n\nThis is a **network/service dependency issue**, not a container or resource problem.",
+  "chars": 819,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 87.9,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` pod is attempting to connect to a database service on port `5432` (common for PostgreSQL), but the connection is being refused.\n- This could mean:\n  - The database service is **not running** or **unreachable**.\n  - The database **credentials** or **network policies** are misconfigured.\n  - The database service is in a different namespace and not accessible to the `demo` namespace.\n\n### Next Steps:\n1. Check if the database service (e.g., `postgres` or similar) is running in the same namespace (`demo`) or another namespace.\n2. Verify the database's endpoints using `get_service_endpoints` to confirm it has ready endpoints.\n3. Ensure the database credentials (username/password) and connection settings in the app are correct.\n4. Check network policies or firewalls blocking traffic between the pod and the database.\n\nThe pod will continue crashing until the database becomes reachable or the app's configuration is fixed.",
+  "chars": 1145,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 63.9,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the pod's application is trying to connect to a PostgreSQL database (port 5432) but is being denied. Possible causes:\n- The database service is not running or unreachable.\n- The database host/port in the pod's configuration is incorrect.\n- A network policy is blocking the connection.\n\nThe pod is in **CrashLoopBackOff** due to this persistent failure. To fix it, verify the database service is running and accessible, and ensure the pod's configuration (e.g., environment variables, secrets) points to the correct database endpoint.",
+  "chars": 716,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 78.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the app is trying to connect to a database service on port 5432 but is being blocked. Possible causes:\n1. The database service is not running\n2. Network policies are blocking traffic to port 5432\n3. The database host/port configuration is incorrect\n\nCheck if the database service is reachable from the pod, and verify the database is accepting connections on port 5432.",
+  "chars": 548,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 76.2,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` pod is trying to connect to a database on port `5432` (common for PostgreSQL), but the connection is being refused.\n- This could mean:\n  - The **database service is not running**.\n  - The **database is unreachable** (networking issue, firewall, or misconfigured DNS).\n  - The **database port (5432)** is blocked or not exposed.\n\n### Next Steps:\n1. Check if the database service (e.g., PostgreSQL) is running in the cluster.\n2. Verify network connectivity between the `crasher` pod and the database (e.g., using `kubectl exec` to test `telnet` or `nc`).\n3. Ensure the database port (`5432`) is open and accessible from the pod's namespace.\n\nThis is a **network/service dependency issue**, not a resource or configuration problem with the pod itself.",
+  "chars": 967,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 75.8,
+  "confidence": "partial",
+  "unverified": [
+   "5432"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. Here's why:\n\n- **Root Cause**: The logs show the app is trying to connect to a database on `db:5432` but gets a `connection refused` error. This means the database service is either:\n  - Not running (e.g., the DB pod is down or not yet scheduled),\n  - Not reachable (network policies block access),\n  - Or misconfigured (wrong hostname/port).\n\n- **Next Steps**:\n  1. Check if the database pod is running (`kubectl get pods -n <db-namespace>`).\n  2. Verify the DB service is exposing the correct endpoint (`kubectl get svc -n <db-namespace>`).\n  3. Test connectivity from the crasher pod to the DB using `telnet` or `nc` in a debug container.\n  4. Ensure the DB is properly configured (e.g., listening on `0.0.0.0` and not restricted by security groups).\n\nThe crash loop is caused by the app exiting with code 1 due to this database connection failure.",
+  "chars": 938,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 63.1,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The crasher pod is failing because its application cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the app is trying to reach a PostgreSQL database on port 5432 but is being blocked. Possible causes:\n- The database service is down\n- Network policies are blocking traffic to the database\n- The database is running on a different node with no routing\n- The database credentials are incorrect\n\nCheck the database service endpoints with `get_service_endpoints` and verify the database is reachable.",
+  "chars": 574,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": false,
+  "seconds": 98.3,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "failures": [
+   "missing ['db:5432', 'database', 'connection refused']",
+   "never called get_pod_logs"
+  ],
+  "answer": "The **crasher pod** in the `demo` namespace is in a **CrashLoopBackOff** state due to repeated crashes and restarts. Here's the breakdown:\n\n- **Exit Code 1**: The container exited with a non-zero code (`exit_code: 1`), indicating an application-level error (e.g., missing files, invalid commands, or runtime failures).\n- **Back-off Loop**: Kubernetes detects the crash and delays restarts via the `BackOff` event (153 times so far), but the root cause remains unresolved.\n- **Image**: The container uses `busybox:1.36`, a minimal image. If the container's command (e.g., `CMD` or `ENTRYPOINT` in the Dockerfile) is invalid or missing, it would crash immediately.\n\n### Next Steps\nCheck the container logs with `get_pod_logs` to identify the exact error. For example:\n- A missing command like `sh -c \"nonexistent-command\"` would trigger `exit_code: 1`.\n- Resource limits (CPU/memory) might also be misconfigured, but the `describe_pod` output shows no explicit limits set.\n\n**Fix**: Verify the container's command and ensure all dependencies exist in the image. If the logs show a specific error, address that issue.",
+  "chars": 1114,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 65.3,
+  "confidence": "partial",
+  "unverified": [
+   "5432"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. Here's the breakdown:\n\n- **Root Cause**: The pod's logs show it's trying to connect to a database on `db:5432` but receives a `connection refused` error. This indicates the database service is either:\n  - Not running,\n  - Not reachable (networking issue),\n  - Or misconfigured (wrong host/port).\n\n- **Impact**: The application crashes immediately upon startup, triggering Kubernetes' **CrashLoopBackOff** retry mechanism.\n\n- **Fix**: Ensure the database service is:\n  - Running and accessible from the pod's network.\n  - Exposed correctly (e.g., via a Kubernetes Service or host IP).\n  - Configured with the right connection parameters in the app.",
+  "chars": 734,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 56.5,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `busybox:1.36` container is attempting to connect to a database at `db:5432` (likely PostgreSQL), but the connection is being refused. This could mean:\n  - The database service is not running or unreachable.\n  - Network policies (e.g., firewalls, DNS, or service mesh rules) are blocking the connection.\n  - The database is not properly configured to accept connections from this pod.\n\n### Next Steps:\n1. Verify the database service is running and accessible (e.g., check `db` pod status or service endpoints).\n2. Ensure the database's network settings allow connections from the crasher pod's namespace.\n3. Check if the database service is correctly exposed (e.g., via a Kubernetes Service).",
+  "chars": 899,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 80.8,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database service. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The application in the `crasher` container is trying to connect to a PostgreSQL database at `db:5432` (default port), but the connection is being refused.\n- This indicates the **database service is unreachable** (not running, misconfigured, or network policies blocking access).\n\n### Next Steps:\n1. **Check the database service** (e.g., `db` service in the same namespace) for readiness.\n2. **Verify network connectivity** between the `crasher` pod and the database.\n3. **Ensure the database is properly deployed** and accessible (e.g., check `db` pod status with `kubectl get pods -l app=db`).\n4. **Adjust readiness/liveness probes** in the `crasher` deployment if the database is delayed in starting.",
+  "chars": 894,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-after",
+  "arm": "after",
+  "passed": true,
+  "seconds": 70.4,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its container cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod's container is trying to connect to a database at `db:5432` but is being **refused**. This indicates:\n  - The **database service** is either **not running**, **not reachable**, or **misconfigured**.\n  - The hostname `db` might not resolve to the correct database pod (e.g., if the service is not yet ready or the DNS is misconfigured).\n\n### Next Steps:\n1. Check if the **database service** (e.g., `db` service) is running and accessible using `get_service_endpoints`.\n2. Verify the **database pod** is healthy and not in a crash loop.\n3. Ensure the **network policy** allows traffic from the crasher pod to the database service.",
+  "chars": 820,
+  "hedges": []
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3-before",
+  "arm": "before",
+  "passed": true,
+  "seconds": 240.6,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "failures": [],
+  "answer": "The **crasher pod** is failing because its application cannot connect to the database. Here's why:\n\n- **Root Cause**: The log shows `FATAL: could not connect to db:5432: connection refused` \u2014 the application is trying to connect to a PostgreSQL database on port 5432 but is being blocked.\n- **Next Steps**:\n  - Verify the **database service** (e.g., `postgres` or `db` service) is running and accessible.\n  - Check if the **network policy** or firewall blocks traffic to port 5432.\n  - Ensure the **database host** and **credentials** in the pod's configuration are correct.\n  - If using Kubernetes, confirm the **service selector** for the database matches the pods and that endpoints are properly exposed.\n\nThis is a **network connectivity issue**, not a resource exhaustion problem.",
+  "chars": 785,
+  "hedges": []
+ }
+]
