@@ -20,6 +20,7 @@ import threading
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
+import podcache
 from redaction import redact
 
 log = logging.getLogger(__name__)
@@ -537,7 +538,15 @@ def scan_cluster(
     try:
         # One namespace is a much cheaper query than the whole cluster; take it
         # when it is the only one asked for.
-        pods = list(_iter_pods(wanted[0] if len(wanted) == 1 else None))
+        # A watch-backed cache when one is running and can vouch for being
+        # current; otherwise exactly what this always did. pods_or_none()
+        # returns None for every untrustworthy state, so there is one branch
+        # here rather than a taxonomy of cache conditions.
+        pods = podcache.pods_or_none()
+        if pods is None:
+            pods = list(_iter_pods(wanted[0] if len(wanted) == 1 else None))
+        elif len(wanted) == 1:
+            pods = [p for p in pods if p.metadata.namespace == wanted[0]]
     except Exception as exc:
         return _handle(exc)
 
