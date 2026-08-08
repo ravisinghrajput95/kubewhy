@@ -151,10 +151,9 @@ class SlackApiSink(SlackSink):
     namespace or team possible later. It also returns a real error body, so a
     misconfiguration says what is wrong instead of failing silently.
 
-    The signing secret is not used here and is not needed: it verifies requests
-    coming *from* Slack. Nothing in this project accepts inbound requests, and
-    adding that means exposing an endpoint to the internet -- a separate
-    decision, not a side effect of posting messages.
+    The signing secret is not used here: it verifies requests coming *from*
+    Slack, which is slack_events.py's job. That surface is opt-in and separate
+    precisely because it means exposing an endpoint to the internet.
     """
 
     API = "https://slack.com/api/chat.postMessage"
@@ -167,6 +166,12 @@ class SlackApiSink(SlackSink):
     def send(self, finding):
         body = self._blocks(finding)
         body["channel"] = self.channel
+
+        # Answers belong under the question. Only set when the caller knows a
+        # thread -- the controller posts unprompted and has none, and passing
+        # an empty thread_ts makes chat.postMessage reject the whole message.
+        if finding.get("thread_ts"):
+            body["thread_ts"] = finding["thread_ts"]
 
         request = urllib.request.Request(
             self.API,
