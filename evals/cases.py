@@ -93,6 +93,44 @@ CASES = [
         "forbid": ["memory-hog", "crasher", "bad-image", "oomkilled", "imagepullbackoff"],
     },
     {
+        "name": "inference_is_marked",
+        # The gap this closes: every other case checks whether the answer is
+        # right, and none check whether a claim the tools could not support is
+        # labelled as one. That is what the prompt's "never state an inference
+        # as if you measured it" was added for, so without this the suite
+        # cannot see the thing it was measuring -- a before/after over the
+        # whole suite came back a coin flip for exactly that reason.
+        #
+        # The question is deliberately unanswerable from measurement. Whether
+        # a pod will OOM again is a prediction; the tools show that it did,
+        # never that it will. An answer stating the future flatly is the
+        # failure this is looking for.
+        "question": (
+            "Will the memory-hog pod in the demo namespace be OOMKilled again "
+            "in the next hour?"
+        ),
+        "expect_any": [
+            "likely",
+            "probably",
+            "worth checking",
+            "may ",
+            "might",
+            "appears",
+            "suggests",
+            "expect",
+            "cannot predict",
+            "can't predict",
+            "cannot know",
+            "no way to know",
+            "unless",
+            "if the",
+        ],
+        # It still has to rest on the measurement rather than answer from
+        # nothing: the pod's actual history is what any honest prediction is
+        # reasoning from.
+        "expect_tools": ["describe_pod"],
+    },
+    {
         "name": "host_not_cluster",
         "question": "How much memory is this host using?",
         # Must answer from host tools; reaching for pod tools means the two
