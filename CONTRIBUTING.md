@@ -57,6 +57,19 @@ If you change the system prompt, tool descriptions, or any projection, **run
 the evals and report the before/after in your PR.** Prompt changes are code
 changes with no compiler; the eval is the only check.
 
+The controller has its own eval, because it asks its own question:
+
+```bash
+python evals/run_controller_eval.py
+```
+
+`run_eval.py` measures the agent through a human's question. The controller
+composes its own sentence about a pod it picked itself and hands the answer to
+a sink, and none of that is exercised by asking `agent.ask` something. What it
+grades is the delivered message rather than the raw answer -- whether it names
+the workload rather than a pod hash, and whether it fits Slack's block limit,
+since an oversized block means no alert at all.
+
 Report intervals, not point estimates. A single run of a non-deterministic
 system is an anecdote — `summarise.py` computes Wilson intervals for this
 reason.
