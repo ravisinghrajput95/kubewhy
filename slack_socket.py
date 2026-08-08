@@ -129,7 +129,16 @@ def build_client():
     if not BOT_TOKEN:
         raise SystemExit("SLACK_BOT_TOKEN is unset: answers would have nowhere to go.")
 
-    client = SocketModeClient(app_token=APP_TOKEN, web_client=WebClient(token=BOT_TOKEN))
+    # The same TLS context the outbound sink uses. A python.org build on macOS
+    # has no system CA store, so without this the socket fails to open with
+    # CERTIFICATE_VERIFY_FAILED while working fine in the container -- which is
+    # the shape of bug that only appears where nobody is watching. Verified:
+    # the connection is refused without it and opens with it.
+    context = sinks._tls_context()
+    client = SocketModeClient(
+        app_token=APP_TOKEN,
+        web_client=WebClient(token=BOT_TOKEN, ssl=context),
+    )
     client.socket_mode_request_listeners.append(handle)
     return client
 
