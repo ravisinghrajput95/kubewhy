@@ -8,12 +8,43 @@ signatures and response shapes may still change.
 
 ### Added
 
+- **Probe reporting in `describe_pod`.** Each container's readiness, liveness
+  and startup probes: what is checked, and the timings. A container can be
+  `Running` with nothing terminated and still be broken — not ready means its
+  readiness probe is failing and it is receiving no traffic. The timings are
+  there because a probe is as often the cause as the symptom: a container
+  needing 60s to start, under a liveness probe that gives it ~20s, reports
+  `CrashLoopBackOff` with exit code 137, which reads as an application crash
+  or an OOM kill. Only the probe's numbers tell those apart.
+- **Two demo workloads that are `Running` and broken** — `never-ready` and
+  `slow-starter` — because no existing demo fault was invisible in the pod
+  status, so nothing exercised the case.
 - **`POST /ask/stream`** — the agent loop as server-sent events, one per tool
   call and result, ending with the same body `/ask` returns. Fixes the silence
   during a long diagnosis, not the blocking: the connection is still held for
   the whole run, and detaching the work needs a job store that survives more
   than one replica — the same unsolved problem as the controller's in-memory
   dedup state.
+
+### Changed
+
+- **`workload_pods()` asks the API server to filter.** It read every pod in the
+  namespace and discarded the ones whose owner did not match; it now looks up
+  the owning controller's label selector and passes it to the API. Rendering
+  all 8 demo workloads went from 96 pod objects transferred to 31, with
+  identical output. The owner reference still decides membership — the
+  selector only narrows what is fetched. CronJobs, static pods and bare pods
+  have no single selector and still fall back to the full read.
+- **`mcp` 1.29 → 2.0.** `FastMCP` no longer exists; the server is built on
+  `MCPServer` from `mcp.server`. The port moved from server settings into
+  `run()`, which mattered — setting `settings.port` under 2.0 binds 8000 and
+  says nothing. Verified with a real MCP client over stdio and streamable
+  HTTP, not just the mocked tests: 13 tools advertised with descriptions
+  intact, live cluster reads, and a 404 still returning `{"error": ...}` as
+  data rather than a protocol error frame.
+- Clients now see an **empty server version** where 1.29 reported `1.29.0`.
+  That was the SDK's version rather than kubewhy's, so it was never right;
+  setting it properly needs a version constant this project does not have.
 
 ## [0.1.2] — 2026-08-07
 

@@ -27,7 +27,7 @@ Register with a stdio client by pointing it at this file:
 import argparse
 import logging
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 import observability
 from routers.k8s_pods_info import (
@@ -49,7 +49,7 @@ from routers.top_memory import get_top_memory_processes
 observability.configure()
 log = logging.getLogger("triage.mcp")
 
-mcp = FastMCP(
+mcp = MCPServer(
     "kubewhy",
     instructions=(
         "Read-only diagnostics for a Kubernetes cluster and the local host.\n\n"
@@ -108,9 +108,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.http:
-        mcp.settings.port = args.port
+        # The port is a run argument now, not server settings -- setting
+        # settings.port silently bound 8000 instead of failing.
         log.info("mcp_server_starting", extra={"transport": "http", "port": args.port})
-        mcp.run(transport="streamable-http")
+        mcp.run(transport="streamable-http", port=args.port)
     else:
         # stdio must stay clean: logs go to stderr, protocol to stdout.
         log.info("mcp_server_starting", extra={"transport": "stdio"})

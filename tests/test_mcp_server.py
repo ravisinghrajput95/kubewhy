@@ -41,11 +41,11 @@ class TestSchemas:
     def test_arguments_survive_schema_derivation(self):
         by_name = {t.name: t for t in _tools()}
 
-        assert set(by_name["list_pods"].inputSchema["properties"]) == {
+        assert set(by_name["list_pods"].input_schema["properties"]) == {
             "namespace",
             "only_unhealthy",
         }
-        assert set(by_name["scan_cluster"].inputSchema["properties"]) == {
+        assert set(by_name["scan_cluster"].input_schema["properties"]) == {
             "only_unhealthy",
             "limit",
             # Narrowing, so a large cluster is navigable rather than truncated.
@@ -54,7 +54,7 @@ class TestSchemas:
             # is the only way to answer "is X healthy?" with "yes".
             "workload",
         }
-        assert set(by_name["get_pod_logs"].inputSchema["properties"]) == {
+        assert set(by_name["get_pod_logs"].input_schema["properties"]) == {
             "name",
             "namespace",
             "tail",
@@ -65,8 +65,8 @@ class TestSchemas:
     def test_required_arguments_are_marked(self):
         by_name = {t.name: t for t in _tools()}
         # name has no default; namespace does.
-        assert by_name["describe_pod"].inputSchema.get("required") == ["name"]
+        assert by_name["describe_pod"].input_schema.get("required") == ["name"]
 
     def test_zero_argument_tools_have_empty_schema(self):
         by_name = {t.name: t for t in _tools()}
-        assert by_name["list_nodes"].inputSchema.get("properties", {}) == {}
+        assert by_name["list_nodes"].input_schema.get("properties", {}) == {}
