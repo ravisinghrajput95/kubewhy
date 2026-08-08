@@ -20,3 +20,15 @@ A diagnosis takes tens of seconds -- the controller is not waiting on anyone,
 so latency is not a problem here. Findings are capped at
 {{ .Values.watch.maxPerHour }}/hour with a {{ .Values.watch.cooldownSeconds }}s
 per-workload cooldown.
+{{- if .Values.ui.enabled }}
+
+The browser UI is running, and it has no authentication. Reach it deliberately:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Release.Name }}-ui {{ .Values.ui.port }}:{{ .Values.ui.port }}
+  open http://127.0.0.1:{{ .Values.ui.port }}
+
+This chart ships no Ingress on purpose. The page renders cluster state and pod
+logs, and there is no token to set -- anyone who can reach the Service sees
+everything the ServiceAccount can read. If you expose it, put something in
+front that authenticates.
+{{- end }}

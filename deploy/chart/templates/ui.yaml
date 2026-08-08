@@ -1,0 +1,141 @@
+{{- if and .Values.ui.enabled (not .Values.ui.exposureAcknowledged) }}
+  {{- fail "\n\nui.enabled=true also needs ui.exposureAcknowledged=true.\n\nThe UI renders cluster state and pod logs and has NO authentication -- unlike\nthe API there is no token to set, and running it in a pod means binding every\ninterface rather than the loopback address it is pinned to on a laptop. Anyone\nwho can reach the Service sees everything it can read.\n\nSet ui.exposureAcknowledged=true if that is what you want, and keep it behind\nport-forward: this chart deliberately ships no Ingress.\n" }}
+{{- end }}
+{{- if .Values.ui.enabled -}}
+{{- $name := default (printf "%s" .Release.Name) .Values.serviceAccount.name -}}
+{{- $ui := printf "%s-ui" .Release.Name -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $ui }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+spec:
+  # The UI holds no state between requests -- the cluster is the state, and
+  # each session's context lives in its own session. More than one replica is
+  # safe here in a way it is not for the controller, whose dedup state is
+  # in-process.
+  replicas: {{ .Values.ui.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: ui
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ui
+          image: "{{ .Values.ui.image.repository | default .Values.image.repository }}:{{ .Values.ui.image.tag | default (printf "%s-ui" (.Values.image.tag | default .Chart.AppVersion)) }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - streamlit
+            - run
+            - ui.py
+            - --server.port={{ .Values.ui.port }}
+            # Inside a pod this has to bind every interface for the Service to
+            # reach it, which is exactly what the loopback pin in
+            # .streamlit/config.toml prevents when you run it on a laptop.
+            # That pin is the only thing standing between an unauthenticated
+            # page and the network, so overriding it is the decision this
+            # whole surface turns on -- see ui.exposureAcknowledged.
+            - --server.address=0.0.0.0
+            - --server.headless=true
+            # Telemetry off, in-cluster as everywhere else: this project's
+            # claim is that nothing leaves your network.
+            - --browser.gatherUsageStats=false
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ui.port }}
+          env:
+            - name: OLLAMA_HOST
+              value: {{ .Values.model.ollamaHost | quote }}
+            - name: TRIAGE_MODEL
+              value: {{ .Values.model.name | quote }}
+            - name: OLLAMA_TIMEOUT
+              value: {{ .Values.model.timeoutSeconds | quote }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logFormat | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+          # Streamlit ships a health endpoint, which is what tells you the
+          # difference between a pod that is Running and a page that renders.
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            # Generous: Streamlit is slow to start, and a liveness probe that
+            # fires during startup kills the container forever while reporting
+            # CrashLoopBackOff, which reads as an application bug.
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # readOnlyRootFilesystem is on and Streamlit writes here on start.
+            - name: streamlit
+              mountPath: /.streamlit
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: streamlit
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $ui }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: ui
+spec:
+  # ClusterIP, and no Ingress in this chart at all. The UI renders cluster
+  # state and pod logs and has no authentication of any kind -- unlike the
+  # API, there is no token to set. Reaching it should cost a deliberate
+  # port-forward, not a hostname someone can guess.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: ui
+  ports:
+    - name: http
+      port: {{ .Values.ui.port }}
+      targetPort: http
+{{- end }}

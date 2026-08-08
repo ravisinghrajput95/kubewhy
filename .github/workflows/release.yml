@@ -59,6 +59,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Build and push the UI image
+        # A second image rather than thirteen more packages in the first.
+        # Streamlit's dependency tree does not belong in the process the API,
+        # MCP server and controller run in -- see the ui stage in Dockerfile.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ui
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.version.outputs.number }}-ui
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest-ui
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.number }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Verify the published image runs
         # A tag that publishes a broken image is worse than no tag. Pull the
         # amd64 manifest back and check the service actually serves.

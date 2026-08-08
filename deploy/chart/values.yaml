@@ -47,6 +47,31 @@ watch:
   # Pods already broken at startup are usually known problems.
   skipExisting: true
 
+# The browser UI. Off by default, and not merely as a default: it has no
+# authentication at all, so switching it on is a decision about who can see
+# your cluster rather than a convenience.
+ui:
+  enabled: false
+  # Deliberate friction. enabled alone renders nothing and fails the install
+  # with an explanation, so nobody turns this on without reading what it means.
+  exposureAcknowledged: false
+  replicas: 1
+  port: 8501
+  # A separate image: the base one has no streamlit in it, deliberately, so
+  # the API and controller do not carry pandas and pyarrow. Built as the "ui"
+  # target of the Dockerfile and published alongside the base image.
+  image:
+    repository: ""     # defaults to image.repository
+    tag: ""            # defaults to "<image tag>-ui"
+  resources:
+    requests:
+      cpu: 100m
+      # Streamlit pulls numpy, pandas and pyarrow, which is why it is not in
+      # the base requirements and why this asks for more than the controller.
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
 rbac:
   create: true
   # pods/log is the sensitive grant: logs carry credentials. Redaction runs

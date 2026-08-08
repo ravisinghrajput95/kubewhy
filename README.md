@@ -273,8 +273,28 @@ Two Streamlit defaults are overridden in `.streamlit/config.toml`, because both
 are wrong here: it otherwise **reports usage to streamlit.io** (this project's
 whole claim is that nothing leaves your network) and **binds every interface
 with no authentication** while rendering cluster state and pod logs. It is
-pinned to loopback. Don't put it behind a Service — unlike the API, it has no
-token to set.
+pinned to loopback.
+
+### Running it in the cluster
+
+The chart can deploy it, off by default and behind a second switch:
+
+```bash
+helm install kubewhy deploy/chart --set ui.enabled=true \
+  --set ui.exposureAcknowledged=true
+kubectl port-forward -n triage svc/kubewhy-ui 8501:8501
+```
+
+`ui.enabled` alone fails the install with an explanation. That friction is
+deliberate: in a pod the loopback pin has to be dropped for the Service to
+reach it, and **there is still no authentication** — unlike the API, there is
+no token to set, so anyone who can reach the Service sees everything the
+ServiceAccount can read. **ClusterIP only, and no Ingress in the chart**, so
+getting to it costs a port-forward rather than a hostname someone can guess.
+
+It runs from a separate `:<tag>-ui` image. Streamlit's thirteen packages do not
+belong in the process the API, MCP server and controller run in, which is the
+same reason they are not in `requirements.txt`.
 
 If you work against more than one cluster, the sidebar switches context and
 reports the one the client is actually **bound** to, which is not always what
