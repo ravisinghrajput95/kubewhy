@@ -199,7 +199,30 @@ with st.sidebar:
         "Refresh forces a new read."
     )
 
-st.title("kubewhy")
+# A heptagon -- Kubernetes' own shape -- around a question mark, which is the
+# whole product in one glyph: this reads Kubernetes and answers "why".
+#
+# Inline SVG rather than an image file, and deliberately so. The UI renders
+# cluster state and pod logs on a claim that nothing leaves your network, and
+# an <img> pointing at a CDN would quietly break that for the sake of a logo.
+# Inline also means it inherits the page's colour: the mark uses currentColor,
+# so it stays legible if the theme is ever light.
+st.markdown(
+    """
+    <div style="display:flex;align-items:center;gap:.65rem;margin-bottom:.25rem;">
+      <svg width="46" height="46" viewBox="0 0 48 48" role="img"
+           aria-label="kubewhy logo" style="flex:0 0 auto;">
+        <polygon points="24,4 39.6,11.5 43.5,28.5 32.7,42 15.3,42 4.5,28.5 8.4,11.5"
+                 fill="none" stroke="#FF4B4B" stroke-width="2.4"
+                 stroke-linejoin="round"/>
+        <text x="24" y="32.5" text-anchor="middle" font-size="24"
+              font-weight="700" fill="currentColor" font-family="inherit">?</text>
+      </svg>
+      <h1 style="margin:0;padding:0;line-height:1;">kubewhy</h1>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 namespaces = ",".join(chosen_namespaces)
 findings = _unwrap(
@@ -382,13 +405,39 @@ with st.form("ask", clear_on_submit=False):
     submitted = st.form_submit_button("Diagnose", type="primary")
 
 if submitted and question:
+    asked = question
     if scoped:
         # Shared with the CLI, the REST API and the controller: see
         # agent.scoped_question for why this is directive rather than a hint.
         question = agent.scoped_question(
             question, subject["workload"], subject["namespace"], subject["pod"]
         )
+        # Say so, and show the rewrite. The checkbox defaults to on, so a
+        # question about a namespace or about some other workload gets silently
+        # turned into a question about the selected one, and the model is told
+        # in as many words not to answer anything else. The user then reads
+        # their own sentence next to an answer that ignores it. Every other
+        # panel here names the tool behind it; this one was rewriting the input
+        # and not showing it.
+        st.caption(
+            f"Scoped to **{subject['workload']}** — untick the box above to "
+            "ask about the cluster as a whole."
+        )
+        with st.expander("what was actually sent to the model"):
+            st.code(question, language="text")
+    # A new diagnosis invalidates the last one, and it has to be dropped
+    # *before* the model is called rather than when the new answer arrives.
+    # Otherwise the previous workload's answer stays on screen for the minute
+    # this takes -- and if the run fails, or ends without an answer event, it
+    # stays there for good, rendered underneath whichever workload is selected
+    # now. An answer about a different workload, shown as though it were about
+    # this one, is exactly the substitution scan_cluster(workload=...) and
+    # scoped_question exist to prevent; it should not come back in through the
+    # UI's own state.
+    st.session_state.pop("answer", None)
+
     steps = st.status("Thinking...", expanded=True)
+    result = None
     try:
         # stream() rather than ask(): the chain is the point, and a diagnosis
         # runs long enough that a caller shown only the final answer is
@@ -406,7 +455,10 @@ if submitted and question:
                 # Held in session_state so that moving a slider afterwards
                 # re-renders the answer instead of re-running the model.
                 st.session_state["answer"] = event
-        result = st.session_state.get("answer")
+                result = event
+        # This run's answer, not whatever is in session_state: reading it back
+        # out meant a run that produced nothing was labelled with the previous
+        # run's tool count.
         steps.update(
             label=f"{len(result['tool_calls'])} tool calls" if result else "No answer",
             state="complete",
@@ -430,6 +482,13 @@ if answer:
         # nothing. Calling a clarifying question "grounded" implies it was
         # checked against the cluster, and nothing was.
         st.warning("no tools were called — nothing here was measured")
+    elif confidence == "grounded" and not answer.get("checked"):
+        # Tools ran, but the answer asserts nothing checkable -- "I could not
+        # identify any failing pods" has no figure and no status name in it, so
+        # the checker finds nothing to contradict and reports grounded. Green
+        # there says the cluster confirmed this, when what happened is that
+        # there was nothing to confirm.
+        st.info("nothing to verify — this answer makes no measurable claim")
     elif confidence == "grounded":
         st.success("grounded — every figure traced to a tool result")
     elif confidence == "partial":
