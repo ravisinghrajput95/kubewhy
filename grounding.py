@@ -276,12 +276,20 @@ def check(answer, tool_outputs):
         return {
             "confidence": "ungrounded" if claims else "grounded",
             "unverified": sorted(_format(c) for c in claims),
+            "checked": len(claims),
         }
 
     measured_text = " ".join(tool_outputs)
     index = _entity_index(tool_outputs)
 
     unverified = []
+    # How many claims were actually examined, which is not the same question as
+    # how many failed. With no claims at all, unverified is empty and the answer
+    # comes back "grounded" -- a green badge on "I could not identify any
+    # failing pods", which reads as though the cluster confirmed it. Empty and
+    # clean are different states and the caller has to be able to tell them
+    # apart.
+    checked = 0
 
     def flag(item):
         # One mention is enough; repeating a claim should not repeat the alarm.
@@ -298,6 +306,7 @@ def check(answer, tool_outputs):
         scope_lower = scope.lower()
 
         for claim in sorted(_numbers(clause, strip_ordinals=True)):
+            checked += 1
             if not _matches(claim, scope_numbers):
                 flag(_format(claim))
 
@@ -305,12 +314,15 @@ def check(answer, tool_outputs):
         # them as **OOMKilled** or `OOMKilled`, so compare lowered.
         lowered = clause.lower()
         for status in KNOWN_STATUSES:
-            if status in lowered and status not in scope_lower:
-                flag(status)
+            if status in lowered:
+                checked += 1
+                if status not in scope_lower:
+                    flag(status)
 
     return {
         "confidence": "partial" if unverified else "grounded",
         "unverified": unverified,
+        "checked": checked,
     }
 
 

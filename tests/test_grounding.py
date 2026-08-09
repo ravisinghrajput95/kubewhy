@@ -285,3 +285,36 @@ class TestNoToolsCalled:
 
     def test_refusal_without_tools_is_not_penalised(self):
         assert grounding.check("I could not determine that.", [])["confidence"] == "grounded"
+
+
+class TestCheckedCount:
+    """
+    "Nothing contradicted this" and "nothing was claimed" both come back
+    grounded, and a caller badging the first as confirmation will badge the
+    second the same way. The count is what separates them.
+    """
+
+    def test_answer_with_no_measurable_claim_checks_nothing(self):
+        tools = [json.dumps({"pods": []})]
+        result = grounding.check("I cannot identify any failing pods.", tools)
+
+        assert result["confidence"] == "grounded"
+        assert result["checked"] == 0
+
+    def test_traceable_claims_are_counted(self):
+        tools = [json.dumps({"reason": "OOMKilled", "limits": {"memory": "64Mi"}})]
+        result = grounding.check("memory-hog was OOMKilled at its 64Mi limit.", tools)
+
+        assert result["confidence"] == "grounded"
+        assert result["checked"] > 0
+
+    def test_untraceable_claims_are_counted_too(self):
+        # Counted, not just flagged: checked is how many were examined.
+        tools = [json.dumps({"pod": "p", "status": "Running"})]
+        result = grounding.check("The pod restarted 9 times.", tools)
+
+        assert result["confidence"] == "partial"
+        assert result["checked"] == 1
+
+    def test_no_tools_and_no_claims_checks_nothing(self):
+        assert grounding.check("I could not determine that.", [])["checked"] == 0
