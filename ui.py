@@ -131,7 +131,12 @@ def _unwrap(result, tool):
     return result
 
 
-st.set_page_config(page_title="kubewhy", page_icon="🩺", layout="wide")
+# One definition, used for the browser tab and for the heading on the page.
+# They were set in two places and drifted into two different marks, which
+# reads as two different products in the same window.
+PAGE_ICON = "🩺"
+
+st.set_page_config(page_title="kubewhy", page_icon=PAGE_ICON, layout="wide")
 
 # Before anything reads the cluster. The context lives in session state and is
 # re-asserted on every rerun, because it is scoped to the caller now and
@@ -199,25 +204,15 @@ with st.sidebar:
         "Refresh forces a new read."
     )
 
-# A heptagon -- Kubernetes' own shape -- around a question mark, which is the
-# whole product in one glyph: this reads Kubernetes and answers "why".
-#
-# Inline SVG rather than an image file, and deliberately so. The UI renders
-# cluster state and pod logs on a claim that nothing leaves your network, and
-# an <img> pointing at a CDN would quietly break that for the sake of a logo.
-# Inline also means it inherits the page's colour: the mark uses currentColor,
-# so it stays legible if the theme is ever light.
+# The same mark as the browser tab, from the same constant. An emoji rather
+# than artwork of my own: it costs no asset, fetches nothing from a CDN --
+# which this page cannot afford, rendering cluster state on a claim that
+# nothing leaves your network -- and it cannot fall out of step with the tab.
 st.markdown(
-    """
-    <div style="display:flex;align-items:center;gap:.65rem;margin-bottom:.25rem;">
-      <svg width="46" height="46" viewBox="0 0 48 48" role="img"
-           aria-label="kubewhy logo" style="flex:0 0 auto;">
-        <polygon points="24,4 39.6,11.5 43.5,28.5 32.7,42 15.3,42 4.5,28.5 8.4,11.5"
-                 fill="none" stroke="#FF4B4B" stroke-width="2.4"
-                 stroke-linejoin="round"/>
-        <text x="24" y="32.5" text-anchor="middle" font-size="24"
-              font-weight="700" fill="currentColor" font-family="inherit">?</text>
-      </svg>
+    f"""
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.25rem;">
+      <span style="font-size:2.5rem;line-height:1;" role="img"
+            aria-label="kubewhy">{PAGE_ICON}</span>
       <h1 style="margin:0;padding:0;line-height:1;">kubewhy</h1>
     </div>
     """,
