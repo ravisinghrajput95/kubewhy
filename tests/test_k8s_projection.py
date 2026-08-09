@@ -1392,3 +1392,130 @@ class TestConfigRefs:
 
         assert len(result["containers"]["app"]["config"]) == 4
         assert len(json.dumps(result)) < 900
+
+
+class TestServicePortMismatch:
+    """
+    Pods Ready, endpoints published, ready=true, Deployment Available, and
+    every connection refused. No status field anywhere reports this, which is
+    why the cross-check exists: it compares two objects that are each valid on
+    their own.
+    """
+
+    def _setup(self, api, discovery_api, target_port, container_ports):
+        api.read_namespaced_service.return_value = client.V1Service(
+            metadata=client.V1ObjectMeta(name="web"),
+            spec=client.V1ServiceSpec(
+                type="ClusterIP",
+                selector={"app": "web"},
+                ports=[client.V1ServicePort(port=80, target_port=target_port)],
+            ),
+        )
+        discovery_api.list_namespaced_endpoint_slice.return_value = (
+            client.V1EndpointSliceList(items=[endpoint_slice(ready_ips=["10.0.0.1"])])
+        )
+        pod = make_pod(name="web-1")
+        pod.spec.containers[0].ports = container_ports
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[pod])
+        return k8s.get_service_endpoints("web", "demo")
+
+    def test_numeric_target_no_pod_declares_is_flagged(self, api, discovery_api):
+        result = self._setup(
+            api, discovery_api, 8080, [client.V1ContainerPort(container_port=5678)]
+        )
+
+        # Endpoints are healthy -- that is the whole trap.
+        assert result["ready_endpoints"] == ["10.0.0.1"]
+        assert "8080" in result["diagnosis"]
+        assert "5678" in result["diagnosis"]
+
+    def test_numeric_mismatch_is_hedged_not_asserted(self, api, discovery_api):
+        # containerPort is informational; a container may listen on a port it
+        # never declared. Sending someone to "fix" a working service during an
+        # incident is the worse error, so this one stays short of certainty.
+        result = self._setup(
+            api, discovery_api, 8080, [client.V1ContainerPort(container_port=5678)]
+        )
+
+        assert "very likely" in result["diagnosis"]
+        assert "confirm by connecting" in result["diagnosis"]
+
+    def test_named_target_that_resolves_nowhere_is_stated_as_fact(
+        self, api, discovery_api
+    ):
+        # A named targetPort MUST resolve to a declared port name. When it does
+        # not, the endpoint carries no port at all, so this is not a guess.
+        result = self._setup(
+            api,
+            discovery_api,
+            "https",
+            [client.V1ContainerPort(container_port=5678, name="http")],
+        )
+
+        assert "cannot carry traffic" in result["diagnosis"]
+        assert "very likely" not in result["diagnosis"]
+
+    def test_named_target_that_resolves_is_silent(self, api, discovery_api):
+        # The control. Naming the port is what makes a service immune to this
+        # whole class, so the check must never punish it.
+        result = self._setup(
+            api,
+            discovery_api,
+            "http",
+            [client.V1ContainerPort(container_port=5678, name="http")],
+        )
+
+        assert "diagnosis" not in result
+
+    def test_matching_numeric_target_is_silent(self, api, discovery_api):
+        result = self._setup(
+            api, discovery_api, 5678, [client.V1ContainerPort(container_port=5678)]
+        )
+
+        assert "diagnosis" not in result
+
+    def test_no_declared_ports_draws_no_conclusion(self, api, discovery_api):
+        # Declaring ports is optional. With nothing to compare against, saying
+        # anything would be inventing a finding.
+        result = self._setup(api, discovery_api, 8080, [])
+
+        assert "diagnosis" not in result
+
+    def test_pod_list_failure_does_not_break_the_tool(self, api, discovery_api):
+        api.read_namespaced_service.return_value = client.V1Service(
+            metadata=client.V1ObjectMeta(name="web"),
+            spec=client.V1ServiceSpec(
+                type="ClusterIP",
+                selector={"app": "web"},
+                ports=[client.V1ServicePort(port=80, target_port=8080)],
+            ),
+        )
+        discovery_api.list_namespaced_endpoint_slice.return_value = (
+            client.V1EndpointSliceList(items=[endpoint_slice(ready_ips=["10.0.0.1"])])
+        )
+        api.list_namespaced_pod.side_effect = RuntimeError("boom")
+
+        result = k8s.get_service_endpoints("web", "demo")
+
+        # The endpoint answer still lands; only the extra check is skipped.
+        assert result["ready_endpoints"] == ["10.0.0.1"]
+        assert "diagnosis" not in result
+
+    def test_no_selector_is_skipped(self, api, discovery_api):
+        # Services with manually managed endpoints have no selector, so there
+        # are no pods to compare against.
+        api.read_namespaced_service.return_value = client.V1Service(
+            metadata=client.V1ObjectMeta(name="web"),
+            spec=client.V1ServiceSpec(
+                type="ClusterIP",
+                selector=None,
+                ports=[client.V1ServicePort(port=80, target_port=8080)],
+            ),
+        )
+        discovery_api.list_namespaced_endpoint_slice.return_value = (
+            client.V1EndpointSliceList(items=[endpoint_slice(ready_ips=["10.0.0.1"])])
+        )
+
+        result = k8s.get_service_endpoints("web", "demo")
+
+        assert "diagnosis" not in result

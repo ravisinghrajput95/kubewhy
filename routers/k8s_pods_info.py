@@ -1089,6 +1089,76 @@ def list_deployments(namespace: str = "default"):
     return result or {"result": f"no deployments in namespace {namespace}"}
 
 
+def _port_mismatch(api, namespace, svc):
+    """
+    Does this service's targetPort correspond to anything the pods declare?
+
+    Two cases, and they differ in how certain the answer is.
+
+    A NAMED targetPort must resolve to a port of that name on the container.
+    If no backing pod declares it, the endpoint is built with no port and the
+    service cannot work. That is a fact.
+
+    A NUMERIC targetPort is only checked against declared containerPorts, and
+    containerPort is informational -- a container may listen on a port it never
+    declared, and kube-proxy will route there quite happily. So a numeric
+    mismatch is strong evidence and not proof, and it is worded that way.
+    Saying "this is broken" about a service that works would be the worse
+    error: it sends someone to change a working config during an incident.
+    """
+    if not svc.spec.selector or not svc.spec.ports:
+        return None
+
+    selector = ",".join(f"{k}={v}" for k, v in svc.spec.selector.items())
+    try:
+        pods = api.list_namespaced_pod(
+            namespace, label_selector=selector, limit=20, _request_timeout=TIMEOUT
+        )
+    except Exception:
+        # Best effort. A service diagnosis must not fail because the extra
+        # cross-check could not be made.
+        return None
+
+    numbers, names = set(), set()
+    for pod in pods.items:
+        for container in pod.spec.containers or []:
+            for port in container.ports or []:
+                if port.container_port is not None:
+                    numbers.add(port.container_port)
+                if port.name:
+                    names.add(port.name)
+
+    if not numbers and not names:
+        # Nothing declared anywhere, so there is nothing to compare against.
+        return None
+
+    for port in svc.spec.ports:
+        target = port.target_port
+        if isinstance(target, str) and not target.isdigit():
+            if target not in names:
+                declared = ", ".join(sorted(names)) or "none"
+                return (
+                    f"port {port.port} targets the named port {target!r}, which "
+                    f"no backing pod declares (declared: {declared}) -- a named "
+                    "targetPort that does not resolve produces an endpoint with "
+                    "no port, so this service cannot carry traffic even though "
+                    "its endpoints are ready"
+                )
+        else:
+            number = int(target) if target is not None else port.port
+            if number not in numbers:
+                declared = ", ".join(str(n) for n in sorted(numbers)) or "none"
+                return (
+                    f"port {port.port} targets container port {number}, which no "
+                    f"backing pod declares (declared: {declared}) -- endpoints "
+                    "are ready and traffic is very likely being refused. "
+                    "containerPort is informational, so confirm by connecting "
+                    "to a pod IP on that port before changing anything"
+                )
+
+    return None
+
+
 def get_service_endpoints(name: str, namespace: str = "default"):
     """
     Returns a service's selector, ports, and the pod endpoints currently
@@ -1150,6 +1220,16 @@ def get_service_endpoints(name: str, namespace: str = "default"):
 
     info["ready_endpoints"] = ready
     info["not_ready_endpoints"] = not_ready
+
+    if ready:
+        # The failure this catches is invisible everywhere else: pods Ready,
+        # endpoints published, ready=true, Deployment Available, and every
+        # connection refused because the service points at a port nothing
+        # serves. Only worth checking when endpoints ARE ready -- with none,
+        # the diagnoses below are the answer already.
+        mismatch = _port_mismatch(api, namespace, svc)
+        if mismatch:
+            info["diagnosis"] = mismatch
 
     if not ready:
         # The two causes need different fixes, and the endpoint lists tell
