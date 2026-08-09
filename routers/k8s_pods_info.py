@@ -645,6 +645,14 @@ def describe_pod(name: str, namespace: str = "default"):
     no traffic. A restart count next to a liveness probe means the probe is
     killing the container -- and an initial delay shorter than the app's start
     time makes the probe the fault rather than the app.
+
+    Reports which ConfigMaps and Secrets each container consumes under
+    "config", by name and by route, never by value. Use this when a
+    configuration change appears to have had no effect: "updates_in_place":
+    false means the container read that source once at startup and will not
+    see an edit until it restarts, which is the case for env and envFrom and
+    for any volume mounted with subPath. The pod stays Ready throughout and
+    nothing else reports it.
     Args: name -- the pod name; namespace -- defaults to "default".
     """
     try:
@@ -686,15 +694,89 @@ def describe_pod(name: str, namespace: str = "default"):
                     "exit_code": ended.exit_code,
                 }
 
+        config = _config_refs(pod, spec)
+        if config:
+            info["config"] = config
+
         containers[spec.name] = info
 
-    return {
+    projected = {
         "pod": name,
         "namespace": namespace,
         "status": _pod_status(pod),
         "node": pod.spec.node_name,
         "containers": containers,
     }
+
+    pull_secrets = [s.name for s in (pod.spec.image_pull_secrets or []) if s.name]
+    if pull_secrets:
+        projected["image_pull_secrets"] = pull_secrets
+
+    return projected
+
+
+def _config_refs(pod, spec):
+    """
+    Which ConfigMaps and Secrets this container consumes, and by which route.
+
+    The route is the whole point, not decoration. A ConfigMap reached through
+    env or envFrom is read once when the container starts and is never read
+    again: editing it changes the object and changes nothing in the running
+    pod, which stays Ready and serves the old value indefinitely, with no
+    event and no restart to give it away. Mounted as a volume it does refresh,
+    within about a minute -- unless it is mounted with subPath, which never
+    refreshes either. Three routes, two of which silently discard your change.
+
+    So a reader asking "why did my config change not take effect" cannot be
+    answered by the ConfigMap or by the pod, only by the edge between them.
+
+    Names only. Never values: a Secret's whole point is that its contents do
+    not travel, and this output reaches a model.
+    """
+    volumes = {v.name: v for v in (pod.spec.volumes or [])}
+    refs = []
+
+    def add(kind, name, via, updates):
+        if name and not any(r["name"] == name and r["via"] == via for r in refs):
+            refs.append(
+                {"kind": kind, "name": name, "via": via, "updates_in_place": updates}
+            )
+
+    # envFrom: the whole ConfigMap or Secret as environment. Start-time only.
+    for source in spec.env_from or []:
+        if source.config_map_ref:
+            add("ConfigMap", source.config_map_ref.name, "envFrom", False)
+        if source.secret_ref:
+            add("Secret", source.secret_ref.name, "envFrom", False)
+
+    # Individual keys as environment. Also start-time only.
+    for var in spec.env or []:
+        source = var.value_from
+        if not source:
+            continue
+        if source.config_map_key_ref:
+            add("ConfigMap", source.config_map_key_ref.name, "env", False)
+        if source.secret_key_ref:
+            add("Secret", source.secret_key_ref.name, "env", False)
+
+    # Volumes. These refresh, and subPath is the exception that does not.
+    for mount in spec.volume_mounts or []:
+        volume = volumes.get(mount.name)
+        if not volume:
+            continue
+        via = "volume(subPath)" if mount.sub_path else "volume"
+        updates = not mount.sub_path
+        if volume.config_map:
+            add("ConfigMap", volume.config_map.name, via, updates)
+        if volume.secret:
+            add("Secret", volume.secret.secret_name, via, updates)
+        for source in getattr(volume.projected, "sources", None) or []:
+            if source.config_map:
+                add("ConfigMap", source.config_map.name, via, updates)
+            if source.secret:
+                add("Secret", source.secret.name, via, updates)
+
+    return refs
 
 
 def _probe(probe):

@@ -1227,3 +1227,168 @@ class TestProbes:
         tokens = len(json.dumps(k8s.describe_pod("web-1", "demo"))) // 4
 
         assert tokens < 150, f"describe_pod grew to {tokens} tokens"
+
+
+class TestConfigRefs:
+    """
+    Which ConfigMap or Secret a pod consumes is in the pod spec and was being
+    dropped, so nothing could answer "why did my config change not take
+    effect". The route is the answer, not the name: env and envFrom are read
+    once at container start, a volume refreshes, and subPath never does.
+    """
+
+    def _refs(self, api, container=None, volumes=None, pull_secrets=None):
+        pod = make_pod(name="web-1")
+        if container is not None:
+            for attribute, value in container.items():
+                setattr(pod.spec.containers[0], attribute, value)
+        if volumes is not None:
+            pod.spec.volumes = volumes
+        if pull_secrets is not None:
+            pod.spec.image_pull_secrets = pull_secrets
+        api.read_namespaced_pod.return_value = pod
+        return k8s.describe_pod("web-1", "demo")
+
+    def test_envfrom_configmap_is_reported_as_not_updating(self, api):
+        result = self._refs(
+            api,
+            container={
+                "env_from": [
+                    client.V1EnvFromSource(
+                        config_map_ref=client.V1ConfigMapEnvSource(name="app-config")
+                    )
+                ]
+            },
+        )
+
+        ref = result["containers"]["app"]["config"][0]
+        assert ref == {
+            "kind": "ConfigMap",
+            "name": "app-config",
+            "via": "envFrom",
+            "updates_in_place": False,
+        }
+
+    def test_secret_key_in_env_is_named_but_never_valued(self, api):
+        result = self._refs(
+            api,
+            container={
+                "env": [
+                    client.V1EnvVar(
+                        name="DB_PASSWORD",
+                        value_from=client.V1EnvVarSource(
+                            secret_key_ref=client.V1SecretKeySelector(
+                                name="db-credentials", key="password"
+                            )
+                        ),
+                    )
+                ]
+            },
+        )
+
+        ref = result["containers"]["app"]["config"][0]
+        assert ref["kind"] == "Secret"
+        assert ref["name"] == "db-credentials"
+        assert ref["updates_in_place"] is False
+        # Only the Secret's name travels. Not the key it selects, not the
+        # environment variable it lands in, and above all not a value -- this
+        # projection is handed to a model.
+        assert set(ref) == {"kind", "name", "via", "updates_in_place"}
+        assert "password" not in json.dumps(result)
+        assert "DB_PASSWORD" not in json.dumps(result)
+
+    def test_volume_mounted_configmap_does_update(self, api):
+        result = self._refs(
+            api,
+            container={
+                "volume_mounts": [
+                    client.V1VolumeMount(name="cfg", mount_path="/etc/app")
+                ]
+            },
+            volumes=[
+                client.V1Volume(
+                    name="cfg",
+                    config_map=client.V1ConfigMapVolumeSource(name="app-config"),
+                )
+            ],
+        )
+
+        ref = result["containers"]["app"]["config"][0]
+        assert ref["via"] == "volume"
+        assert ref["updates_in_place"] is True
+
+    def test_subpath_mount_does_not_update(self, api):
+        # The trap: identical to the case above except for sub_path, and the
+        # behaviour inverts. A reader cannot be expected to know that.
+        result = self._refs(
+            api,
+            container={
+                "volume_mounts": [
+                    client.V1VolumeMount(
+                        name="cfg", mount_path="/etc/app.conf", sub_path="app.conf"
+                    )
+                ]
+            },
+            volumes=[
+                client.V1Volume(
+                    name="cfg",
+                    config_map=client.V1ConfigMapVolumeSource(name="app-config"),
+                )
+            ],
+        )
+
+        ref = result["containers"]["app"]["config"][0]
+        assert ref["via"] == "volume(subPath)"
+        assert ref["updates_in_place"] is False
+
+    def test_image_pull_secrets_are_reported_at_pod_level(self, api):
+        result = self._refs(
+            api,
+            pull_secrets=[client.V1LocalObjectReference(name="registry-creds")],
+        )
+
+        assert result["image_pull_secrets"] == ["registry-creds"]
+
+    def test_no_references_adds_no_key(self, api):
+        # Silence rather than an empty list: most pods reference nothing, and
+        # a key per pod is a token cost paid on every describe_pod.
+        result = self._refs(api)
+
+        assert "config" not in result["containers"]["app"]
+        assert "image_pull_secrets" not in result
+
+    def test_projection_stays_small(self, api):
+        # A pod with references in every route at once. CONTRIBUTING requires a
+        # size assertion on new projections; the whole point of this tool is
+        # that it costs a fraction of a raw pod object.
+        result = self._refs(
+            api,
+            container={
+                "env_from": [
+                    client.V1EnvFromSource(
+                        config_map_ref=client.V1ConfigMapEnvSource(name="app-config"),
+                        secret_ref=client.V1SecretEnvSource(name="app-secret"),
+                    )
+                ],
+                "volume_mounts": [
+                    client.V1VolumeMount(name="cfg", mount_path="/etc/app"),
+                    client.V1VolumeMount(
+                        name="tls", mount_path="/etc/tls/ca.pem", sub_path="ca.pem"
+                    ),
+                ],
+            },
+            volumes=[
+                client.V1Volume(
+                    name="cfg",
+                    config_map=client.V1ConfigMapVolumeSource(name="mounted-config"),
+                ),
+                client.V1Volume(
+                    name="tls",
+                    secret=client.V1SecretVolumeSource(secret_name="tls-certs"),
+                ),
+            ],
+            pull_secrets=[client.V1LocalObjectReference(name="registry-creds")],
+        )
+
+        assert len(result["containers"]["app"]["config"]) == 4
+        assert len(json.dumps(result)) < 900
