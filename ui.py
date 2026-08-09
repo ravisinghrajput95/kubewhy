@@ -20,6 +20,7 @@ no capability, only a way to look at it.
 """
 
 import datetime as dt
+import time
 
 import streamlit as st
 
@@ -107,6 +108,26 @@ def _logs(context, name, namespace, tail, container=""):
 def _nodes(context):
     _bind(context)
     return list_nodes()
+
+
+def progress_label(tool, calls, elapsed):
+    """
+    What the status bar says while a diagnosis runs.
+
+    Progress has to be TEXT, not only the spinner beside it. That spinner is a
+    CSS animation, and a browser stops painting frames whenever the tab is
+    hidden, occluded or busy -- measured in Chrome with the tab backgrounded,
+    requestAnimationFrame fired zero times in 1.2 seconds while the animation
+    still reported playState "running". It freezes mid-rotation into a static
+    arc, so a run that is working looks exactly like one that has hung. That
+    matters here more than in most apps, because a diagnosis legitimately takes
+    minutes and this model backend has stalled for as long as 1013 seconds.
+
+    Text cannot be paused by a compositor. Whenever the reader looks back, the
+    label says which tool is running, how many have run, and for how long --
+    all of which a spinner never said even when it was spinning.
+    """
+    return f"{tool} — tool {calls}, {elapsed:.0f}s elapsed"
 
 
 def _unwrap(result, tool):
@@ -433,12 +454,30 @@ if submitted and question:
 
     steps = st.status("Thinking...", expanded=True)
     result = None
+    started = time.monotonic()
+    calls = 0
     try:
         # stream() rather than ask(): the chain is the point, and a diagnosis
         # runs long enough that a caller shown only the final answer is
         # watching a spinner for a minute.
         for event in agent.stream(question):
             if event["type"] == "tool_call":
+                calls += 1
+                # Progress in the LABEL, not only in the spinner beside it.
+                # That spinner is a CSS animation, and a browser stops painting
+                # frames whenever the tab is hidden, occluded or busy -- at
+                # which point it freezes mid-rotation into a static arc that
+                # reads as a chevron, and a diagnosis that is working looks
+                # identical to one that has hung. Measured: with the tab
+                # backgrounded, requestAnimationFrame fired zero times in 1.2s
+                # while the animation still reported playState "running".
+                #
+                # Text cannot be paused by a compositor. Whenever the reader
+                # next looks, the label states what is happening and how long
+                # it has taken, which is also more than a spinner ever said.
+                steps.update(
+                    label=progress_label(event["name"], calls, time.monotonic() - started)
+                )
                 steps.write(f"`{event['name']}({event['arguments']})`")
             elif event["type"] == "tool_result":
                 steps.write(
@@ -454,8 +493,13 @@ if submitted and question:
         # This run's answer, not whatever is in session_state: reading it back
         # out meant a run that produced nothing was labelled with the previous
         # run's tool count.
+        took = time.monotonic() - started
         steps.update(
-            label=f"{len(result['tool_calls'])} tool calls" if result else "No answer",
+            label=(
+                f"{len(result['tool_calls'])} tool calls, {took:.0f}s"
+                if result
+                else f"No answer after {took:.0f}s"
+            ),
             state="complete",
             expanded=False,
         )

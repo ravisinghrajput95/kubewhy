@@ -156,3 +156,43 @@ class TestContextIsPerSession:
         for name in ("_scan", "_namespaces", "_workload_pods", "_describe", "_events", "_logs", "_nodes"):
             first = list(inspect.signature(getattr(ui, name)).parameters)[0]
             assert first == "context", f"{name} is cached without the context in its key"
+
+
+class TestProgressIsTextNotOnlyAnimation:
+    """
+    The spinner beside "Thinking..." is a CSS animation, and a browser stops
+    painting frames whenever the tab is hidden, occluded or busy. Measured in
+    Chrome with the tab backgrounded: requestAnimationFrame fired zero times in
+    1.2s while the animation still reported playState "running". It freezes
+    mid-rotation into a static arc that reads as a chevron, and a diagnosis
+    that is working becomes indistinguishable from one that has hung.
+
+    Driving the form through AppTest is not the test for this: importing ui in
+    another test leaves Streamlit form state in the process, so a form click
+    here fails depending on test order. The label itself is a pure function, so
+    it is tested as one.
+    """
+
+    def test_label_names_the_tool_the_count_and_the_elapsed_time(self):
+        import ui
+
+        label = ui.progress_label("get_pod_logs", 3, 42.4)
+
+        assert "get_pod_logs" in label
+        assert "tool 3" in label
+        assert "42s" in label
+
+    def test_elapsed_is_whole_seconds(self):
+        # Sub-second precision on a minute-long run is noise that changes on
+        # every event and makes the label look unstable.
+        import ui
+
+        assert "0s" in ui.progress_label("list_pods", 1, 0.4)
+        assert "." not in ui.progress_label("list_pods", 1, 12.34)
+
+    def test_a_stalled_run_is_legible_as_a_long_one(self):
+        # Ollama has stalled for 1013s in this project. The label has to make
+        # that visible rather than looking identical to a fast run.
+        import ui
+
+        assert "1013s" in ui.progress_label("get_pod_logs", 2, 1013.0)
