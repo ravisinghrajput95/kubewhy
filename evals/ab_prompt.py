@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import agent  # noqa: E402
+from ollama_state import resident  # noqa: E402
 from cases import CASES  # noqa: E402
 from run_eval import grade  # noqa: E402
 
@@ -50,6 +51,9 @@ def hedges(text):
 
 def run(case, arm, prompts, model):
     agent.SYSTEM_PROMPT = prompts[arm]
+    # Before the clock starts: a run that has to load the weights is not
+    # measuring the same thing as one that does not.
+    was_resident = resident(model)
     started = time.time()
     try:
         result = agent.ask(case["question"], model=model)
@@ -70,6 +74,8 @@ def run(case, arm, prompts, model):
         # the table it already prints.
         "model": f"{model}-{arm}",
         "arm": arm,
+        # None means the probe failed, which is not the same as "absent".
+        "model_resident": was_resident,
         "passed": bool(ok),
         "seconds": round(time.time() - started, 1),
         "confidence": result.get("confidence"),

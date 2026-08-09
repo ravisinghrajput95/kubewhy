@@ -57,6 +57,29 @@ If you change the system prompt, tool descriptions, or any projection, **run
 the evals and report the before/after in your PR.** Prompt changes are code
 changes with no compiler; the eval is the only check.
 
+### Set `OLLAMA_KEEP_ALIVE` before a long run
+
+```bash
+OLLAMA_KEEP_ALIVE=24h python evals/run_eval.py --repeat 10 --json results/qwen3.json
+```
+
+Ollama unloads a model five minutes after its last request by default, and a
+benchmark should measure the agent rather than the loader.
+
+This matters because of an open defect: runs of 371s to 1013s against a median
+near 70s, on ordinary two-tool chains. The stalls arrive in **adjacent pairs**,
+and in one 60-run set they landed on runs 20 and 21 — the first two runs of the
+second repeat, on a case that had taken 82s and 49s in the first. Same
+question, same prompt, same cluster, eleven times slower.
+
+Every run now records `model_resident`, so the next set of numbers can say
+whether a stall landed on a run that had to load the weights. Treat that as an
+open question rather than a settled diagnosis: a plain unload and reload is
+measurably cheap here (1.37s cold against 0.25s warm on a 2GB model), so it
+does not on its own account for 1013s. Page eviction under memory pressure
+would, and so would several other things. **Any latency figure from a long run
+should state its outliers** until this is understood.
+
 The controller has its own eval, because it asks its own question:
 
 ```bash

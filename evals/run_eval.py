@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import agent  # noqa: E402
 from cases import CASES  # noqa: E402
+from ollama_state import resident  # noqa: E402
 
 
 def _satisfied(group, text):
@@ -84,6 +85,7 @@ def main():
         reasons = []
 
         for _ in range(args.repeat):
+            was_resident = resident(args.model)
             started = time.time()
             try:
                 result = agent.ask(case["question"], model=args.model)
@@ -110,6 +112,11 @@ def main():
                 "passed": bool(ok),
                 "seconds": round(time.time() - started, 1),
                 "confidence": result.get("confidence"),
+                # Whether the weights were already loaded when this run began.
+                # A stall on a run that had to load them is a loader problem,
+                # not a model one, and the two have been indistinguishable in
+                # every latency figure this project has published so far.
+                "model_resident": was_resident,
                 # What was flagged, not just that something was: without this
                 # a rise in the unverified count cannot be told apart from the
                 # checker getting stricter.
