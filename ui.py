@@ -159,6 +159,35 @@ PAGE_ICON = "🩺"
 
 st.set_page_config(page_title="kubewhy", page_icon=PAGE_ICON, layout="wide")
 
+# Streamlit reserves about 6rem above the first element, which on a wide
+# dashboard is a screenful of nothing before the scan table. Pulled in to leave
+# room for the toolbar and no more.
+#
+# Selected by data-testid rather than the st-emotion-cache-* classes beside
+# them: those are content hashes and change whenever Streamlit rebuilds its
+# stylesheet, so a rule written against one silently stops applying on upgrade.
+# The bare .block-container fallback covers older builds that predate the
+# testid.
+st.markdown(
+    """
+    <style>
+      [data-testid="stMainBlockContainer"], .block-container {
+        padding-top: 2.2rem;
+      }
+      [data-testid="stSidebarUserContent"] {
+        padding-top: 0.5rem;
+      }
+      /* Streamlit puts padding on the heading itself as well as the container,
+         so trimming only the container leaves the sidebar sitting lower than
+         the page title beside it. */
+      [data-testid="stSidebarUserContent"] > div > div:first-child h3 {
+        padding-top: 0;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Before anything reads the cluster. The context lives in session state and is
 # re-asserted on every rerun, because it is scoped to the caller now and
 # Streamlit gives each rerun a fresh thread -- a selection made last rerun is
