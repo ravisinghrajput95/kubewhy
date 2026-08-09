@@ -97,7 +97,7 @@ notices a pod going unhealthy, diagnoses it unprompted, and delivers the root
 cause somewhere people already look.
 
 ```bash
-helm install triage deploy/chart --set sink.type=slack \
+helm install kubewhy deploy/chart --set sink.type=slack \
   --set sink.slack.existingSecret=slack-webhook
 ```
 
@@ -282,7 +282,7 @@ The chart can deploy it, off by default and behind a second switch:
 ```bash
 helm install kubewhy deploy/chart --set ui.enabled=true \
   --set ui.exposureAcknowledged=true
-kubectl port-forward -n triage svc/kubewhy-ui 8501:8501
+kubectl port-forward -n kubewhy svc/kubewhy-ui 8501:8501
 ```
 
 `ui.enabled` alone fails the install with an explanation. That friction is
@@ -304,9 +304,9 @@ without moving this process's connection.
 ## Deploying the controller
 
 ```bash
-helm install triage oci://ghcr.io/ravisinghrajput95/charts/kubewhy \
-  --namespace triage --create-namespace
-kubectl logs -n triage -l app.kubernetes.io/instance=triage -f
+helm install kubewhy oci://ghcr.io/ravisinghrajput95/charts/kubewhy \
+  --namespace kubewhy --create-namespace
+kubectl logs -n kubewhy -l app.kubernetes.io/instance=kubewhy -f
 ```
 
 The image and chart are published to GHCR on every `v*` tag, multi-arch
@@ -318,7 +318,7 @@ channel the bot is invited to, reports a real error when it refuses, and is
 what you want if findings should ever be routed by namespace or team:
 
 ```bash
-kubectl create secret generic kubewhy-slack -n triage \
+kubectl create secret generic kubewhy-slack -n kubewhy \
   --from-literal=bot-token="$SLACK_BOT_TOKEN"
 
 helm install kubewhy deploy/chart --set sink.type=slack \
@@ -401,7 +401,7 @@ Check what you are pointed at before running anything:
 
 ```bash
 kubectl config current-context
-kubectl auth can-i --list --as=system:serviceaccount:triage:triage-agent
+kubectl auth can-i --list --as=system:serviceaccount:kubewhy:kubewhy-agent
 ```
 
 Read that second command's output as a hint rather than an answer. On GKE it
@@ -473,7 +473,7 @@ support user rule resolution`. `--list` was closer but still omitted
 answer that counts:
 
 ```bash
-kubectl create token triage-agent -n triage --duration=8h
+kubectl create token kubewhy-agent -n kubewhy --duration=8h
 ```
 
 ## Security
@@ -485,7 +485,7 @@ care about.** The short version:
 
 ```bash
 kubectl apply -f deploy/rbac.yaml
-kubectl create token triage-agent -n triage --duration=8h
+kubectl create token kubewhy-agent -n kubewhy --duration=8h
 ```
 
 Verified against a live cluster:
@@ -500,7 +500,7 @@ list pods (all ns)  -> yes      watch pods         -> yes
 
 The cluster-wide scan needs no additional grant: `list pods` at cluster scope
 is already covered. Verified by running `--scan` under a token minted for the
-`triage-agent` ServiceAccount, not by reading the YAML.
+`kubewhy-agent` ServiceAccount, not by reading the YAML.
 
 **Authenticate the API.** Set `TRIAGE_API_TOKEN` and every endpoint requires
 `Authorization: Bearer <token>`. Unset, the API is open — acceptable only on

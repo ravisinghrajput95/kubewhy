@@ -6,7 +6,7 @@
 # own admin kubeconfig.
 #
 #   kubectl apply -f deploy/rbac.yaml
-#   kubectl create token triage-agent -n triage --duration=8h
+#   kubectl create token kubewhy-agent -n kubewhy --duration=8h
 #
 # Then build a kubeconfig from that token, or run the agent in-cluster with
 # this ServiceAccount and it will pick the credentials up automatically.
@@ -20,18 +20,18 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: triage
+  name: kubewhy
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: triage-agent
-  namespace: triage
+  name: kubewhy-agent
+  namespace: kubewhy
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: triage-agent-readonly
+  name: kubewhy-agent-readonly
 rules:
   # Pods, nodes, services and events. No create/update/patch/delete anywhere.
   - apiGroups: [""]
@@ -61,12 +61,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: triage-agent-readonly
+  name: kubewhy-agent-readonly
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: triage-agent-readonly
+  name: kubewhy-agent-readonly
 subjects:
   - kind: ServiceAccount
-    name: triage-agent
-    namespace: triage
+    name: kubewhy-agent
+    namespace: kubewhy
