@@ -65,7 +65,12 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Build image
-        run: docker build -t kubewhy:ci .
+        # --target base, explicitly. Without it docker builds the LAST stage in
+        # the Dockerfile, which became the ui stage the moment that was added
+        # below base -- so this job silently started building Streamlit and
+        # then curling port 8000 for an API that was never in the image.
+        # Streamlit is not what this job tests; the ui job above covers it.
+        run: docker build --target base -t kubewhy:ci .
 
       - name: Check the service starts and serves
         # Guards the container entrypoint, which the pytest job never touches.
