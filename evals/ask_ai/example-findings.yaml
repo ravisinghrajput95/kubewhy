@@ -1,0 +1,580 @@
+investigation:
+  id: INV-2026-08-09-001
+  cluster: kind-sre-audit (1 node, v1.36.1)
+  namespace_under_test: shop
+  method: |
+    Read-only inspection via the Kubernetes API, plus one in-cluster
+    reachability probe executed from an existing pod. Every figure quoted below
+    was produced by a command run against this cluster during the
+    investigation. Nothing is recalled, assumed or generalised from experience.
+
+  headline: |
+    10 pods. 3 show a problem in `kubectl get pods`. 9 distinct faults are
+    present, 6 of them in workloads reporting Running and Ready.
+
+    A status-only view of this namespace is 67% blind. That is the finding
+    behind the findings: pod phase is not a health signal for anything whose
+    failure lives in a reference between two objects.
+
+evidence_availability:
+  available:
+    - Kubernetes API: all core and apps objects, RBAC, storage, policy, networking
+    - Kubernetes Events (default retention window)
+    - Container logs via pods/log
+    - In-cluster network reachability, by probing from a running pod
+    - TLS certificate expiry, by decoding kubernetes.io/tls secrets
+  unavailable:
+    - reason: "metrics-server is not installed — verified with `kubectl top nodes`"
+      consequence: "No CPU, memory, disk, IOPS or utilisation data exists. Every
+        resource-pressure question in the brief is unanswerable on this cluster.
+        I have not estimated these from requests/limits, because a request is a
+        scheduling declaration, not a measurement."
+    - reason: "Prometheus, Loki, Grafana, Alertmanager not deployed — namespace check"
+      consequence: "No time-series, no log aggregation, no alert history, no trends."
+    - reason: "Istio, Linkerd not deployed"
+      consequence: "No mesh, no traffic policy, no request-level latency, and no
+        application call graph. Service-to-service dependency cannot be derived."
+    - reason: "ArgoCD, Flux not deployed"
+      consequence: "No GitOps desired-state, so configuration drift cannot be assessed."
+    - reason: "Velero not deployed"
+      consequence: "No backup or DR status. Not 'backups are fine' — unknown."
+    - reason: "Kyverno, Gatekeeper, OPA not deployed; 0 admission webhooks"
+      consequence: "No policy enforcement exists. Every fault below was admitted
+        without objection, which is itself the preventive finding."
+    - reason: "cert-manager not deployed; 0 TLS secrets in cluster"
+      consequence: "No certificates to expire. Nothing to report rather than nothing wrong."
+    - reason: "Single-node kind cluster, 0 CRDs, 0 CSI drivers, 0 taints"
+      consequence: "No operators, no multi-cluster, no autoscaler, no node topology
+        or zone spread to analyse."
+    - reason: "No historical investigations, timeline or knowledge graph exist"
+      consequence: "No prior-incident correlation is possible. First run."
+
+findings:
+
+  - id: F-01
+    title: Service catalog routes to a port nothing listens on
+    severity: critical
+    confidence: certain
+    confidence_basis: |
+      Not inferred from configuration — measured. An in-cluster probe returned
+      the application on :5678 and Connection refused on :8080.
+    evidence:
+      - "svc/catalog spec.ports[0].targetPort = 8080"
+      - "deploy/catalog containerPort = 5678"
+      - "EndpointSlice: PORTS=8080 ADDRS=[10.244.0.5],[10.244.0.6] READY=true,true"
+      - "probe from pod: http://10.244.0.6:5678/ -> 'catalog ok'"
+      - "probe from pod: http://10.244.0.6:8080/ -> Connection refused"
+      - "probe via Service: http://catalog.shop.svc.cluster.local/ -> Connection refused"
+    root_cause: |
+      targetPort was set to 8080, a common default, while the container is
+      started with -listen=:5678. The selector matches, the pods pass their
+      readiness probe on the real port, so the endpoint controller publishes
+      them as Ready. Readiness proves the pod is healthy; it says nothing about
+      whether the Service points at the port the probe used.
+    why_it_hides: |
+      This is the most dangerous shape in Kubernetes networking. Pod is Running,
+      pod is Ready, endpoints are populated, EndpointSlice says ready=true.
+      Every status surface is green and no traffic arrives.
+    alternative_hypotheses:
+      - hypothesis: "Application crashed or is not listening"
+        ruled_out_by: "Direct probe on :5678 returned a 200 body."
+      - hypothesis: "NetworkPolicy is blocking"
+        ruled_out_by: "The only NetworkPolicy selects app=reports, not app=catalog;
+          and the probe on :5678 to the same pod IP succeeded."
+      - hypothesis: "kube-proxy or CNI fault"
+        ruled_out_by: "svc/search, same node and CNI, resolves and serves."
+    affected_workloads: [shop/catalog]
+    blast_radius: |
+      Infrastructure blast radius, derived from real references: svc/catalog ->
+      2 pods; ingress shop-edge /catalog path -> svc/catalog. Any client
+      resolving catalog.shop.svc.cluster.local fails.
+      NOT ASSESSABLE: which applications call catalog. No mesh or traffic data
+      exists, and the Kubernetes API does not record call graphs.
+    recommended_fix: |
+      Set targetPort to the container's port. Prefer the NAMED port so the two
+      cannot drift again — svc/search in this namespace uses targetPort: http
+      and is correct, which is the pattern to copy.
+        kubectl patch svc catalog -n shop --type=json \
+          -p='[{"op":"replace","path":"/spec/ports/0/targetPort","value":5678}]'
+    rollback: |
+      kubectl patch svc catalog -n shop --type=json \
+        -p='[{"op":"replace","path":"/spec/ports/0/targetPort","value":8080}]'
+      Service-only change, no pod restart, no data risk. Reverts in one call.
+    verification:
+      - "kubectl get endpointslice -n shop -l kubernetes.io/service-name=catalog -o jsonpath='{.items[0].ports[0].port}'  # expect 5678"
+      - "probe from a pod: wget -qO- http://catalog.shop.svc.cluster.local/  # expect 'catalog ok'"
+      - "Confirm the control still passes: wget -qO- http://search.shop.svc.cluster.local/"
+    prevention:
+      - "Use named container ports and reference them by name in Services."
+      - "Admission policy rejecting a Service whose targetPort matches no
+         containerPort on any pod its selector matches. No webhook exists here."
+      - "The endpoints-populated-but-port-mismatched check belongs in the
+         deterministic broken-edge scan, not in a model prompt."
+    related_objects: [svc/catalog, deploy/catalog, endpointslice/catalog, ingress/shop-edge]
+    related_metrics: "UNAVAILABLE — metrics-server absent. Connection-refused rate
+      would normally be the confirming signal."
+    related_logs: "Application logs show nothing: the app is healthy and never
+      receives the requests. Absence of errors here is expected, not reassuring."
+    related_events: "None. No Kubernetes event is emitted for this fault class."
+    related_topology: "ingress/shop-edge -> svc/catalog -> [2 pods]. Break is at
+      the Service-to-pod hop, which renders as connected in any topology view
+      that trusts endpoint readiness."
+    related_kg_nodes: "selection edge svc/catalog -> app=catalog (resolves);
+      traffic edge svc:8080 -> containerPort (DANGLING)."
+
+  - id: F-02
+    title: Service basket selects no pods
+    severity: high
+    confidence: certain
+    evidence:
+      - "svc/basket selector = app=basket-v2"
+      - "EndpointSlice basket: ADDRS=<none>, PORTS=<none>"
+      - "No pod in namespace shop carries label app=basket-v2"
+    root_cause: |
+      Selector points at a label version that no workload carries — the classic
+      residue of a v1-to-v2 rename where the Deployment was reverted or never
+      shipped and the Service was not.
+    alternative_hypotheses:
+      - hypothesis: "Pods exist but are not Ready"
+        ruled_out_by: "EndpointSlice has no addresses at all, not unready ones."
+      - hypothesis: "Pods are in another namespace"
+        ruled_out_by: "Services are namespace-scoped; a selector cannot cross namespaces."
+    affected_workloads: ["shop/basket (Service only — no backing workload exists)"]
+    blast_radius: "Every caller of basket.shop.svc.cluster.local. Connections
+      fail immediately rather than hanging, since there is no endpoint to route to."
+    recommended_fix: "Correct the selector to the label the workload actually
+      carries, or delete the Service if basket-v2 was abandoned. Deciding which
+      requires knowing intent, which is not in the cluster."
+    rollback: "Restore the previous selector value; Service-only, instant."
+    verification: ["kubectl get endpointslice -n shop -l kubernetes.io/service-name=basket -o jsonpath='{.items[0].endpoints}'  # expect addresses"]
+    prevention: ["Alert on any Service whose selector resolves to zero pods for
+      more than a few minutes. Deterministic, no model needed."]
+    related_objects: [svc/basket, endpointslice/basket]
+    related_metrics: UNAVAILABLE — metrics-server absent
+    related_logs: "None — no pod exists to log."
+    related_events: "None. Kubernetes emits no event for an empty selector."
+    related_topology: "svc/basket -> (nothing). Dangling leaf."
+    related_kg_nodes: "selection edge svc/basket -> app=basket-v2 (DANGLING)."
+
+  - id: F-03
+    title: Ingress references a nonexistent Service and a nonexistent port
+    severity: critical
+    confidence: certain
+    evidence:
+      - "ingress/shop-edge path /catalog -> service catalog port 9999"
+      - "svc/catalog exposes port 80 only"
+      - "ingress/shop-edge path /checkout -> service checkout-svc port 80"
+      - "Services present in shop: basket, catalog, reports, search. No checkout-svc."
+    root_cause: |
+      Two independent dangling references in one Ingress: a port that does not
+      exist on a Service that does, and a Service that does not exist at all.
+      Kubernetes admits both — Ingress backends are not validated at write time.
+    alternative_hypotheses:
+      - hypothesis: "Ingress controller misconfiguration"
+        ruled_out_by: "No ingress controller is installed in this cluster at all,
+          so the object is inert here. On a cluster with one, both paths would 503."
+    affected_workloads: [shop/catalog, "shop/checkout-svc (absent)"]
+    blast_radius: "All external traffic on shop.example.com for both paths.
+      Compounds with F-01: even after fixing the Ingress port, /catalog would
+      still fail, because the Service beneath it is broken too."
+    recommended_fix: |
+      Point /catalog at port 80. Either create checkout-svc or remove the path —
+      an Ingress path to a nonexistent backend is worse than no path, because it
+      returns 503 rather than 404 and reads as an outage.
+    rollback: "Re-apply the previous Ingress manifest. No traffic impact here as
+      no controller is running."
+    verification:
+      - "kubectl get ingress shop-edge -n shop -o jsonpath='{.spec.rules[0].http.paths[*].backend.service}'"
+      - "With a controller installed: curl -H 'Host: shop.example.com' http://<lb>/catalog  # expect 200"
+    prevention: ["Validating webhook rejecting an Ingress backend that does not
+      resolve to an existing Service and port. Zero admission webhooks exist here."]
+    related_objects: [ingress/shop-edge, svc/catalog]
+    related_metrics: UNAVAILABLE
+    related_logs: "Ingress controller access logs would show 503s. No controller installed."
+    related_events: None
+    related_topology: "Request path breaks at hop 1 of 3 for both routes."
+    related_kg_nodes: "traffic edges ingress->svc:9999 (DANGLING) and
+      ingress->checkout-svc (DANGLING)."
+
+  - id: F-04
+    title: pricing cannot start — missing ConfigMap
+    severity: high
+    confidence: certain
+    evidence:
+      - "pod pricing-bd4d4f8ff-pbfj7 status = CreateContainerConfigError"
+      - "event: Warning Failed — configmap \"pricing-config\" not found"
+      - "deploy/pricing envFrom.configMapRef.name = pricing-config"
+    root_cause: "The Deployment consumes a ConfigMap that was never created in
+      this namespace. envFrom resolves at container start, so the kubelet cannot
+      construct the container at all."
+    alternative_hypotheses:
+      - hypothesis: "ConfigMap exists in another namespace"
+        ruled_out_by: "ConfigMap references are namespace-local; this is not recoverable
+          by a cross-namespace lookup."
+      - hypothesis: "RBAC prevents the kubelet reading it"
+        ruled_out_by: "Event says 'not found', not 'forbidden'."
+    affected_workloads: [shop/pricing]
+    blast_radius: "pricing has no Service in this namespace, so nothing routes to
+      it. Impact is confined to the workload itself — which is why this loud
+      failure is less serious than the quiet ones above."
+    recommended_fix: "Create pricing-config with the required keys, or remove the
+      envFrom block. The pod recovers without intervention once the ConfigMap exists."
+    rollback: "kubectl delete configmap pricing-config -n shop returns to current state."
+    verification: ["kubectl get pod -n shop -l app=pricing  # expect Running 1/1"]
+    prevention: ["Ship ConfigMaps and their consumers in the same Helm release or
+      Kustomization so ordering is guaranteed."]
+    related_objects: [deploy/pricing, "configmap/pricing-config (absent)"]
+    related_metrics: UNAVAILABLE
+    related_logs: "None — the container never started, so there are no logs.
+      A log query here returns empty, which must not be read as 'no errors'."
+    related_events: "Warning Failed, repeating on the kubelet's backoff schedule."
+    related_topology: "Not in any traffic path."
+    related_kg_nodes: "consumption edge pod -> configmap/pricing-config (DANGLING)."
+
+  - id: F-05
+    title: shipping consumes config via envFrom — changes will never propagate
+    severity: medium
+    confidence: high
+    confidence_basis: |
+      The consumption route is a fact read from the spec. That a future config
+      change will be silently ignored is a well-established Kubernetes
+      behaviour, not something measured on this cluster today — so: high, not
+      certain. No change has yet been made to demonstrate it live.
+    evidence:
+      - "deploy/shipping envFrom = shipping-config; volumes = (none)"
+      - "configmap/shipping-config exists, key RATE_TABLE=v1-legacy"
+      - "pod shipping-77dbdbfbbf-qrcgm is Running"
+    root_cause: |
+      Environment variables from a ConfigMap are injected once at container
+      start and are never refreshed. Editing shipping-config changes the object
+      and changes nothing in the running pod. The pod stays Ready and serves the
+      old value indefinitely, with no event, no restart and no signal of any kind.
+      A ConfigMap mounted as a volume would update within about a minute —
+      except via subPath, which never updates either.
+    alternative_hypotheses:
+      - hypothesis: "The application re-reads config at runtime"
+        cannot_rule_out: "Not determinable from the cluster. It depends on
+          application code, which is not an object I can read. If the app polls
+          its own config source this finding does not apply."
+    affected_workloads: [shop/shipping]
+    blast_radius: "Latent. Zero impact until someone edits the ConfigMap and
+      believes the change took effect — at which point the blast radius is
+      'everyone who trusts the deploy went out'."
+    recommended_fix: |
+      Either roll the Deployment on every config change, or make it automatic by
+      putting a hash of the ConfigMap in the pod template annotations, which
+      makes a config change a template change:
+        kubectl rollout restart deploy/shipping -n shop
+    rollback: "A rollout restart is reversible with kubectl rollout undo deploy/shipping -n shop."
+    verification:
+      - "kubectl exec deploy/shipping -n shop -- printenv RATE_TABLE  # compare to the ConfigMap"
+    prevention:
+      - "checksum/config annotation on the pod template (standard Helm pattern)."
+      - "In the graph: flag every pod whose ConfigMap start time predates the
+         ConfigMap's last modification. That is a computable staleness check."
+    related_objects: [deploy/shipping, configmap/shipping-config]
+    related_metrics: UNAVAILABLE
+    related_logs: "Nothing. The workload is behaving correctly for the config it holds."
+    related_events: None
+    related_topology: Not in a traffic path
+    related_kg_nodes: "consumption edge pod -> configmap (route=envFrom, propagates=false)."
+
+  - id: F-06
+    title: Secret db-credentials password carries a trailing newline
+    severity: high
+    confidence: certain
+    evidence:
+      - "secret/db-credentials key password: 16 bytes, ends_with_newline=True"
+      - "secret/db-credentials key username: 8 bytes, ends_with_newline=False"
+      - "Value itself deliberately not read into this report."
+    root_cause: |
+      Created with `echo` rather than `echo -n`, or a here-doc that appended a
+      newline before base64 encoding. The object is completely valid; the byte
+      string handed to the database is one character longer than the credential.
+    why_it_hides: |
+      Every view of this object looks correct. kubectl describe shows only byte
+      counts, kubectl get -o yaml shows base64, and a human decoding it sees the
+      right password because the terminal does not render a trailing newline.
+      The only way to see it is to measure the length or inspect the bytes.
+    alternative_hypotheses:
+      - hypothesis: "The consuming application strips whitespace"
+        cannot_rule_out: "Depends on the client library. Some strip, most do not.
+          Not determinable from the cluster."
+      - hypothesis: "The password genuinely ends in a newline"
+        assessed: "Possible but very unlikely; no credential policy produces one."
+    affected_workloads: "None currently — no pod in this namespace references
+      db-credentials. It is staged for a workload that does not exist yet."
+    blast_radius: "Whatever mounts it. Presents as an authentication failure with
+      correct-looking configuration, which is a very expensive class of outage
+      to debug: every object inspection says the credential is right."
+    recommended_fix: |
+      Recreate without the newline:
+        kubectl create secret generic db-credentials -n shop \
+          --from-literal=username=shopuser --from-literal=password='<value>' \
+          --dry-run=client -o yaml | kubectl apply -f -
+      --from-literal does not append a newline. printf '%s' also does not; echo does.
+    rollback: "Re-apply the previous Secret manifest. Any pod consuming it needs a
+      restart, because Secret env vars have the same non-propagation property as F-05."
+    verification:
+      - "Re-run the byte-length check: expect 15 bytes and ends_with_newline=False"
+      - "Attempt an authentication against the target system"
+    prevention:
+      - "Report byte length and a trailing-whitespace flag for every Secret key in
+         the UI — never the value. That catches this class while keeping the
+         read-only guarantee intact."
+      - "Admission policy rejecting Secret values with leading/trailing whitespace."
+    related_objects: [secret/db-credentials]
+    related_metrics: UNAVAILABLE
+    related_logs: "Would appear as auth failures in the consuming app, not here."
+    related_events: None
+    related_topology: Not in a traffic path
+    related_kg_nodes: "consumption edges: none. Secret is currently orphaned."
+
+  - id: F-07
+    title: HPA targets a Deployment that does not exist
+    severity: high
+    confidence: certain
+    evidence:
+      - "hpa/catalog-hpa scaleTargetRef = Deployment/catalog-v2"
+      - "status condition AbleToScale = FailedGetScale: deployments.apps \"catalog-v2\" not found"
+      - "hpa REPLICAS column = 0; metrics show cpu: <unknown>/70%"
+      - "No Deployment named catalog-v2 exists; the Deployment is named catalog"
+    root_cause: "scaleTargetRef was not updated when the Deployment was renamed
+      (or the HPA was copied from another environment). The HPA controller cannot
+      resolve the target and does nothing."
+    alternative_hypotheses:
+      - hypothesis: "HPA is idle because metrics are missing"
+        partially_true: "metrics-server IS absent, which would independently
+          prevent scaling. But the condition message names the missing Deployment
+          specifically, so the dangling reference is proven regardless."
+    affected_workloads: [shop/catalog]
+    blast_radius: "catalog will never scale under load. Silent under-provisioning:
+      the failure appears only during the traffic spike the HPA existed to absorb."
+    recommended_fix: "Point scaleTargetRef at catalog. Also install metrics-server,
+      or the HPA still cannot function even once the reference is correct."
+    rollback: "Revert scaleTargetRef; HPA-only change, no workload impact."
+    verification:
+      - "kubectl get hpa catalog-hpa -n shop  # TARGETS should show a real percentage, not <unknown>"
+      - "kubectl describe hpa catalog-hpa -n shop  # AbleToScale=True"
+    prevention: ["Alert on any HPA whose AbleToScale condition is False for >5 min.
+      This is a status field, not an inference — trivially checkable."]
+    related_objects: [hpa/catalog-hpa, deploy/catalog, "deploy/catalog-v2 (absent)"]
+    related_metrics: "UNAVAILABLE — and directly causal here, not incidental."
+    related_logs: "kube-controller-manager logs would show the failure."
+    related_events: None
+    related_topology: Not in a traffic path
+    related_kg_nodes: "scaling edge hpa -> deploy/catalog-v2 (DANGLING)."
+
+  - id: F-08
+    title: PodDisruptionBudget permits zero disruptions
+    severity: medium
+    confidence: certain
+    evidence:
+      - "pdb/catalog-pdb minAvailable=2, ALLOWED DISRUPTIONS=0"
+      - "deploy/catalog replicas=2"
+    root_cause: "minAvailable equals the replica count, so no pod may ever be
+      voluntarily evicted. The PDB is not protecting availability; it is
+      preventing maintenance."
+    alternative_hypotheses:
+      - hypothesis: "Intentional for a singleton workload"
+        assessed: "Unlikely at 2 replicas. With minAvailable=1 the same PDB would
+          protect availability while permitting rolling maintenance."
+    affected_workloads: [shop/catalog]
+    blast_radius: |
+      Cluster-wide operational impact, not application impact: kubectl drain of
+      this node blocks indefinitely, which stalls node upgrades, autoscaler
+      scale-down and patching. On a single-node cluster that means no
+      maintenance is possible at all.
+    recommended_fix: "Set minAvailable: 1, or maxUnavailable: 1 which expresses
+      the intent directly and does not need editing when replicas change."
+    rollback: "Restore minAvailable: 2. Policy-only, instant, no workload impact."
+    verification: ["kubectl get pdb catalog-pdb -n shop  # ALLOWED DISRUPTIONS >= 1"]
+    prevention: ["Reject PDBs where minAvailable >= the target's replica count.
+      Prefer maxUnavailable, which cannot drift against replica count."]
+    related_objects: [pdb/catalog-pdb, deploy/catalog]
+    related_metrics: UNAVAILABLE
+    related_logs: "Would surface as a drain hanging, not as a log line."
+    related_events: "None until a drain is attempted."
+    related_topology: Not a traffic concern
+    related_kg_nodes: "policy edge pdb -> app=catalog (resolves, but permits 0 disruption)."
+
+  - id: F-09
+    title: NetworkPolicy isolates reports with no ingress rules
+    severity: high
+    confidence: high
+    confidence_basis: |
+      The object is a fact. Whether traffic is actually dropped depends on the
+      CNI enforcing NetworkPolicy. kindnet is installed here and its enforcement
+      was NOT verified by probe, so I am not claiming measured isolation — this
+      is read from configuration, unlike F-01.
+    evidence:
+      - "netpol/reports-isolate podSelector = app=reports, policyTypes=[Ingress], no ingress rules"
+      - "An empty ingress rule list denies all ingress to selected pods"
+      - "svc/reports and its EndpointSlice are healthy: 1 address, ready=true"
+    root_cause: "A NetworkPolicy selecting pods with no ingress rules is a
+      deny-all. Frequently the result of a template that was meant to be filled in."
+    why_it_hides: |
+      The worst observability profile of any fault here. No event, no log entry,
+      no packet, no status change. Endpoints are healthy and the pod is Ready.
+      The only evidence is the policy object itself.
+    alternative_hypotheses:
+      - hypothesis: "Deliberate isolation of a sensitive workload"
+        cannot_rule_out: "Legitimate pattern. Intent is not recorded in the cluster.
+          Requires an owner to confirm."
+      - hypothesis: "CNI does not enforce NetworkPolicy"
+        not_ruled_out: "Not probed. Would need a connectivity test from another pod."
+    affected_workloads: [shop/reports]
+    blast_radius: "All inbound traffic to reports pods, including its own Service."
+    recommended_fix: "If isolation is intended, add explicit ingress rules for
+      legitimate callers. If not, delete the policy. Confirm intent before either."
+    rollback: "Re-apply the original NetworkPolicy manifest."
+    verification:
+      - "Probe from another pod before and after: wget -qO- http://reports.shop.svc.cluster.local/"
+      - "This probe is also the missing evidence for the confidence gap above."
+    prevention: ["Flag NetworkPolicies that select pods and permit nothing. Warn at
+      admission — nearly always a half-finished template."]
+    related_objects: [netpol/reports-isolate, deploy/reports, svc/reports]
+    related_metrics: UNAVAILABLE
+    related_logs: "None. Dropped packets are not logged by the CNI here."
+    related_events: None
+    related_topology: "svc/reports -> pod resolves, but the pod is unreachable.
+      Topology drawn from endpoints alone shows this path as healthy."
+    related_kg_nodes: "policy edge netpol -> app=reports (ISOLATING)."
+
+  - id: F-10
+    title: PVC archive-data references a nonexistent StorageClass
+    severity: high
+    confidence: certain
+    evidence:
+      - "pvc/archive-data status=Pending, storageClassName=fast-ssd-nonexistent"
+      - "StorageClasses available in cluster: standard (only)"
+      - "pod archive-bbdcbb574-b7fnk status=Pending, node=<none>"
+      - "event: FailedScheduling — pod has unbound immediate PersistentVolumeClaims"
+    root_cause: "The PVC names a StorageClass that does not exist, so no
+      provisioner claims it, the PVC stays Pending, and the pod cannot schedule
+      because its volume cannot bind."
+    alternative_hypotheses:
+      - hypothesis: "Provisioner is slow"
+        ruled_out_by: "Pending for the entire investigation window, and no
+          provisioner is registered for that class name (0 CSI drivers; only the
+          local-path 'standard' class exists)."
+      - hypothesis: "Insufficient node resources"
+        ruled_out_by: "The scheduler event names the unbound PVC specifically."
+    affected_workloads: [shop/archive]
+    blast_radius: "archive is entirely down. Two Pending pods in this namespace
+      (archive and gpu-scoring) have different causes and must not be grouped."
+    recommended_fix: "Set storageClassName to standard, or install the CSI driver
+      providing fast-ssd. Note storageClassName is immutable on an existing PVC —
+      the PVC must be deleted and recreated."
+    rollback: |
+      DESTRUCTIVE ASYMMETRY: recreating the PVC is not reversible if it has bound
+      and holds data. Here it never bound, so nothing can be lost — recreation is
+      safe in this specific case, and would not be on a bound PVC.
+    verification:
+      - "kubectl get pvc archive-data -n shop  # expect Bound"
+      - "kubectl get pod -n shop -l app=archive  # expect Running"
+    prevention: ["Validate storageClassName against installed classes at admission.
+      Set a cluster default StorageClass so an omitted name still binds."]
+    related_objects: [pvc/archive-data, deploy/archive, "storageclass/fast-ssd-nonexistent (absent)", storageclass/standard]
+    related_metrics: "UNAVAILABLE. Disk and IOPS unmeasurable: no volume, no metrics-server."
+    related_logs: "None — container never started."
+    related_events: "FailedScheduling, repeating."
+    related_topology: Not in a traffic path
+    related_kg_nodes: "consumption edge pvc -> storageclass (DANGLING); pod -> pvc (BLOCKED)."
+
+  - id: F-11
+    title: ServiceAccount audit-sa has no permissions at all
+    severity: medium
+    confidence: certain
+    evidence:
+      - "deploy/audit serviceAccountName = audit-sa"
+      - "RoleBindings and ClusterRoleBindings referencing audit-sa: 0"
+      - "kubectl auth can-i list pods --as=system:serviceaccount:shop:audit-sa -> no"
+      - "pod audit-869d9ffd8d-dz9jm is Running"
+    root_cause: "The ServiceAccount was created and assigned but never bound to
+      any Role. It authenticates successfully and is authorized for nothing."
+    why_it_hides: |
+      The pod is Running and Ready. RBAC failures happen at request time, inside
+      the application, and surface only as 403s in application logs — never in
+      pod status, never as a Kubernetes event.
+    alternative_hypotheses:
+      - hypothesis: "The workload never calls the Kubernetes API"
+        cannot_rule_out: "Then the SA is harmless but pointless. Determining this
+          needs the application's behaviour, which is not a cluster object.
+          Note the comparison probe: the default SA also returns 'no', so this is
+          the expected baseline for an unbound SA, not an anomaly of audit-sa."
+    affected_workloads: [shop/audit]
+    blast_radius: "Confined to whatever API calls audit makes. Zero if it makes none."
+    recommended_fix: "Bind a Role granting exactly the verbs the workload needs.
+      If it needs none, drop serviceAccountName and set
+      automountServiceAccountToken: false, which is also the safer posture."
+    rollback: "kubectl delete rolebinding <name> -n shop."
+    verification: ["kubectl auth can-i <verb> <resource> -n shop --as=system:serviceaccount:shop:audit-sa  # expect yes"]
+    prevention: ["Report ServiceAccounts that are referenced by a workload but
+      bound to nothing. A pure graph query: SA node with an inbound pod edge and
+      no outbound binding edge."]
+    related_objects: [sa/audit-sa, deploy/audit]
+    related_metrics: "UNAVAILABLE. apiserver_request_total by code would show the 403s."
+    related_logs: "Application logs only. Not inspected — the container runs sleep
+      and makes no API calls, so there is nothing to find."
+    related_events: None
+    related_topology: Not in a traffic path
+    related_kg_nodes: "identity edge pod -> sa/audit-sa (resolves); sa -> role (MISSING)."
+
+  - id: F-12
+    title: gpu-scoring cannot schedule — nodeSelector matches no node
+    severity: medium
+    confidence: certain
+    evidence:
+      - "deploy/gpu-scoring nodeSelector = accelerator: nvidia-a100"
+      - "event: FailedScheduling — 0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector"
+      - "Cluster has 1 node with no accelerator label and 0 taints"
+    root_cause: "The workload requires a node label that no node in this cluster
+      carries. A manifest written for a GPU cluster, applied to one without GPUs."
+    alternative_hypotheses:
+      - hypothesis: "Taints without tolerations"
+        ruled_out_by: "The node has zero taints; the event names affinity/selector."
+      - hypothesis: "Insufficient resources"
+        ruled_out_by: "Event text is specific, and requests are 10m/16Mi."
+      - hypothesis: "Autoscaler should add a GPU node"
+        ruled_out_by: "No Cluster Autoscaler or Karpenter is installed. On a
+          managed cluster with a GPU pool this would resolve itself; here it never will."
+    affected_workloads: [shop/gpu-scoring]
+    blast_radius: "The workload alone. It has no Service and nothing depends on it."
+    recommended_fix: "Label a suitable node, add a GPU node pool, or remove the
+      nodeSelector if the accelerator is not genuinely required."
+    rollback: "Re-apply the previous pod template; a rollout, fully reversible."
+    verification: ["kubectl get pod -n shop -l app=gpu-scoring -o wide  # expect Running with a node assigned"]
+    prevention: ["Warn when a Deployment's nodeSelector matches zero current nodes
+      at admission time — cheap, deterministic, catches environment-mismatched manifests."]
+    related_objects: [deploy/gpu-scoring, node/sre-audit-control-plane]
+    related_metrics: UNAVAILABLE
+    related_logs: "None — container never started."
+    related_events: "FailedScheduling, repeating."
+    related_topology: Not in a traffic path
+    related_kg_nodes: "placement edge pod -> node (UNSATISFIABLE)."
+
+controls_verified_healthy:
+  - object: shop/search (Deployment + Service)
+    result: |
+      Reported healthy, correctly. 2/2 Ready, EndpointSlice has 2 ready
+      addresses on port 5678, and an in-cluster probe of
+      search.shop.svc.cluster.local returned "search ok".
+      It uses a NAMED targetPort, which is precisely why it is immune to F-01.
+      Recording this matters: an investigation that flags everything is as
+      useless as one that flags nothing, and this is the false-positive check.
+
+cluster_level_observations:
+  - observation: "Zero admission webhooks, zero policy engines (Kyverno/Gatekeeper/OPA)."
+    significance: |
+      Every one of the twelve faults above was admitted without objection. Eight
+      of them are statically detectable at write time. This is the single
+      highest-leverage preventive finding in the investigation: the faults are
+      not individually surprising, but nothing in the cluster is positioned to
+      stop any of them.
+  - observation: "Zero ResourceQuotas, zero LimitRanges."
+    significance: "No namespace-level bound on consumption. Not currently causing
+      harm on a 1-node test cluster; would matter in a shared environment."
+  - observation: "metrics-server absent."
+    significance: "No utilisation data. Also makes F-07's HPA inoperable even
+      after its dangling reference is fixed."

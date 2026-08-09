@@ -1,0 +1,348 @@
+# Fault fixtures for a cross-object SRE investigation.
+#
+# Every fault here is RELATIONAL: the objects are individually valid and most
+# of the pods are Running and Ready. A status-only view reports this namespace
+# as healthy. That is the point.
+#
+# Ground truth is recorded in ground-truth.md so findings can be scored for
+# misses AND false positives.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+---
+# ---------------------------------------------------------------- EDGE 1
+# Service targetPort does not match the container port.
+# Pods are Ready, endpoints are POPULATED, and nothing reaches the app.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: shop
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: catalog}}
+  template:
+    metadata:
+      labels: {app: catalog}
+    spec:
+      containers:
+        - name: web
+          image: hashicorp/http-echo:1.0
+          args: ["-listen=:5678", "-text=catalog ok"]
+          ports: [{containerPort: 5678}]
+          readinessProbe:
+            httpGet: {path: /, port: 5678}
+            initialDelaySeconds: 2
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: shop
+spec:
+  selector: {app: catalog}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080      # BROKEN: container listens on 5678
+---
+# ---------------------------------------------------------------- EDGE 2
+# Service selector matches nothing. Service exists and blackholes silently.
+apiVersion: v1
+kind: Service
+metadata:
+  name: basket
+  namespace: shop
+spec:
+  selector: {app: basket-v2}   # BROKEN: no pod carries this label
+  ports: [{port: 80, targetPort: 8080}]
+---
+# ---------------------------------------------------------------- EDGE 3
+# Ingress references a Service that does not exist, and a port that does not
+# exist on a Service that does.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop-edge
+  namespace: shop
+spec:
+  rules:
+    - host: shop.example.com
+      http:
+        paths:
+          - path: /catalog
+            pathType: Prefix
+            backend:
+              service:
+                name: catalog
+                port: {number: 9999}    # BROKEN: catalog exposes 80
+          - path: /checkout
+            pathType: Prefix
+            backend:
+              service:
+                name: checkout-svc      # BROKEN: no such Service
+                port: {number: 80}
+---
+# ---------------------------------------------------------------- EDGE 4
+# Pod consumes a ConfigMap that does not exist -> CreateContainerConfigError.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pricing
+  namespace: shop
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: pricing}}
+  template:
+    metadata:
+      labels: {app: pricing}
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          envFrom:
+            - configMapRef: {name: pricing-config}   # BROKEN: absent
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+---
+# ---------------------------------------------------------------- EDGE 5
+# ConfigMap consumed via envFrom. Values are injected at start and NEVER
+# update. Pod stays Ready and serves stale config forever after a change.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shipping-config
+  namespace: shop
+data:
+  RATE_TABLE: "v1-legacy"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shipping
+  namespace: shop
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: shipping}}
+  template:
+    metadata:
+      labels: {app: shipping}
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          envFrom:
+            - configMapRef: {name: shipping-config}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+---
+# ---------------------------------------------------------------- EDGE 6
+# Secret with a trailing newline. Object is valid, auth fails at runtime.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: shop
+type: Opaque
+stringData:
+  # 17 bytes of password + a trailing \n = 18. The newline is the whole bug.
+  password: "s3cret-password\n"
+  username: "shopuser"
+---
+# ---------------------------------------------------------------- EDGE 7
+# HPA targeting a Deployment that does not exist. Silently never scales.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: catalog-hpa
+  namespace: shop
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: catalog-v2          # BROKEN: renamed away
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+---
+# ---------------------------------------------------------------- EDGE 8
+# PDB that permits zero disruption -> blocks every drain and node upgrade.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: catalog-pdb
+  namespace: shop
+spec:
+  minAvailable: 2            # equals replica count: zero allowed disruptions
+  selector: {matchLabels: {app: catalog}}
+---
+# ---------------------------------------------------------------- EDGE 9
+# NetworkPolicy selecting pods and permitting no ingress at all.
+# No event, no log, no packet. Only the object graph shows it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: reports-isolate
+  namespace: shop
+spec:
+  podSelector: {matchLabels: {app: reports}}
+  policyTypes: [Ingress]
+  # no ingress rules -> deny all
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reports
+  namespace: shop
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: reports}}
+  template:
+    metadata:
+      labels: {app: reports}
+    spec:
+      containers:
+        - name: web
+          image: hashicorp/http-echo:1.0
+          args: ["-listen=:5678", "-text=reports ok"]
+          ports: [{containerPort: 5678}]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reports
+  namespace: shop
+spec:
+  selector: {app: reports}
+  ports: [{port: 80, targetPort: 5678}]
+---
+# ---------------------------------------------------------------- EDGE 10
+# PVC bound to a StorageClass that does not exist -> Pending forever,
+# and the consuming pod is stuck Pending behind it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archive-data
+  namespace: shop
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: fast-ssd-nonexistent    # BROKEN
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archive
+  namespace: shop
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: archive}}
+  template:
+    metadata:
+      labels: {app: archive}
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          volumeMounts: [{name: data, mountPath: /data}]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: archive-data}
+---
+# ---------------------------------------------------------------- EDGE 11
+# ServiceAccount with no RoleBinding. Pod runs fine; API calls 403 at runtime.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audit-sa
+  namespace: shop
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit
+  namespace: shop
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: audit}}
+  template:
+    metadata:
+      labels: {app: audit}
+    spec:
+      serviceAccountName: audit-sa      # BROKEN: no binding grants anything
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+---
+# ---------------------------------------------------------------- EDGE 12
+# Unschedulable: nodeSelector matches no node in this cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-scoring
+  namespace: shop
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: gpu-scoring}}
+  template:
+    metadata:
+      labels: {app: gpu-scoring}
+    spec:
+      nodeSelector:
+        accelerator: nvidia-a100        # BROKEN: no node carries this
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+---
+# ---------------------------------------------------------------- CONTROL
+# Fully healthy. A finding against this object is a FALSE POSITIVE.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: search
+  namespace: shop
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: search}}
+  template:
+    metadata:
+      labels: {app: search}
+    spec:
+      containers:
+        - name: web
+          image: hashicorp/http-echo:1.0
+          args: ["-listen=:5678", "-text=search ok"]
+          ports: [{name: http, containerPort: 5678}]
+          readinessProbe:
+            httpGet: {path: /, port: 5678}
+            initialDelaySeconds: 2
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: search
+  namespace: shop
+spec:
+  selector: {app: search}
+  ports: [{port: 80, targetPort: http}]     # correct: named port resolves
