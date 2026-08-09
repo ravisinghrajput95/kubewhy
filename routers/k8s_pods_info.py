@@ -72,6 +72,15 @@ def _build_bundle(requested):
         "core": client.CoreV1Api(api_client),
         "apps": client.AppsV1Api(api_client),
         "discovery": client.DiscoveryV1Api(api_client),
+        # Read-only, and only ever listed -- these exist for scan_references,
+        # which compares objects against each other rather than reading any
+        # object's contents. Deliberately not SecretsV1: a reference to a
+        # Secret can be reported without the Secret being read, and listing
+        # them would return their data.
+        "networking": client.NetworkingV1Api(api_client),
+        "autoscaling": client.AutoscalingV2Api(api_client),
+        "policy": client.PolicyV1Api(api_client),
+        "storage": client.StorageV1Api(api_client),
         "active": active,
     }
 
@@ -258,6 +267,26 @@ def _apps_api():
 def _discovery_api():
     """DiscoveryV1Api, for EndpointSlices."""
     return _bundle()["discovery"]
+
+
+def _networking_api():
+    """NetworkingV1Api, for Ingresses."""
+    return _bundle()["networking"]
+
+
+def _autoscaling_api():
+    """AutoscalingV2Api, for HorizontalPodAutoscalers."""
+    return _bundle()["autoscaling"]
+
+
+def _policy_api():
+    """PolicyV1Api, for PodDisruptionBudgets."""
+    return _bundle()["policy"]
+
+
+def _storage_api():
+    """StorageV1Api, for StorageClasses."""
+    return _bundle()["storage"]
 
 
 def _api_message(exc):
@@ -1087,6 +1116,183 @@ def list_deployments(namespace: str = "default"):
         }
 
     return result or {"result": f"no deployments in namespace {namespace}"}
+
+
+def scan_references(namespace: str = "default"):
+    """
+    Finds references between objects that do not resolve, in one namespace.
+
+    Use this when something is wrong and the pods all look fine. Most
+    Kubernetes objects have no health of their own -- a Service, an Ingress, a
+    PodDisruptionBudget is never "unhealthy", it is only pointing at something
+    that is not there. Those faults leave every pod Running and Ready, so
+    list_pods and scan_cluster cannot see them at all.
+
+    No model reasoning is involved and nothing is inferred: a reference either
+    resolves against the cluster or it does not. Reports the object, what it
+    points at, and the symptom the break produces.
+
+    Args: namespace -- defaults to "default".
+    """
+    broken = []
+    checked = {}
+
+    def failed(exc):
+        return {"error": _api_message(exc) or str(exc)}
+
+    # -- Services: selector resolving to nothing --------------------------
+    try:
+        services = _api().list_namespaced_service(
+            namespace, _request_timeout=TIMEOUT
+        ).items
+        pods = _api().list_namespaced_pod(namespace, _request_timeout=TIMEOUT).items
+    except Exception as exc:
+        return failed(exc)
+
+    checked["services"] = len(services)
+    for svc in services:
+        selector = svc.spec.selector
+        if not selector:
+            continue
+        matched = [
+            p for p in pods
+            if all((p.metadata.labels or {}).get(k) == v for k, v in selector.items())
+        ]
+        if not matched:
+            broken.append({
+                "kind": "Service",
+                "name": svc.metadata.name,
+                "points_at": f"pods matching {selector}",
+                "problem": "selector matches no pod in this namespace",
+                "symptom": "the Service resolves but has no endpoints, so "
+                           "connections fail immediately",
+            })
+
+    # -- Ingress: backend Service and port --------------------------------
+    try:
+        ingresses = _networking_api().list_namespaced_ingress(
+            namespace, _request_timeout=TIMEOUT
+        ).items
+    except Exception:
+        ingresses = []
+    checked["ingresses"] = len(ingresses)
+
+    by_name = {s.metadata.name: s for s in services}
+    for ing in ingresses:
+        for rule in ing.spec.rules or []:
+            http = getattr(rule, "http", None)
+            for path in (getattr(http, "paths", None) or []):
+                backend = getattr(path.backend, "service", None)
+                if not backend:
+                    continue
+                svc = by_name.get(backend.name)
+                if svc is None:
+                    broken.append({
+                        "kind": "Ingress",
+                        "name": ing.metadata.name,
+                        "points_at": f"Service {backend.name}",
+                        "problem": "no Service of that name exists here",
+                        "symptom": "requests on this path return 503",
+                    })
+                    continue
+                wanted = getattr(backend.port, "number", None)
+                if wanted and wanted not in [p.port for p in (svc.spec.ports or [])]:
+                    have = ", ".join(str(p.port) for p in (svc.spec.ports or []))
+                    broken.append({
+                        "kind": "Ingress",
+                        "name": ing.metadata.name,
+                        "points_at": f"Service {backend.name} port {wanted}",
+                        "problem": f"that Service exposes {have or 'no ports'}",
+                        "symptom": "requests on this path return 503",
+                    })
+
+    # -- HPA: scaleTargetRef ----------------------------------------------
+    try:
+        hpas = _autoscaling_api().list_namespaced_horizontal_pod_autoscaler(
+            namespace, _request_timeout=TIMEOUT
+        ).items
+    except Exception:
+        hpas = []
+    checked["hpas"] = len(hpas)
+
+    for hpa in hpas:
+        # The API server already decided this and says so in a condition; that
+        # is a measurement rather than a guess about what the name refers to.
+        for condition in hpa.status.conditions or []:
+            if condition.type == "AbleToScale" and condition.status == "False":
+                ref = hpa.spec.scale_target_ref
+                broken.append({
+                    "kind": "HorizontalPodAutoscaler",
+                    "name": hpa.metadata.name,
+                    "points_at": f"{ref.kind} {ref.name}",
+                    "problem": condition.reason or "cannot scale",
+                    "symptom": "the workload never scales, which shows up only "
+                               "under the load the HPA was added to absorb",
+                })
+
+    # -- PVC: StorageClass and binding ------------------------------------
+    try:
+        claims = _api().list_namespaced_persistent_volume_claim(
+            namespace, _request_timeout=TIMEOUT
+        ).items
+        classes = {c.metadata.name for c in _storage_api().list_storage_class(
+            _request_timeout=TIMEOUT
+        ).items}
+    except Exception:
+        claims, classes = [], set()
+    checked["pvcs"] = len(claims)
+
+    for claim in claims:
+        wanted = claim.spec.storage_class_name
+        if wanted and classes and wanted not in classes:
+            broken.append({
+                "kind": "PersistentVolumeClaim",
+                "name": claim.metadata.name,
+                "points_at": f"StorageClass {wanted}",
+                "problem": f"no such StorageClass (have: {', '.join(sorted(classes))})",
+                "symptom": "the claim stays Pending and every pod mounting it "
+                           "stays Pending behind it",
+            })
+        elif claim.status.phase == "Pending":
+            broken.append({
+                "kind": "PersistentVolumeClaim",
+                "name": claim.metadata.name,
+                "points_at": f"StorageClass {wanted or '(default)'}",
+                "problem": "unbound",
+                "symptom": "pods mounting this claim cannot schedule",
+            })
+
+    # -- PDB: permits no disruption at all --------------------------------
+    try:
+        budgets = _policy_api().list_namespaced_pod_disruption_budget(
+            namespace, _request_timeout=TIMEOUT
+        ).items
+    except Exception:
+        budgets = []
+    checked["pdbs"] = len(budgets)
+
+    for pdb in budgets:
+        allowed = getattr(pdb.status, "disruptions_allowed", None)
+        healthy = getattr(pdb.status, "current_healthy", 0) or 0
+        if allowed == 0 and healthy > 0:
+            broken.append({
+                "kind": "PodDisruptionBudget",
+                "name": pdb.metadata.name,
+                "points_at": f"minAvailable {pdb.spec.min_available}"
+                             if pdb.spec.min_available is not None
+                             else f"maxUnavailable {pdb.spec.max_unavailable}",
+                "problem": "permits zero voluntary disruptions",
+                "symptom": "node drains and cluster upgrades block indefinitely; "
+                           "this is an operations outage rather than an app one",
+            })
+
+    if not broken:
+        return {
+            "namespace": namespace,
+            "checked": checked,
+            "result": "every reference in this namespace resolves",
+        }
+    return {"namespace": namespace, "checked": checked, "broken": broken}
 
 
 def _port_mismatch(api, namespace, svc):

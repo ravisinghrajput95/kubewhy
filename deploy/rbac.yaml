@@ -57,6 +57,35 @@ rules:
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
     verbs: ["get", "list"]
+
+  # Reference targets for scan_references. All list-only, and all chosen
+  # because a broken reference to one of them leaves every pod Running and
+  # Ready -- which is exactly what nothing else here can see.
+  #
+  # Secrets are deliberately absent and stay absent. A pod's reference TO a
+  # Secret is in the pod spec and is already readable; verifying the Secret
+  # exists would mean listing Secrets, and a list returns their data. The
+  # reference is worth reporting; the contents are not worth the grant.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list"]
+
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list"]
+
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list"]
+
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list"]
+
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list"]
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

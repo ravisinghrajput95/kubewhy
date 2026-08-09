@@ -34,6 +34,7 @@ from routers.k8s_pods_info import (
     list_nodes,
     list_deployments,
     get_service_endpoints,
+    scan_references,
 )
 
 # OLLAMA_HOST is read by the ollama client itself; in a container it needs to
@@ -65,6 +66,7 @@ TOOLS = {
     "list_nodes": list_nodes,
     "list_deployments": list_deployments,
     "get_service_endpoints": get_service_endpoints,
+    "scan_references": scan_references,
 }
 
 SYSTEM_PROMPT = """You are a triage assistant. You can inspect two separate

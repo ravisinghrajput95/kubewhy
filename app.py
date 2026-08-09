@@ -37,6 +37,7 @@ from routers.k8s_pods_info import (
     list_nodes,
     list_deployments,
     get_service_endpoints,
+    scan_references,
 )
 
 observability.configure()
@@ -203,6 +204,12 @@ def deployments(namespace: str = "default"):
 )
 def service_endpoints(name: str, namespace: str = "default"):
     return get_service_endpoints(name, namespace)
+
+
+@app.get("/references")
+def references(namespace: str = "default"):
+    """Objects in this namespace whose references do not resolve."""
+    return scan_references(namespace)
 
 
 # --- agent ------------------------------------------------------------------

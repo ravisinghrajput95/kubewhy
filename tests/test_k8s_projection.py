@@ -1519,3 +1519,195 @@ class TestServicePortMismatch:
         result = k8s.get_service_endpoints("web", "demo")
 
         assert "diagnosis" not in result
+
+
+@pytest.fixture
+def networking_api():
+    mock = MagicMock()
+    with patch.object(k8s, "_networking_api", return_value=mock):
+        yield mock
+
+
+@pytest.fixture
+def autoscaling_api():
+    mock = MagicMock()
+    with patch.object(k8s, "_autoscaling_api", return_value=mock):
+        yield mock
+
+
+@pytest.fixture
+def policy_api():
+    mock = MagicMock()
+    with patch.object(k8s, "_policy_api", return_value=mock):
+        yield mock
+
+
+@pytest.fixture
+def storage_api():
+    mock = MagicMock()
+    with patch.object(k8s, "_storage_api", return_value=mock):
+        yield mock
+
+
+class TestScanReferences:
+    """
+    The faults here leave every pod Running and Ready, so list_pods and
+    scan_cluster are blind to all of them. Nothing is inferred: a reference
+    either resolves against the cluster or it does not.
+    """
+
+    def _empty(self, networking_api, autoscaling_api, policy_api, storage_api):
+        networking_api.list_namespaced_ingress.return_value = client.V1IngressList(items=[])
+        autoscaling_api.list_namespaced_horizontal_pod_autoscaler.return_value = MagicMock(items=[])
+        policy_api.list_namespaced_pod_disruption_budget.return_value = MagicMock(items=[])
+        storage_api.list_storage_class.return_value = MagicMock(items=[])
+
+    def _svc(self, name, selector, ports=(80,)):
+        return client.V1Service(
+            metadata=client.V1ObjectMeta(name=name),
+            spec=client.V1ServiceSpec(
+                selector=selector,
+                ports=[client.V1ServicePort(port=p) for p in ports],
+            ),
+        )
+
+    def test_selector_matching_nothing_is_reported(
+        self, api, networking_api, autoscaling_api, policy_api, storage_api
+    ):
+        self._empty(networking_api, autoscaling_api, policy_api, storage_api)
+        api.list_namespaced_service.return_value = client.V1ServiceList(
+            items=[self._svc("basket", {"app": "basket-v2"})]
+        )
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[])
+        api.list_namespaced_persistent_volume_claim.return_value = MagicMock(items=[])
+
+        result = k8s.scan_references("shop")
+
+        assert result["broken"][0]["kind"] == "Service"
+        assert result["broken"][0]["name"] == "basket"
+
+    def test_a_selector_that_matches_is_not_reported(
+        self, api, networking_api, autoscaling_api, policy_api, storage_api
+    ):
+        # The control. A scan that flags healthy objects is unusable, and this
+        # is the direction that costs trust fastest.
+        self._empty(networking_api, autoscaling_api, policy_api, storage_api)
+        pod = make_pod(name="search-1")
+        pod.metadata.labels = {"app": "search"}
+        api.list_namespaced_service.return_value = client.V1ServiceList(
+            items=[self._svc("search", {"app": "search"})]
+        )
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[pod])
+        api.list_namespaced_persistent_volume_claim.return_value = MagicMock(items=[])
+
+        result = k8s.scan_references("shop")
+
+        assert "broken" not in result
+        assert "every reference" in result["result"]
+
+    def test_ingress_to_a_missing_service_and_a_missing_port(
+        self, api, networking_api, autoscaling_api, policy_api, storage_api
+    ):
+        self._empty(networking_api, autoscaling_api, policy_api, storage_api)
+        pod = make_pod(name="catalog-1")
+        pod.metadata.labels = {"app": "catalog"}
+        api.list_namespaced_service.return_value = client.V1ServiceList(
+            items=[self._svc("catalog", {"app": "catalog"}, ports=(80,))]
+        )
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[pod])
+        api.list_namespaced_persistent_volume_claim.return_value = MagicMock(items=[])
+
+        def path(svc, port):
+            return client.V1HTTPIngressPath(
+                path=f"/{svc}", path_type="Prefix",
+                backend=client.V1IngressBackend(
+                    service=client.V1IngressServiceBackend(
+                        name=svc, port=client.V1ServiceBackendPort(number=port)
+                    )
+                ),
+            )
+
+        networking_api.list_namespaced_ingress.return_value = client.V1IngressList(
+            items=[client.V1Ingress(
+                metadata=client.V1ObjectMeta(name="edge"),
+                spec=client.V1IngressSpec(rules=[client.V1IngressRule(
+                    http=client.V1HTTPIngressRuleValue(
+                        paths=[path("catalog", 9999), path("checkout-svc", 80)]
+                    )
+                )]),
+            )]
+        )
+
+        found = {(b["kind"], b["points_at"]) for b in k8s.scan_references("shop")["broken"]}
+
+        assert ("Ingress", "Service catalog port 9999") in found
+        assert ("Ingress", "Service checkout-svc") in found
+
+    def test_pvc_naming_a_storageclass_that_does_not_exist(
+        self, api, networking_api, autoscaling_api, policy_api, storage_api
+    ):
+        self._empty(networking_api, autoscaling_api, policy_api, storage_api)
+        api.list_namespaced_service.return_value = client.V1ServiceList(items=[])
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[])
+        storage_api.list_storage_class.return_value = MagicMock(
+            items=[MagicMock(metadata=client.V1ObjectMeta(name="standard"))]
+        )
+        api.list_namespaced_persistent_volume_claim.return_value = MagicMock(
+            items=[client.V1PersistentVolumeClaim(
+                metadata=client.V1ObjectMeta(name="archive-data"),
+                spec=client.V1PersistentVolumeClaimSpec(storage_class_name="fast-ssd"),
+                status=client.V1PersistentVolumeClaimStatus(phase="Pending"),
+            )]
+        )
+
+        broken = k8s.scan_references("shop")["broken"][0]
+
+        assert broken["kind"] == "PersistentVolumeClaim"
+        assert "standard" in broken["problem"]
+
+    def test_pdb_permitting_no_disruption(
+        self, api, networking_api, autoscaling_api, policy_api, storage_api
+    ):
+        self._empty(networking_api, autoscaling_api, policy_api, storage_api)
+        api.list_namespaced_service.return_value = client.V1ServiceList(items=[])
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[])
+        api.list_namespaced_persistent_volume_claim.return_value = MagicMock(items=[])
+        policy_api.list_namespaced_pod_disruption_budget.return_value = MagicMock(
+            items=[client.V1PodDisruptionBudget(
+                metadata=client.V1ObjectMeta(name="catalog-pdb"),
+                spec=client.V1PodDisruptionBudgetSpec(min_available=2),
+                status=client.V1PodDisruptionBudgetStatus(
+                    disruptions_allowed=0, current_healthy=2, desired_healthy=2,
+                    expected_pods=2, disrupted_pods=None, conditions=None,
+                    observed_generation=1,
+                ),
+            )]
+        )
+
+        broken = k8s.scan_references("shop")["broken"][0]
+
+        assert broken["kind"] == "PodDisruptionBudget"
+        assert "drain" in broken["symptom"]
+
+    def test_a_denied_read_is_returned_as_data(self, api):
+        # Errors are data everywhere in this module; the agent loop has to
+        # survive a namespace it cannot read.
+        api.list_namespaced_service.side_effect = ApiException(status=403, reason="Forbidden")
+        api.list_namespaced_service.side_effect.body = json.dumps({"message": "forbidden"})
+
+        assert "error" in k8s.scan_references("shop")
+
+    def test_projection_stays_small(
+        self, api, networking_api, autoscaling_api, policy_api, storage_api
+    ):
+        self._empty(networking_api, autoscaling_api, policy_api, storage_api)
+        api.list_namespaced_service.return_value = client.V1ServiceList(
+            items=[self._svc(f"svc-{i}", {"app": f"missing-{i}"}) for i in range(8)]
+        )
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[])
+        api.list_namespaced_persistent_volume_claim.return_value = MagicMock(items=[])
+
+        result = k8s.scan_references("shop")
+
+        assert len(result["broken"]) == 8
+        assert len(json.dumps(result)) < 3000
