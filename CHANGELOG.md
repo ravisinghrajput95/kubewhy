@@ -19,6 +19,15 @@ signatures and response shapes may still change.
 - **Two demo workloads that are `Running` and broken** — `never-ready` and
   `slow-starter` — because no existing demo fault was invisible in the pod
   status, so nothing exercised the case.
+- **A CronJob case and a plan detector in the controller eval.** The live GKE
+  failure — a finding that listed the tool calls to make instead of making
+  them — was invisible to both suites: `run_controller_eval.py` had no CronJob
+  case, and its grader only asked whether the right words appeared, which a
+  well-written plan satisfies. Every case is now also checked for tools named
+  in the prose but absent from `tool_calls`, which is a fact rather than a
+  judgement about tone. The graders themselves now have tests.
+- **Missing-Secret fixtures in `demo/tricky-pods.yaml`** — via `envFrom`, via a
+  volume, and an `optional: true` control that must not be reported.
 - **`POST /ask/stream`** — the agent loop as server-sent events, one per tool
   call and result, ending with the same body `/ask` returns. Fixes the silence
   during a long diagnosis, not the blocking: the connection is still held for
@@ -45,6 +54,63 @@ signatures and response shapes may still change.
 - Clients now see an **empty server version** where 1.29 reported `1.29.0`.
   That was the SDK's version rather than kubewhy's, so it was never right;
   setting it properly needs a version constant this project does not have.
+- **Eval results are written as each run finishes**, rather than once at the
+  end. A full set is over an hour and the defect the harness exists to measure
+  is a run that hangs, so the interrupted run was both the likely one and the
+  one that left nothing on disk.
+- **Each eval run records when it started and the machine's load average**,
+  either side of the call. Latency figures could previously be described but
+  not attributed.
+
+### Fixed
+
+- **The controller diagnosed pods that no longer existed.** The watch reports a
+  pod and the diagnosis runs a minute or two later; for a CronJob failing every
+  minute with `failedJobsHistoryLimit: 2`, that gap is longer than the pod's
+  whole life. Measured on the demo cluster: every tool call about the
+  handed-over pod returned `{"error": "kubernetes API error 404: pods
+  "nightly-sync-29772408-4bn2r" not found"}`, three runs of three, and in one
+  run a pod died *between* `describe_pod` and `get_pod_logs`. Given nothing to
+  reason from, the model replied with a plan for investigating — "1. Check
+  termination reason: call `describe_pod`" — which is the sane response to no
+  data and useless in an alert. This had been recorded as a prompt defect
+  needing an A/B; it is a race. `Controller.still_there()` now re-resolves to a
+  live pod of the same workload and the same fault before asking, and posts
+  nothing at all if the workload has gone quiet. **This does not fix
+  `nightly-sync`** — measured before and after with `--repeat 3`, the score is
+  11/16 either way and that case is 0/3 either way. The substitution fires and
+  the replacement is collected mid-diagnosis too, because the runs take
+  89–126s against a pod that lives about two minutes. The window is narrower,
+  not closed; a diagnosis slower than its subject needs the evidence captured
+  while the pod is alive.
+- **`count_affected` had been returning 1 for every controller-eval finding.**
+  It built a bare `client.CoreV1Api()` and swallowed the failure; the
+  kubeconfig is only loaded by `run()`, and the eval calls `diagnose()`
+  directly.
+- **`OLLAMA_KEEP_ALIVE` was read by nothing.** CONTRIBUTING documented
+  `OLLAMA_KEEP_ALIVE=24h python evals/run_eval.py` as the mitigation for the
+  stall defect, but keep-alive is a server-side setting and the Ollama Python
+  client ignores the environment. Measured: unload the model, run one chat
+  through the client with the variable exported, and it comes back expiring in
+  **5.0 minutes** — the server default. `agent.py` now forwards it, and the
+  same measurement reports **1440 minutes**. Every latency figure published
+  before this was taken under a five-minute unload window by someone who
+  believed they had disabled unloading. Unset, the field is omitted from the
+  request exactly as before.
+- **The UI tests depended on the order they ran in.** `import ui` executes the
+  Streamlit script in bare mode, leaving `FormData(form_id='ask')` on the
+  process-wide main `DeltaGenerator`; any later test rendering a button then
+  failed with "st.button() can't be used in an st.form()". One attribute, so an
+  autouse fixture clears it, and two tests pin the mechanism so a Streamlit
+  rename cannot quietly turn the cleanup into a no-op.
+- **The `evals/ask_ai` scripts could not run from the repo root**, which is
+  where their own README says to run them: all three opened their inputs
+  relative to the working directory. `build_investigation.py` additionally
+  opened `findings.yaml`, a file that does not exist — it is
+  `example-findings.yaml` — so it could not run from anywhere at all.
+  `validate.py` is described as the CI gate.
+- **`scan_references` was missing from the README entirely**, along with `GET
+  /references`, and the tool count still said 13 of 14.
 
 ## [0.1.2] — 2026-08-07
 
