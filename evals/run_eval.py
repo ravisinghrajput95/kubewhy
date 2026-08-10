@@ -125,6 +125,16 @@ def main():
                 "failures": why,
             })
 
+            # Written after every run, not at the end. A full set is over an
+            # hour, and the defect this file exists to measure is a run that
+            # hangs for 1013s -- so the interrupted run is the likely one, and
+            # holding sixty results in memory until then loses exactly the
+            # evidence that was worth collecting. ab_prompt.py already does
+            # this; run_eval.py should not be the one that throws it away.
+            if args.json:
+                with open(args.json, "w") as fh:
+                    json.dump(records, fh, indent=1)
+
         total_passes += passes
         total_runs += args.repeat
         rows.append((case["name"], passes, args.repeat, elapsed / args.repeat, reasons))
