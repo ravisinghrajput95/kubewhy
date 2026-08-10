@@ -55,7 +55,42 @@ CASES = [
         # controller cannot explain this one it is reading only the status.
         "expect_all": [["readiness", "probe", "not ready"]],
     },
+    {
+        "workload": "nightly-sync",
+        # A CronJob pod, which is the shape this eval had no case for and the
+        # one seen failing live on GKE: the controller's finding was a list of
+        # tool calls to make rather than a diagnosis. The cause is one line in
+        # the container's log, and the pod has terminated rather than
+        # restarting, so nothing about the status can supply it.
+        "expect_all": [["503", "upstream"]],
+    },
 ]
+
+# The tools the model can call. Named in prose but absent from tool_calls,
+# they are the signature of an answer that described the investigation instead
+# of performing it.
+TOOL_NAMES = (
+    "scan_cluster", "list_pods", "describe_pod", "get_pod_events", "get_pod_logs",
+    "list_nodes", "list_deployments", "get_service_endpoints", "scan_references",
+)
+
+
+def planned_instead_of_looking(finding):
+    """
+    Tools the answer told the reader to call, which it never called itself.
+
+    Observed live on GKE for a failing CronJob: "To find the root cause: 1.
+    Check termination reason: call describe_pod... 2. Inspect logs: use
+    get_pod_logs...". Every tool was available and none were used.
+
+    Deliberately not a judgement about tone. A tool named in the prose and
+    absent from tool_calls is a fact, and it is the difference between a
+    diagnosis and a plan to make one. A finding that says "the logs show X"
+    having called get_pod_logs does not match, because the tool was called.
+    """
+    text = (finding.get("diagnosis") or "").lower()
+    called = {name.lower() for name in finding.get("tool_calls", [])}
+    return sorted(tool for tool in TOOL_NAMES if tool in text and tool not in called)
 
 
 class CaptureSink:
@@ -92,6 +127,13 @@ def grade(case, finding, delivered):
 
     if finding.get("confidence") not in ("grounded", "partial", "ungrounded"):
         failures.append(f"no usable confidence: {finding.get('confidence')!r}")
+
+    described = planned_instead_of_looking(finding)
+    if described:
+        failures.append(
+            f"wrote out {', '.join(described)} as steps for the reader to take "
+            "instead of calling them"
+        )
 
     # Slack drops a block over 3000 characters, which means no alert at all
     # rather than a truncated one.
