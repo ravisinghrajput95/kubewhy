@@ -12,17 +12,46 @@ nothing is wrong during an incident.
 """
 
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
 
 pytest.importorskip("streamlit", reason="UI extra not installed (requirements-ui.txt)")
 
+from streamlit.delta_generator_singletons import get_dg_singleton_instance  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 import routers.k8s_pods_info as k8s  # noqa: E402
 
 UI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui.py")
+
+
+def clear_leaked_form_state():
+    """Drop the form context left on Streamlit's process-wide singletons."""
+    singletons = get_dg_singleton_instance()
+    singletons.main_dg._form_data = None
+    singletons.sidebar_dg._form_data = None
+
+
+@pytest.fixture(autouse=True)
+def _no_form_state_left_behind():
+    """
+    Undo the form context `import ui` leaves in the process.
+
+    ui.py is a Streamlit script, so importing it executes every top-level call
+    in bare mode -- including `with st.form("ask")`. That leaves
+    FormData(form_id='ask') on the main DeltaGenerator, which is a
+    process-wide singleton and is not reset between tests. Any later test that
+    renders a button then dies with "st.button() can't be used in an
+    st.form()", and whether it does depends purely on test order.
+
+    Measured rather than guessed: main_dg._form_data is None before the import
+    and FormData(form_id='ask') after it. That single attribute is the whole
+    leak, so clearing it is the fix rather than a workaround for symptoms.
+    """
+    yield
+    clear_leaked_form_state()
 
 FINDINGS = {
     "staging/payments-api": {
@@ -158,6 +187,51 @@ class TestContextIsPerSession:
             assert first == "context", f"{name} is cached without the context in its key"
 
 
+class TestImportingUiDoesNotBreakLaterTests:
+    """
+    The suite used to depend on its own ordering, which is the kind of defect
+    that makes every other result untrustworthy: a test that passes only
+    because of what ran before it is not evidence about the code.
+    """
+
+    @staticmethod
+    def _import_ui_afresh():
+        """
+        Force ui.py to execute, rather than be handed back from sys.modules.
+
+        Another test in this file imports ui, so a plain `import ui` here is a
+        no-op that leaks nothing -- which would make both of these tests pass
+        while demonstrating nothing at all.
+        """
+        sys.modules.pop("ui", None)
+        import ui  # noqa: F401
+
+    def test_importing_ui_leaves_form_state_behind(self):
+        """
+        Pins the mechanism. If Streamlit renames the attribute this breaks
+        loudly here, rather than quietly turning the cleanup into a no-op and
+        letting the ordering hazard back in unannounced.
+        """
+        clear_leaked_form_state()
+        assert get_dg_singleton_instance().main_dg._form_data is None
+
+        self._import_ui_afresh()
+
+        leaked = get_dg_singleton_instance().main_dg._form_data
+        assert leaked is not None, "import ui no longer leaks; the fixture may be dead code"
+        assert leaked.form_id == "ask"
+
+    def test_the_app_still_renders_once_that_state_is_cleared(self):
+        """The symptom: st.button() raising because a form is still open."""
+        self._import_ui_afresh()
+
+        clear_leaked_form_state()
+
+        app = run({})
+
+        assert not app.exception
+
+
 class TestProgressIsTextNotOnlyAnimation:
     """
     The spinner beside "Thinking..." is a CSS animation, and a browser stops
@@ -167,10 +241,11 @@ class TestProgressIsTextNotOnlyAnimation:
     mid-rotation into a static arc that reads as a chevron, and a diagnosis
     that is working becomes indistinguishable from one that has hung.
 
-    Driving the form through AppTest is not the test for this: importing ui in
-    another test leaves Streamlit form state in the process, so a form click
-    here fails depending on test order. The label itself is a pure function, so
-    it is tested as one.
+    The label is a pure function and is tested as one. That was originally
+    forced -- importing ui in another test left Streamlit form state in the
+    process, so driving the form here failed depending on test order -- but the
+    ordering hazard is now cleared between tests, so this is a choice about the
+    right level to test at rather than a way around a broken suite.
     """
 
     def test_label_names_the_tool_the_count_and_the_elapsed_time(self):
