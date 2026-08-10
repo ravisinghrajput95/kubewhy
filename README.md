@@ -751,6 +751,7 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
 | `TRIAGE_MODEL` | `qwen3` | Ollama model |
 | `OLLAMA_HOST` | `http://localhost:11434` | Where Ollama listens |
 | `OLLAMA_TIMEOUT` | `300` | Seconds before a model call is abandoned |
+| `OLLAMA_KEEP_ALIVE` | *unset* | How long Ollama holds the weights after a request, e.g. `24h`. Forwarded on every call, because the client library does not read it. Unset means the server's own default (5m) |
 | `K8S_TIMEOUT` | `15` | Seconds before a cluster call is abandoned |
 | `TRIAGE_API_TOKEN` | *unset* | Bearer token; unset means no auth |
 | `KUBECONFIG` | `~/.kube/config` | Cluster credentials |

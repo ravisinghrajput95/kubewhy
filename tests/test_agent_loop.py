@@ -202,6 +202,46 @@ class TestAskLoop:
         assert chat.call_args.kwargs["think"] is True
 
 
+class TestKeepAlive:
+    """
+    OLLAMA_KEEP_ALIVE has to reach the request, because nothing else reads it.
+
+    It is conventionally a server-side variable and the ollama client library
+    ignores it entirely, so the eval command documented in CONTRIBUTING was
+    exporting it into a process where no code path looked. Measured against a
+    live server: unload the model, run one chat with the variable exported,
+    and /api/ps reports the model expiring in five minutes rather than 24
+    hours. These assert the wiring that makes that command mean something.
+    """
+
+    def test_forwards_the_configured_keep_alive(self):
+        with patch.object(agent, "KEEP_ALIVE", "24h"):
+            with mock_chat(return_value=reply(content="x")) as chat:
+                agent.ask("q")
+
+        assert chat.call_args.kwargs["keep_alive"] == "24h"
+
+    def test_unset_sends_none_so_the_server_default_still_applies(self):
+        """None is dropped from the body, so this is not a behaviour change."""
+        with patch.object(agent, "KEEP_ALIVE", None):
+            with mock_chat(return_value=reply(content="x")) as chat:
+                agent.ask("q")
+
+        assert chat.call_args.kwargs["keep_alive"] is None
+
+    def test_survives_the_no_thinking_fallback(self):
+        """The retry builds a fresh call, which is where a setting gets lost."""
+        import ollama as ollama_mod
+
+        error = ollama_mod.ResponseError("llama3.2 does not support thinking")
+        with patch.object(agent, "KEEP_ALIVE", "24h"):
+            with mock_chat(side_effect=[error, reply(content="ok")]) as chat:
+                agent.ask("q", model="llama3.2")
+
+        assert chat.call_args.kwargs["keep_alive"] == "24h"
+        assert chat.call_args.kwargs["think"] is False
+
+
 class TestStream:
     """
     The event stream ask() is built on.

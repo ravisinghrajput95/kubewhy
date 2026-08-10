@@ -46,6 +46,23 @@ MODEL = os.getenv("TRIAGE_MODEL", "qwen3")
 # is legitimately slow.
 TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))
 
+# How long Ollama holds the weights in memory after a request. This is a
+# SERVER-side setting, and the client library never reads it -- so the command
+# CONTRIBUTING has documented for two months,
+#
+#     OLLAMA_KEEP_ALIVE=24h python evals/run_eval.py
+#
+# set a variable that nothing on the path read. Measured: unload the model,
+# run one chat through this client with that variable exported, and the model
+# comes back with an expiry five minutes out, the server default. Every
+# latency figure this project has published was taken under a five-minute
+# unload window by a person who believed they had disabled unloading.
+#
+# Forwarding it here makes the documented command true without requiring a
+# restart of somebody's Ollama.app. None is excluded from the request body, so
+# leaving it unset is byte-identical to not sending the field at all.
+KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE") or None
+
 log = logging.getLogger("triage.agent")
 
 # Max tool-calling rounds before we give up. Guards against a model that
@@ -134,12 +151,14 @@ def _chat(model, messages, think):
     client = ollama.Client(timeout=TIMEOUT)
     try:
         return client.chat(
-            model=model, messages=messages, tools=list(TOOLS.values()), think=think
+            model=model, messages=messages, tools=list(TOOLS.values()), think=think,
+            keep_alive=KEEP_ALIVE,
         ), think
     except ollama.ResponseError as exc:
         if think and "does not support thinking" in str(exc):
             return client.chat(
-                model=model, messages=messages, tools=list(TOOLS.values()), think=False
+                model=model, messages=messages, tools=list(TOOLS.values()), think=False,
+                keep_alive=KEEP_ALIVE,
             ), False
         raise
 

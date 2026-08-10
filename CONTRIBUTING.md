@@ -66,6 +66,16 @@ OLLAMA_KEEP_ALIVE=24h python evals/run_eval.py --repeat 10 --json results/qwen3.
 Ollama unloads a model five minutes after its last request by default, and a
 benchmark should measure the agent rather than the loader.
 
+**This command was a no-op until 2026-08-10, and every latency figure this
+project has published predates the fix.** `OLLAMA_KEEP_ALIVE` is a server-side
+variable; the Ollama Python client never reads it, so exporting it in front of
+`run_eval.py` set a variable that nothing on the path looked at. Measured by
+unloading the model, running one chat through the client, and reading
+`/api/ps`: the model came back with an expiry **five minutes** out, the server
+default. `agent.py` now forwards it explicitly, and the same measurement
+afterwards reports 1440 minutes. Unset, it is still omitted from the request
+body, so the server default applies exactly as before.
+
 This matters because of an open defect: runs of 371s to 1013s against a median
 near 70s, on ordinary two-tool chains. The stalls arrive in **adjacent pairs**,
 and in one 60-run set they landed on runs 20 and 21 — the first two runs of the
@@ -79,6 +89,11 @@ measurably cheap here (1.37s cold against 0.25s warm on a 2GB model), so it
 does not on its own account for 1013s. Page eviction under memory pressure
 would, and so would several other things. **Any latency figure from a long run
 should state its outliers** until this is understood.
+
+Note also what the keep-alive defect does *not* explain. Eval runs are
+back-to-back, so the five-minute idle timer never elapsed between them anyway
+— the weights should have stayed loaded regardless. A hypothesis that needs an
+idle gap cannot account for a stall on run 21 of a continuous set.
 
 The controller has its own eval, because it asks its own question:
 
