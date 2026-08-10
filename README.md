@@ -10,9 +10,9 @@ broken. `kubewhy` tells you **why** — reading the real logs, events and
 resource limits behind a failure with a model running on your own hardware. No
 cloud API, no API key, no cluster data leaving your network.
 
-Five surfaces on one set of read-only tools: a CLI, a cluster-wide scan, a REST
-API, an MCP server, a browser UI, and a controller that diagnoses failures
-without being asked.
+Six surfaces on one set of read-only tools: a CLI (with a cluster-wide scan), a
+REST API, an MCP server, a browser UI, a controller that diagnoses failures
+without being asked, and a Slack bot you can talk back to over Socket Mode.
 
 ![demo](docs/demo.gif)
 
@@ -376,11 +376,26 @@ missing invite returns `{"ok": false}` — so the sink reads the body rather tha
 the status code. Trusting the status means the alert is never seen and nothing
 says so.
 
-**This is one-way.** The controller posts; nothing reads Slack back. Replies,
-buttons and slash commands need an endpoint Slack can reach, verified with the
-signing secret — which means exposing this to the internet, a decision that
-deserves its own thought rather than arriving as a side effect of posting
-messages.
+**The controller itself is one-way** — it posts and nothing reads Slack back.
+To ask it questions from Slack, run the Socket Mode bot, which is a separate
+process:
+
+```bash
+export SLACK_APP_TOKEN=xapp-…      # App-Level Tokens, connections:write
+export SLACK_BOT_TOKEN=xoxb-…
+python slack_socket.py
+```
+
+Socket Mode inverts the direction: the process dials out to Slack over a
+WebSocket rather than publishing a URL Slack calls. That is what made replies
+possible here at all. Webhook-style inbound would mean a public hostname, an
+inbound listener and signature verification — exposing to the internet a tool
+whose whole claim is that nothing leaves your network. There is no public
+endpoint, and nothing unauthenticated can reach the process.
+
+**The reply path is untested against real Slack.** The connection is
+exercised, but posting a reply needs a genuine bot token, so treat that half
+as unverified.
 
 Defaults to `stdout`, so you can read what it would have said before pointing
 it at a channel. The chart creates the read-only ServiceAccount and
@@ -800,10 +815,13 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
 | `OLLAMA_KEEP_ALIVE` | *unset* | How long Ollama holds the weights after a request, e.g. `24h`. Forwarded on every call, because the client library does not read it. Unset means the server's own default (5m) |
 | `K8S_TIMEOUT` | `15` | Seconds before a cluster call is abandoned |
 | `TRIAGE_API_TOKEN` | *unset* | Bearer token; unset means no auth |
+| `TRIAGE_STATE_DB` | *unset* | Path to a SQLite file for controller dedup state and `/ask` job results. Unset, both live in memory and a restart forgets them. **The Helm chart does not set this**, so an in-cluster controller re-announces everything after a rollout |
+| `TRIAGE_JOB_TTL` | `86400` | Seconds an `/ask` job result is kept before purging |
 | `KUBECONFIG` | `~/.kube/config` | Cluster credentials |
 | `SLACK_WEBHOOK_URL` | *unset* | Incoming webhook, bound to one channel |
 | `SLACK_BOT_TOKEN` | *unset* | Bot token (`xoxb-…`). With `SLACK_CHANNEL`, posts via `chat.postMessage` and wins over a webhook |
 | `SLACK_CHANNEL` | *unset* | Channel for the bot token, e.g. `#kubernetes-events` |
+| `SLACK_APP_TOKEN` | *unset* | App-level token (`xapp-…`) for the Socket Mode bot in `slack_socket.py`. Needs `connections:write` |
 | `LOG_FORMAT` | `json` | `text` for human-readable logs |
 | `LOG_LEVEL` | `INFO` | Standard Python levels |
 
