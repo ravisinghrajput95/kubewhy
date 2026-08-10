@@ -15,6 +15,7 @@ and reports a pass rate. A single failure is noise; a low rate is a finding.
 """
 
 import argparse
+import datetime as dt
 import json
 import os
 import sys
@@ -86,6 +87,14 @@ def main():
 
         for _ in range(args.repeat):
             was_resident = resident(args.model)
+            # Wall clock and machine load at the moment the run began. Without
+            # these a stall can only be described, never attributed: the first
+            # set of numbers showed slow runs arriving in adjacent pairs on a
+            # model that was resident throughout, which rules out the loader
+            # and leaves contention as the obvious next suspect -- and nothing
+            # recorded said what else the machine was doing at the time.
+            began_at = dt.datetime.now().isoformat(timespec="seconds")
+            load_before = os.getloadavg()[0]
             started = time.time()
             try:
                 result = agent.ask(case["question"], model=args.model)
@@ -117,6 +126,12 @@ def main():
                 # not a model one, and the two have been indistinguishable in
                 # every latency figure this project has published so far.
                 "model_resident": was_resident,
+                "started_at": began_at,
+                # 1-minute load average, sampled before and after. A run that
+                # is slow because sixteen other things were running is not
+                # telling you anything about the agent.
+                "load_before": round(load_before, 2),
+                "load_after": round(os.getloadavg()[0], 2),
                 # What was flagged, not just that something was: without this
                 # a rise in the unverified count cannot be told apart from the
                 # checker getting stricter.
