@@ -312,6 +312,74 @@ spec:
           resources:
             requests: {cpu: 10m, memory: 16Mi}
 ---
+# ---------------------------------------------------------------- EDGE 13
+# A Secret that does not exist, consumed by envFrom.
+#
+# This is here to settle a question rather than to add a fault: the project
+# carried "a pod referencing a missing Secret is undetectable, because
+# verifying existence means listing Secrets and a list returns their data" as
+# an open gap. It is not undetectable. The kubelet cannot construct the
+# container and says exactly which Secret is missing, in the pod's own status
+# and in a Warning event -- both readable with no Secrets grant of any kind.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: billing-worker
+  namespace: shop
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      envFrom:
+        - secretRef: {name: stripe-credentials}   # BROKEN: absent
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+---
+# ---------------------------------------------------------------- EDGE 14
+# The same absence via a volume, which fails in a different place and reads
+# differently: the container never gets as far as a config error, so the pod
+# sits in ContainerCreating and only the FailedMount event names the Secret.
+# A status-only view sees a pod that looks like it is still starting up.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cert-rotator
+  namespace: shop
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - {name: tls, mountPath: /etc/tls}
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+  volumes:
+    - name: tls
+      secret:
+        secretName: ingress-tls        # BROKEN: absent
+---
+# ---------------------------------------------------------------- CONTROL
+# An absent Secret marked optional. The pod runs, the env vars are simply not
+# set, and NOTHING reports it -- which is correct: optional means the author
+# said absence is acceptable. A finding against this object is a FALSE
+# POSITIVE, and it is the one Secret case no amount of RBAC would reveal.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: experiment-runner
+  namespace: shop
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      envFrom:
+        - secretRef: {name: feature-flags, optional: true}
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+---
 # ---------------------------------------------------------------- CONTROL
 # Fully healthy. A finding against this object is a FALSE POSITIVE.
 apiVersion: apps/v1
