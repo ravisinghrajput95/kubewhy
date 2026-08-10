@@ -63,6 +63,41 @@ On a shared or multi-tenant cluster, scope the credential with a namespaced
 Role instead of the ClusterRole. Verified: the scan then fails closed with
 `kubernetes API error 403` while the namespace-scoped tools keep working.
 
+## Why Secrets are never listed
+
+The ClusterRole grants no verb on `secrets`, and that is deliberate rather
+than an oversight to be tidied up later.
+
+The tempting exception is existence checking: `scan_references` would like to
+say that a pod names a Secret that was never created, and the API server can
+return `PartialObjectMetadata` — names without contents. It is a real feature
+and it does what it says.
+
+**It is not a security boundary.** Content negotiation happens *after*
+authorization, so RBAC cannot distinguish a metadata-only request from a full
+one, and `list` cannot be restricted by `resourceNames` the way `get` can.
+Granting `list secrets` to read names grants every Secret's contents to
+anything holding that token.
+
+Measured on a live cluster rather than argued from the documentation. A
+ServiceAccount was granted exactly `list` on `secrets`, and one token was used
+twice:
+
+```
+Accept: …as=PartialObjectMetadataList…   -> PartialObjectMetadataList, names only
+(no Accept header)                       -> SecretList, password = <plaintext>
+```
+
+The feature is doing its job in the first line. The grant is doing its job in
+the second, and the second is the one that matters.
+
+It buys nothing anyway. A pod referencing an absent Secret is already
+diagnosable without any Secrets permission: the kubelet cannot build the
+container and puts the name in the pod's own status
+(`CreateContainerConfigError`, `secret "x" not found`) or in a `FailedMount`
+event. The only reference that stays invisible is one marked `optional: true`,
+where absence is what the author asked for.
+
 ## Secret redaction, and its limits
 
 `redaction.py` strips recognisable secrets from pod logs and event messages

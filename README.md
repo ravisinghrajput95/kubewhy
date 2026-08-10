@@ -88,6 +88,51 @@ figure is 83% of qwen3's entire 40k window spent on one call, before the model
 has reasoned about anything — and at ~1,739 tokens per pod, a 24-pod cluster
 exceeds the window outright.
 
+### When every pod is fine and the wiring is not
+
+Most Kubernetes objects have no health of their own. A Service, an Ingress, a
+PodDisruptionBudget is never "unhealthy" — it is only pointing at something
+that is not there. Those faults leave every pod `Running` and `Ready`, so the
+scan above cannot see them at all.
+
+```bash
+python agent.py "what is broken in the shop namespace?"
+curl http://127.0.0.1:8000/references?namespace=shop
+```
+
+`scan_references` resolves references instead of reading statuses: Service
+selectors that match no pod, Ingress backends naming a Service or port that
+does not exist, HPAs that cannot scale, PVCs bound to a missing StorageClass,
+and PDBs permitting zero voluntary disruptions. Nothing is inferred and no
+model is involved — a reference either resolves against the cluster or it does
+not.
+
+**Missing ConfigMaps and Secrets are already covered, by the kubelet.** This
+was carried as an open gap for a while, on the reasoning that confirming a
+Secret exists means listing Secrets, and a list returns their contents. That
+reasoning was wrong, and measuring it settled it in both directions:
+
+- A pod whose `envFrom` names an absent Secret sits in
+  `CreateContainerConfigError`, and `describe_pod` reports
+  `secret "api-credentials" not found` in the container's own waiting message.
+- Mounted as a volume it fails later and reads differently — the pod stays in
+  `ContainerCreating` and the `FailedMount` event carries the name.
+- Both are visible **with no Secrets permission of any kind**, because the
+  kubelet reports the failure on the pod.
+
+The only case that stays invisible is a reference marked `optional: true`,
+which is not a fault: the author said absence is acceptable, and the pod runs.
+
+So the `PartialObjectMetadata` approach was dropped rather than built.
+It works — the API server returns names without contents — but **RBAC cannot
+tell the two apart.** Content negotiation happens after authorization, so the
+`list secrets` grant it requires is a full read of every Secret in the
+namespace, and `list` cannot be narrowed by `resourceNames` the way `get` can.
+Verified on a live cluster: a token granted `list secrets` returned names only
+when asked for `PartialObjectMetadataList`, and the secret's plaintext value
+when the same token asked again without that header. It would have bought
+detection of a non-fault at the price of the guarantee the project is built on.
+
 ## Or don't ask at all
 
 Asking requires you to already know something is wrong, be at a terminal, and
@@ -249,7 +294,7 @@ python mcp_server.py --http     # streamable HTTP on :8765
 }
 ```
 
-All 13 tools are exposed with schemas derived from their signatures. The
+All 14 tools are exposed with schemas derived from their signatures. The
 read-only guarantee and log redaction apply identically here.
 
 ## Browser UI
@@ -621,6 +666,7 @@ Kubernetes endpoints take `?namespace=` (default `default`).
 | `GET /healthz` | Liveness. No dependencies. |
 | `GET /readyz` | Readiness. Checks the model backend. |
 | `GET /scan` | Failing workloads across every namespace, grouped. `?only_unhealthy=` `?limit=` `?namespaces=` `?workload=` |
+| `GET /references` | References that do not resolve in one namespace — Service selectors, Ingress backends, HPA targets, PVC storage classes, PDBs. `?namespace=` |
 | `GET /pods` | Status, ready, restarts, node. `?only_unhealthy=true` |
 | `GET /pods/{name}` | Images, requests/limits, last termination reason and exit code |
 | `GET /pods/{name}/events` | Recent Warning events |
