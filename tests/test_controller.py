@@ -280,7 +280,7 @@ class TestDiagnosis:
 
         with patch.object(ctrl.agent, "ask", return_value=fake), patch.object(
             controller, "count_affected", return_value=3
-        ):
+        ), patch.object(controller, "still_there", return_value=pod):
             finding = controller.diagnose(pod, "OOMKilled")
 
         assert finding["workload"] == "web"
@@ -293,5 +293,120 @@ class TestDiagnosis:
         pod = owned_pod(
             statuses=[container_status(ready=False, terminated_reason="OOMKilled")]
         )
-        with patch.object(ctrl.agent, "ask", side_effect=RuntimeError("ollama down")):
+        with patch.object(ctrl.agent, "ask", side_effect=RuntimeError("ollama down")), \
+                patch.object(controller, "still_there", return_value=pod):
             assert controller.diagnose(pod, "OOMKilled") is None
+
+
+class TestThePodMayBeGoneAlready:
+    """
+    The watch reports a pod; the diagnosis runs a minute or two later.
+
+    For a CronJob failing every minute with failedJobsHistoryLimit: 2 that gap
+    is longer than the pod's whole life. Measured on the demo cluster: every
+    tool call about the handed-over pod returned
+    {"error": "kubernetes API error 404: ... not found"}, three runs of three,
+    and the model -- given nothing to reason from -- replied with a plan for
+    investigating rather than a diagnosis. Read as a prompt defect for weeks;
+    it is a race.
+    """
+
+    @staticmethod
+    def _api(read=None, listed=()):
+        api = MagicMock()
+        if read is None:
+            api.read_namespaced_pod.side_effect = client.ApiException(status=404)
+        else:
+            api.read_namespaced_pod.return_value = read
+        api.list_namespaced_pod.return_value = MagicMock(items=list(listed))
+        return api
+
+    def test_the_original_pod_is_used_when_it_still_exists(self, controller):
+        pod = owned_pod(statuses=[container_status(ready=False, terminated_reason="OOMKilled")])
+
+        with patch.object(ctrl, "_api", return_value=self._api(read=pod)):
+            assert controller.still_there(pod, "OOMKilled") is pod
+
+    def test_a_collected_pod_is_replaced_by_a_live_one(self, controller):
+        """The whole point: same workload, same fault, still there."""
+        gone = owned_pod(
+            name="nightly-sync-29772408-4bn2r",
+            statuses=[container_status(ready=False, terminated_reason="Error")],
+        )
+        live = owned_pod(
+            name="nightly-sync-29772414-xh4t9",
+            statuses=[container_status(ready=False, terminated_reason="Error")],
+        )
+
+        with patch.object(ctrl, "_api", return_value=self._api(listed=[live])):
+            chosen = controller.still_there(gone, "Error")
+
+        assert chosen.metadata.name == "nightly-sync-29772414-xh4t9"
+
+    def test_a_workload_that_has_gone_quiet_is_not_diagnosed(self, controller):
+        """
+        No live pod carries the fault, so there is nothing to look at.
+
+        Posting here would mean an alert about a pod that no longer exists,
+        built from 404s -- worse than silence.
+        """
+        gone = owned_pod(statuses=[container_status(ready=False, terminated_reason="Error")])
+
+        with patch.object(ctrl, "_api", return_value=self._api(listed=[])):
+            assert controller.still_there(gone, "Error") is None
+
+    def test_diagnose_gives_up_rather_than_asking_about_a_dead_pod(self, controller):
+        gone = owned_pod(statuses=[container_status(ready=False, terminated_reason="Error")])
+
+        with patch.object(controller, "still_there", return_value=None), \
+                patch.object(ctrl.agent, "ask") as ask:
+            assert controller.diagnose(gone, "Error") is None
+
+        assert not ask.called, "asked the model about a pod known to be gone"
+
+    def test_an_api_failure_is_not_read_as_a_collected_pod(self, controller):
+        """
+        A 503 says nothing about whether the pod exists.
+
+        Treating every error as "gone" would silently drop findings during
+        exactly the API trouble most worth hearing about.
+        """
+        pod = owned_pod(statuses=[container_status(ready=False, terminated_reason="Error")])
+        api = MagicMock()
+        api.read_namespaced_pod.side_effect = client.ApiException(status=503)
+
+        with patch.object(ctrl, "_api", return_value=api):
+            assert controller.still_there(pod, "Error") is pod
+
+        assert not api.list_namespaced_pod.called
+
+    def test_the_newest_replacement_wins(self, controller):
+        """An older replacement is the one about to be collected next."""
+        import datetime as dt
+
+        gone = owned_pod(name="nightly-sync-old-aaa",
+                         statuses=[container_status(ready=False, terminated_reason="Error")])
+        older = owned_pod(name="nightly-sync-1",
+                          statuses=[container_status(ready=False, terminated_reason="Error")])
+        newer = owned_pod(name="nightly-sync-2",
+                          statuses=[container_status(ready=False, terminated_reason="Error")])
+        base = dt.datetime(2026, 8, 10, 12, 0, tzinfo=dt.timezone.utc)
+        older.metadata.creation_timestamp = base
+        newer.metadata.creation_timestamp = base + dt.timedelta(minutes=1)
+
+        with patch.object(ctrl, "_api", return_value=self._api(listed=[older, newer])):
+            assert controller.still_there(gone, "Error").metadata.name == "nightly-sync-2"
+
+    def test_a_different_fault_is_not_substituted(self, controller):
+        """
+        A replacement has to share the fault, or the alert describes one
+        problem while naming another.
+        """
+        gone = owned_pod(statuses=[container_status(ready=False, terminated_reason="Error")])
+        other = owned_pod(
+            name="nightly-sync-other",
+            statuses=[container_status(ready=False, waiting_reason="ImagePullBackOff")],
+        )
+
+        with patch.object(ctrl, "_api", return_value=self._api(listed=[other])):
+            assert controller.still_there(gone, "Error") is None

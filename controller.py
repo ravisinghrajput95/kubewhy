@@ -32,7 +32,7 @@ import agent
 import observability
 import sinks
 import store
-from routers.k8s_pods_info import base_status, fault_of, _pod_status, workload_of
+from routers.k8s_pods_info import _api, base_status, fault_of, _pod_status, workload_of
 
 observability.configure()
 log = logging.getLogger("triage.controller")
@@ -146,10 +146,111 @@ class Controller:
 
     # -- diagnosis ----------------------------------------------------------
 
+    def still_there(self, pod, status):
+        """
+        The pod to actually diagnose, which may not be the one we were handed.
+
+        A CronJob failing every minute with failedJobsHistoryLimit: 2 collects
+        its pods within a couple of minutes, and a diagnosis takes longer than
+        a minute. So the watch hands over nightly-sync-29772408-4bn2r, the pod
+        is gone before the model asks about it, and every tool call comes back
+        {"error": "kubernetes API error 404: pods ... not found"}.
+
+        Measured on the demo cluster, three runs out of three: the model got
+        404s, went looking for a live pod with list_pods, described whichever
+        one it found, and one of those died between describe_pod and
+        get_pod_logs too. With nothing to reason from it answered with a plan
+        for investigating -- "1. Check termination reason: call describe_pod"
+        -- which is a sensible thing to do with no data and useless in an
+        alert. That was read as a prompt problem for weeks. It is a race.
+
+        Returns a live pod of the same workload and the same fault, preferring
+        the newest, or None if the whole workload has gone quiet -- in which
+        case there is nothing to diagnose and nothing worth posting.
+        """
+        # _api() rather than client.CoreV1Api(): it loads and caches the
+        # kubeconfig on first use. run() loads config before the worker starts,
+        # so a bare client works in production and fails everywhere else --
+        # including in the eval, which calls diagnose() directly. That is how
+        # count_affected below came to be silently returning 1 for every
+        # finding the controller eval has ever produced.
+        api = _api()
+        namespace = pod.metadata.namespace
+        try:
+            return api.read_namespaced_pod(
+                pod.metadata.name, namespace, _request_timeout=15
+            )
+        except Exception as exc:
+            # Only a 404 means collected. A timeout or a 503 says nothing about
+            # whether the pod exists, and treating those as "gone" would drop
+            # findings during exactly the API trouble worth hearing about -- so
+            # carry on with the pod we were given and let the tools report.
+            if getattr(exc, "status", None) != 404:
+                return pod
+
+        workload = workload_of(pod)
+        if not workload:
+            return None
+
+        try:
+            pods = api.list_namespaced_pod(namespace, _request_timeout=15).items
+        except Exception:
+            return None
+
+        fault = fault_of(status)
+        alive = [
+            p for p in pods
+            if workload_of(p) == workload and fault_of(_pod_status(p)) == fault
+        ]
+        # Newest, because an older replacement is the one about to be collected.
+        # Seconds rather than the datetime itself: a pod without a timestamp
+        # would otherwise be compared against one that has it, which raises.
+        alive.sort(
+            key=lambda p: (
+                p.metadata.creation_timestamp.timestamp()
+                if p.metadata.creation_timestamp
+                else 0.0
+            ),
+            reverse=True,
+        )
+        return alive[0] if alive else None
+
     def diagnose(self, pod, status):
         namespace = pod.metadata.namespace
-        name = pod.metadata.name
         workload = workload_of(pod)
+
+        live = self.still_there(pod, status)
+        if live is None:
+            # The budget was already spent in enqueue(), so this workload stays
+            # silent for the cooldown and one slot of the hourly ceiling is
+            # gone with nothing posted. Deliberate, and still an improvement:
+            # before, the same slot was spent AND a diagnosis built entirely
+            # from 404s was delivered. Refunding it would need the budget to
+            # learn about outcomes, which is a bigger change than the leak
+            # justifies -- nothing carries the fault any more, so there is
+            # nothing being suppressed.
+            log.info(
+                "pod_gone_before_diagnosis",
+                extra={
+                    "pod": pod.metadata.name,
+                    "namespace": namespace,
+                    "workload": workload,
+                },
+            )
+            return None
+        if live.metadata.name != pod.metadata.name:
+            log.info(
+                "diagnosing_a_replacement_pod",
+                extra={
+                    "requested": pod.metadata.name,
+                    "using": live.metadata.name,
+                    "namespace": namespace,
+                    "workload": workload,
+                },
+            )
+            pod = live
+
+        name = pod.metadata.name
 
         question = (
             f"Pod {name} in namespace {namespace} is {status}. "
@@ -195,7 +296,7 @@ class Controller:
         if not workload:
             return 1
         try:
-            pods = client.CoreV1Api().list_namespaced_pod(namespace, _request_timeout=15)
+            pods = _api().list_namespaced_pod(namespace, _request_timeout=15)
         except Exception:
             return 1
         return sum(
