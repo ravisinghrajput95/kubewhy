@@ -5,6 +5,7 @@ Generated from the YAML rather than written by hand, so the document and the
 runnable suite cannot disagree about what is in it.
 """
 import html
+import os
 from collections import Counter
 
 import yaml
@@ -16,8 +17,13 @@ def e(x):
     return html.escape(str(x if x is not None else ""))
 
 
+# Alongside this file rather than in the working directory, so the documented
+# `python evals/ask_ai/build_report.py` works from the repo root.
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
 def load(p):
-    with open(p) as fh:
+    with open(os.path.join(HERE, p)) as fh:
         return yaml.safe_load(fh)
 
 
@@ -383,9 +389,10 @@ and <span class="mono">tiers.yaml</span>. Counts on this page are computed from 
 transcribed &mdash; the document cannot drift from the runnable suite.</footer>
 </div>
 """
-    with open("report.html", "w") as fh:
+    out = os.path.join(HERE, "report.html")
+    with open(out, "w") as fh:
         fh.write(page)
-    print(f"wrote report.html — {len(page):,} bytes, {n_func + n_red} prompts")
+    print(f"wrote {out} — {len(page):,} bytes, {n_func + n_red} prompts")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,15 @@
-"""Render findings.yaml as a self-contained investigation report."""
+"""Render example-findings.yaml as a self-contained investigation report."""
 import html
+import os
 from collections import Counter
 
 import yaml
+
+# The findings file is example-findings.yaml, not findings.yaml -- this read
+# the wrong name and read it from the working directory, so the script could
+# not run from anywhere at all.
+HERE = os.path.dirname(os.path.abspath(__file__))
+FINDINGS = os.path.join(HERE, "example-findings.yaml")
 
 SEV = {"critical": "crit", "high": "high", "medium": "med", "low": "low"}
 CONF = {"certain": "c-cert", "high": "c-high", "medium": "c-med", "low": "c-low"}
@@ -41,7 +48,8 @@ def hyp(items):
 
 
 def main():
-    d = yaml.safe_load(open("findings.yaml"))
+    with open(FINDINGS) as fh:
+        d = yaml.safe_load(fh)
     inv, fs = d["investigation"], d["findings"]
     sev = Counter(f["severity"] for f in fs)
 
@@ -243,8 +251,10 @@ produced by a command run against <span class="fid">{e(inv['cluster'])}</span> d
 investigation. Where a data source was absent it is named as absent rather than estimated.</footer>
 </div>
 """
-    open("investigation.html", "w").write(page)
-    print(f"wrote investigation.html — {len(page):,} bytes, {len(fs)} findings")
+    out = os.path.join(HERE, "investigation.html")
+    with open(out, "w") as fh:
+        fh.write(page)
+    print(f"wrote {out} — {len(page):,} bytes, {len(fs)} findings")
 
 
 if __name__ == "__main__":

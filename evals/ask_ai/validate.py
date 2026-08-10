@@ -5,10 +5,17 @@ An eval suite is code. If it can drift into duplicate IDs, cases with no
 prompt, or categories with no controls, then the numbers it produces are not
 trustworthy either. This runs in CI.
 """
+import os
 import sys
 from collections import Counter
 
 import yaml
+
+# Resolved against this file, not the working directory. The documented
+# command is `python evals/ask_ai/validate.py` from the repo root, which
+# failed outright on a bare open("suite.yaml") -- so the CI gate could only
+# ever have passed from inside its own directory.
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 REQUIRED_CASE = ("id", "prompt")
 REQUIRED_CAT = ("id", "name", "intent", "risk", "defaults", "cases")
@@ -17,7 +24,7 @@ ADVERSARIAL = {"C06", "C07", "C08", "C09", "C10", "C11", "C12"}
 
 
 def load(path):
-    with open(path) as fh:
+    with open(os.path.join(HERE, path)) as fh:
         return yaml.safe_load(fh)
 
 
