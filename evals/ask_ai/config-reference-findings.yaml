@@ -1,0 +1,188 @@
+investigation:
+  id: INV-2026-08-15-002
+  cluster: kind-triage-demo (1 node, v1.36.1)
+  namespaces_under_test: [shop, config-faults]
+  method: |
+    Read-only inspection via the Kubernetes API and via this project's own
+    projections (routers.k8s_pods_info: scan_cluster, describe_pod,
+    get_pod_events, scan_references). Every string quoted below was produced
+    by a command run against this cluster during the investigation. Nothing
+    is recalled, assumed or generalised.
+
+    A separate investigation, INV-2026-08-09-001 in example-findings.yaml,
+    covers reference faults between objects in `shop`. This one covers the
+    ConfigMap and Secret fixtures that investigation had no cases for:
+    billing-worker, cert-rotator and experiment-runner in `shop`, plus the
+    whole config-faults namespace.
+
+  headline: |
+    Every one of these faults is reported by the kubelet on the pod, with no
+    ConfigMap or Secret read permission of any kind. That much was already
+    claimed in the README and is confirmed here.
+
+    What was not known is that they split cleanly in two by *where* the name
+    appears, and the split decides which of this project's surfaces can see
+    them. An env-var reference puts the missing name in the container's
+    waiting message, so describe_pod alone is enough. A volume reference puts
+    it only in a FailedMount event and leaves the pod in ContainerCreating
+    with no waiting message at all -- so describe_pod is not enough, and the
+    controller never looks, because ContainerCreating is not in WATCHED.
+
+evidence_availability:
+  available:
+    - Kubernetes API, core objects, from a kubeconfig with cluster-admin
+    - Kubernetes Events, default retention window
+    - This project's projections, called directly as Python functions
+  unavailable:
+    - reason: "metrics-server is not installed -- verified with `kubectl top nodes`"
+      consequence: "No utilisation data. Not needed for any finding here; every
+        one of these faults is a reference that resolves or does not."
+    - reason: "No model was run during this investigation"
+      consequence: "Nothing here grades the agent's answers. This records what
+        the tools return, which is the input those answers are built from."
+  noted:
+    - "One CSI driver is present, hostpath.csi.k8s.io, installed during
+       unrelated Helm chart testing in the same session. It backs no workload
+       in either namespace under test and affects no finding here. Recorded
+       because INV-2026-08-09-001 states '0 CSI drivers' for its cluster and
+       the two records should not be read as describing identical clusters."
+
+findings:
+
+  - id: C-01
+    title: A Secret named by envFrom is fully diagnosable from describe_pod alone
+    severity: high
+    confidence: certain
+    confidence_basis: |
+      Measured. The missing Secret's name is in the container's own waiting
+      message, returned by the projection with no Secrets permission involved.
+    fixture: shop/billing-worker
+    evidence:
+      - "status: CreateContainerConfigError; pod phase: Pending"
+      - "describe_pod waiting_reason: CreateContainerConfigError"
+      - 'describe_pod waiting_message: secret "stripe-credentials" not found'
+      - 'get_pod_events: [Failed] Error: secret "stripe-credentials" not found (count 7)'
+      - "scan_cluster: shop/billing-worker, status CreateContainerConfigError, fault=config"
+      - 'describe_pod config[]: {kind: Secret, name: stripe-credentials, via: envFrom}'
+    root_cause: |
+      envFrom names a Secret that does not exist. The kubelet cannot build the
+      container's environment, so the container is never created and the pod
+      sits in CreateContainerConfigError indefinitely.
+    surface_visibility: |
+      Visible everywhere. scan_cluster lists it with fault=config, describe_pod
+      carries the missing name, and the controller diagnoses it unprompted --
+      CreateContainerConfigError is in controller.WATCHED.
+    ground_truth_for_evals: |
+      An answer about billing-worker should name `stripe-credentials` and
+      should not need get_pod_events to do it. A chain of
+      scan_cluster -> describe_pod is sufficient and is the expected shape.
+
+  - id: C-02
+    title: A Secret mounted as a volume hides the name from describe_pod entirely
+    severity: high
+    confidence: certain
+    confidence_basis: |
+      Measured. describe_pod returns no waiting_message key at all for this
+      pod, and the missing name appears only in an event.
+    fixture: shop/cert-rotator
+    evidence:
+      - "status: ContainerCreating; pod phase: Pending; age at observation 2m46s"
+      - "describe_pod waiting_reason: ContainerCreating"
+      - "describe_pod waiting_message: absent -- the key is not present in the projection"
+      - 'get_pod_events: [FailedMount] MountVolume.SetUp failed for volume "tls" : secret "ingress-tls" not found (count 8)'
+      - "scan_cluster: shop/cert-rotator, status ContainerCreating, no fault class assigned"
+      - 'describe_pod config[]: {kind: Secret, name: ingress-tls, via: volume}'
+    root_cause: |
+      A volume references a Secret that does not exist. The failure happens at
+      mount time rather than at environment-construction time, which is later
+      and is reported differently: the pod stays in ContainerCreating and the
+      name is carried by a FailedMount event.
+    why_it_hides: |
+      ContainerCreating reads as transient. It normally is -- image pulls and
+      volume attachment pass through it in seconds. This one never leaves it,
+      and nothing in the status distinguishes the two cases. Only the event's
+      repeat count and the pod's age do.
+    surface_visibility: |
+      Split, and this is the finding. scan_cluster DOES list it, so `--scan`
+      and the UI show it. describe_pod alone cannot explain it. And the
+      controller never diagnoses it at all: ContainerCreating is deliberately
+      excluded from controller.WATCHED as a transient state that resolves on
+      its own, which is true of the status in general and false of this
+      instance. Verified by calling Controller.interesting() on the live pod:
+      it returns None.
+    ground_truth_for_evals: |
+      An answer about cert-rotator must name `ingress-tls`, and it can only
+      get there via get_pod_events. A chain that stops at describe_pod has not
+      failed to reason -- the evidence genuinely is not in that projection.
+      An eval case for this fixture should require get_pod_events in the trace.
+
+  - id: C-03
+    title: The four config-faults volume cases behave identically to C-02
+    severity: medium
+    confidence: certain
+    fixture: config-faults namespace
+    evidence:
+      - "missing-configmap-key: CreateContainerConfigError, fault=config,
+         waiting_message: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings"
+      - "missing-secret-key: CreateContainerConfigError, fault=config,
+         waiting_message: couldn't find key STRIPE_SECRET_KEY in Secret config-faults/api-keys"
+      - 'missing-configmap-volume: ContainerCreating, no fault, event only:
+         MountVolume.SetUp failed for volume "conf" : configmap "nginx-conf" not found'
+      - 'missing-volume-key: ContainerCreating, no fault, event only:
+         MountVolume.SetUp failed for volume "conf" : configmap references non-existent config key: application.yaml'
+      - 'projected-source-missing: ContainerCreating, no fault, event only:
+         MountVolume.SetUp failed for volume "bundle" : secret "tls-bundle" not found'
+    root_cause: |
+      The same two mechanisms as C-01 and C-02, across ConfigMaps as well as
+      Secrets, and across a missing *key* as well as a missing object. A
+      missing key is reported as precisely as a missing object -- the kubelet
+      names the key and the object it looked in.
+    surface_visibility: |
+      The two env-var cases are diagnosable from describe_pod and are watched
+      by the controller. The three volume cases are not, on both counts. The
+      split is by env-var-versus-volume, not by ConfigMap-versus-Secret and
+      not by missing-object-versus-missing-key.
+
+controls_verified_healthy:
+  - object: shop/experiment-runner (Secret via envFrom, optional true)
+    result: |
+      Correctly invisible, which is the intended behaviour and the reason the
+      fixture exists. Running, ready=true, restarts=0. Absent from
+      scan_cluster entirely. No Warning events -- only Scheduled, Pulling,
+      Pulled, Created, Started. describe_pod does list the reference
+      ({kind: Secret, name: feature-flags, via: envFrom}), so the information
+      is available to a question that asks for it, while nothing reports it as
+      a fault. That is the correct outcome: the author declared absence
+      acceptable and the pod runs.
+  - object: config-faults/correctly-configured and config-faults/frozen-config
+    result: |
+      Both Running, neither in scan_cluster, neither carrying a Warning event.
+      frozen-config mounts app-settings as a volume and resolves, which is the
+      false-positive check for C-03: the volume path is only a fault when the
+      reference does not resolve.
+
+cluster_level_observations:
+  - observation: |
+      The controller has a permanent blind spot on volume-referenced
+      ConfigMaps and Secrets.
+    significance: |
+      controller.WATCHED excludes ContainerCreating because it is normally
+      transient. A pod stuck there on a missing volume reference never leaves
+      it, so the fault is permanent and the controller is silent forever.
+      Measured on four fixtures in two namespaces: Controller.interesting()
+      returns None for every one of them while `--scan` lists them all.
+
+      This is a real gap, not a fixture artefact -- a missing Secret is an
+      ordinary production failure. Adding ContainerCreating to WATCHED
+      outright would be wrong, since the status genuinely is transient most of
+      the time; the distinguishing signal available here is duration, or the
+      presence of a repeating FailedMount event. Recorded rather than fixed,
+      because the fix is a design choice about what the controller should
+      wait for and no measurement here settles it.
+  - observation: |
+      scan_cluster assigns no fault class to ContainerCreating workloads.
+    significance: |
+      Findings are deduped by fault rather than status. A workload with no
+      fault class falls back to its status string, which for these pods never
+      changes, so dedup happens to work. Worth knowing before any change to
+      fault_of() assumes every scanned workload has one.

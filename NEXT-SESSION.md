@@ -170,6 +170,18 @@ no entry for `TRIAGE_STATE_DB`.
   **with the root cause present** it is a postscript, and is printed as a
   `~` note rather than scored. The old behaviour could fail a correct answer
   for ending with a suggestion.
+- **The controller never reports a volume-referenced ConfigMap or Secret.**
+  Found 2026-08-15 while recording ground truth; see
+  `evals/ask_ai/config-reference-findings.yaml`. `controller.WATCHED` excludes
+  `ContainerCreating` as transient, which it usually is — but a pod stuck on a
+  missing volume reference never leaves it, so the fault is permanent and the
+  controller is silent forever. `Controller.interesting()` returns None for
+  all four such fixtures (`cert-rotator`, `missing-configmap-volume`,
+  `missing-volume-key`, `projected-source-missing`) while `--scan` lists every
+  one. **Do not just add `ContainerCreating` to WATCHED** — that would
+  diagnose every ordinary image pull. The available signals are duration in
+  the status, or a repeating `FailedMount` event. Deliberately left as a
+  design choice; nothing measured settles which.
 - **Eval `n=3` per case hides flaky cases.** `crashloop_root_cause` really
   passes ~85%, so at n=3 it reads 3/3 about 61% of the time.
 - **Grounding cannot check reasoning.** Speculation next to measured facts
@@ -204,17 +216,26 @@ land on high `load_before`, the answer is contention and the defect is about
 how the benchmark is run rather than about Ollama. If they do not, that is the
 interesting outcome and the search continues.
 
-**4. Ground truth for the new fixtures.** `demo/tricky-pods.yaml` gained
-`billing-worker` (missing Secret via envFrom), `cert-rotator` (missing Secret
-via volume) and `experiment-runner` (absent but `optional: true`, a control
-that must never be reported). `evals/ask_ai/example-findings.yaml` does **not**
-cover them. Do not hand-write entries into that file — it records one real
-investigation and states that every figure came from a command run during it.
-Re-run the investigation and record what is observed.
+**4. ~~Ground truth for the new fixtures.~~** Done, as a *separate*
+investigation — `evals/ask_ai/config-reference-findings.yaml`
+(INV-2026-08-15-002), not appended to `example-findings.yaml`, whose header
+describes a different cluster and whose integrity claim covers only its own
+run. Covers `billing-worker`, `cert-rotator`, `experiment-runner` and all of
+`config-faults`, measured on kind v1.36.1.
 
-**5. Wire `TRIAGE_STATE_DB` into the chart.** Needs a PVC and a
-`persistence.enabled` value: the container runs a read-only root filesystem
-with only an emptyDir for /tmp, and an emptyDir does not survive rescheduling.
+The result that matters: these faults split by **env-var versus volume**, not
+by ConfigMap-versus-Secret and not by missing-object-versus-missing-key. An
+env reference puts the name in the container's waiting message, so
+`describe_pod` is sufficient. A volume reference leaves the pod in
+`ContainerCreating` with **no waiting message at all** and the name only in a
+`FailedMount` event, so `get_pod_events` is required. Any eval case for
+`cert-rotator` must therefore expect `get_pod_events` in the trace.
+
+**5. ~~Wire `TRIAGE_STATE_DB` into the chart.~~** Done — `persistence.enabled`
+adds the PVC, the env var and `podSecurityContext.fsGroup: 1000`. The fsGroup
+is the part that is easy to miss: the volume arrives root-owned, the pod is
+UID 1000, and without it the install succeeds and the controller crashloops.
+Test it on `csi-driver-host-path`, never on kind's default StorageClass.
 
 **6. Frozen benchmarks are provisional.** The 30 cases in
 `evals/ask_ai/tiers.yaml` were chosen on judgement. A benchmark must
