@@ -122,6 +122,107 @@ class TestBudget:
         assert budget.allow("c", now=3700) is True
 
 
+class TestRefundingASlotNothingWasSaidWith:
+    """
+    A spend and a delivered message are not the same event.
+
+    The hourly ceiling is global, so a slot spent on a finding that was never
+    posted is taken from every other workload in the cluster.
+    """
+
+    def test_a_refunded_slot_returns_to_the_ceiling(self):
+        budget = ctrl.Budget(cooldown=0, max_per_hour=2)
+        first = budget.spend("a", now=0)
+        budget.spend("b", now=1)
+        assert budget.allow("c", now=2) is False
+
+        budget.refund(first)
+        assert budget.allow("c", now=3) is True
+
+    def test_a_refunded_workload_can_report_again_immediately(self):
+        budget = ctrl.Budget(cooldown=1800, max_per_hour=12)
+        receipt = budget.spend("ns/nightly-sync/Error", now=0)
+        assert budget.allow("ns/nightly-sync/Error", now=60) is False
+
+        budget.refund(receipt)
+        assert budget.allow("ns/nightly-sync/Error", now=60) is True
+
+    def test_a_refund_does_not_clear_a_cooldown_that_predates_it(self):
+        budget = ctrl.Budget(cooldown=1800, max_per_hour=12)
+        assert budget.allow("ns/web/Error", now=0) is True
+        receipt = budget.spend("ns/web/Error", now=1900)
+
+        budget.refund(receipt)
+        # Back to the 0 report, whose cooldown expired at 1800 -- not to no
+        # report at all, which would have been reportable at t=1.
+        assert budget.allow("ns/web/Error", now=1000) is False
+
+    def test_refunding_nothing_is_harmless(self):
+        """diagnose() refunds unconditionally; direct callers pass no receipt."""
+        ctrl.Budget().refund(None)
+
+    def test_spend_reports_the_same_decision_as_allow(self):
+        budget = ctrl.Budget(cooldown=1800, max_per_hour=12)
+        assert budget.spend("k", now=0) is not None
+        assert budget.spend("k", now=60) is None
+
+    def test_a_vanished_workload_gives_back_its_hourly_slot(self, controller):
+        """
+        The case this was built for: a CronJob collected before the model
+        reads it. Twelve of these in an hour used to silence the cluster.
+        """
+        gone = owned_pod(statuses=[container_status(ready=False, terminated_reason="Error")])
+        receipt = controller.budget.spend("demo/nightly-sync/Error", now=0)
+
+        with patch.object(controller, "still_there", return_value=None), \
+                patch.object(ctrl.agent, "ask") as ask:
+            assert controller.diagnose(gone, "Error", receipt=receipt) is None
+
+        assert not ask.called
+        assert controller.budget.store.reports_since(0) == 0
+
+    def test_a_full_queue_gives_back_its_slot(self, controller):
+        """
+        Nothing was queued, so nothing will ever be posted for that slot.
+
+        Keeping it would let a failure storm that overflows the queue also eat
+        the ceiling, silencing the workloads whose findings did get in.
+        """
+        controller.work = ctrl.queue.Queue(maxsize=1)
+        web = owned_pod(
+            statuses=[container_status(ready=False, waiting_reason="CrashLoopBackOff")]
+        )
+        api = owned_pod(
+            name="api-def456-xyz",
+            owner="api-def456",
+            statuses=[container_status(ready=False, waiting_reason="CrashLoopBackOff")],
+        )
+
+        with patch.object(ctrl.agent, "capture_pod_logs", return_value=[]):
+            assert controller.enqueue(web, "CrashLoopBackOff") is True
+            # A different workload, so this is the queue refusing it rather
+            # than the cooldown.
+            assert controller.enqueue(api, "CrashLoopBackOff") is False
+
+        assert controller.budget.store.reports_since(0) == 1
+
+    def test_a_failed_diagnosis_keeps_its_slot(self, controller):
+        """
+        Deliberately not refunded, unlike a vanished pod.
+
+        The fault is still real and still present. The spent slot is the only
+        thing pacing retries while Ollama is down.
+        """
+        pod = owned_pod(statuses=[container_status(ready=False, terminated_reason="Error")])
+        receipt = controller.budget.spend("demo/web/Error", now=0)
+
+        with patch.object(controller, "still_there", return_value=pod), \
+                patch.object(ctrl.agent, "ask", side_effect=RuntimeError("ollama down")):
+            assert controller.diagnose(pod, "Error", receipt=receipt) is None
+
+        assert controller.budget.store.reports_since(0) == 1
+
+
 class TestFaultClasses:
     """
     One fault, one message.

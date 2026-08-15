@@ -77,7 +77,16 @@ class Budget:
         self.store = state if state is not None else store.build()
         self._lock = threading.Lock()
 
-    def allow(self, key, now=None):
+    def spend(self, key, now=None):
+        """
+        Take a slot, returning the receipt needed to give it back, or None.
+
+        The receipt exists because a spend and a delivered message are not the
+        same event. The hourly ceiling is a shared resource: a workload that
+        vanishes between the watch and the diagnosis used to consume one of
+        the twelve and post nothing, which suppressed findings for unrelated
+        workloads that did have something to say.
+        """
         # Not `now or store.now()`: a caller passing now=0 means time zero, not
         # "unset", and the falsy check silently substituted the real clock --
         # which made every subsequent comparison nonsense.
@@ -85,14 +94,35 @@ class Budget:
         with self._lock:
             if self.store.reports_since(now - 3600) >= self.max_per_hour:
                 log.warning("rate_limited", extra={"key": key})
-                return False
+                return None
 
             last = self.store.last_reported(key)
             if last is not None and now - last < self.cooldown:
-                return False
+                return None
 
             self.store.record_report(key, now)
-            return True
+            return {"key": key, "at": now, "previous": last}
+
+    def allow(self, key, now=None):
+        """Spend a slot without keeping the receipt, for callers that cannot
+        refund one anyway."""
+        return self.spend(key, now) is not None
+
+    def refund(self, receipt):
+        """
+        Give back a slot spent on a finding that was never delivered.
+
+        Only for the cases where there turned out to be nothing to say at all.
+        A diagnosis that fails because the model is down is deliberately NOT
+        refunded: the fault is still real and still present, and the spent
+        slot is the only thing pacing retries against a broken Ollama.
+        """
+        if not receipt:
+            return
+        with self._lock:
+            self.store.undo_report(
+                receipt["key"], receipt["at"], receipt["previous"]
+            )
 
 
 class Controller:
@@ -134,7 +164,8 @@ class Controller:
         scope = workload_of(pod) or pod.metadata.name
         fault = fault_of(status)
         key = f"{pod.metadata.namespace}/{scope}/{fault}"
-        if not self.budget.allow(key):
+        receipt = self.budget.spend(key)
+        if receipt is None:
             return False
 
         # After the budget check, so a deduped or rate-limited event costs
@@ -143,9 +174,14 @@ class Controller:
         evidence = self.capture_evidence(pod)
 
         try:
-            self.work.put_nowait((pod, status, evidence))
+            self.work.put_nowait((pod, status, evidence, receipt))
             return True
         except queue.Full:
+            # Nothing was queued, so nothing will ever be posted for this
+            # slot. Keeping it would let a failure storm that overflows the
+            # queue also eat the hourly ceiling, silencing the workloads whose
+            # findings did make it in.
+            self.budget.refund(receipt)
             log.warning("queue_full_dropping", extra={"key": key})
             return False
 
@@ -236,20 +272,19 @@ class Controller:
         )
         return alive[0] if alive else None
 
-    def diagnose(self, pod, status, evidence=None):
+    def diagnose(self, pod, status, evidence=None, receipt=None):
         namespace = pod.metadata.namespace
         workload = workload_of(pod)
 
         live = self.still_there(pod, status)
         if live is None:
-            # The budget was already spent in enqueue(), so this workload stays
-            # silent for the cooldown and one slot of the hourly ceiling is
-            # gone with nothing posted. Deliberate, and still an improvement:
-            # before, the same slot was spent AND a diagnosis built entirely
-            # from 404s was delivered. Refunding it would need the budget to
-            # learn about outcomes, which is a bigger change than the leak
-            # justifies -- nothing carries the fault any more, so there is
-            # nothing being suppressed.
+            # Hand the slot back. The earlier reasoning -- "nothing carries
+            # the fault any more, so nothing is being suppressed" -- holds for
+            # this workload's cooldown and not for the hourly ceiling, which
+            # is global. A CronJob whose pods are collected before the model
+            # can read them produces one of these per run, and twelve of them
+            # in an hour silence every other workload in the cluster.
+            self.budget.refund(receipt)
             log.info(
                 "pod_gone_before_diagnosis",
                 extra={
@@ -337,12 +372,12 @@ class Controller:
         """
         while not self.stopping.is_set():
             try:
-                pod, status, evidence = self.work.get(timeout=1)
+                pod, status, evidence, receipt = self.work.get(timeout=1)
             except queue.Empty:
                 continue
 
             try:
-                finding = self.diagnose(pod, status, evidence)
+                finding = self.diagnose(pod, status, evidence, receipt)
                 if finding:
                     self.sink.send(finding)
             except Exception:

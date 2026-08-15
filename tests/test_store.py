@@ -38,6 +38,48 @@ class TestBothImplementationsAgree:
         assert state.reports_since(0) == 3
         assert state.reports_since(250) == 1
 
+    def test_an_undone_report_frees_its_slot(self, state):
+        state.record_report("demo/web", 100.0)
+        state.undo_report("demo/web", 100.0, None)
+
+        assert state.reports_since(0) == 0
+        assert state.last_reported("demo/web") is None
+
+    def test_an_undone_report_restores_the_previous_timestamp(self, state):
+        """
+        Rolling back must not clear an older cooldown that was still running.
+
+        Deleting the row outright would let the next event report immediately,
+        which is the noise the cooldown exists to prevent.
+        """
+        state.record_report("demo/web", 100.0)
+        state.record_report("demo/web", 200.0)
+        state.undo_report("demo/web", 200.0, 100.0)
+
+        assert state.last_reported("demo/web") == 100.0
+
+    def test_undo_leaves_a_newer_report_alone(self, state):
+        """A slot spent after ours supersedes the refund rather than losing it."""
+        state.record_report("demo/web", 100.0)
+        state.record_report("demo/web", 200.0)
+        state.undo_report("demo/web", 100.0, None)
+
+        assert state.last_reported("demo/web") == 200.0
+
+    def test_undo_frees_exactly_one_slot_at_a_shared_instant(self, state):
+        """
+        Two workloads recorded at the same instant, one refunded.
+
+        A delete keyed on the timestamp alone would take both and hand back a
+        slot nobody spent, quietly raising the hourly ceiling.
+        """
+        state.record_report("demo/web", 100.0)
+        state.record_report("demo/api", 100.0)
+        state.undo_report("demo/web", 100.0, None)
+
+        assert state.reports_since(0) == 1
+        assert state.last_reported("demo/api") == 100.0
+
     def test_a_job_round_trips(self, state):
         state.create_job("job-1", "why is crasher failing?", 10.0)
         assert state.get_job("job-1")["state"] == "queued"

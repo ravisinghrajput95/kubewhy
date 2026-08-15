@@ -75,6 +75,26 @@ class MemoryStore:
             self._emissions = [t for t in self._emissions if t >= cutoff]
             return len(self._emissions)
 
+    def undo_report(self, key, at, previous):
+        with self._lock:
+            # Any emission with this timestamp will do -- they are counted,
+            # never identified, so removing "some row at this instant" and
+            # removing "our row" are the same operation.
+            try:
+                self._emissions.remove(at)
+            except ValueError:
+                pass
+            # Only if the slot is still ours. With a zero cooldown the same
+            # key can be spent again before we get here, and restoring the
+            # older value would then suppress a report that was legitimately
+            # allowed after ours.
+            if self._last.get(key) != at:
+                return
+            if previous is None:
+                self._last.pop(key, None)
+            else:
+                self._last[key] = previous
+
     def create_job(self, job_id, question, at):
         with self._lock:
             self._jobs[job_id] = {
@@ -168,6 +188,29 @@ class SqliteStore:
             connection.execute("DELETE FROM emissions WHERE at < ?", (cutoff,))
             row = connection.execute("SELECT COUNT(*) AS n FROM emissions").fetchone()
         return row["n"]
+
+    def undo_report(self, key, at, previous):
+        with self._connect() as connection:
+            # By rowid, so exactly one row goes even if two workloads were
+            # recorded at the same instant. A bare DELETE ... WHERE at = ?
+            # would take both and hand back a slot nobody spent.
+            connection.execute(
+                "DELETE FROM emissions WHERE rowid = "
+                "(SELECT rowid FROM emissions WHERE at = ? LIMIT 1)",
+                (at,),
+            )
+            # The last_at guard is the same "only if still ours" check the
+            # memory store makes: a newer report for this key supersedes the
+            # refund rather than being rolled back by it.
+            if previous is None:
+                connection.execute(
+                    "DELETE FROM reports WHERE key = ? AND last_at = ?", (key, at)
+                )
+            else:
+                connection.execute(
+                    "UPDATE reports SET last_at = ? WHERE key = ? AND last_at = ?",
+                    (previous, key, at),
+                )
 
     def create_job(self, job_id, question, at):
         with self._connect() as connection:

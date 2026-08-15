@@ -140,17 +140,28 @@ no entry for `TRIAGE_STATE_DB`.
   instrumented. **Caveat: the one measured pair (113.8s, 106.3s vs a 60.0s
   median) coincided with a pytest run started by hand on the same laptop, so it
   is a confound, not a result.** Nothing so far explains 1013s.
-- **The Helm chart never sets `TRIAGE_STATE_DB`**, so the persistence
-  `store.py` exists for is unreachable in the shipped deployment — an
-  in-cluster controller still re-announces everything after a rollout, the
-  exact problem store.py was written to fix.
+- ~~**The Helm chart never sets `TRIAGE_STATE_DB`**~~ — fixed.
+  `persistence.enabled=true` wires a PVC, the env var and
+  `podSecurityContext.fsGroup: 1000`; without the fsGroup the volume arrives
+  root-owned and the controller crashloops on
+  `sqlite3.OperationalError: unable to open database file`, so the chart now
+  refuses to render persistence without one on a non-root pod. Verified
+  against `csi-driver-host-path` (`fsGroupPolicy: File`, as Azure Disk has).
+  **kind's default StorageClass cannot test this** — local-path hands out a
+  world-writable 0777 directory, so the bug does not reproduce, and the
+  kubelet does not apply fsGroup to it at all.
 - **`run_eval.py` iterates case-major**, so an interrupted run has full data on
   the first cases and none on the rest. Repeat-major would degrade gracefully.
-- **A vanished workload still spends its budget.** `Budget.allow()` records at
-  enqueue time, so when `diagnose()` declines to ask about a collected pod, the
-  cooldown and one slot of the hourly ceiling are consumed with nothing posted.
-  Deliberate and documented; refunding it would mean teaching the budget about
-  outcomes.
+- ~~**A vanished workload still spends its budget.**~~ — fixed.
+  `Budget.spend()` returns a receipt, carried through the queue, and
+  `refund()` hands the slot back when `diagnose()` finds nothing left to look
+  at. The old reasoning ("nothing carries the fault, so nothing is being
+  suppressed") held for that workload's cooldown and not for the hourly
+  ceiling, which is global — twelve collected CronJob pods in an hour
+  silenced every other workload in the cluster. A queue overflow refunds for
+  the same reason. **A failed diagnosis deliberately does not**: the fault is
+  still real, and the spent slot is the only thing pacing retries while
+  Ollama is down.
 - **Eval `n=3` per case hides flaky cases.** `crashloop_root_cause` really
   passes ~85%, so at n=3 it reads 3/3 about 61% of the time.
 - **Grounding cannot check reasoning.** Speculation next to measured facts
