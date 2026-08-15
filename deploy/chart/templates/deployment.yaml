@@ -1,4 +1,7 @@
 {{- $name := default (printf "%s" .Release.Name) .Values.serviceAccount.name -}}
+{{- if and .Values.persistence.enabled .Values.podSecurityContext.runAsNonRoot (not .Values.podSecurityContext.fsGroup) }}
+  {{- fail "\n\npersistence.enabled=true needs podSecurityContext.fsGroup set.\n\nA provisioned volume is owned by root and this pod is not root, so the\ncontroller would install cleanly, bind the PVC, and then crashloop with\nsqlite3.OperationalError: unable to open database file. That is a runtime\nfailure for a mistake that is visible here, so it fails here instead.\n\nSet podSecurityContext.fsGroup to podSecurityContext.runAsUser's group (the\nchart default is 1000 for both), or run as root if that is genuinely what you\nwant.\n" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,6 +58,15 @@ spec:
               value: {{ .Values.logFormat | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
+          {{- if .Values.persistence.enabled }}
+            # Without this the controller forgets every finding it has already
+            # reported whenever it restarts, and a rollout re-announces the
+            # whole cluster -- which is the exact problem the cooldown exists
+            # to prevent. store.py has supported this from the start; the
+            # chart simply never set it.
+            - name: TRIAGE_STATE_DB
+              value: {{ printf "%s/state.db" .Values.persistence.mountPath | quote }}
+          {{- end }}
           {{- if eq .Values.sink.type "slack" }}
             - name: SLACK_WEBHOOK_URL
               valueFrom:
@@ -80,9 +92,18 @@ spec:
             # to write.
             - name: tmp
               mountPath: /tmp
+          {{- if .Values.persistence.enabled }}
+            - name: state
+              mountPath: {{ .Values.persistence.mountPath }}
+          {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+      {{- if .Values.persistence.enabled }}
+        - name: state
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-state" .Release.Name) }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

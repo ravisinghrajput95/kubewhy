@@ -47,6 +47,29 @@ watch:
   # Pods already broken at startup are usually known problems.
   skipExisting: true
 
+# Where the controller writes what it has already reported.
+#
+# Off by default, and the default is a real choice rather than caution: with
+# this unset the controller keeps its dedup state in memory, so a restart
+# forgets everything and the next rollout re-announces every failure in the
+# cluster -- the exact noise the cooldown exists to prevent. store.py has
+# supported a SQLite file from the start and the chart never set
+# TRIAGE_STATE_DB, so the feature was unreachable in the shipped deployment.
+#
+# Not enabled by default because it claims a PersistentVolume, and a chart
+# that silently provisions storage on install is a worse surprise than a
+# controller that forgets. Turn it on for anything long-lived.
+persistence:
+  enabled: false
+  # ReadWriteOnce, and one replica. SQLite over a shared filesystem corrupts;
+  # see store.py for why this is the seam where Redis or Postgres would go.
+  size: 128Mi
+  # Empty uses the cluster default StorageClass.
+  storageClass: ""
+  # Bring your own claim instead, if you manage volumes separately.
+  existingClaim: ""
+  mountPath: /var/lib/kubewhy
+
 # The browser UI. Off by default, and not merely as a default: it has no
 # authentication at all, so switching it on is a decision about who can see
 # your cluster rather than a convenience.
@@ -104,6 +127,14 @@ resources:
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
+  # A provisioned PersistentVolume arrives owned by root, and this container
+  # is not root -- so without fsGroup the controller starts, opens the state
+  # path and dies with "unable to open database file". The kubelet chgrps the
+  # volume to fsGroup and sets setgid on it before the container starts, which
+  # is the only reason UID 1000 can write there. It has to match runAsUser's
+  # group. With persistence off it applies to the tmp emptyDir instead, where
+  # it changes nothing.
+  fsGroup: 1000
   seccompProfile:
     type: RuntimeDefault
 

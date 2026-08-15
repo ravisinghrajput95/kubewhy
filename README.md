@@ -414,6 +414,17 @@ dedup state is in-process.
 | `watch.maxPerHour` | `12` | Global ceiling across all workloads |
 | `watch.skipExisting` | `true` | Don't diagnose everything already broken at startup |
 | `rbac.allowPodLogs` | `true` | Set false to diagnose without reading logs |
+| `persistence.enabled` | `false` | Claim a PersistentVolume for the dedup state, so a restart does not re-announce every failure. Off by default because a chart that silently provisions storage is a worse surprise than a controller that forgets |
+| `persistence.size` | `128Mi` | ReadWriteOnce, and still one replica — SQLite over a shared filesystem corrupts |
+
+**Turning `persistence.enabled` on needs `podSecurityContext.fsGroup`**, which
+the chart sets to `1000` to match `runAsUser`. A provisioned volume arrives
+owned by `root:root` mode `0755` and this pod is not root, so without it the
+install succeeds, the PVC binds, and the controller crashloops with
+`sqlite3.OperationalError: unable to open database file` — a runtime failure
+for a mistake that is visible at render time. If you override
+`podSecurityContext` wholesale and drop `fsGroup`, the chart fails the install
+with that explanation rather than letting you find out from a restart count.
 
 Run it locally against your current kubecontext with `python controller.py`.
 
@@ -787,8 +798,11 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
   across every namespace in one API call, but the cause of any one of them
   still costs a full diagnosis — so `--explain` is bounded to a few workloads
   rather than the whole list.
-- **The controller holds dedup state in memory**, so a restart forgets what it
-  already reported and it cannot be run with more than one replica.
+- **The controller holds dedup state in memory by default**, so a restart
+  forgets what it already reported. `persistence.enabled=true` puts it on a
+  PersistentVolume and fixes the restart case; it does **not** buy a second
+  replica, which would be two pods with two files, or SQLite over a shared
+  filesystem. One replica stays pinned either way.
 - **Untested on EKS.** AKS and GKE have both been run against for real,
   including GKE's exec credential plugin and a live token expiry. EKS auth is
   still verified by reading the client rather than by running against one.
@@ -815,7 +829,7 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
 | `OLLAMA_KEEP_ALIVE` | *unset* | How long Ollama holds the weights after a request, e.g. `24h`. Forwarded on every call, because the client library does not read it. Unset means the server's own default (5m) |
 | `K8S_TIMEOUT` | `15` | Seconds before a cluster call is abandoned |
 | `TRIAGE_API_TOKEN` | *unset* | Bearer token; unset means no auth |
-| `TRIAGE_STATE_DB` | *unset* | Path to a SQLite file for controller dedup state and `/ask` job results. Unset, both live in memory and a restart forgets them. **The Helm chart does not set this**, so an in-cluster controller re-announces everything after a rollout |
+| `TRIAGE_STATE_DB` | *unset* | Path to a SQLite file for controller dedup state and `/ask` job results. Unset, both live in memory and a restart forgets them. The Helm chart sets it when `persistence.enabled=true` |
 | `TRIAGE_JOB_TTL` | `86400` | Seconds an `/ask` job result is kept before purging |
 | `KUBECONFIG` | `~/.kube/config` | Cluster credentials |
 | `SLACK_WEBHOOK_URL` | *unset* | Incoming webhook, bound to one channel |

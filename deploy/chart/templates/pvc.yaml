@@ -1,0 +1,27 @@
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-state" .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  annotations:
+    # Kept when the release is uninstalled: the whole point of this volume is
+    # to remember what has already been reported, and helm delete is exactly
+    # the moment you would rather not re-announce every failure in the cluster
+    # on the next install.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    # ReadWriteOnce on purpose. SQLite over a shared filesystem corrupts, and
+    # RWX here would advertise a multi-replica story the store cannot honour.
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
