@@ -410,3 +410,63 @@ class TestThePodMayBeGoneAlready:
 
         with patch.object(ctrl, "_api", return_value=self._api(listed=[other])):
             assert controller.still_there(gone, "Error") is None
+
+
+class TestEvidenceIsCapturedWhileThePodIsAlive:
+    """
+    still_there() narrowed the race; it did not close it.
+
+    A CronJob pod lives ~120s and a diagnosis takes 89-126s, so the live
+    replacement it substitutes is collected mid-diagnosis too -- measured 0/3
+    on nightly-sync both before and after that change. The only evidence that
+    survives is evidence read before the queue.
+    """
+
+    def test_logs_are_captured_in_the_shape_ask_expects(self, controller):
+        with patch.object(ctrl, "get_pod_logs", return_value={"logs": "FATAL: 503"}):
+            evidence = controller.capture_evidence(owned_pod())
+
+        assert len(evidence) == 1
+        assert evidence[0]["name"] == "get_pod_logs"
+        assert "FATAL: 503" in evidence[0]["result"]
+        assert evidence[0]["captured_at"]
+
+    def test_an_error_result_is_not_passed_off_as_evidence(self, controller):
+        """
+        Tools return {"error": ...} as data. Forwarding one would hand the
+        model an error message dressed up as a measurement.
+        """
+        with patch.object(ctrl, "get_pod_logs", return_value={"error": "404 not found"}):
+            assert controller.capture_evidence(owned_pod()) == []
+
+    def test_a_raising_tool_is_not_fatal(self, controller):
+        """Failing to capture puts us back where we were, which was survivable."""
+        with patch.object(ctrl, "get_pod_logs", side_effect=RuntimeError("boom")):
+            assert controller.capture_evidence(owned_pod()) == []
+
+    def test_capture_happens_only_after_the_budget_agrees(self, controller):
+        """
+        Otherwise every deduped event costs an extra log read on a cluster
+        that is already having a bad day.
+        """
+        pod = owned_pod(
+            statuses=[container_status(ready=False, waiting_reason="CrashLoopBackOff")]
+        )
+        with patch.object(controller, "capture_evidence", return_value=[]) as capture:
+            assert controller.enqueue(pod, "CrashLoopBackOff") is True
+            assert controller.enqueue(pod, "CrashLoopBackOff") is False  # cooldown
+
+        assert capture.call_count == 1
+
+    def test_evidence_reaches_the_model(self, controller):
+        pod = owned_pod(statuses=[container_status(ready=False, terminated_reason="Error")])
+        evidence = [{"name": "get_pod_logs", "arguments": {}, "result": "{}"}]
+        fake = {"answer": "a", "confidence": "grounded", "unverified": [],
+                "tool_calls": []}
+
+        with patch.object(ctrl.agent, "ask", return_value=fake) as ask, \
+                patch.object(controller, "still_there", return_value=pod), \
+                patch.object(controller, "count_affected", return_value=1):
+            controller.diagnose(pod, "Error", evidence)
+
+        assert ask.call_args.kwargs["prefetched"] is evidence

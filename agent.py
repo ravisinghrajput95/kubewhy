@@ -207,7 +207,33 @@ def scoped_question(question, workload, namespace, pod=None):
     )
 
 
-def stream(question, model=MODEL, think=True):
+def _prefetched_block(prefetched):
+    """
+    Render evidence collected before the loop started, for the user message.
+
+    Written to be read by the model as fact rather than as a hint, and
+    timestamped, because the whole reason it exists is that the subject may no
+    longer be there to re-read. It says so explicitly: a tool returning 404 for
+    this pod is expected, and does not mean the evidence below is wrong.
+    """
+    parts = []
+    for item in prefetched:
+        args = ", ".join(f"{k}={v!r}" for k, v in (item.get("arguments") or {}).items())
+        parts.append(
+            f"{item['name']}({args}) returned, at {item.get('captured_at', 'an earlier time')}:\n"
+            f"{item['result']}"
+        )
+    return (
+        "\n\nEvidence already collected for you, while the pod was still "
+        "running. The pod may have been deleted since — if a tool now returns "
+        "a 404 for it, that is expected and does not contradict this. For a "
+        "Job or CronJob pod this is the only record that will ever exist, so "
+        "do not ask for it again and do not withhold a diagnosis for want of "
+        "it:\n\n" + "\n\n".join(parts)
+    )
+
+
+def stream(question, model=MODEL, think=True, prefetched=None):
     """
     Run the loop, yielding each step as it happens.
 
@@ -227,12 +253,28 @@ def stream(question, model=MODEL, think=True):
     on a spinner. The CLI's --verbose trace, the browser UI and any streaming
     endpoint are all consumers of these events.
     """
+    prefetched = list(prefetched or [])
+    trace = []
+    # Seeded with the prefetched results so grounding treats them as
+    # measurements. They ARE measurements -- a tool produced them against the
+    # live cluster -- and the alternative is an answer quoting the one piece of
+    # evidence that survived being marked unverified for doing so.
+    outputs = [item["result"] for item in prefetched]
+
+    content = question + (_prefetched_block(prefetched) if prefetched else "")
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": question},
+        {"role": "user", "content": content},
     ]
-    trace = []
-    outputs = []
+
+    for item in prefetched:
+        # Shown in the chain, flagged, so a reader can tell what the model went
+        # and got from what it was handed.
+        trace.append({
+            "name": item["name"],
+            "arguments": item.get("arguments") or {},
+            "prefetched": True,
+        })
 
     for _ in range(MAX_ROUNDS):
         response, think = _chat(model, messages, think)
@@ -291,7 +333,7 @@ def stream(question, model=MODEL, think=True):
     }
 
 
-def ask(question, model=MODEL, verbose=False, think=True):
+def ask(question, model=MODEL, verbose=False, think=True, prefetched=None):
     """
     Answer a question about this host, letting the model call collectors.
 
@@ -309,7 +351,7 @@ def ask(question, model=MODEL, verbose=False, think=True):
     """
     answer = None
 
-    for event in stream(question, model=model, think=think):
+    for event in stream(question, model=model, think=think, prefetched=prefetched):
         if verbose and event["type"] == "tool_call":
             print(f"  -> {event['name']}({event['arguments']})", file=sys.stderr)
         if event["type"] == "answer":

@@ -330,3 +330,56 @@ class TestStream:
 
         assert asked == {k: v for k, v in streamed.items() if k != "type"}
         assert "type" not in asked
+
+
+class TestPrefetchedEvidence:
+    """
+    Evidence gathered before the loop starts, for a subject that may be gone.
+
+    The controller reads a pod's logs at enqueue time because a CronJob pod
+    lives about two minutes and a diagnosis takes longer. By the time the model
+    asks, every tool returns 404 -- so the only record that will ever exist has
+    to be carried in.
+    """
+
+    def test_it_reaches_the_model(self):
+        item = {"name": "get_pod_logs", "arguments": {"name": "p"},
+                "result": '{"logs": "FATAL: upstream returned 503"}'}
+
+        with mock_chat(return_value=reply(content="x")) as chat:
+            agent.ask("why did it fail?", prefetched=[item])
+
+        sent = chat.call_args.kwargs["messages"][1]["content"]
+        assert "FATAL: upstream returned 503" in sent
+        assert "why did it fail?" in sent
+
+    def test_it_counts_as_a_measurement_for_grounding(self):
+        """
+        Otherwise the one surviving piece of evidence is the one thing an
+        answer gets marked unverified for quoting. It IS a measurement -- a
+        tool produced it against the live cluster.
+        """
+        item = {"name": "get_pod_logs", "arguments": {"name": "p"},
+                "result": '{"logs": "exited with code 137"}'}
+
+        with mock_chat(return_value=reply(content="It exited with code 137.")):
+            result = agent.ask("why?", prefetched=[item])
+
+        assert result["confidence"] == "grounded"
+        assert result["unverified"] == []
+
+    def test_it_appears_in_the_trace_marked_as_prefetched(self):
+        """A reader has to be able to tell this from what the model fetched."""
+        item = {"name": "get_pod_logs", "arguments": {"name": "p"}, "result": "{}"}
+
+        with mock_chat(return_value=reply(content="x")):
+            result = agent.ask("why?", prefetched=[item])
+
+        assert result["tool_calls"][0]["name"] == "get_pod_logs"
+        assert result["tool_calls"][0]["prefetched"] is True
+
+    def test_no_prefetched_evidence_changes_nothing(self):
+        with mock_chat(return_value=reply(content="x")) as chat:
+            agent.ask("plain question")
+
+        assert chat.call_args.kwargs["messages"][1]["content"] == "plain question"
