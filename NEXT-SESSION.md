@@ -254,9 +254,16 @@ gate is available: 427 prompts, 27 categories, 19 controls, clean.
 ## Not verified
 
 - **Slack reply path has never run.** Socket Mode connects to real Slack, but
-  replying needs a real `SLACK_BOT_TOKEN`.
-- **EKS.** AKS and GKE have both been run against for real, including GKE's
-  exec credential plugin and a live token expiry.
+  replying needs a real `SLACK_BOT_TOKEN`. The token is shared on request and
+  revoked straight afterwards, so **batch every reply-path check into one
+  run** — there is no second attempt without asking for it again.
+- **EKS.** Wanted, but deliberately gated on cost: run it only when the change
+  under test is expected to pass, so it confirms rather than debugs. AKS and
+  GKE have both been run against for real, including GKE's exec credential
+  plugin and a live token expiry.
+- **GKE is available on demand** and is the right cloud for anything needing a
+  real managed cluster. AKS is not — that subscription is empty and its
+  billing state is `Warned`.
 - **`store.py` under more than one replica.** Note the controller Deployment
   hardcodes `replicas: 1` with no value to override it, so this is theoretical
   rather than reachable by configuration.
