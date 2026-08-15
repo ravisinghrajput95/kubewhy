@@ -1,0 +1,219 @@
+# Configuration faults: ConfigMaps and Secrets that exist, or nearly exist.
+#
+# demo/tricky-pods.yaml covers the object being ABSENT. These are the harder
+# half -- the object is there and the reference into it is still wrong -- and
+# they fail in four different places with four different signatures:
+#
+#   CreateContainerConfigError   the kubelet cannot build the container
+#   ContainerCreating (stuck)    the volume never mounts
+#   Running and silently wrong   the kubelet skipped it and said so once
+#
+# The last class is the one worth having. Nothing in the pod status is
+# abnormal, so a status-only view reports these as healthy.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: config-faults
+---
+# ---------------------------------------------------------------- fixtures
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-settings
+  namespace: config-faults
+data:
+  LOG_LEVEL: "info"
+  TIMEOUT_SECONDS: "30"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: api-keys
+  namespace: config-faults
+type: Opaque
+stringData:
+  STRIPE_KEY: "sk_test_not_a_real_key"
+---
+# ---------------------------------------------------------------- FAULT 1
+# The ConfigMap exists; the KEY does not. A typo in one key, not a missing
+# object, so "kubectl get configmap" shows everything present.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: missing-configmap-key
+  namespace: config-faults
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      env:
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-settings
+              key: LOGLEVEL          # BROKEN: the key is LOG_LEVEL
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+---
+# ---------------------------------------------------------------- FAULT 2
+# The same mistake against a Secret. Identical symptom, different object, and
+# the message names the key rather than the value -- which is why this is
+# diagnosable at all without ever reading a secret.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: missing-secret-key
+  namespace: config-faults
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      env:
+        - name: STRIPE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: STRIPE_SECRET_KEY   # BROKEN: the key is STRIPE_KEY
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+---
+# ---------------------------------------------------------------- FAULT 3
+# A volume built from a ConfigMap that does not exist. Fails later than the
+# env cases -- the container is never created, so the pod sits in
+# ContainerCreating and only the FailedMount event names the object.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: missing-configmap-volume
+  namespace: config-faults
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - {name: conf, mountPath: /etc/conf}
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+  volumes:
+    - name: conf
+      configMap:
+        name: nginx-conf          # BROKEN: absent
+---
+# ---------------------------------------------------------------- FAULT 4
+# The ConfigMap exists and the volume selects a key inside it that does not.
+# Distinct from FAULT 3: everything the reference names exists except the last
+# component, and the event says "references non-existent config key".
+apiVersion: v1
+kind: Pod
+metadata:
+  name: missing-volume-key
+  namespace: config-faults
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - {name: conf, mountPath: /etc/conf}
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+  volumes:
+    - name: conf
+      configMap:
+        name: app-settings
+        items:
+          - key: application.yaml    # BROKEN: not a key in app-settings
+            path: application.yaml
+---
+# ---------------------------------------------------------------- FAULT 5
+# Running, Ready, and frozen on the configuration it started with.
+#
+# A ConfigMap volume normally refreshes in place: edit the object and the file
+# under the mount changes within a minute. Mounting a single file with subPath
+# does NOT -- the kubelet resolves it once at container start and never
+# updates it. So the ConfigMap is edited, `kubectl get configmap` shows the
+# new value, the pod stays Ready, and the process goes on reading the old one
+# until something happens to restart it.
+#
+# This is the config equivalent of never-ready: nothing in the pod status is
+# abnormal, so a status-only view reports it healthy. describe_pod reports the
+# route as "volume(subPath)" with updates_in_place false, which is the only
+# thing that distinguishes it from a mount that does refresh.
+#
+# An earlier version of this fixture tried to demonstrate the kubelet skipping
+# ConfigMap keys that are not valid environment variable names. Measured on
+# Kubernetes 1.35: it does not skip them. `app.timeout=30` was exported to the
+# container exactly as written, and no InvalidVariableNames event was emitted.
+# The fixture asserted a behaviour that does not happen, so it was replaced.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frozen-config
+  namespace: config-faults
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - name: settings
+          mountPath: /etc/app/timeout.conf
+          subPath: TIMEOUT_SECONDS      # BROKEN: never refreshes after start
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+  volumes:
+    - name: settings
+      configMap:
+        name: app-settings
+---
+# ---------------------------------------------------------------- FAULT 6
+# A projected volume, which is a third route into the same objects and fails
+# in its own way. One valid source and one absent one: the whole projection
+# fails, so a working ConfigMap is unmounted because of an unrelated Secret.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: projected-source-missing
+  namespace: config-faults
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - {name: bundle, mountPath: /etc/bundle}
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+  volumes:
+    - name: bundle
+      projected:
+        sources:
+          - configMap: {name: app-settings}
+          - secret: {name: tls-bundle}      # BROKEN: absent
+---
+# ---------------------------------------------------------------- CONTROL
+# Correct in every way: the ConfigMap and Secret exist, the keys exist, and
+# the names are valid environment variables. A finding against this is a FALSE
+# POSITIVE.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: correctly-configured
+  namespace: config-faults
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      env:
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef: {name: app-settings, key: LOG_LEVEL}
+        - name: STRIPE_KEY
+          valueFrom:
+            secretKeyRef: {name: api-keys, key: STRIPE_KEY}
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
