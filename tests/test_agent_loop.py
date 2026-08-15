@@ -383,3 +383,41 @@ class TestPrefetchedEvidence:
             agent.ask("plain question")
 
         assert chat.call_args.kwargs["messages"][1]["content"] == "plain question"
+
+
+class TestCapturePodLogs:
+    """
+    The shared half of the CronJob race fix.
+
+    Both the controller's watch and the CLI's --explain know which pod they
+    are about to ask about, and both are slower than the pod: measured on
+    --explain against a real CronJob, get_pod_logs was followed immediately by
+    list_pods -- the model going to look elsewhere -- and the answer reached no
+    root cause.
+    """
+
+    def test_returns_the_shape_ask_expects(self):
+        with patch.object(agent, "get_pod_logs", return_value={"logs": "boom"}):
+            captured = agent.capture_pod_logs("p", "demo")
+
+        assert captured[0]["name"] == "get_pod_logs"
+        assert captured[0]["arguments"] == {"name": "p", "namespace": "demo", "tail": 50}
+        assert "boom" in captured[0]["result"]
+        assert captured[0]["captured_at"]
+
+    def test_an_error_is_not_captured_as_evidence(self):
+        with patch.object(agent, "get_pod_logs", return_value={"error": "404 not found"}):
+            assert agent.capture_pod_logs("p", "demo") == []
+
+    def test_a_no_logs_explanation_is_not_captured_as_evidence(self):
+        """
+        "its container has never started" is a helpful sentence and not a log.
+        Handing it over as a measurement would have the model quote it as one.
+        """
+        with patch.object(agent, "get_pod_logs",
+                          return_value={"result": "no logs for pod p: never started"}):
+            assert agent.capture_pod_logs("p", "demo") == []
+
+    def test_a_raising_tool_is_not_fatal(self):
+        with patch.object(agent, "get_pod_logs", side_effect=RuntimeError("boom")):
+            assert agent.capture_pod_logs("p", "demo") == []

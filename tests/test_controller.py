@@ -423,7 +423,7 @@ class TestEvidenceIsCapturedWhileThePodIsAlive:
     """
 
     def test_logs_are_captured_in_the_shape_ask_expects(self, controller):
-        with patch.object(ctrl, "get_pod_logs", return_value={"logs": "FATAL: 503"}):
+        with patch.object(ctrl.agent, "get_pod_logs", return_value={"logs": "FATAL: 503"}):
             evidence = controller.capture_evidence(owned_pod())
 
         assert len(evidence) == 1
@@ -436,12 +436,12 @@ class TestEvidenceIsCapturedWhileThePodIsAlive:
         Tools return {"error": ...} as data. Forwarding one would hand the
         model an error message dressed up as a measurement.
         """
-        with patch.object(ctrl, "get_pod_logs", return_value={"error": "404 not found"}):
+        with patch.object(ctrl.agent, "get_pod_logs", return_value={"error": "404 not found"}):
             assert controller.capture_evidence(owned_pod()) == []
 
     def test_a_raising_tool_is_not_fatal(self, controller):
         """Failing to capture puts us back where we were, which was survivable."""
-        with patch.object(ctrl, "get_pod_logs", side_effect=RuntimeError("boom")):
+        with patch.object(ctrl.agent, "get_pod_logs", side_effect=RuntimeError("boom")):
             assert controller.capture_evidence(owned_pod()) == []
 
     def test_capture_happens_only_after_the_budget_agrees(self, controller):

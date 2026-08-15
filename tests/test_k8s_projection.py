@@ -1711,3 +1711,64 @@ class TestScanReferences:
 
         assert len(result["broken"]) == 8
         assert len(json.dumps(result)) < 3000
+
+
+class TestAMissingNamespaceIsNotHealthy:
+    """
+    Kubernetes answers a list query against a namespace that does not exist
+    with an empty list and a 200, so "nothing is wrong here" and "there is no
+    here" arrive identically. scan_references reported the second as
+    "every reference in this namespace resolves" -- a confident all-clear
+    about somewhere that is not there, which one typo in a question produces.
+    """
+
+    @staticmethod
+    def _api(exists):
+        api = MagicMock()
+        if exists:
+            api.read_namespace.return_value = MagicMock()
+        else:
+            api.read_namespace.side_effect = ApiException(status=404)
+        api.list_namespaced_pod.return_value = MagicMock(items=[])
+        api.list_namespaced_service.return_value = MagicMock(items=[])
+        return api
+
+    def test_absent_namespace_is_an_error_not_an_empty_result(self):
+        with patch.object(k8s, "_api", return_value=self._api(exists=False)):
+            result = k8s.list_pods(namespace="typo-ns")
+
+        assert "error" in result
+        assert "does not exist" in result["error"]
+
+    def test_scan_references_does_not_declare_a_missing_namespace_clean(self):
+        with patch.object(k8s, "_api", return_value=self._api(exists=False)), \
+                patch.object(k8s, "_networking_api", return_value=MagicMock()), \
+                patch.object(k8s, "_autoscaling_api", return_value=MagicMock()), \
+                patch.object(k8s, "_policy_api", return_value=MagicMock()), \
+                patch.object(k8s, "_storage_api", return_value=MagicMock()):
+            result = k8s.scan_references(namespace="typo-ns")
+
+        assert "error" in result
+        assert "resolves" not in str(result)
+
+    def test_a_namespace_that_exists_but_is_empty_still_reports_empty(self):
+        """The fix must not turn every quiet namespace into an error."""
+        with patch.object(k8s, "_api", return_value=self._api(exists=True)):
+            result = k8s.list_pods(namespace="genuinely-empty")
+
+        assert "error" not in result
+        assert "no matching pods" in result["result"]
+
+    def test_an_unreadable_namespace_is_not_called_missing(self):
+        """
+        A 403 on namespaces means we cannot tell. Manufacturing a definite
+        answer out of an unknown is the same mistake in the other direction.
+        """
+        api = self._api(exists=True)
+        api.read_namespace.side_effect = ApiException(status=403)
+
+        with patch.object(k8s, "_api", return_value=api):
+            result = k8s.list_pods(namespace="restricted")
+
+        assert "error" not in result
+        assert "no matching pods" in result["result"]

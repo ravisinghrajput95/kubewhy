@@ -19,8 +19,6 @@ grouped by owning workload rather than pod, each workload has a cooldown, and
 there is a global hourly ceiling.
 """
 
-import datetime as dt
-import json
 import logging
 import os
 import queue
@@ -34,9 +32,7 @@ import agent
 import observability
 import sinks
 import store
-from routers.k8s_pods_info import (
-    _api, base_status, fault_of, get_pod_logs, _pod_status, workload_of,
-)
+from routers.k8s_pods_info import _api, base_status, fault_of, _pod_status, workload_of
 
 observability.configure()
 log = logging.getLogger("triage.controller")
@@ -157,45 +153,19 @@ class Controller:
 
     def capture_evidence(self, pod):
         """
-        Read the logs now, while the pod is provably alive.
+        Read the pod's logs while it is provably alive.
 
-        still_there() narrowed the race and did not close it: a CronJob pod
-        lives about two minutes and a diagnosis takes 89-126s, so the
-        replacement it substitutes is collected mid-diagnosis too. Measured
-        0/3 on nightly-sync before and after that change.
-
+        still_there() narrowed the CronJob race and did not close it: the live
+        replacement it substitutes is collected mid-diagnosis too, because a
+        nightly-sync pod lives about two minutes and a diagnosis takes longer.
         The only evidence that survives is evidence taken before the queue.
-        This runs at enqueue time, once, for a pod the budget has already
-        agreed to spend a diagnosis on -- so it costs one extra log read per
-        finding, not per event.
 
-        Returns the list shape agent.ask(prefetched=...) takes, or [] if the
-        read fails. Failure is not fatal: it puts us back exactly where we
-        were, which is the pre-existing behaviour rather than a new one.
+        Runs at enqueue time, after the budget has agreed to spend a diagnosis,
+        so it costs one extra log read per finding rather than per event. The
+        implementation is shared with the CLI's --explain, which has exactly
+        the same problem for exactly the same reason.
         """
-        name = pod.metadata.name
-        namespace = pod.metadata.namespace
-        arguments = {"name": name, "namespace": namespace, "tail": 50}
-        try:
-            result = get_pod_logs(**arguments)
-        except Exception as exc:  # noqa: BLE001
-            log.info(
-                "evidence_capture_failed",
-                extra={"pod": name, "namespace": namespace, "error": str(exc)},
-            )
-            return []
-
-        # A 404 or a permission error is data, not logs. Passing it on would
-        # hand the model an error message dressed up as measurement.
-        if isinstance(result, dict) and result.get("error"):
-            return []
-
-        return [{
-            "name": "get_pod_logs",
-            "arguments": arguments,
-            "result": json.dumps(result, default=str),
-            "captured_at": dt.datetime.now().strftime("%H:%M:%S"),
-        }]
+        return agent.capture_pod_logs(pod.metadata.name, pod.metadata.namespace)
 
     def still_there(self, pod, status):
         """

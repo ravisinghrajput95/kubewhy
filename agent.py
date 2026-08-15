@@ -207,6 +207,42 @@ def scoped_question(question, workload, namespace, pod=None):
     )
 
 
+def capture_pod_logs(pod, namespace, tail=50):
+    """
+    Read a pod's logs now, to hand to a diagnosis that runs later.
+
+    Shared by the controller's watch and the CLI's --explain, because both
+    know which pod they are about to ask about and both are slower than the
+    pod. A CronJob pod lives about two minutes; a diagnosis takes longer, so
+    by the time the model calls get_pod_logs the pod is gone and every tool
+    answers 404. Measured on --explain against a real CronJob: the chain ran
+    scan_cluster, describe_pod, get_pod_logs, then list_pods -- the last call
+    being the model going to look elsewhere -- and the answer reached no root
+    cause at all.
+
+    Returns the list shape ask(prefetched=...) takes, or [] if the read fails
+    or comes back as an error. Failing to capture restores the previous
+    behaviour rather than introducing a new one.
+    """
+    arguments = {"name": pod, "namespace": namespace, "tail": tail}
+    try:
+        result = get_pod_logs(**arguments)
+    except Exception:  # noqa: BLE001
+        return []
+
+    # An error is data, not logs. Passing one on would hand the model a 404
+    # dressed up as a measurement.
+    if isinstance(result, dict) and (result.get("error") or result.get("result")):
+        return []
+
+    return [{
+        "name": "get_pod_logs",
+        "arguments": arguments,
+        "result": json.dumps(result, default=str),
+        "captured_at": time.strftime("%H:%M:%S"),
+    }]
+
+
 def _prefetched_block(prefetched):
     """
     Render evidence collected before the loop started, for the user message.
@@ -407,6 +443,9 @@ def scan(explain=0):
         # workload carries two faults at once.
         namespace = key.split("/", 1)[0]
         print(f"\n--- {key} ---")
+        # Read the logs before the diagnosis rather than during it. For a
+        # CronJob the example pod is routinely collected mid-chain, and the
+        # model then has nothing to reason from -- see capture_pod_logs.
         result = ask(
             scoped_question(
                 "Find the root cause and say what should change.",
@@ -415,6 +454,7 @@ def scan(explain=0):
                 entry["example"],
             ),
             verbose=True,
+            prefetched=capture_pod_logs(entry["example"], namespace),
         )
         print(result["answer"])
         _report_unverified(result)

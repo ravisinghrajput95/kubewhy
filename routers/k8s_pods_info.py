@@ -297,6 +297,30 @@ def _api_message(exc):
         return (exc.body or "").strip()[:300]
 
 
+def _namespace_absent(namespace):
+    """
+    True only when the namespace can be shown not to exist.
+
+    Kubernetes answers a list query against a missing namespace with an empty
+    list and a 200, so "nothing is wrong here" and "there is no here" arrive
+    as the same response. Reporting the second as the first is the worst
+    failure this project has: a mistyped namespace came back as "every
+    reference in this namespace resolves", which is a confident all-clear
+    about somewhere that does not exist.
+
+    Returns False when the check itself fails. A 403 on namespaces means we
+    cannot tell, and manufacturing a definite answer out of an unknown is the
+    same mistake in the other direction.
+    """
+    try:
+        _api().read_namespace(namespace, _request_timeout=TIMEOUT)
+        return False
+    except ApiException as exc:
+        return exc.status == 404
+    except Exception:
+        return False
+
+
 def _handle(exc):
     if isinstance(exc, ApiException):
         # reason alone is "Bad Request", which explains nothing. The body says
@@ -493,6 +517,8 @@ def list_pods(namespace: str = "default", only_unhealthy: bool = False):
         }
 
     if not result:
+        if _namespace_absent(namespace):
+            return {"error": f"namespace {namespace!r} does not exist"}
         return {"result": f"no matching pods in namespace {namespace}"}
     return result
 
@@ -1115,7 +1141,11 @@ def list_deployments(namespace: str = "default"):
             "images": [c.image for c in dep.spec.template.spec.containers],
         }
 
-    return result or {"result": f"no deployments in namespace {namespace}"}
+    if not result:
+        if _namespace_absent(namespace):
+            return {"error": f"namespace {namespace!r} does not exist"}
+        return {"result": f"no deployments in namespace {namespace}"}
+    return result
 
 
 def scan_references(namespace: str = "default"):
@@ -1287,6 +1317,11 @@ def scan_references(namespace: str = "default"):
             })
 
     if not broken:
+        # Nothing checked at all is the shape a missing namespace makes,
+        # and "every reference resolves" is exactly the wrong thing to say
+        # about a namespace that is not there.
+        if not any(checked.values()) and _namespace_absent(namespace):
+            return {"error": f"namespace {namespace!r} does not exist"}
         return {
             "namespace": namespace,
             "checked": checked,
