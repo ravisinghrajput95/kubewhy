@@ -19,6 +19,7 @@ grouped by owning workload rather than pod, each workload has a cooldown, and
 there is a global hourly ceiling.
 """
 
+import datetime as dt
 import logging
 import os
 import queue
@@ -48,6 +49,25 @@ WATCHED = {
     "Error",
     "Evicted",
 }
+
+# Statuses that are transient almost always and permanent occasionally. They
+# cannot go in WATCHED -- every image pull passes through ContainerCreating,
+# and diagnosing those would be pure noise -- but a pod parked in one forever
+# is a real fault the controller was silent about. A volume naming a
+# ConfigMap or Secret that does not exist does exactly that: the kubelet
+# retries the mount indefinitely, the pod never leaves ContainerCreating, and
+# nothing about the status distinguishes it from an image still downloading.
+# Only elapsed time does, which is why this set is separate from WATCHED.
+STUCK_WHEN_SLOW = {"ContainerCreating", "PodInitializing"}
+
+# Measured on the demo cluster with warm images: 22 healthy pods reached Ready
+# in a median of 21s and a maximum of 52s. 300s is roughly six times that
+# worst case, which leaves room for a cold pull of a large image over a slow
+# link -- the thing this must not fire on. Raise it if your registry is far
+# away; the cost of raising it is detection latency on a fault that has
+# already lasted minutes, and the cost of lowering it too far is a diagnosis
+# of every ordinary start-up.
+STUCK_AFTER = int(os.getenv("TRIAGE_STUCK_AFTER", "300"))
 
 NAMESPACES = [n for n in os.getenv("TRIAGE_NAMESPACES", "").split(",") if n]
 COOLDOWN = int(os.getenv("TRIAGE_COOLDOWN", "1800"))
@@ -140,7 +160,30 @@ class Controller:
 
     # -- detection ----------------------------------------------------------
 
-    def interesting(self, pod):
+    def stuck_for(self, pod, now=None):
+        """
+        Seconds this pod has been trying to start, or None if unknowable.
+
+        status.start_time is when the kubelet accepted the pod, which is the
+        clock that matters: a pod waiting on a mount has been *trying* since
+        then. metadata.creation_timestamp is the fallback for a pod the
+        kubelet has not accepted, where the two are close enough and the
+        alternative is no answer at all.
+        """
+        since = pod.status.start_time or pod.metadata.creation_timestamp
+        if not since:
+            return None
+        now = dt.datetime.now(dt.timezone.utc) if now is None else now
+        return (now - since).total_seconds()
+
+    def stuck(self, pod, status, now=None):
+        """Whether a normally-transient status has lasted long enough to be a fault."""
+        if base_status(status) not in STUCK_WHEN_SLOW:
+            return False
+        elapsed = self.stuck_for(pod, now)
+        return elapsed is not None and elapsed >= STUCK_AFTER
+
+    def interesting(self, pod, now=None):
         """Whether this pod state is worth a diagnosis."""
         if pod.metadata.deletion_timestamp:
             return None
@@ -149,7 +192,13 @@ class Controller:
         # base_status, not status: an init container crashlooping reports as
         # Init:CrashLoopBackOff, which is just as worth waking someone for and
         # would otherwise never match this set at all.
-        if base_status(status) not in WATCHED:
+        #
+        # The second clause is the whole reason a pod stuck on a missing
+        # volume reference is ever reported. Its status is never in WATCHED,
+        # so before this it fell out here and the controller stayed silent
+        # for as long as the pod existed -- which, for a mount that cannot
+        # resolve, is forever.
+        if base_status(status) not in WATCHED and not self.stuck(pod, status, now):
             return None
 
         # A pod that restarted once an hour ago and is running now is not a
@@ -452,6 +501,7 @@ class Controller:
                 "namespaces": NAMESPACES or ["*"],
                 "cooldown_s": self.budget.cooldown,
                 "max_per_hour": self.budget.max_per_hour,
+                "stuck_after_s": STUCK_AFTER,
                 "model": self.model,
                 "sink": type(self.sink).__name__,
             },

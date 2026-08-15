@@ -169,6 +169,22 @@ Findings are also deduped by *fault*, not status — a bad image reports
 `CrashLoopBackOff`. Both were producing duplicate messages until a live run
 caught it.
 
+**Some statuses are only faults once they last.** A pod whose volume names a
+ConfigMap or Secret that does not exist sits in `ContainerCreating` forever —
+the kubelet retries the mount indefinitely and nothing in the status says so.
+The controller cannot simply watch that status, because every image pull
+passes through it, so it watches the *duration* instead: past
+`watch.stuckAfterSeconds` (default 300), a pod still trying to start is
+treated as a fault. Measured on the demo cluster, 22 healthy pods reached
+Ready in a median of 21s and a maximum of 52s, so the default is roughly six
+times the observed worst case.
+
+The evidence for these lives in a `FailedMount` **event**, not in the
+container's waiting message and not in any log — the container never ran. So
+this is one of the few faults where `get_pod_events` is the only tool that can
+answer, which is worth knowing if you are reading a trace and wondering why
+`get_pod_logs` was not enough.
+
 Three properties it is built around:
 
 - **Read-only.** No tool scales, restarts or deletes anything, and
@@ -413,6 +429,7 @@ dedup state is in-process.
 | `watch.cooldownSeconds` | `1800` | Silence per workload after a finding |
 | `watch.maxPerHour` | `12` | Global ceiling across all workloads |
 | `watch.skipExisting` | `true` | Don't diagnose everything already broken at startup |
+| `watch.stuckAfterSeconds` | `300` | How long `ContainerCreating`/`PodInitializing` must last to count as a fault. Raise it if you pull large images over a slow link |
 | `rbac.allowPodLogs` | `true` | Set false to diagnose without reading logs |
 | `persistence.enabled` | `false` | Claim a PersistentVolume for the dedup state, so a restart does not re-announce every failure. Off by default because a chart that silently provisions storage is a worse surprise than a controller that forgets |
 | `persistence.size` | `128Mi` | ReadWriteOnce, and still one replica — SQLite over a shared filesystem corrupts |
@@ -829,6 +846,7 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
 | `OLLAMA_KEEP_ALIVE` | *unset* | How long Ollama holds the weights after a request, e.g. `24h`. Forwarded on every call, because the client library does not read it. Unset means the server's own default (5m) |
 | `K8S_TIMEOUT` | `15` | Seconds before a cluster call is abandoned |
 | `TRIAGE_API_TOKEN` | *unset* | Bearer token; unset means no auth |
+| `TRIAGE_STUCK_AFTER` | `300` | Seconds a pod may sit in `ContainerCreating` or `PodInitializing` before the controller treats it as a fault rather than a start-up |
 | `TRIAGE_STATE_DB` | *unset* | Path to a SQLite file for controller dedup state and `/ask` job results. Unset, both live in memory and a restart forgets them. The Helm chart sets it when `persistence.enabled=true` |
 | `TRIAGE_JOB_TTL` | `86400` | Seconds an `/ask` job result is kept before purging |
 | `KUBECONFIG` | `~/.kube/config` | Cluster credentials |

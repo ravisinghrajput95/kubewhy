@@ -7,6 +7,7 @@ incident gets muted and then uninstalled -- at which point nothing else about
 it matters.
 """
 
+import datetime as dt
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,10 @@ from kubernetes import client
 
 import controller as ctrl
 from conftest import container_status, make_pod
+
+# Fixed, and timezone-aware because the Kubernetes client returns aware
+# datetimes -- subtracting a naive one raises rather than being wrong quietly.
+NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.timezone.utc)
 
 
 def owned_pod(name="web-abc123-xyz", owner="web-abc123", **kwargs):
@@ -120,6 +125,80 @@ class TestBudget:
         assert budget.allow("b", now=1) is True
         assert budget.allow("c", now=2) is False
         assert budget.allow("c", now=3700) is True
+
+
+class TestAStatusThatIsOnlyAFaultWhenItLasts:
+    """
+    ContainerCreating cannot go in WATCHED and cannot stay out of it.
+
+    Every image pull passes through it, so watching it outright means
+    diagnosing every ordinary start-up. But a volume naming a ConfigMap or
+    Secret that does not exist parks a pod there permanently, and the
+    controller was silent about that for as long as the pod existed. Elapsed
+    time is the only thing that separates the two.
+    """
+
+    def stuck_pod(self, age_s, reason="ContainerCreating", started=True):
+        pod = owned_pod(statuses=[container_status(ready=False, waiting_reason=reason)])
+        when = NOW - dt.timedelta(seconds=age_s)
+        if started:
+            pod.status.start_time = when
+        else:
+            pod.metadata.creation_timestamp = when
+        return pod
+
+    def test_a_pod_stuck_past_the_threshold_is_reported(self, controller):
+        pod = self.stuck_pod(ctrl.STUCK_AFTER + 60)
+        assert controller.interesting(pod, now=NOW) == "ContainerCreating"
+
+    def test_a_pod_that_is_merely_starting_is_left_alone(self, controller):
+        """The false positive that matters. 30s is an ordinary image pull."""
+        assert controller.interesting(self.stuck_pod(30), now=NOW) is None
+
+    def test_the_boundary_is_inclusive(self, controller):
+        assert controller.interesting(self.stuck_pod(ctrl.STUCK_AFTER - 1), now=NOW) is None
+        assert controller.interesting(self.stuck_pod(ctrl.STUCK_AFTER), now=NOW) is not None
+
+    def test_podinitializing_is_treated_the_same(self, controller):
+        pod = self.stuck_pod(ctrl.STUCK_AFTER + 60, reason="PodInitializing")
+        assert controller.interesting(pod, now=NOW) == "PodInitializing"
+
+    def test_creation_timestamp_is_the_fallback(self, controller):
+        """A pod the kubelet never accepted has no start_time."""
+        pod = self.stuck_pod(ctrl.STUCK_AFTER + 60, started=False)
+        assert pod.status.start_time is None
+        assert controller.interesting(pod, now=NOW) == "ContainerCreating"
+
+    def test_a_pod_with_no_timestamp_at_all_is_not_guessed_about(self, controller):
+        pod = owned_pod(
+            statuses=[container_status(ready=False, waiting_reason="ContainerCreating")]
+        )
+        assert pod.status.start_time is None
+        assert controller.stuck_for(pod, now=NOW) is None
+        assert controller.interesting(pod, now=NOW) is None
+
+    def test_age_alone_does_not_make_a_status_interesting(self, controller):
+        """
+        A long-running healthy pod is old. Age is only ever a qualifier on a
+        status already in STUCK_WHEN_SLOW, never a reason on its own.
+        """
+        pod = owned_pod(statuses=[container_status(ready=True)])
+        pod.status.start_time = NOW - dt.timedelta(days=30)
+        assert controller.interesting(pod, now=NOW) is None
+
+    def test_a_watched_status_still_reports_immediately(self, controller):
+        """The threshold must not delay the faults that were never transient."""
+        pod = owned_pod(
+            statuses=[container_status(ready=False, waiting_reason="CrashLoopBackOff")]
+        )
+        pod.status.start_time = NOW - dt.timedelta(seconds=5)
+        assert controller.interesting(pod, now=NOW) == "CrashLoopBackOff"
+
+    def test_a_terminating_pod_is_still_ignored(self, controller):
+        """Deletion beats every other rule, including this one."""
+        pod = self.stuck_pod(ctrl.STUCK_AFTER + 600)
+        pod.metadata.deletion_timestamp = NOW
+        assert controller.interesting(pod, now=NOW) is None
 
 
 class TestRefundingASlotNothingWasSaidWith:

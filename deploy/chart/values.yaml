@@ -46,6 +46,14 @@ watch:
   maxPerHour: 12
   # Pods already broken at startup are usually known problems.
   skipExisting: true
+  # How long ContainerCreating or PodInitializing has to last before it counts
+  # as a fault rather than a start-up. Both are transient almost always, so
+  # they cannot simply be watched -- every image pull passes through them --
+  # but a volume naming a ConfigMap or Secret that does not exist parks a pod
+  # in ContainerCreating forever, and nothing but elapsed time tells the two
+  # apart. Raise it if you pull large images over a slow link; that is the
+  # case this must not fire on.
+  stuckAfterSeconds: 300
 
 # Where the controller writes what it has already reported.
 #

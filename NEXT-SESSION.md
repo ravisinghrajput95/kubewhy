@@ -170,18 +170,26 @@ no entry for `TRIAGE_STATE_DB`.
   **with the root cause present** it is a postscript, and is printed as a
   `~` note rather than scored. The old behaviour could fail a correct answer
   for ending with a suggestion.
-- **The controller never reports a volume-referenced ConfigMap or Secret.**
-  Found 2026-08-15 while recording ground truth; see
-  `evals/ask_ai/config-reference-findings.yaml`. `controller.WATCHED` excludes
-  `ContainerCreating` as transient, which it usually is — but a pod stuck on a
-  missing volume reference never leaves it, so the fault is permanent and the
-  controller is silent forever. `Controller.interesting()` returns None for
-  all four such fixtures (`cert-rotator`, `missing-configmap-volume`,
-  `missing-volume-key`, `projected-source-missing`) while `--scan` lists every
-  one. **Do not just add `ContainerCreating` to WATCHED** — that would
-  diagnose every ordinary image pull. The available signals are duration in
-  the status, or a repeating `FailedMount` event. Deliberately left as a
-  design choice; nothing measured settles which.
+- ~~**The controller never reports a volume-referenced ConfigMap or Secret.**~~
+  Found and fixed 2026-08-15; evidence in
+  `evals/ask_ai/config-reference-findings.yaml`. `STUCK_WHEN_SLOW`
+  (`ContainerCreating`, `PodInitializing`) plus `TRIAGE_STUCK_AFTER` (300s,
+  `watch.stuckAfterSeconds` in the chart) qualifies those statuses by
+  duration instead of adding them to `WATCHED`, which would have diagnosed
+  every image pull.
+
+  Two mechanism checks made this work rather than guesswork. **The watch
+  re-delivers stuck pods**: each 300s cycle re-lists and replays them as
+  `ADDED` — measured over three cycles, both test pods re-delivered every
+  time — so the threshold does fire; worst-case detection is the threshold
+  plus one cycle. And **`status.start_time` is set on stuck pods** (all four
+  fixtures), with `metadata.creation_timestamp` as the fallback.
+
+  The default came from measurement, not taste: 22 healthy pods on the demo
+  cluster reached Ready in a median of 21s, max 52s. Verified live afterwards
+  — all four fixtures now report, a freshly created pod stays unreported
+  through its `ContainerCreating` window, and `nightly-sync` at 17s still
+  reports immediately, so the threshold does not delay real faults.
 - **Eval `n=3` per case hides flaky cases.** `crashloop_root_cause` really
   passes ~85%, so at n=3 it reads 3/3 about 61% of the time.
 - **Grounding cannot check reasoning.** Speculation next to measured facts
