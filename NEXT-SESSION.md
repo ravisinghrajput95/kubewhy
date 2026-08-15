@@ -162,6 +162,14 @@ no entry for `TRIAGE_STATE_DB`.
   the same reason. **A failed diagnosis deliberately does not**: the fault is
   still real, and the spent slot is the only thing pacing retries while
   Ollama is down.
+- ~~**The plan detector conflates two behaviours.**~~ — settled.
+  `planned_instead_of_looking` is now `tools_named_but_not_called`, which
+  reports the fact and takes no view. `grade()` supplies the verdict, because
+  it is the only caller that knows the case's root cause: tools named but not
+  called **with the root cause missing** is the GKE failure and fails the run;
+  **with the root cause present** it is a postscript, and is printed as a
+  `~` note rather than scored. The old behaviour could fail a correct answer
+  for ending with a suggestion.
 - **Eval `n=3` per case hides flaky cases.** `crashloop_root_cause` really
   passes ~85%, so at n=3 it reads 3/3 about 61% of the time.
 - **Grounding cannot check reasoning.** Speculation next to measured facts

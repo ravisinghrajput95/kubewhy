@@ -75,18 +75,24 @@ TOOL_NAMES = (
 )
 
 
-def planned_instead_of_looking(finding):
+def tools_named_but_not_called(finding):
     """
-    Tools the answer told the reader to call, which it never called itself.
+    Tools the answer names in prose and never called itself.
 
     Observed live on GKE for a failing CronJob: "To find the root cause: 1.
     Check termination reason: call describe_pod... 2. Inspect logs: use
     get_pod_logs...". Every tool was available and none were used.
 
-    Deliberately not a judgement about tone. A tool named in the prose and
-    absent from tool_calls is a fact, and it is the difference between a
-    diagnosis and a plan to make one. A finding that says "the logs show X"
-    having called get_pod_logs does not match, because the tool was called.
+    A fact, not a verdict, and the rename is the whole change. As
+    planned_instead_of_looking this was read as the failure itself, which
+    conflated two behaviours the signal cannot separate: *wrote a plan instead
+    of diagnosing*, and *diagnosed, then suggested a next step*. Both name a
+    tool they did not call. Only the first is worthless in an alert.
+
+    grade() decides which one happened, because it is the only caller that
+    knows the case's root cause and can ask whether the answer already carries
+    it. A finding that says "the logs show X" having called get_pod_logs does
+    not match here at all, because the tool was called.
     """
     text = (finding.get("diagnosis") or "").lower()
     called = {name.lower() for name in finding.get("tool_calls", [])}
@@ -112,12 +118,23 @@ def find_pod(workload):
 
 
 def grade(case, finding, delivered):
+    """
+    Grade one delivered message. Returns (ok, failures, notes).
+
+    Notes are things worth seeing that are not failures. They exist because
+    the plan detector needed somewhere to put "suggested a next step" without
+    either failing the run or throwing the observation away.
+    """
     failures = []
+    notes = []
     text = delivered.lower()
 
-    for group in case["expect_all"]:
-        if not any(term in text for term in group):
-            failures.append(f"missing {group}")
+    missing = [
+        group for group in case["expect_all"]
+        if not any(term in text for term in group)
+    ]
+    for group in missing:
+        failures.append(f"missing {group}")
 
     # The message has to name the workload. A pod name carries a fresh hash on
     # every rollout, so an alert naming only the pod is unsearchable minutes
@@ -128,11 +145,21 @@ def grade(case, finding, delivered):
     if finding.get("confidence") not in ("grounded", "partial", "ungrounded"):
         failures.append(f"no usable confidence: {finding.get('confidence')!r}")
 
-    described = planned_instead_of_looking(finding)
-    if described:
+    # The same signal, read two ways, because on its own it cannot tell a
+    # plan from a postscript. With the root cause missing, naming tools it
+    # never called is the GKE failure: an alert that hands you a to-do list.
+    # With the root cause present, it is a suggestion after the useful part,
+    # which is not what this eval is here to punish.
+    described = tools_named_but_not_called(finding)
+    if described and missing:
         failures.append(
             f"wrote out {', '.join(described)} as steps for the reader to take "
             "instead of calling them"
+        )
+    elif described:
+        notes.append(
+            f"suggested {', '.join(described)} as a next step, after reporting "
+            "the root cause"
         )
 
     # Slack drops a block over 3000 characters, which means no alert at all
@@ -140,7 +167,7 @@ def grade(case, finding, delivered):
     if len(delivered) > 2900:
         failures.append(f"delivered text is {len(delivered)} chars, over the block limit")
 
-    return not failures, failures
+    return not failures, failures, notes
 
 
 def main():
@@ -183,7 +210,7 @@ def main():
 
             sink.send(finding)
             delivered = sinks.format_text(sink.sent[0])
-            ok, why = grade(case, finding, delivered)
+            ok, why, notes = grade(case, finding, delivered)
             passes += ok
 
             mark = "PASS" if ok else "FAIL"
@@ -193,6 +220,11 @@ def main():
             )
             for reason in why:
                 print(f"         - {reason}")
+            # Marked differently from failures on purpose: a run can be all
+            # PASS and still have these, and reading them as failures is the
+            # confusion this detector had built into it.
+            for note in notes:
+                print(f"         ~ {note}")
 
     # The dedup half of the path, which costs no model time to check.
     budget = controller.Budget(cooldown=1800, state=store.MemoryStore())
