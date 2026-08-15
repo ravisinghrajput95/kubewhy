@@ -186,3 +186,46 @@ class TestAskStream:
 class TestRequestLogging:
     def test_request_id_returned(self, open_client):
         assert open_client.get("/healthz").headers.get("X-Request-ID")
+
+
+class TestEveryRouteIsAuthenticated:
+    """
+    Auth is per-route, so a new endpoint is unprotected until someone
+    remembers the dependency -- and nobody notices, because the endpoint
+    works.
+
+    That happened: GET /references shipped without Depends(require_token) and
+    served cluster topology to anyone who could reach the port while every
+    other endpoint returned 401. Found by testing auth on a live cluster
+    rather than on /scan alone. This enumerates the routes so the next one
+    cannot repeat it.
+    """
+
+    # Liveness must not require a token: a probe that needs a secret fails
+    # closed and gets the container killed during a credential problem.
+    PUBLIC = {"/healthz", "/readyz", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+
+    def test_no_route_is_missing_the_token_dependency(self):
+        import app as api
+
+        unprotected = []
+        for route in api.app.routes:
+            path = getattr(route, "path", None)
+            if not path or path in self.PUBLIC:
+                continue
+            names = [
+                getattr(d.dependency, "__name__", "")
+                for d in getattr(route, "dependencies", [])
+            ]
+            if "require_token" not in names:
+                unprotected.append(f"{sorted(getattr(route, 'methods', []) or [])} {path}")
+
+        assert not unprotected, f"routes served without auth: {unprotected}"
+
+    def test_references_specifically(self):
+        """The one that was actually wrong, pinned by name."""
+        import app as api
+
+        route = next(r for r in api.app.routes if getattr(r, "path", "") == "/references")
+        names = [getattr(d.dependency, "__name__", "") for d in route.dependencies]
+        assert "require_token" in names

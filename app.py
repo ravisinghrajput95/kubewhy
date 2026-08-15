@@ -17,7 +17,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 import observability
@@ -114,6 +114,28 @@ def healthz():
     return {"status": "ok"}
 
 
+@app.exception_handler(ConnectionError)
+async def model_unreachable(_request: Request, exc: ConnectionError):
+    """
+    A dead model backend is a 503, not a 500.
+
+    /ask raises straight through the Ollama client when nothing is listening,
+    and FastAPI turned that into a bare "Internal Server Error" with no body --
+    so a caller could not tell "Ollama is down" from "kubewhy is broken", and
+    the one endpoint whose whole job is diagnosis gave a worse error message
+    than the things it diagnoses.
+
+    503 and the reason, matching /readyz, which has always reported this
+    correctly. /ask/stream needs no handler: its status line is long gone by
+    the time the model is called, so it emits an `error` event instead.
+    """
+    log.warning("model_unreachable", extra={"error": str(exc)})
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"ollama unreachable: {type(exc).__name__}"},
+    )
+
+
 @app.get("/readyz", tags=["health"])
 def readyz():
     """Readiness: the model backend is reachable, so /ask can succeed."""
@@ -206,7 +228,7 @@ def service_endpoints(name: str, namespace: str = "default"):
     return get_service_endpoints(name, namespace)
 
 
-@app.get("/references")
+@app.get("/references", dependencies=[Depends(require_token)], tags=["kubernetes"])
 def references(namespace: str = "default"):
     """Objects in this namespace whose references do not resolve."""
     return scan_references(namespace)
