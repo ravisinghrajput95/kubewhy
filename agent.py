@@ -269,6 +269,31 @@ def _prefetched_block(prefetched):
     )
 
 
+def _timing(model_ms, tool_ms, round_ms):
+    """
+    Where a run's wall clock went, split model against tools.
+
+    Reported because the run-level timer in the evals could only say *that* a
+    run took 2217s, never *where*. Two hypotheses have already died on that
+    ambiguity, so the next one should not have to.
+
+    `slowest_round_ms` is the field to look at first: a stall concentrated in
+    one round is a hung request, while a run that is uniformly slow across
+    every round is something systemic. `unaccounted_ms` is the rest -- JSON
+    encoding, grounding, the generator's own overhead -- and should be small.
+    If it is not, the interesting thing is happening outside both.
+    """
+    total = model_ms + tool_ms
+    return {
+        "model_ms": round(model_ms, 1),
+        "tool_ms": round(tool_ms, 1),
+        "rounds": len(round_ms),
+        "round_ms": round_ms,
+        "slowest_round_ms": max(round_ms) if round_ms else 0.0,
+        "model_share": round(model_ms / total, 3) if total else None,
+    }
+
+
 def stream(question, model=MODEL, think=True, prefetched=None):
     """
     Run the loop, yielding each step as it happens.
@@ -312,8 +337,23 @@ def stream(question, model=MODEL, think=True, prefetched=None):
             "prefetched": True,
         })
 
+    # Where the wall clock actually went. Tool calls were already timed; the
+    # model rounds were not, so a run that took 2217s against a 62s median
+    # could not be attributed to anything -- and both hypotheses that died
+    # (weights unloading, machine contention) died on exactly that ambiguity.
+    # Per round rather than a total, because "one round hung" and "every round
+    # was slow" are different faults and the sum cannot tell them apart.
+    model_ms = 0.0
+    tool_ms = 0.0
+    round_ms = []
+
     for _ in range(MAX_ROUNDS):
+        began = time.perf_counter()
         response, think = _chat(model, messages, think)
+        this_round = (time.perf_counter() - began) * 1000
+        model_ms += this_round
+        round_ms.append(round(this_round, 1))
+
         message = response.message
         messages.append(message)
 
@@ -324,6 +364,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
                 "type": "answer",
                 "answer": answer,
                 "tool_calls": trace,
+                "timing": _timing(model_ms, tool_ms, round_ms),
                 **grounding.check(answer, outputs),
             }
             return
@@ -339,6 +380,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
             output = _run_tool(name, arguments)
             outputs.append(output)
             duration_ms = round((time.perf_counter() - started) * 1000, 1)
+            tool_ms += duration_ms
 
             log.info(
                 "tool_call",
@@ -364,6 +406,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
         "type": "answer",
         "answer": f"Gave up after {MAX_ROUNDS} rounds of tool calls.",
         "tool_calls": trace,
+        "timing": _timing(model_ms, tool_ms, round_ms),
         "confidence": "ungrounded",
         "unverified": [],
     }

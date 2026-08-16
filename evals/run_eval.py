@@ -154,6 +154,12 @@ def main():
                 "unverified": result.get("unverified", []),
                 "tools": [c["name"] for c in result.get("tool_calls", [])],
                 "failures": why,
+                # Where the wall clock went, split model against tools, with
+                # the per-round breakdown. `seconds` above can only say a run
+                # took 2217s; this says whether one round hung or every round
+                # was slow, which is the distinction that killed the last two
+                # hypotheses for lack of evidence.
+                "timing": result.get("timing"),
             })
 
             # Written after every run, not at the end. A full set is over an

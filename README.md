@@ -733,7 +733,12 @@ curl -X POST http://127.0.0.1:8000/ask \
   "answer": "memory-hog is OOMKilled; its 64Mi limit is too low.",
   "tool_calls": [{"name": "list_pods", "arguments": {"namespace": "demo"}}],
   "confidence": "grounded",
-  "unverified": []
+  "unverified": [],
+  "timing": {
+    "model_ms": 41230.5, "tool_ms": 118.4, "rounds": 2,
+    "round_ms": [19980.1, 21250.4], "slowest_round_ms": 21250.4,
+    "model_share": 0.997
+  }
 }
 ```
 

@@ -82,13 +82,29 @@ and in one 60-run set they landed on runs 20 and 21 — the first two runs of th
 second repeat, on a case that had taken 82s and 49s in the first. Same
 question, same prompt, same cluster, eleven times slower.
 
-Every run now records `model_resident`, so the next set of numbers can say
-whether a stall landed on a run that had to load the weights. Treat that as an
-open question rather than a settled diagnosis: a plain unload and reload is
-measurably cheap here (1.37s cold against 0.25s warm on a 2GB model), so it
-does not on its own account for 1013s. Page eviction under memory pressure
-would, and so would several other things. **Any latency figure from a long run
-should state its outliers** until this is understood.
+**Both obvious explanations are now dead, measured rather than argued.** Over
+61 runs on 2026-08-15 (`results/interrupted-6cases-n10.json`), nine exceeded
+200s against a 62s median, the worst at 2217s:
+
+- **Not the loader.** All nine had `model_resident: True`. A plain unload and
+  reload is cheap anyway — 1.37s cold against 0.25s warm on a 2GB model.
+- **Not contention.** Median `load_before` was 2.73 for stalls against 2.06
+  for normal runs, and three stalls landed on an idle 15-CPU machine: 611s at
+  load 1.06, 322s at 1.20, 248s at 1.83.
+
+Two clues remain. The stalls hit `healthy_not_reported_broken`, the *cheapest*
+case in the suite (median 26s), which returned 39s, 19s and 20s immediately
+afterwards — so it is not the question's difficulty. And they arrive
+consecutively, which is hysteresis rather than per-run randomness.
+
+Every run now also records `timing`: `model_ms` against `tool_ms`, plus
+`round_ms` per model round and `slowest_round_ms`. The run-level timer could
+only say *that* a run took 2217s, and both hypotheses above died on that
+ambiguity. The next one should not have to — check first whether the time sits
+in one hung round or spreads evenly across all of them.
+
+**Any latency figure from a long run should state its outliers** until this is
+understood.
 
 Note also what the keep-alive defect does *not* explain. Eval runs are
 back-to-back, so the five-minute idle timer never elapsed between them anyway

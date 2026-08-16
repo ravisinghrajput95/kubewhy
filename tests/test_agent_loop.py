@@ -8,6 +8,7 @@ and runaway loops stopped.
 
 import contextlib
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -328,8 +329,19 @@ class TestStream:
         streamed = run(lambda: list(agent.stream("q"))[-1])
         asked = run(lambda: agent.ask("q"))
 
-        assert asked == {k: v for k, v in streamed.items() if k != "type"}
         assert "type" not in asked
+        # Same fields, both ways. This is the half that catches drift.
+        assert set(asked) == set(streamed) - {"type"}
+
+        # Everything except timing must be equal. Timing is measured, so two
+        # runs of the same mocked chain legitimately differ by a few
+        # microseconds -- comparing it by value would make this test flaky for
+        # the one field that is supposed to vary.
+        ignore = {"type", "timing"}
+        assert {k: v for k, v in asked.items() if k not in ignore} == {
+            k: v for k, v in streamed.items() if k not in ignore
+        }
+        assert set(asked["timing"]) == set(streamed["timing"])
 
 
 class TestPrefetchedEvidence:
@@ -421,3 +433,82 @@ class TestCapturePodLogs:
     def test_a_raising_tool_is_not_fatal(self):
         with patch.object(agent, "get_pod_logs", side_effect=RuntimeError("boom")):
             assert agent.capture_pod_logs("p", "demo") == []
+
+
+class TestTimingAttribution:
+    """
+    Where a run's wall clock went, split model against tools.
+
+    The eval's run-level timer could only say *that* a run took 2217s against
+    a 62s median. Two hypotheses died on that ambiguity -- weights unloading
+    and machine contention -- because nothing recorded whether the time was
+    spent inside Ollama or inside a tool call.
+    """
+
+    def test_a_slow_model_round_is_attributed_to_the_model(self):
+        def slow_chat(*args, **kwargs):
+            time.sleep(0.20)
+            return reply(content="done")
+
+        with mock_chat(side_effect=slow_chat):
+            result = agent.ask("q")
+
+        t = result["timing"]
+        assert t["rounds"] == 1
+        assert t["model_ms"] >= 200
+        assert t["tool_ms"] == 0
+        assert t["model_share"] == 1.0
+
+    def test_a_slow_tool_is_not_blamed_on_the_model(self):
+        """The distinction the whole field exists to make."""
+        def slow_tool(**kwargs):
+            time.sleep(0.20)
+            return {"ok": True}
+
+        with mock_chat(
+            side_effect=[
+                reply(calls=[tool_call("get_system_info", {})]),
+                reply(content="done"),
+            ]
+        ), patch.dict(agent.TOOLS, {"get_system_info": slow_tool}):
+            result = agent.ask("q")
+
+        t = result["timing"]
+        assert t["tool_ms"] >= 200
+        assert t["model_share"] < 0.5, "slow tool time was attributed to the model"
+
+    def test_one_hung_round_is_visible_among_fast_ones(self):
+        """
+        The signal that separates a hung request from a uniformly slow run.
+        A total cannot tell those apart; slowest_round_ms can.
+        """
+        calls = []
+
+        def chat(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 2:
+                time.sleep(0.25)
+            if len(calls) >= 3:
+                return reply(content="done")
+            return reply(calls=[tool_call("get_system_info", {})])
+
+        with mock_chat(side_effect=chat):
+            result = agent.ask("q")
+
+        t = result["timing"]
+        assert t["rounds"] == 3
+        assert len(t["round_ms"]) == 3
+        assert t["slowest_round_ms"] >= 250
+        assert t["slowest_round_ms"] == max(t["round_ms"])
+        # The other rounds were fast, so a total would have hidden this.
+        assert sorted(t["round_ms"])[0] < 100
+
+    def test_giving_up_still_reports_timing(self):
+        """A run that exhausts MAX_ROUNDS is exactly one worth timing."""
+        with mock_chat(
+            return_value=reply(calls=[tool_call("get_system_info", {})])
+        ):
+            result = agent.ask("q")
+
+        assert "Gave up" in result["answer"]
+        assert result["timing"]["rounds"] == agent.MAX_ROUNDS
