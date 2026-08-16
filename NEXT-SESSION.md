@@ -261,10 +261,14 @@ the case's difficulty. And they arrive **consecutively**, reproducing the
 known "adjacent pairs" observation as adjacent triples. Something with
 hysteresis, not per-run randomness.
 
-Next probe: instrument inside `agent.ask` rather than around it, to find
-whether the wall time is in the Ollama call, the tool calls, or between them.
-The run-level timer cannot distinguish those and every hypothesis so far has
-died on that ambiguity.
+**The next probe is already built** — it just needs a run. `agent.stream` now
+reports `timing` on the answer event and `run_eval` records it: `model_ms`
+against `tool_ms`, `round_ms` per model round, `slowest_round_ms`,
+`model_share`. Read `slowest_round_ms` first. One round carrying nearly all
+the time is a hung request; time spread evenly across rounds is systemic; and
+`model_ms + tool_ms` falling well short of the run's `seconds` means the
+delay is outside both, which would be the most interesting outcome of the
+three.
 
 **4. ~~Ground truth for the new fixtures.~~** Done, as a *separate*
 investigation — `evals/ask_ai/config-reference-findings.yaml`
