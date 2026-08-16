@@ -41,6 +41,7 @@ from routers.k8s_pods_info import (
     list_pods,
     scan_cluster,
 )
+from version import __version__
 from routers.platform_info import get_platform_info
 from routers.process_info import get_processes
 from routers.system_info import get_system_info
@@ -52,6 +53,8 @@ log = logging.getLogger("triage.mcp")
 
 mcp = MCPServer(
     "kubewhy",
+    # Without this the server reported an empty version to every client.
+    version=__version__,
     instructions=(
         "Read-only diagnostics for a Kubernetes cluster and the local host.\n\n"
         "For a question about the cluster as a whole with no namespace named, "

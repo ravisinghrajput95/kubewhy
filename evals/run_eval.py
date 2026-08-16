@@ -77,15 +77,31 @@ def main():
 
     total_passes = total_runs = 0
     ungrounded = 0
-    rows = []
     records = []
+    # Accumulated across rounds rather than printed as we go: repeat-major
+    # ordering means no case is finished until the final round.
+    stats = {
+        c["name"]: {"passes": 0, "runs": 0, "elapsed": 0.0, "reasons": []}
+        for c in cases
+    }
 
-    for case in cases:
-        passes = 0
-        elapsed = 0.0
-        reasons = []
-
-        for _ in range(args.repeat):
+    # Repeat-major, not case-major, and the ordering is the whole point.
+    # An interrupted run is the normal outcome here rather than the
+    # exception: a full set takes over an hour, and the defect this file
+    # exists to measure is one that hangs for thousands of seconds. What an
+    # interruption leaves behind is therefore a design decision.
+    #
+    # Case-major leaves a few cases complete and the rest never run, which is
+    # not a sample of the suite -- it is a complete measurement of whichever
+    # cases happened to be first. Measured on 2026-08-15: the machine shut
+    # down 61 runs in and four of the ten cases had never run once, so the
+    # suite-wide number was unusable while the early cases were oversampled.
+    # Repeat-major would have left six rounds of all ten.
+    for round_index in range(args.repeat):
+        for case in cases:
+            passes = 0
+            elapsed = 0.0
+            reasons = []
             was_resident = resident(args.model)
             # Wall clock and machine load at the moment the run began. Without
             # these a stall can only be described, never attributed: the first
@@ -150,13 +166,37 @@ def main():
                 with open(args.json, "w") as fh:
                     json.dump(records, fh, indent=1)
 
-        total_passes += passes
-        total_runs += args.repeat
-        rows.append((case["name"], passes, args.repeat, elapsed / args.repeat, reasons))
+            total_passes += passes
+            total_runs += 1
+            entry = stats[case["name"]]
+            entry["passes"] += passes
+            entry["runs"] += 1
+            entry["elapsed"] += elapsed
+            entry["reasons"] += reasons
 
-        mark = "PASS" if passes == args.repeat else ("FLAKY" if passes else "FAIL")
-        print(f"{mark:6} {case['name']:32} {passes}/{args.repeat}  {elapsed/args.repeat:5.1f}s")
-        for reason in dict.fromkeys(reasons):
+            # One line per run rather than one per case: with repeat-major
+            # there is nothing to summarise until the end, and an hour of
+            # silence is indistinguishable from a hang -- which is the exact
+            # failure this suite is trying to characterise.
+            print(
+                f"  r{round_index + 1:<3} {case['name']:32} "
+                f"{'PASS' if passes else 'FAIL':5} {elapsed:6.1f}s"
+            )
+
+    print()
+    for case in cases:
+        entry = stats[case["name"]]
+        if not entry["runs"]:
+            continue
+        mark = (
+            "PASS" if entry["passes"] == entry["runs"]
+            else ("FLAKY" if entry["passes"] else "FAIL")
+        )
+        print(
+            f"{mark:6} {case['name']:32} {entry['passes']}/{entry['runs']}  "
+            f"{entry['elapsed'] / entry['runs']:5.1f}s"
+        )
+        for reason in dict.fromkeys(entry["reasons"]):
             print(f"         - {reason}")
 
     if args.json:

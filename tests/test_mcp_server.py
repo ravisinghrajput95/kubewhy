@@ -70,3 +70,38 @@ class TestSchemas:
     def test_zero_argument_tools_have_empty_schema(self):
         by_name = {t.name: t for t in _tools()}
         assert by_name["list_nodes"].input_schema.get("properties", {}) == {}
+
+
+class TestVersionIsReported:
+    """
+    The server used to answer an empty string when asked what it was.
+
+    Two files carry the number -- version.py and Chart.yaml -- because Helm
+    cannot read Python. This is the check that keeps them from drifting, which
+    is cheaper than adding a build step to generate one from the other.
+    """
+
+    def test_the_server_reports_a_version(self):
+        import mcp_server
+        from version import __version__
+
+        assert __version__
+        assert mcp_server.mcp.version == __version__
+
+    def test_the_chart_agrees_with_the_package(self):
+        import os
+        import re
+        from version import __version__
+
+        chart = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "deploy", "chart", "Chart.yaml",
+        )
+        with open(chart) as fh:
+            text = fh.read()
+
+        app = re.search(r'^appVersion:\s*"?([^"\s]+)"?', text, re.M).group(1)
+        ver = re.search(r'^version:\s*"?([^"\s]+)"?', text, re.M).group(1)
+
+        assert app == __version__, f"Chart appVersion {app} != version.py {__version__}"
+        assert ver == __version__, f"Chart version {ver} != version.py {__version__}"

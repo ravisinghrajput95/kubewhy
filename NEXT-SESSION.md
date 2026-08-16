@@ -150,8 +150,12 @@ no entry for `TRIAGE_STATE_DB`.
   **kind's default StorageClass cannot test this** — local-path hands out a
   world-writable 0777 directory, so the bug does not reproduce, and the
   kubelet does not apply fsGroup to it at all.
-- **`run_eval.py` iterates case-major**, so an interrupted run has full data on
-  the first cases and none on the rest. Repeat-major would degrade gracefully.
+- ~~**`run_eval.py` iterates case-major**~~ — fixed 2026-08-15, the day it
+  cost a run. The machine died 61 runs in and four of ten cases had never
+  executed once, so the suite-wide number was unusable while the early cases
+  were oversampled. Now repeat-major: an interruption leaves every case
+  sampled roughly equally. It also prints one line per run, because an hour of
+  silence is indistinguishable from the hang this suite exists to measure.
 - ~~**A vanished workload still spends its budget.**~~ — fixed.
   `Budget.spend()` returns a receipt, carried through the queue, and
   `refund()` hands the slot back when `diagnose()` finds nothing left to look
@@ -212,17 +216,55 @@ narrows the window. Options, none free:
 - **Raise `failedJobsHistoryLimit` in the demo fixture** — makes the eval pass
   and fixes nothing real. Named only so nobody does it by accident.
 
-**2. Get a real baseline.** The biggest gap. The 100-run set was stopped at
-n=19 across two cases (`results/keepalive-partial-2cases.json`) to unblock item
-1. It is the first data taken with keep-alive genuinely held, and it is not a
-baseline. Run it on an otherwise idle machine and *leave the machine alone* —
-the `load_before`/`load_after` fields exist so you can prove you did.
+**2. Get a real baseline.** Still open, and closer.
+`results/interrupted-6cases-n10.json` has **61 runs, six cases complete at
+n=10** — taken 2026-08-15 with keep-alive genuinely held (verified: Ollama
+reported `expires_at` 24h out during the run). The machine **shut down at
+22:32** mid-run, three minutes after the last recorded run started, so four
+cases never ran.
 
-**3. Settle the stalls with the confound removed.** Instrumentation is in place
-(`started_at`, `load_before`, `load_after`, `model_resident`). If slow runs
-land on high `load_before`, the answer is contention and the defect is about
-how the benchmark is run rather than about Ollama. If they do not, that is the
-interesting outcome and the search continues.
+**Use the correctness data, not the latency.** Pass/fail does not depend on
+wall clock, so 58/60 across the six complete cases stands. The timing was
+taken across a window where the machine reached load 15–17 and then died;
+that median is not publishable and the README table is untouched.
+
+The useful new number: `crashloop_root_cause` scored **8/10**, which is the
+~85% your own note predicted and which n=3 was hiding behind a flattering
+3/3. That alone justifies `--repeat 10`.
+
+To finish: rerun all ten cases. Note that `run_eval.py` now iterates
+repeat-major, so an interruption leaves every case partially sampled rather
+than a few cases complete and the rest absent — which is exactly what went
+wrong here.
+
+**3. Settle the stalls.** *Contention is refuted. This is the interesting
+outcome, and the search continues.*
+
+Measured 2026-08-15 over 61 runs, `results/interrupted-6cases-n10.json`.
+Nine runs exceeded 200s, the worst at **2217s** against a 62s median. All
+nine had `model_resident: True`, so the unload hypothesis stays dead — and
+`load_before` does not explain them either:
+
+| | median `load_before` |
+| --- | --- |
+| stalls (>200s) | 2.73 |
+| normal runs | 2.06 |
+
+Nothing like an 11× ratio, and **three stalls landed on a demonstrably idle
+machine** — 611s at load 1.06, 322s at 1.20, 248s at 1.83, on a 15-CPU box.
+So the defect is not about how the benchmark is run.
+
+Two shapes worth chasing next. The stalls hit
+`healthy_not_reported_broken`, the **cheapest** case in the suite (median
+26s), which then returned 39s, 19s, 20s immediately afterwards — so it is not
+the case's difficulty. And they arrive **consecutively**, reproducing the
+known "adjacent pairs" observation as adjacent triples. Something with
+hysteresis, not per-run randomness.
+
+Next probe: instrument inside `agent.ask` rather than around it, to find
+whether the wall time is in the Ollama call, the tool calls, or between them.
+The run-level timer cannot distinguish those and every hypothesis so far has
+died on that ambiguity.
 
 **4. ~~Ground truth for the new fixtures.~~** Done, as a *separate*
 investigation — `evals/ask_ai/config-reference-findings.yaml`
@@ -275,8 +317,10 @@ gate is available: 427 prompts, 27 categories, 19 controls, clean.
   needs its own character budget.
 - Tighter benchmark `n` for the published README table — 21 runs cannot
   distinguish a perfect agent from one that fails 15% of the time.
-- A version constant, so the MCP server can report its own version instead of
-  an empty string.
+- ~~A version constant~~ — done. `version.py` holds `__version__`, the MCP
+  server passes it, and a test asserts it matches `Chart.yaml`'s `version` and
+  `appVersion`, since Helm cannot read Python and two files carrying one
+  number drift silently. Bump all three together when tagging.
 - `/ask` is still synchronous. `/ask/stream` makes the wait legible but does
   not detach the work.
 
