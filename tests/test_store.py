@@ -156,3 +156,52 @@ class TestJobApi:
 
         with patch.object(app, "JOBS", store.MemoryStore()):
             assert TestClient(app.app).get("/ask/jobs/nope").status_code == 404
+
+    def test_a_job_runs_to_done_and_carries_its_answer(self):
+        """
+        The round trip the README long claimed did not exist: submit, poll,
+        read the answer without having held a connection open.
+        """
+        import time
+
+        import app
+
+        with patch.object(app, "JOBS", store.MemoryStore()), patch.object(
+            app, "ask", return_value={"answer": "db refused", "confidence": "grounded"}
+        ):
+            client = TestClient(app.app)
+            job_id = client.post("/ask/jobs", json={"question": "why?"}).json()["id"]
+
+            # The work runs on a thread, so the state is not "done" the moment
+            # the 202 lands -- that is the entire point of the endpoint.
+            for _ in range(100):
+                job = client.get(f"/ask/jobs/{job_id}").json()
+                if job["state"] in ("done", "failed"):
+                    break
+                time.sleep(0.05)
+
+            assert job["state"] == "done"
+            assert job["result"]["answer"] == "db refused"
+            assert job["finished_at"]
+
+    def test_a_failing_job_is_readable_rather_than_lost(self):
+        """A job that raised must be reportable; silence would leave a poller
+        waiting forever on a question that already failed."""
+        import time
+
+        import app
+
+        with patch.object(app, "JOBS", store.MemoryStore()), patch.object(
+            app, "ask", side_effect=RuntimeError("ollama is down")
+        ):
+            client = TestClient(app.app)
+            job_id = client.post("/ask/jobs", json={"question": "why?"}).json()["id"]
+
+            for _ in range(100):
+                job = client.get(f"/ask/jobs/{job_id}").json()
+                if job["state"] in ("done", "failed"):
+                    break
+                time.sleep(0.05)
+
+            assert job["state"] == "failed"
+            assert "ollama is down" in job["result"]["error"]

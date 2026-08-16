@@ -728,6 +728,8 @@ Kubernetes endpoints take `?namespace=` (default `default`).
 | `GET /platform` `/system` `/processes` `/cpu` `/memory` | Host stats |
 | `POST /ask` | Natural-language question → answer, trace, confidence |
 | `POST /ask/stream` | The same, as server-sent events: one per tool call and result, then the answer |
+| `POST /ask/jobs` | The same question, detached: returns `202` with an id immediately |
+| `GET /ask/jobs/{id}` | That job's state, and its answer once there is one |
 
 ```bash
 curl -X POST http://127.0.0.1:8000/ask \
@@ -774,13 +776,34 @@ data: {"answer": "...", "confidence": "grounded", "unverified": []}
 
 This fixes the silence, not the blocking — the connection is still held open
 for the whole run. What changes is that a two-minute diagnosis no longer looks
-identical to a hang. Detaching the work properly needs a job store, and a job
-store that survives more than one replica is the same unsolved problem as the
-controller's in-memory dedup state.
+identical to a hang.
 
-**`POST /ask` blocks for as long as the model takes** — tens of seconds is
-normal, and a deep chain can exceed two minutes. Set generous client timeouts.
-Making this async is the main outstanding API problem.
+**`POST /ask/jobs` detaches the work.** It answers `202` with an id straight
+away and runs the diagnosis on a thread, so nothing has to stay connected:
+
+```bash
+ID=$(curl -sX POST http://127.0.0.1:8000/ask/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "why is memory-hog failing in demo?"}' | jq -r .id)
+
+curl -s http://127.0.0.1:8000/ask/jobs/$ID     # queued -> running -> done
+```
+
+The finished job carries the same answer, trace and confidence `/ask` would
+have returned. A job that raised comes back `failed` with the reason rather
+than vanishing, because a poller told nothing waits forever. Unknown ids are
+`404`: an id never issued and one whose result has expired are the same thing
+to a caller, and inventing a `queued` job for a typo is worse than saying no.
+
+With `TRIAGE_STATE_DB` set the result survives a restart of this process.
+It does not survive being answered by a *different* replica, which is why the
+chart still pins one — the same constraint as the controller's dedup state,
+and the same seam in `store.py` where Redis or Postgres would go.
+
+**`POST /ask` still blocks for as long as the model takes** — tens of seconds
+is normal and a deep chain can exceed two minutes. It is kept because it is
+the obvious thing to curl; set generous client timeouts, or use the job
+endpoint.
 </details>
 
 <details>
@@ -838,8 +861,10 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
   still verified by reading the client rather than by running against one.
 - **Latency.** Tens of seconds per diagnosis. `kubectl describe` is faster
   when you already know where to look.
-- **`/ask` still holds a request open** for the whole run. `/ask/stream` makes
-  the wait legible but does not detach the work; there is no job API.
+- **`/ask` still holds a request open** for the whole run, and `/ask/stream`
+  makes the wait legible without shortening it. `/ask/jobs` detaches the work
+  properly — but the result lives in this process's store, so it is one
+  replica or nothing.
 - **Answers vary between runs.** The same question can produce a different
   chain. The `confidence` field and `tool_calls` trace tell you which
   measurements an answer actually rests on.

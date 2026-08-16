@@ -331,8 +331,13 @@ gate is available: 427 prompts, 27 categories, 19 controls, clean.
   server passes it, and a test asserts it matches `Chart.yaml`'s `version` and
   `appVersion`, since Helm cannot read Python and two files carrying one
   number drift silently. Bump all three together when tagging.
-- `/ask` is still synchronous. `/ask/stream` makes the wait legible but does
-  not detach the work.
+- ~~`/ask` is still synchronous.~~ — `/ask/jobs` already detaches it and was
+  shipped without the docs catching up: the README claimed in three places
+  that no job API existed. Corrected 2026-08-15, with round-trip tests added
+  (submit → poll → `done` carrying the answer, and a raising job surfacing as
+  `failed` rather than vanishing). `/ask` stays synchronous on purpose — it is
+  the obvious thing to curl. What remains genuinely open is that a job result
+  lives in one process's store, so it is one replica or nothing.
 
 ## Settled — do not reopen without new evidence
 
