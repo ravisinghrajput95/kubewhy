@@ -198,7 +198,13 @@ no entry for `TRIAGE_STATE_DB`.
   passes ~85%, so at n=3 it reads 3/3 about 61% of the time.
 - **Grounding cannot check reasoning.** Speculation next to measured facts
   still reads `grounded`. `inference_is_marked` at least tests the labelling.
-- **UI search filters only what the scan returned**, not the cluster.
+- ~~**UI search filters only what the scan returned**, not the cluster.~~ —
+  fixed 2026-08-15. It still filters the page first, but on no match it falls
+  through to `scan_cluster(workload=...)`, which reports one workload by name
+  whether or not anything is wrong with it. That is what separates "not on
+  this page" from "not in this cluster" — the old message was honest about its
+  scope and unusable as an answer, since the workload could be outside the
+  limit or healthy and therefore never scanned.
 
 ## Pending development, in priority order
 

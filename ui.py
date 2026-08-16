@@ -69,9 +69,9 @@ def _bind(context):
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _scan(context, only_unhealthy, limit, namespaces):
+def _scan(context, only_unhealthy, limit, namespaces, workload=""):
     _bind(context)
-    return scan_cluster(only_unhealthy, limit, namespaces)
+    return scan_cluster(only_unhealthy, limit, namespaces, workload)
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
@@ -281,17 +281,38 @@ if findings:
     truncated = findings.pop("_truncated", None)
 
     if search:
-        # Client-side, and only over what the scan already returned: the
-        # server has no name index to query, so a "search" that claimed to
-        # cover the whole cluster would be lying about its scope.
+        # Filter what is already on the page first -- free, and the common
+        # case, since you are usually narrowing a list you can see.
         needle = search.lower()
         findings = {
             key: entry
             for key, entry in findings.items()
             if needle in key.lower() or needle in entry["example"].lower()
         }
+
         if not findings:
-            st.info(f"nothing matching {search!r} in the {limit} workloads scanned")
+            # Nothing on the page, which used to end here with "nothing
+            # matching X in the 20 workloads scanned". Honest about its scope
+            # and useless as an answer: the workload may well exist, just
+            # outside the limit or healthy and therefore never scanned. Ask
+            # the server, which can answer about one workload by name whether
+            # or not anything is wrong with it -- the only way to distinguish
+            # "not here" from "not in the cluster".
+            findings = _unwrap(
+                _scan(_ctx(), False, limit, namespaces, search),
+                f"scan_cluster(workload={search!r})",
+            ) or {}
+            findings.pop("_truncated", None)
+
+            if findings:
+                st.caption(
+                    f"Not in the {limit} workloads scanned — found by asking "
+                    f"the cluster for {search!r} directly."
+                )
+            # Nothing found needs no message here: scan_cluster answers
+            # "no workload named X exists in this cluster", which _unwrap has
+            # already rendered and which is more precise than anything this
+            # branch could add.
 
     st.dataframe(
         [

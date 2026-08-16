@@ -83,6 +83,14 @@ single namespace becomes a namespaced query rather than a cluster-wide one —
 and the browser UI exposes the same filter plus a name search, because a flat
 list of a thousand workloads is not navigable in either surface.
 
+That search covers the **cluster**, not just the page. It filters what is
+already on screen first, and when nothing matches it asks the server for that
+workload by name — which reports it whether or not anything is wrong with it.
+Without that second step a search could only ever say "not in the 20 workloads
+scanned", which is true, useless, and easily read as "not there": the workload
+may sit outside the limit, or be perfectly healthy and so never scanned at
+all.
+
 Measured on a 19-pod kind cluster: **146 tokens against 33,042 raw**. That raw
 figure is 83% of qwen3's entire 40k window spent on one call, before the model
 has reasoned about anything — and at ~1,739 tokens per pod, a 24-pod cluster

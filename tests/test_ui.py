@@ -271,3 +271,89 @@ class TestProgressIsTextNotOnlyAnimation:
         import ui
 
         assert "1013s" in ui.progress_label("get_pod_logs", 2, 1013.0)
+
+
+class TestSearchCoversTheClusterNotJustThePage:
+    """
+    A filter that only sees the current page cannot say a thing is absent.
+
+    It used to answer "nothing matching X in the 20 workloads scanned" --
+    honest about its scope and useless as an answer, because the workload may
+    exist just outside the limit, or be healthy and therefore never scanned at
+    all. scan_cluster(workload=...) reports one workload by name whether or
+    not anything is wrong with it, which is what distinguishes "not on this
+    page" from "not in this cluster".
+    """
+
+    @staticmethod
+    def scanner(elsewhere=None):
+        """Page scan returns FINDINGS; a by-name lookup returns `elsewhere`."""
+        def fake(only_unhealthy=True, limit=20, namespaces="", workload=""):
+            if workload:
+                return elsewhere or {
+                    "result": f"no workload named {workload} exists in this cluster"
+                }
+            return dict(FINDINGS)
+        return fake
+
+    def _search(self, scan, term):
+        import streamlit as st
+
+        st.cache_data.clear()
+        with patch.object(k8s, "scan_cluster", side_effect=scan), patch.object(
+            k8s, "list_nodes", return_value={}
+        ), patch.object(
+            k8s, "describe_pod", return_value={"pod": "x", "containers": {}}
+        ), patch.object(
+            k8s, "get_pod_events", return_value={"pod": "x", "events": []}
+        ), patch.object(
+            k8s, "get_pod_logs",
+            return_value={"pod": "x", "source": "current", "logs": "boom"},
+        ):
+            app = AppTest.from_file(UI, default_timeout=30)
+            app.run()
+            # By label, not index: text_input[0] is the ask panel's
+            # "Question" box, so an index here silently types the search term
+            # into the wrong widget and asserts against an unfiltered page.
+            filter_box = next(t for t in app.text_input if t.label == "Filter")
+            filter_box.set_value(term).run()
+        return app
+
+    def test_a_name_already_on_the_page_is_filtered_locally(self):
+        app = self._search(self.scanner(), "memory-hog")
+
+        workloads = list(app.dataframe[0].value["workload"])
+        assert workloads == ["demo/memory-hog"]
+        # No fallback caption: it was on the page, so nothing was looked up.
+        assert not any("found by asking" in c.value for c in app.caption)
+
+    def test_a_workload_outside_the_page_is_found_in_the_cluster(self):
+        elsewhere = {
+            "prod/billing": {
+                "status": "Running", "pods": 2,
+                "example": "billing-7d9f-abcde", "fault": None,
+            }
+        }
+        app = self._search(self.scanner(elsewhere), "billing")
+
+        assert list(app.dataframe[0].value["workload"]) == ["prod/billing"]
+        assert any("found by asking" in c.value for c in app.caption)
+
+    def test_a_workload_that_does_not_exist_is_reported_as_absent(self):
+        """
+        The distinction that matters: absent from the cluster, not merely
+        absent from the page.
+        """
+        app = self._search(self.scanner(), "nosuchthing")
+
+        assert any(
+            "no workload named nosuchthing exists in this cluster" in i.value
+            for i in app.info
+        )
+        assert not app.error
+
+    def test_the_lookup_names_the_tool_behind_it(self):
+        """Every panel names its tool; the fallback must not be the exception."""
+        app = self._search(self.scanner(), "nosuchthing")
+
+        assert any("scan_cluster(workload='nosuchthing')" in c.value for c in app.caption)
