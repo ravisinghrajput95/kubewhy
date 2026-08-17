@@ -184,9 +184,15 @@ def main():
             # there is nothing to summarise until the end, and an hour of
             # silence is indistinguishable from a hang -- which is the exact
             # failure this suite is trying to characterise.
+            # A nap is printed next to the run it happened in, because the
+            # alternative is what happened for two months: a run reported as
+            # 725s against a 62s median, with nothing to say the host had been
+            # suspended for 548s of it. See agent._timing.
+            slept = (result.get("timing") or {}).get("slept_ms") or 0.0
             print(
                 f"  r{round_index + 1:<3} {case['name']:32} "
                 f"{'PASS' if passes else 'FAIL':5} {elapsed:6.1f}s"
+                + (f"  [host asleep {slept / 1000:.0f}s]" if slept > 1000 else "")
             )
 
     print()

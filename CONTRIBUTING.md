@@ -76,40 +76,55 @@ default. `agent.py` now forwards it explicitly, and the same measurement
 afterwards reports 1440 minutes. Unset, it is still omitted from the request
 body, so the server default applies exactly as before.
 
-This matters because of an open defect: runs of 371s to 1013s against a median
-near 70s, on ordinary two-tool chains. The stalls arrive in **adjacent pairs**,
-and in one 60-run set they landed on runs 20 and 21 — the first two runs of the
-second repeat, on a case that had taken 82s and 49s in the first. Same
-question, same prompt, same cluster, eleven times slower.
+### Hold the machine awake, or the numbers are fiction
 
-**Both obvious explanations are now dead, measured rather than argued.** Over
-61 runs on 2026-08-15 (`results/interrupted-6cases-n10.json`), nine exceeded
-200s against a 62s median, the worst at 2217s:
+```bash
+caffeinate -is env OLLAMA_KEEP_ALIVE=24h python evals/run_eval.py --repeat 10 \
+    --json results/qwen3.json
+```
+
+**The stalls this project chased for two months were the laptop going to
+sleep.** Runs of 371s to 2217s against a ~62s median, arriving in adjacent
+pairs and triples, on ordinary two-tool chains.
+
+Measured 2026-08-17. A run took **725.0s**; its own instrumentation
+attributed **180.0s** to the model and 0.05s to tools, leaving 545s
+unaccounted. `pmset -g log` covering that window:
+
+| event | at | asleep |
+| --- | --- | --- |
+| run starts | 10:43:57 | |
+| `Idle Sleep` → `DarkWake` | 10:44:34 → 10:47:38 | 184s |
+| `Maintenance Sleep` → `Wake` | 10:47:48 → 10:53:52 | 364s |
+| run ends | 10:56:02 | **548s** |
+
+548s asleep against 545s unaccounted. macOS idle sleep counts HID input, not
+CPU load, so an unattended benchmark on battery sleeps *because* nobody is
+typing — which is why the stalls preferred idle machines, and why they arrive
+in neighbouring runs: one nap spans several.
+
+Every run records this now. `timing` carries `wall_ms`, `unaccounted_ms` and
+`slept_ms` alongside `model_ms`, `tool_ms`, `round_ms` and
+`slowest_round_ms`; `slept_ms` is the wall clock minus the monotonic clock
+over the same interval, since a monotonic clock does not advance while the
+host is suspended. `run_eval.py` prints `[host asleep Ns]` next to any run it
+happened in. A stall with `slept_ms` near zero is a different animal and
+worth reporting.
+
+Two earlier hypotheses were killed by measurement, and both stay dead — the
+sleep evidence explains what they could not. Over 61 runs on 2026-08-15
+(`results/interrupted-6cases-n10.json`), nine exceeded 200s:
 
 - **Not the loader.** All nine had `model_resident: True`. A plain unload and
   reload is cheap anyway — 1.37s cold against 0.25s warm on a 2GB model.
 - **Not contention.** Median `load_before` was 2.73 for stalls against 2.06
   for normal runs, and three stalls landed on an idle 15-CPU machine: 611s at
-  load 1.06, 322s at 1.20, 248s at 1.83.
+  load 1.06, 322s at 1.20, 248s at 1.83. A sleeping host is an idle host, so
+  low load next to a long run was the clue, not the contradiction.
 
-Two clues remain. The stalls hit `healthy_not_reported_broken`, the *cheapest*
-case in the suite (median 26s), which returned 39s, 19s and 20s immediately
-afterwards — so it is not the question's difficulty. And they arrive
-consecutively, which is hysteresis rather than per-run randomness.
-
-Every run now also records `timing`: `model_ms` against `tool_ms`, plus
-`round_ms` per model round and `slowest_round_ms`. The run-level timer could
-only say *that* a run took 2217s, and both hypotheses above died on that
-ambiguity. The next one should not have to — check first whether the time sits
-in one hung round or spreads evenly across all of them.
-
-**Any latency figure from a long run should state its outliers** until this is
-understood.
-
-Note also what the keep-alive defect does *not* explain. Eval runs are
-back-to-back, so the five-minute idle timer never elapsed between them anyway
-— the weights should have stayed loaded regardless. A hypothesis that needs an
-idle gap cannot account for a stall on run 21 of a continuous set.
+**Latency figures taken before 2026-08-17 include naps and cannot be
+separated after the fact** — `slept_ms` did not exist to record them. Take
+new ones under `caffeinate`.
 
 The controller has its own eval, because it asks its own question:
 

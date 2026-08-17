@@ -269,7 +269,7 @@ def _prefetched_block(prefetched):
     )
 
 
-def _timing(model_ms, tool_ms, round_ms):
+def _timing(model_ms, tool_ms, round_ms, wall_ms=None, slept_ms=0.0):
     """
     Where a run's wall clock went, split model against tools.
 
@@ -282,9 +282,21 @@ def _timing(model_ms, tool_ms, round_ms):
     every round is something systemic. `unaccounted_ms` is the rest -- JSON
     encoding, grounding, the generator's own overhead -- and should be small.
     If it is not, the interesting thing is happening outside both.
+
+    `slept_ms` is the first thing that turned out to be. Every other timer
+    here is monotonic, and a monotonic clock does not advance while the
+    machine is asleep, so a laptop that naps mid-run reports a wall clock
+    hundreds of seconds longer than the work it did. Measured 2026-08-17: a
+    725s run against a 62s median, of which the model accounted for 180s;
+    `pmset -g log` shows the machine asleep for 548s inside that window
+    (`Idle Sleep` 184s, then `Maintenance Sleep` 364s) against 545s
+    unaccounted. That is the stall this project has chased through two dead
+    hypotheses. An unattended benchmark on battery sleeps because nobody is
+    typing -- macOS idle sleep counts HID input, not CPU load -- which is why
+    the stalls preferred idle machines and arrived in adjacent runs.
     """
     total = model_ms + tool_ms
-    return {
+    timing = {
         "model_ms": round(model_ms, 1),
         "tool_ms": round(tool_ms, 1),
         "rounds": len(round_ms),
@@ -292,6 +304,11 @@ def _timing(model_ms, tool_ms, round_ms):
         "slowest_round_ms": max(round_ms) if round_ms else 0.0,
         "model_share": round(model_ms / total, 3) if total else None,
     }
+    if wall_ms is not None:
+        timing["wall_ms"] = round(wall_ms, 1)
+        timing["unaccounted_ms"] = round(wall_ms - total, 1)
+        timing["slept_ms"] = round(slept_ms, 1)
+    return timing
 
 
 def stream(question, model=MODEL, think=True, prefetched=None):
@@ -347,7 +364,20 @@ def stream(question, model=MODEL, think=True, prefetched=None):
     tool_ms = 0.0
     round_ms = []
 
-    for _ in range(MAX_ROUNDS):
+    # Two clocks, deliberately. perf_counter is monotonic and stops while the
+    # machine is asleep; time.time() does not. Their difference over the same
+    # interval is how long the host was suspended mid-run -- which is the
+    # difference between "the model hung" and "the laptop napped", and those
+    # were indistinguishable in every stall this project has recorded.
+    began_wall = time.time()
+    began_mono = time.perf_counter()
+
+    def elapsed():
+        wall_ms = (time.time() - began_wall) * 1000
+        mono_ms = (time.perf_counter() - began_mono) * 1000
+        return wall_ms, max(wall_ms - mono_ms, 0.0)
+
+    for round_index in range(MAX_ROUNDS):
         began = time.perf_counter()
         response, think = _chat(model, messages, think)
         this_round = (time.perf_counter() - began) * 1000
@@ -360,11 +390,12 @@ def stream(question, model=MODEL, think=True, prefetched=None):
         calls = message.tool_calls
         if not calls:
             answer = (message.content or "").strip()
+
             yield {
                 "type": "answer",
                 "answer": answer,
                 "tool_calls": trace,
-                "timing": _timing(model_ms, tool_ms, round_ms),
+                "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
                 **grounding.check(answer, outputs),
             }
             return
@@ -406,7 +437,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
         "type": "answer",
         "answer": f"Gave up after {MAX_ROUNDS} rounds of tool calls.",
         "tool_calls": trace,
-        "timing": _timing(model_ms, tool_ms, round_ms),
+        "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
         "confidence": "ungrounded",
         "unverified": [],
     }

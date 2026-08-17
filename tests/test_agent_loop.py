@@ -397,6 +397,50 @@ class TestPrefetchedEvidence:
         assert chat.call_args.kwargs["messages"][1]["content"] == "plain question"
 
 
+class TestSuspendedHost:
+    """
+    Telling "the model hung" apart from "the laptop went to sleep".
+
+    Measured 2026-08-17: a 725s run against a 62s median, with the model
+    accounting for 180s of it. `pmset -g log` put the machine asleep for 548s
+    inside that window against 545s unaccounted. Every other timer in the loop
+    is monotonic and a monotonic clock does not advance while a host is
+    suspended, so the two clocks disagreeing by exactly the nap is the signal.
+    """
+
+    def test_a_suspended_host_is_reported_not_hidden(self):
+        # A wall clock that has advanced further than the monotonic one is
+        # only possible if the host was suspended in between.
+        wall = iter([1_000.0, 1_600.0])
+        mono = iter([0.0, 0.0, 10.0, 10.0])
+        with mock_chat(return_value=reply(content="x")):
+            with patch("agent.time.time", lambda: next(wall)), \
+                 patch("agent.time.perf_counter", lambda: next(mono)):
+                result = agent.ask("q")
+
+        assert result["timing"]["slept_ms"] == pytest.approx(590_000, rel=0.01)
+        assert result["timing"]["wall_ms"] == pytest.approx(600_000, rel=0.01)
+
+    def test_an_uninterrupted_run_reports_no_sleep(self):
+        with mock_chat(return_value=reply(content="x")):
+            result = agent.ask("q")
+
+        assert result["timing"]["slept_ms"] == 0.0
+        # Everything the loop did not spend in the model or in a tool.
+        assert result["timing"]["unaccounted_ms"] < 1_000
+
+    def test_the_clocks_are_not_allowed_to_report_negative_sleep(self):
+        """Clock resolution must not produce a negative nap."""
+        wall = iter([1_000.0, 1_000.0])
+        mono = iter([0.0, 0.0, 0.5, 0.5])
+        with mock_chat(return_value=reply(content="x")):
+            with patch("agent.time.time", lambda: next(wall)), \
+                 patch("agent.time.perf_counter", lambda: next(mono)):
+                result = agent.ask("q")
+
+        assert result["timing"]["slept_ms"] == 0.0
+
+
 class TestCapturePodLogs:
     """
     The shared half of the CronJob race fix.
