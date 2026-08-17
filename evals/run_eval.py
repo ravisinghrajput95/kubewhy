@@ -153,6 +153,10 @@ def main():
                 # checker getting stricter.
                 "unverified": result.get("unverified", []),
                 "tools": [c["name"] for c in result.get("tool_calls", [])],
+                # How many times the run was sent back for naming a tool it
+                # never called. A run that reached get_pod_logs on its own and
+                # one that had to be told are the same trace without this.
+                "nudges": result.get("nudges", 0),
                 "failures": why,
                 # Where the wall clock went, split model against tools, with
                 # the per-round breakdown. `seconds` above can only say a run

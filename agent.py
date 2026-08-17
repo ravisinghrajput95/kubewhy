@@ -69,6 +69,11 @@ log = logging.getLogger("triage.agent")
 # keeps calling tools without ever settling on an answer.
 MAX_ROUNDS = 8
 
+# How many times a run may be sent back for naming a tool it did not call.
+# One: the point is to catch the model that stopped one step short, not to
+# argue with a model that has decided it is finished.
+MAX_NUDGES = 1
+
 TOOLS = {
     "get_platform_info": get_platform_info,
     "get_system_info": get_system_info,
@@ -311,6 +316,42 @@ def _timing(model_ms, tool_ms, round_ms, wall_ms=None, slept_ms=0.0):
     return timing
 
 
+def named_but_not_called(answer, called):
+    """
+    Tools the answer tells the reader to run, which this run never ran.
+
+    Measured on `crashloop_root_cause`, the case this project exists to get
+    right: on 2 of 10 runs the model read describe_pod, saw `exit_code: 1`,
+    and finished with "Next Step: check the container logs (get_pod_logs)"
+    -- naming the one tool that holds the answer ("FATAL: could not connect
+    to db:5432") instead of calling it. It is not a model that misunderstood
+    where the cause lives; it is a model that wrote the plan and stopped.
+
+    Matching is on the literal registered name, which is how the model refers
+    to them in these answers. Prose about "the logs" is not enough to act on:
+    it names no call, so there is nothing to insist on and the guess would
+    fire on answers that are already complete.
+    """
+    return [
+        name for name in TOOLS
+        if name in answer and name not in called
+    ]
+
+
+# Sent back when an answer names a tool it never called. Deliberately says
+# nothing about pods, logs or what the cause might be: it restates what the
+# model already decided was the next step and points out that it can take it
+# itself. A hint about where to look would be this file guessing at the
+# diagnosis, and would make every answer after it suspect.
+NUDGE = (
+    "You wrote that {tools} should be run, but you did not run {them}. You "
+    "have {them} available now, and the person asking cannot run tools -- an "
+    "answer that ends in a next step is a plan, not a diagnosis. Call {them}, "
+    "read what comes back, and then answer. If you already have everything "
+    "you need, answer without calling anything."
+)
+
+
 def stream(question, model=MODEL, think=True, prefetched=None):
     """
     Run the loop, yielding each step as it happens.
@@ -363,6 +404,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
     model_ms = 0.0
     tool_ms = 0.0
     round_ms = []
+    nudges = 0
 
     # Two clocks, deliberately. perf_counter is monotonic and stops while the
     # machine is asleep; time.time() does not. Their difference over the same
@@ -391,11 +433,38 @@ def stream(question, model=MODEL, think=True, prefetched=None):
         if not calls:
             answer = (message.content or "").strip()
 
+            # A run that ends by naming a tool it never called has stopped one
+            # step short of the thing it was asked for. Send it back once,
+            # rather than returning the plan as if it were a diagnosis.
+            # Never on the last round: there would be no round left to call
+            # the tool in or to answer from, so the only thing a nudge could
+            # achieve there is trading a usable answer for "gave up".
+            rounds_left = MAX_ROUNDS - round_index - 1
+            skipped = named_but_not_called(answer, {c["name"] for c in trace})
+            if skipped and nudges < MAX_NUDGES and rounds_left >= 2:
+                nudges += 1
+                them = "it" if len(skipped) == 1 else "them"
+                log.info(
+                    "nudged_for_named_tools",
+                    extra={"tools": skipped, "nudge": nudges},
+                )
+                messages.append({
+                    "role": "user",
+                    "content": NUDGE.format(
+                        tools=", ".join(skipped), them=them
+                    ),
+                })
+                continue
+
             yield {
                 "type": "answer",
                 "answer": answer,
                 "tool_calls": trace,
                 "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
+                # Recorded, not just acted on: without it a run that called
+                # get_pod_logs cannot be told apart from one that had to be
+                # sent back for it, and the guard's own effect is unmeasurable.
+                "nudges": nudges,
                 **grounding.check(answer, outputs),
             }
             return
@@ -438,6 +507,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
         "answer": f"Gave up after {MAX_ROUNDS} rounds of tool calls.",
         "tool_calls": trace,
         "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
+        "nudges": nudges,
         "confidence": "ungrounded",
         "unverified": [],
     }

@@ -441,6 +441,120 @@ class TestSuspendedHost:
         assert result["timing"]["slept_ms"] == 0.0
 
 
+class TestNamedButNotCalled:
+    """
+    The plan-instead-of-a-diagnosis failure, at the loop level.
+
+    Measured on crashloop_root_cause, n=10, 2026-08-17: two runs read
+    describe_pod, saw `exit_code: 1`, and ended with "Next Step: check the
+    container logs (get_pod_logs)" -- naming the one tool holding the cause
+    rather than calling it. The user of a diagnosis tool cannot act on a
+    plan; that is the whole product.
+    """
+
+    def test_detects_a_tool_named_but_never_called(self):
+        skipped = agent.named_but_not_called(
+            "Next step: run get_pod_logs to see the error.", {"describe_pod"}
+        )
+        assert skipped == ["get_pod_logs"]
+
+    def test_a_tool_already_called_is_not_flagged(self):
+        """Citing what you did is not a plan -- it is the evidence trail."""
+        skipped = agent.named_but_not_called(
+            "get_pod_logs showed a connection refused to db:5432.",
+            {"list_pods", "get_pod_logs"},
+        )
+        assert skipped == []
+
+    def test_prose_about_logs_is_not_enough(self):
+        """
+        "Check the logs" names no call. Firing on it would mean guessing
+        which tool was meant, on answers that are frequently complete.
+        """
+        assert agent.named_but_not_called("Check the container logs.", set()) == []
+
+    def test_the_run_is_sent_back_and_the_tool_gets_called(self):
+        responses = [
+            reply(calls=[tool_call("describe_pod", {"name": "p"})]),
+            reply(content="Exit code 1. Next step: get_pod_logs."),
+            reply(calls=[tool_call("get_pod_logs", {"name": "p"})]),
+            reply(content="Connection refused to db:5432."),
+        ]
+        with mock_chat(side_effect=responses):
+            result = agent.ask("why is it crashing?")
+
+        assert [c["name"] for c in result["tool_calls"]] == [
+            "describe_pod", "get_pod_logs",
+        ]
+        assert result["answer"] == "Connection refused to db:5432."
+
+    def test_the_nudge_names_the_tool_and_prescribes_nothing_else(self):
+        """
+        It must not hint at where the cause is. That would be this file
+        guessing the diagnosis, and every answer after it would be suspect.
+        """
+        responses = [
+            reply(content="Next step: get_pod_logs."),
+            reply(content="done"),
+        ]
+        with mock_chat(side_effect=responses) as chat:
+            agent.ask("q")
+
+        sent = chat.call_args.kwargs["messages"]
+        nudge = [m for m in sent if isinstance(m, dict) and m["role"] == "user"][-1]
+        assert "get_pod_logs" in nudge["content"]
+        for leading in ("log", "pod", "crash", "database", "connection"):
+            assert leading not in nudge["content"].replace("get_pod_logs", "")
+
+    def test_it_gives_up_after_one_nudge(self):
+        """A model that has decided it is finished is not argued with."""
+        stubborn = reply(content="You should run get_pod_logs.")
+        with mock_chat(return_value=stubborn) as chat:
+            result = agent.ask("q")
+
+        assert chat.call_count == 2
+        assert result["answer"] == "You should run get_pod_logs."
+
+    def test_no_nudge_without_rounds_left_to_use_it(self):
+        """
+        Nudging on the last round can only turn a usable answer into
+        "gave up": there is no round left to call the tool in.
+        """
+        calling = reply(calls=[tool_call("describe_pod", {"name": "p"})])
+        planning = reply(content="Next step: get_pod_logs.")
+        responses = [calling] * (agent.MAX_ROUNDS - 1) + [planning]
+        with mock_chat(side_effect=responses):
+            result = agent.ask("q")
+
+        assert result["answer"] == "Next step: get_pod_logs."
+
+    def test_the_count_is_reported_so_the_guard_can_be_measured(self):
+        """
+        A run that called get_pod_logs after being sent back looks identical
+        to one that called it unprompted, unless this is recorded.
+        """
+        responses = [
+            reply(content="Next step: get_pod_logs."),
+            reply(calls=[tool_call("get_pod_logs", {"name": "p"})]),
+            reply(content="db:5432 refused the connection."),
+        ]
+        with mock_chat(side_effect=responses):
+            nudged = agent.ask("q")
+
+        with mock_chat(side_effect=[reply(content="It is healthy.")]):
+            untouched = agent.ask("q")
+
+        assert nudged["nudges"] == 1
+        assert untouched["nudges"] == 0
+
+    def test_a_complete_answer_is_not_sent_back(self):
+        with mock_chat(side_effect=[reply(content="It is healthy.")]) as chat:
+            result = agent.ask("is it ok?")
+
+        assert chat.call_count == 1
+        assert result["answer"] == "It is healthy."
+
+
 class TestCapturePodLogs:
     """
     The shared half of the CronJob race fix.
