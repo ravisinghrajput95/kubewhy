@@ -7,8 +7,13 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `bf1f571`, tree clean, 390 tests pass, tags through v0.1.6.
-Updated 2026-08-17.**
+**State: `main` at `da6e96f`, tree clean, 391 tests pass, tags through v0.1.6.
+Updated 2026-08-17. No clusters running anywhere; Docker is stopped and the
+model is unloaded.**
+
+**Start with the wrong-workload substitution** — it is the highest-value open
+defect and the one with a precise signature (open defects, below). The stalls,
+the crashloop chain and the baseline all closed on 2026-08-17.
 
 Read README.md and CONTRIBUTING.md first.
 
