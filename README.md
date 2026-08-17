@@ -619,29 +619,43 @@ python evals/run_eval.py --repeat 10 --json results/qwen3.json
 python evals/summarise.py results/*.json
 ```
 
-Measured on the demo cluster, 7 cases, repeated:
+Measured on the demo cluster. The `qwen3` row is ten cases at n=10 on one
+machine, taken in a single set under `caffeinate` so no run contains a nap;
+the `llama3.2` row is the older seven-case set and is not directly comparable.
 
 | Model | Pass rate (95% CI) | n | Median | p95 | Fully grounded |
 | --- | --- | --- | --- | --- | --- |
-| `qwen3:8b` | **100%** — CI [85–100] | 21 | 46s | 76s | 10/21 |
+| `qwen3:8b` | **99%** — CI [95–100] | 100 | 54s | 133s | 86/100 |
 | `llama3.2:3b` | **54%** — CI [38–70] | 35 | 3.2s | 6.1s | 20/35 |
 
-The interval matters more than the headline: 21 runs cannot distinguish a
-perfect agent from one that fails 15% of the time. `summarise.py` reports
-Wilson intervals precisely so the number is not read as more precise than it
-is.
+The interval matters more than the headline. At n=100 the lower bound is 95%,
+which is worth having; at the 21 runs this table used to quote it was 85%,
+which cannot distinguish a perfect agent from one that fails 15% of the time.
+`summarise.py` reports Wilson intervals precisely so the number is not read as
+more precise than it is.
 
 The per-case split is the useful part:
 
-| Case | `qwen3` | `llama3.2` |
+| Case | `qwen3` (n=10) | `llama3.2` (n=5) |
 | --- | --- | --- |
-| oomkill_root_cause | 3/3 | **0/5** |
-| crashloop_root_cause | 3/3 | **0/5** |
-| image_pull_failure | 3/3 | 3/5 |
-| service_unreachable_chain | 3/3 | 5/5 |
-| service_selector_typo | 3/3 | 5/5 |
-| healthy_not_reported_broken | 3/3 | 4/5 |
-| host_not_cluster | 3/3 | 2/5 |
+| oomkill_root_cause | 10/10 | **0/5** |
+| crashloop_root_cause | 10/10 | **0/5** |
+| image_pull_failure | 10/10 | 3/5 |
+| service_unreachable_chain | 10/10 | 5/5 |
+| service_selector_typo | 10/10 | 5/5 |
+| healthy_not_reported_broken | 10/10 | 4/5 |
+| host_not_cluster | 10/10 | 2/5 |
+| cluster_wide_scan | **9/10** | not in that set |
+| healthy_workload_not_substituted | 10/10 | not in that set |
+| inference_is_marked | 10/10 | not in that set |
+
+The one failure is worth more than the ninety-nine passes. Asked what is
+broken anywhere, the model called `scan_cluster`, received eight failing
+workloads, and wrote a numbered list of six — dropping `crasher` and
+`log-shipper` from a list it had been handed complete. Nothing was missed by
+the tools and nothing was invented; a summary silently lost two entries. That
+is a different fault from failing to look, and it is why the answer text is
+kept with every run now.
 
 llama3.2 is 14× faster and solves the shallow cases — a service whose selector
 matches nothing is visible in one call. It scores **zero** on the two that
@@ -649,18 +663,22 @@ require drilling from a status into termination reasons or container logs. It
 reports *that* a pod is failing without finding *why*, which is the entire
 point. Speed is not the tradeoff; depth is.
 
-Note also that only 10 of 21 correct `qwen3` answers were **fully** grounded.
-The rest contained at least one figure the checker could not trace — usually
-arithmetic the model did itself. Correct and fully-traceable are different
-bars, and the gap between them is worth watching.
+Note also that 14 of 100 `qwen3` answers were not **fully** grounded. Those
+contained at least one figure the checker could not trace — usually arithmetic
+the model did itself. Correct and fully-traceable are different bars, and the
+gap between them is worth watching.
 
 Cases assert on substance — the root cause and the tools used — not wording.
-One case is a control: an agent that calls everything broken is worse than
-useless.
+Two are controls: an agent that calls everything broken is worse than useless,
+and one case asks what is wrong with a workload that is fine while the
+namespace around it is full of workloads that are not.
 
-**What these numbers are not.** One synthetic cluster, seven faults, one
-machine. Real clusters fail in uglier and more ambiguous ways, and a
-7-case suite is a smoke test, not a benchmark.
+**What these numbers are not.** One synthetic cluster, ten faults, one machine,
+one model, taken in a single sitting. Real clusters fail in uglier and more
+ambiguous ways, and ten cases is a smoke test, not a benchmark. Latency in
+particular is this laptop's: every figure above was taken under `caffeinate`
+with `slept_ms` zero on all 100 runs, so it excludes the host naps that made
+earlier numbers unusable, but it says nothing about your hardware.
 
 ## Verifying the model's claims
 
