@@ -65,7 +65,29 @@ the `demo` namespace changes results — the `cluster_wide_scan` case asks about
 the whole cluster, so even the `shop` namespace can contaminate it. A run
 started before such a change is void.
 
-## What was settled last session, and how
+## What was settled on 2026-08-17
+
+**The stalls were the laptop sleeping.** Pending item 3, below, with the
+`pmset` evidence. Two hypotheses died on this before it was measured, and the
+answer was the third outcome the timing probe was built to distinguish: the
+delay sat outside both the model and the tools.
+
+**A diagnosis that names a tool now calls it.** `crashloop_root_cause` was
+failing by writing "Next Step: get_pod_logs" instead of running it —
+8/10 before, 10/10 after. The guard cost `cluster_wide_scan` two runs on its
+first outing (it answered about the pod it had just drilled into) and the
+correction was to quote the question back; 9/10 after that.
+
+**The first honest baseline exists.** 100 runs, ten cases, no naps, 95%
+[89-98]. Pending item 2.
+
+**One measurement, three defects.** The baseline separated them cleanly by
+whether the run had been nudged: the loop guard's own regression (nudged), the
+wrong-workload substitution (never nudged), and a summary that drops one fault
+from its own list. They would have read as one flaky suite without the
+`nudges` field.
+
+## What was settled the session before, and how
 
 Two of the six open items closed outright, and two more had their stated cause
 overturned by measuring it. Every one arrived with a plausible story attached,
@@ -214,14 +236,24 @@ no entry for `TRIAGE_STATE_DB`.
   (17/23 pooled with the earlier sets). n=10 after: 9/10, `get_pod_logs`
   called 10/10. The count is on the answer event as `nudges`, so a run that
   got there alone can be told from one that was sent back.
-- **Wrong-workload substitution, seen once.** Asked about `crasher`, a run
-  diagnosed `log-shipper` instead — a real fault, in the same namespace,
-  answering a question nobody asked. The prompt already forbids this in as
-  many words ("Answering about a different workload is worse than saying
-  nothing"), so wording is not the lever. Frequency unknown; it is one run.
-- **`cluster_wide_scan` named none of its three workloads** on round 1 of the
-  2026-08-17 baseline, after `scan_cluster` and one `describe_pod`. `run_eval`
-  now keeps the answer text, so the next occurrence can be read rather than
+- **Wrong-workload substitution — the highest-value open defect, and now
+  quantified.** `healthy_workload_not_substituted` scored **8/10** in the
+  2026-08-17 baseline: asked what is wrong with the healthy `healthy-web`
+  deployment, two runs reported `memory-hog` and `bad-image` instead. A third
+  instance turned up on `crashloop_root_cause`, where a run asked about
+  `crasher` diagnosed `log-shipper`. **Both baseline failures had
+  `nudges: 0`**, so this is not the loop guard, and the prompt already forbids
+  it in as many words ("Answering about a different workload is worse than
+  saying nothing") — wording is not the lever. Both failures called only
+  `list_deployments`, which returns every deployment in the namespace, so the
+  wrong workload is right there in the tool output next to the right one.
+  Worth measuring first: whether the substitution survives a projection that
+  answers about the named workload alone.
+- **`cluster_wide_scan` can drop a fault from its own list.** 9/10 after the
+  nudge correction; the remaining failure named four faults and left `crasher`
+  out, having called only `scan_cluster`. A summary that silently omits one of
+  five is a different fault from a summary that never looked. `run_eval` now
+  keeps the answer text, so the next occurrence can be read rather than
   guessed at.
 - **Eval `n=3` per case hides flaky cases.** `crashloop_root_cause` really
   passes ~85%, so at n=3 it reads 3/3 about 61% of the time.
@@ -251,26 +283,27 @@ narrows the window. Options, none free:
 - **Raise `failedJobsHistoryLimit` in the demo fixture** — makes the eval pass
   and fixes nothing real. Named only so nobody does it by accident.
 
-**2. Get a real baseline.** Still open, and closer.
-`results/interrupted-6cases-n10.json` has **61 runs, six cases complete at
-n=10** — taken 2026-08-15 with keep-alive genuinely held (verified: Ollama
-reported `expires_at` 24h out during the run). The machine **shut down at
-22:32** mid-run, three minutes after the last recorded run started, so four
-cases never ran.
+**2. ~~Get a real baseline.~~** **Taken 2026-08-17: `results/baseline-n10.json`,
+100 runs, all ten cases at n=10, under `caffeinate` at bf1f571.**
 
-**Use the correctness data, not the latency.** Pass/fail does not depend on
-wall clock, so 58/60 across the six complete cases stands. The timing was
-taken across a window where the machine reached load 15–17 and then died;
-that median is not publishable and the README table is untouched.
+95% [89-98] 95% CI, median 59.9s, p95 138.6s, grounded 89/100, and
+`slept_ms` zero on every run -- so the latency is the agent's rather than
+partly the laptop's, and the 176.2s maximum is real rather than a nap.
 
-The useful new number: `crashloop_root_cause` scored **8/10**, which is the
-~85% your own note predicted and which n=3 was hiding behind a flattering
-3/3. That alone justifies `--repeat 10`.
+Per case: `oomkill_root_cause`, `crashloop_root_cause`, `image_pull_failure`,
+`service_unreachable_chain`, `service_selector_typo`,
+`healthy_not_reported_broken`, `inference_is_marked` and `host_not_cluster`
+all 10/10. `cluster_wide_scan` 7/10 and `healthy_workload_not_substituted`
+8/10.
 
-To finish: rerun all ten cases. Note that `run_eval.py` now iterates
-repeat-major, so an interruption leaves every case partially sampled rather
-than a few cases complete and the rest absent — which is exactly what went
-wrong here.
+**The README table was deliberately left alone** and still quotes 21 runs
+over seven cases. This set measured the nudge as it was *before* the
+correction in 5678f11, so it does not describe what ships. Publishing needs
+either a re-run of all 100 on current `main` or a table that says which
+cases were re-measured. That is the next decision, not an oversight.
+
+Re-measured after the correction, n=10 each: `cluster_wide_scan` 9/10 (from
+7/10) and `crashloop_root_cause` 10/10 (held).
 
 **3. ~~Settle the stalls.~~** **Answered 2026-08-17 — and the answer was the
 third of the three outcomes that probe was built to distinguish: the delay
