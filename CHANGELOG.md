@@ -64,6 +64,19 @@ signatures and response shapes may still change.
 
 ### Fixed
 
+- **`nightly-sync` gets a diagnosis instead of a plan — 3/3, from 0/3.** The
+  fix was already in the code and the eval was not exercising it:
+  `capture_evidence()` runs at enqueue time and only `run()` passed its result
+  through, while `run_controller_eval.py` called `diagnose(pod, status)`
+  directly. It now captures at the same point production does. Measured on
+  kind with qwen3, `--repeat 3`: 16/16 overall. **The race is not closed** —
+  two of the three runs had their live `describe_pod` return
+  `{"error": "kubernetes API error 404: pods "…" not found"}`, exactly the 404
+  that used to leave the model writing an investigation plan — but the
+  diagnosis no longer depends on winning it, because the log line carrying
+  `FATAL: upstream returned 503` was read while the pod was alive. Each result
+  line now reports whether evidence was captured: `bad-image` correctly shows
+  `evidence=NONE`, since a pod that never pulled its image has no logs.
 - **The eval scored a true aside as the wrong answer.**
   `healthy_workload_not_substituted` asks what is wrong with a workload that
   is fine, in a namespace full of workloads that are not, and forbids the

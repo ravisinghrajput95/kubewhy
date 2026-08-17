@@ -7,9 +7,13 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `9df3a87`, tree clean, 399 tests pass, tags through v0.1.6.
+**State: `main` at `c1ca882`, tree clean, 399 tests pass, tags through v0.1.6.
 Updated 2026-08-17 (evening). No clusters running anywhere; Docker is stopped
 and the model is unloaded.**
+
+**`nightly-sync` is fixed — 3/3, from 0/3.** The fix was already written and
+the eval was not exercising it. See below before assuming any other "known
+cause, fix outstanding" item is really outstanding.
 
 **Start with `cluster_wide_scan` dropping a workload from its own summary.**
 It is the only case not at 10/10 on the current 100-run set, and unlike the
@@ -79,6 +83,29 @@ the whole cluster, so even the `shop` namespace can contaminate it. A run
 started before such a change is void.
 
 ## What was settled on 2026-08-17, evening
+
+**`nightly-sync` gets a diagnosis now: 3/3, from 0/3, and the whole
+controller eval is 16/16.** The prefetch fix had been written and the eval
+was not measuring it — `capture_evidence()` runs at enqueue time, only
+`run()` passed the result through, and `run_controller_eval.py` called
+`diagnose(pod, status)` directly. It captures at the same point production
+does now, and re-resolves the pod per repeat rather than once per case.
+
+**The race is not closed, and does not need to be.** Two of the three runs
+had their live `describe_pod` come back
+`{"error": "kubernetes API error 404: pods "..." not found"}` — the same 404
+that used to leave the model writing an investigation plan. The diagnosis no
+longer depends on winning the race because the line it turns on was read
+while the pod was alive.
+
+Each result line now prints `evidence=yes|NONE`. `bad-image` is `NONE` on all
+three runs and passes anyway, correctly: a pod that never pulled its image has
+no logs, and an empty capture must be visible or it reads as a real one.
+
+**Read that failure mode across the rest of this file.** Two of today's three
+"open defects" were not defects in the agent: one was the grader, one was an
+eval measuring a code path production does not take. Before diagnosing a
+model, check that the harness is exercising the thing you think it is.
 
 **The wrong-workload substitution was a grading defect.** Three sets, all on
 kind + qwen3, all re-scored under the corrected grader:
@@ -220,8 +247,11 @@ no entry for `TRIAGE_STATE_DB`.
 
 ## Open defects
 
-- **`nightly-sync` still fails, 0/3.** Cause known (above), fix outstanding —
-  see pending item 1. Do not spend an A/B on the prompt wording.
+- ~~**`nightly-sync` still fails, 0/3.**~~ — **fixed 2026-08-17 evening,
+  3/3.** The evidence is captured while the pod is alive and handed to the
+  diagnosis; the 404 race still fires and no longer decides the outcome. The
+  fix had been written before this session and the eval was calling a code
+  path that skipped it.
 - ~~**Ollama stalls, 371s–2217s against a ~62s median.**~~ — **solved
   2026-08-17, and it was never Ollama.** The host sleeps mid-run. A 725s run
   accounted for 180.0s of model and 0.05s of tools; `pmset -g log` puts the
@@ -357,17 +387,17 @@ no entry for `TRIAGE_STATE_DB`.
 
 ## Pending development, in priority order
 
-**1. Make `nightly-sync` diagnosable.** A diagnosis taking 89–126s cannot be
-performed on a pod that lives ~120s; re-resolving once at the start only
-narrows the window. Options, none free:
+**1. ~~Make `nightly-sync` diagnosable.~~** **Done — 3/3 on 2026-08-17
+evening, controller eval 16/16.** The first option below was the one taken,
+and the code for it already existed; what was missing was an eval that ran
+it. `capture_evidence()` at enqueue, handed to `diagnose()`, which is what
+`run()` had been doing all along and what the eval had not.
 
-- **Capture the evidence at enqueue time** — read logs and termination state
-  while the pod is provably alive and hand that to the diagnosis instead of a
-  pod name. Correct, and the largest change: the agent fetches its own evidence
-  through tools today, so this means feeding pre-fetched material into the loop.
+The other two options stay unbuilt and stay named:
+
 - **Diagnose Job/CronJob workloads from the Job**, which outlives its pods and
   carries failure counts and conditions — but not the logs, and the logs are
-  where `FATAL: upstream returned 503` lives.
+  where `FATAL: upstream returned 503` lives. Still true, still unnecessary.
 - **Raise `failedJobsHistoryLimit` in the demo fixture** — makes the eval pass
   and fixes nothing real. Named only so nobody does it by accident.
 
