@@ -343,12 +343,25 @@ def named_but_not_called(answer, called):
 # model already decided was the next step and points out that it can take it
 # itself. A hint about where to look would be this file guessing at the
 # diagnosis, and would make every answer after it suspect.
+#
+# It re-states the question and insists on keeping what was already found,
+# because the first version did neither and cost a case that had been passing.
+# Measured on cluster_wide_scan, which asks what is broken anywhere: the model
+# listed the three broken workloads and offered describe_pod for detail, was
+# sent back, drilled into one pod and then answered about that pod alone --
+# losing the three names it had already reported. 3/3 before, 2/4 after. The
+# last thing in its context by then is one pod's detail and an instruction to
+# call a tool and answer, so a model that answers exactly that is not being
+# unreasonable. The question has to be put back in front of it.
 NUDGE = (
     "You wrote that {tools} should be run, but you did not run {them}. You "
     "have {them} available now, and the person asking cannot run tools -- an "
     "answer that ends in a next step is a plan, not a diagnosis. Call {them}, "
-    "read what comes back, and then answer. If you already have everything "
-    "you need, answer without calling anything."
+    "read what comes back, and then answer this question in full:\n\n"
+    "{question}\n\n"
+    "Keep every finding you have already reported and add to it -- narrowing "
+    "to whatever you looked at last would lose the rest. If you already have "
+    "everything you need, answer without calling anything."
 )
 
 
@@ -451,7 +464,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
                 messages.append({
                     "role": "user",
                     "content": NUDGE.format(
-                        tools=", ".join(skipped), them=them
+                        tools=", ".join(skipped), them=them, question=question
                     ),
                 })
                 continue

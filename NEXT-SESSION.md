@@ -7,9 +7,8 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `bc2ac8c`, tree clean, 318 tests pass, tags through v0.1.6.
-Eleven commits from 2026-08-10 are committed but NOT pushed. No clusters
-running anywhere — local or cloud.**
+**State: `main` at `bf1f571`, tree clean, 390 tests pass, tags through v0.1.6.
+Updated 2026-08-17.**
 
 Read README.md and CONTRIBUTING.md first.
 
@@ -44,11 +43,14 @@ kubectl apply -f demo/tricky-pods.yaml   # namespace shop — relational faults
 unload the model afterwards if you set a long keep-alive:
 `curl -s http://localhost:11434/api/generate -d '{"model":"qwen3","prompt":"x","stream":false,"keep_alive":0}'`
 
-Evals (need a cluster and a model, never run in CI):
+Evals (need a cluster and a model, never run in CI). **Run them under
+`caffeinate`** — on battery this Mac is set to `sleep 1`, so an unattended
+benchmark suspends after a minute without keystrokes and the run reports the
+nap as its own slowness. That was the stall defect; see below.
 
 ```bash
-OLLAMA_KEEP_ALIVE=24h .venv/bin/python evals/run_eval.py --repeat 10 --json results/baseline.json
-OLLAMA_KEEP_ALIVE=24h .venv/bin/python evals/run_controller_eval.py --repeat 3
+caffeinate -is env OLLAMA_KEEP_ALIVE=24h .venv/bin/python evals/run_eval.py --repeat 10 --json results/baseline.json
+caffeinate -is env OLLAMA_KEEP_ALIVE=24h .venv/bin/python evals/run_controller_eval.py --repeat 3
 .venv/bin/python evals/summarise.py results/*.json
 .venv/bin/python evals/ask_ai/validate.py        # CI gate, no model needed
 ```
@@ -134,12 +136,20 @@ no entry for `TRIAGE_STATE_DB`.
 
 - **`nightly-sync` still fails, 0/3.** Cause known (above), fix outstanding —
   see pending item 1. Do not spend an A/B on the prompt wording.
-- **Ollama stalls, 371s–1013s against a ~70s median.** The unload hypothesis is
-  contradicted: with keep-alive genuinely held, the slow runs landed on
-  `model_resident: True`. Contention is the live suspect and is now
-  instrumented. **Caveat: the one measured pair (113.8s, 106.3s vs a 60.0s
-  median) coincided with a pytest run started by hand on the same laptop, so it
-  is a confound, not a result.** Nothing so far explains 1013s.
+- ~~**Ollama stalls, 371s–2217s against a ~62s median.**~~ — **solved
+  2026-08-17, and it was never Ollama.** The host sleeps mid-run. A 725s run
+  accounted for 180.0s of model and 0.05s of tools; `pmset -g log` puts the
+  machine asleep for 548s inside that window (`Idle Sleep` 184s, then
+  `Maintenance Sleep` 364s) against 545s unaccounted. `pmset -g custom` on
+  battery: `sleep 1`. macOS idle sleep counts HID input, not CPU load, so an
+  unattended benchmark suspends *because* nobody is typing — which is why the
+  stalls preferred idle machines, arrived in adjacent runs (one nap spans
+  several), and left the model resident throughout. Every loop timer was
+  monotonic, and a monotonic clock does not advance through a suspend, so the
+  nap could only ever appear as a hole. `timing` now carries `wall_ms`,
+  `unaccounted_ms` and `slept_ms`; `run_eval` prints `[host asleep Ns]`. Run
+  evals under `caffeinate -is`. **A stall with `slept_ms` near zero would be a
+  new animal and is worth reporting.**
 - ~~**The Helm chart never sets `TRIAGE_STATE_DB`**~~ — fixed.
   `persistence.enabled=true` wires a PVC, the env var and
   `podSecurityContext.fsGroup: 1000`; without the fsGroup the volume arrives
@@ -194,6 +204,25 @@ no entry for `TRIAGE_STATE_DB`.
   — all four fixtures now report, a freshly created pod stays unreported
   through its `ContainerCreating` window, and `nightly-sync` at 17s still
   reports immediately, so the threshold does not delay real faults.
+- ~~**`crashloop_root_cause` stops before `get_pod_logs`.**~~ — **fixed
+  2026-08-17.** The model was not confused about where the cause lives: it
+  read `describe_pod`, saw `exit_code: 1`, and ended with "Next Step: check
+  the container logs (`get_pod_logs`)" — naming the tool holding
+  `FATAL: could not connect to db:5432` rather than calling it. The loop now
+  sends a run back once when its answer names a registered tool the run never
+  called, with that fact and no hint about where to look. n=10 before: 8/10
+  (17/23 pooled with the earlier sets). n=10 after: 9/10, `get_pod_logs`
+  called 10/10. The count is on the answer event as `nudges`, so a run that
+  got there alone can be told from one that was sent back.
+- **Wrong-workload substitution, seen once.** Asked about `crasher`, a run
+  diagnosed `log-shipper` instead — a real fault, in the same namespace,
+  answering a question nobody asked. The prompt already forbids this in as
+  many words ("Answering about a different workload is worse than saying
+  nothing"), so wording is not the lever. Frequency unknown; it is one run.
+- **`cluster_wide_scan` named none of its three workloads** on round 1 of the
+  2026-08-17 baseline, after `scan_cluster` and one `describe_pod`. `run_eval`
+  now keeps the answer text, so the next occurrence can be read rather than
+  guessed at.
 - **Eval `n=3` per case hides flaky cases.** `crashloop_root_cause` really
   passes ~85%, so at n=3 it reads 3/3 about 61% of the time.
 - **Grounding cannot check reasoning.** Speculation next to measured facts
@@ -243,38 +272,35 @@ repeat-major, so an interruption leaves every case partially sampled rather
 than a few cases complete and the rest absent — which is exactly what went
 wrong here.
 
-**3. Settle the stalls.** *Contention is refuted. This is the interesting
-outcome, and the search continues.*
+**3. ~~Settle the stalls.~~** **Answered 2026-08-17 — and the answer was the
+third of the three outcomes that probe was built to distinguish: the delay
+was outside both the model and the tools.**
 
-Measured 2026-08-15 over 61 runs, `results/interrupted-6cases-n10.json`.
-Nine runs exceeded 200s, the worst at **2217s** against a 62s median. All
-nine had `model_resident: True`, so the unload hypothesis stays dead — and
-`load_before` does not explain them either:
+A 725s run against a 62s median reported `model_ms` 180.0s and `tool_ms`
+0.05s. `pmset -g log` over the same window:
 
-| | median `load_before` |
-| --- | --- |
-| stalls (>200s) | 2.73 |
-| normal runs | 2.06 |
+| event | at | asleep |
+| --- | --- | --- |
+| run starts | 10:43:57 | |
+| `Idle Sleep` -> `DarkWake` | 10:44:34 -> 10:47:38 | 184s |
+| `Maintenance Sleep` -> `Wake` | 10:47:48 -> 10:53:52 | 364s |
+| run ends | 10:56:02 | **548s** |
 
-Nothing like an 11× ratio, and **three stalls landed on a demonstrably idle
-machine** — 611s at load 1.06, 322s at 1.20, 248s at 1.83, on a 15-CPU box.
-So the defect is not about how the benchmark is run.
+548s asleep, 545s unaccounted. The host naps mid-run; every timer in the loop
+was monotonic, and monotonic clocks do not advance through a suspend, so the
+nap could only ever show up as missing time. `pmset -g custom` on battery says
+`sleep 1`.
 
-Two shapes worth chasing next. The stalls hit
-`healthy_not_reported_broken`, the **cheapest** case in the suite (median
-26s), which then returned 39s, 19s, 20s immediately afterwards — so it is not
-the case's difficulty. And they arrive **consecutively**, reproducing the
-known "adjacent pairs" observation as adjacent triples. Something with
-hysteresis, not per-run randomness.
+It explains every earlier observation, including the ones that killed the
+other two hypotheses. Idle machines because macOS idle sleep counts HID input
+and not CPU load, so an unattended run sleeps *because* nobody is typing.
+Adjacent runs because one nap spans several. Model resident throughout because
+nothing unloaded it. The cheapest case because a nap lands where it lands.
 
-**The next probe is already built** — it just needs a run. `agent.stream` now
-reports `timing` on the answer event and `run_eval` records it: `model_ms`
-against `tool_ms`, `round_ms` per model round, `slowest_round_ms`,
-`model_share`. Read `slowest_round_ms` first. One round carrying nearly all
-the time is a hung request; time spread evenly across rounds is systemic; and
-`model_ms + tool_ms` falling well short of the run's `seconds` means the
-delay is outside both, which would be the most interesting outcome of the
-three.
+`timing` now carries `wall_ms`, `unaccounted_ms` and `slept_ms`; `run_eval`
+prints `[host asleep Ns]` and keeps `slept_ms` per run. Run under
+`caffeinate -is`. Numbers published before 2026-08-17 contain naps that cannot
+be separated out after the fact.
 
 **4. ~~Ground truth for the new fixtures.~~** Done, as a *separate*
 investigation — `evals/ask_ai/config-reference-findings.yaml`

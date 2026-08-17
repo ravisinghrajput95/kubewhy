@@ -498,13 +498,42 @@ class TestNamedButNotCalled:
             reply(content="done"),
         ]
         with mock_chat(side_effect=responses) as chat:
-            agent.ask("q")
+            agent.ask("why is the crasher pod failing?")
 
         sent = chat.call_args.kwargs["messages"]
         nudge = [m for m in sent if isinstance(m, dict) and m["role"] == "user"][-1]
         assert "get_pod_logs" in nudge["content"]
+
+        # The question is quoted back verbatim, so only what this file adds
+        # around it is held to the no-hints rule.
+        added = (
+            nudge["content"]
+            .replace("why is the crasher pod failing?", "")
+            .replace("get_pod_logs", "")
+        )
         for leading in ("log", "pod", "crash", "database", "connection"):
-            assert leading not in nudge["content"].replace("get_pod_logs", "")
+            assert leading not in added
+
+    def test_the_nudge_puts_the_question_back(self):
+        """
+        Without it the last thing in context is one pod's detail and an
+        order to call a tool, and the model answers that instead. Measured
+        on cluster_wide_scan: 3/3 before the guard, 2/4 after, both failures
+        answering about the single pod they had just described.
+        """
+        responses = [
+            reply(calls=[tool_call("scan_cluster", {})]),
+            reply(content="memory-hog, crasher and bad-image are broken. "
+                          "Run describe_pod for detail."),
+            reply(content="still all three"),
+        ]
+        with mock_chat(side_effect=responses) as chat:
+            agent.ask("Is anything broken anywhere in the cluster?")
+
+        sent = chat.call_args.kwargs["messages"]
+        nudge = [m for m in sent if isinstance(m, dict) and m["role"] == "user"][-1]
+        assert "Is anything broken anywhere in the cluster?" in nudge["content"]
+        assert "Keep every finding you have already reported" in nudge["content"]
 
     def test_it_gives_up_after_one_nudge(self):
         """A model that has decided it is finished is not argued with."""
