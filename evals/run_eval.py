@@ -22,6 +22,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# This directory too, so `from cases import CASES` resolves when something
+# other than the shell imports this file -- the grader has tests now, and they
+# do not run from evals/.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import agent  # noqa: E402
 from cases import CASES  # noqa: E402
@@ -33,20 +37,65 @@ def _satisfied(group, text):
 
 
 def grade(case, result):
-    """Return (passed, [reasons it failed])."""
+    """
+    Return (passed, [reasons it failed], [notes]).
+
+    `forbid` is read against whether the question was answered, for the same
+    reason `tools_named_but_not_called` is in the controller eval: one string
+    match cannot tell *answered about the wrong thing* from *answered, then
+    mentioned another thing*, and only the case knows which of those it is
+    looking at.
+
+    Measured on `healthy_workload_not_substituted`, the case that motivated
+    `forbid` in the first place. Four failures were recorded with their answer
+    text -- 2 of 30 in a replay probe, 2 of 20 live -- and all four read like
+    this:
+
+        The healthy-web deployment in demo is running normally with 2 ready
+        replicas. No issues detected. Other deployments in demo (like
+        bad-image, memory-hog) are unhealthy and may require investigation.
+
+    That is the correct answer with a true aside, and it was being scored as
+    the substitution the case exists to catch. Nothing in the run was wrong;
+    the grader was. A substitution failing to deliver the verdict still fails,
+    because `answered` is false there.
+
+    The 2026-08-17 baseline's 2 failures on this case are unverified: they
+    carry the same two reasons, `memory-hog` and `bad-image`, and predate the
+    run that keeps answer text, so there is nothing left to read.
+
+    Notes are printed and recorded, never scored -- an aside is worth seeing,
+    since one that grew into a diagnosis of the neighbour would be a real
+    failure and this is the only place it would show up first.
+    """
     answer = result["answer"].lower()
     called = [c["name"] for c in result["tool_calls"]]
     failures = []
+    notes = []
+
+    wanted = "expect_any" in case or "expect_all" in case
+    missing = []
 
     if "expect_any" in case and not _satisfied(case["expect_any"], answer):
-        failures.append(f"none of {case['expect_any']} in answer")
+        missing.append(f"none of {case['expect_any']} in answer")
 
     for group in case.get("expect_all", []):
         if not _satisfied(group, answer):
-            failures.append(f"missing {group}")
+            missing.append(f"missing {group}")
+
+    failures += missing
+
+    # Answered means the case's own positive expectations were all met. A case
+    # that declares none has nothing to condition on, so its forbid list stays
+    # unconditional rather than silently becoming advisory.
+    answered = wanted and not missing
 
     for term in case.get("forbid", []):
-        if term.lower() in answer:
+        if term.lower() not in answer:
+            continue
+        if answered:
+            notes.append(f"named {term!r} alongside the answer")
+        else:
             failures.append(f"wrongly claimed {term!r}")
 
     for tool in case.get("expect_tools", []):
@@ -57,7 +106,7 @@ def grade(case, result):
         if tool in called:
             failures.append(f"should not have called {tool}")
 
-    return not failures, failures
+    return not failures, failures, notes
 
 
 def main():
@@ -125,7 +174,7 @@ def main():
                 result = {"answer": f"ERROR: {exc}", "tool_calls": [], "confidence": "ungrounded"}
             elapsed += time.time() - started
 
-            ok, why = grade(case, result)
+            ok, why, notes = grade(case, result)
             passes += ok
             reasons += why
             if result.get("confidence") != "grounded":
@@ -153,6 +202,16 @@ def main():
                 # checker getting stricter.
                 "unverified": result.get("unverified", []),
                 "tools": [c["name"] for c in result.get("tool_calls", [])],
+                # The arguments too, because for several tools the name is not
+                # the behaviour. scan_cluster() and scan_cluster(workload='x')
+                # return different things -- the second reports one workload
+                # whether or not it is broken -- and the 2026-08-17 baseline
+                # recorded only the name, so the runs that answered about the
+                # right workload could not be told from the ones that asked
+                # the right question. Same for namespace on every pod tool.
+                "arguments": [
+                    c.get("arguments", {}) for c in result.get("tool_calls", [])
+                ],
                 # The answer itself, not just the strings it was missing. A
                 # failure recorded as ["missing ['memory-hog']"] cannot say
                 # whether the model looked and found nothing, described a
@@ -165,6 +224,11 @@ def main():
                 # one that had to be told are the same trace without this.
                 "nudges": result.get("nudges", 0),
                 "failures": why,
+                # Not failures, and not noise either: an answer that names a
+                # broken neighbour beside a correct verdict is one edit away
+                # from the substitution this suite is watching for, and a run
+                # that only prints its failures cannot show that drift.
+                "notes": notes,
                 # Where the wall clock went, split model against tools, with
                 # the per-round breakdown. `seconds` above can only say a run
                 # took 2217s; this says whether one round hung or every round
@@ -211,6 +275,11 @@ def main():
                 + (f"  [host asleep {slept / 1000:.0f}s]" if slept > 1000 else ""),
                 flush=True,
             )
+            for note in notes:
+                # `~` rather than `-`, matching the controller eval: a reader
+                # scanning a hundred lines needs to see at a glance that this
+                # one did not count against the score.
+                print(f"       ~ {note}", flush=True)
 
     print()
     for case in cases:

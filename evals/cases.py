@@ -8,7 +8,10 @@ run.
 
     expect_any    at least one of these must appear (synonyms for one fact)
     expect_all    every group must be satisfied; a group is a list of synonyms
-    forbid        must not appear; catches confident wrong answers
+    forbid        catches a confident wrong answer: fails the run when the
+                  expectations above went unmet, and is recorded as a note
+                  when they were met, because a term appearing next to a
+                  correct answer is an aside and not the wrong answer
     expect_tools  tools the answer should have been built from
 """
 
@@ -81,6 +84,11 @@ CASES = [
         # that are. Observed failure -- asked about a healthy workload, the
         # agent confidently described a different, broken one instead, which
         # reads as an answer and is worse than saying nothing.
+        #
+        # The forbidden names are conditional on the verdict, which is the
+        # difference between the failure above and "healthy-web is running
+        # normally; bad-image and memory-hog are unhealthy". All four failures
+        # recorded with their answer text were the second shape. See grade().
         "expect_any": [
             "no issue",
             "healthy",

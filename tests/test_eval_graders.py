@@ -26,6 +26,9 @@ controller_eval = _load("run_controller_eval")
 tools_named_but_not_called = controller_eval.tools_named_but_not_called
 grade = controller_eval.grade
 
+agent_eval = _load("run_eval")
+grade_answer = agent_eval.grade
+
 
 def finding(diagnosis, tool_calls):
     return {"diagnosis": diagnosis, "tool_calls": tool_calls}
@@ -147,3 +150,109 @@ class TestAPlanAndAPostscriptAreNotTheSameThing:
         assert ok is False
         assert any("missing" in f for f in failures)
         assert not any("instead of calling them" in f for f in failures)
+
+
+class TestForbidReadsAgainstTheAnswer:
+    """
+    The same conflation, in the other eval, found by measuring it.
+
+    `healthy_workload_not_substituted` asks what is wrong with a workload that
+    is fine, in a namespace full of workloads that are not. Its forbid list
+    holds the neighbours' names, and a bare substring match cannot tell
+
+        "the issue is that bad-image cannot pull its image"     -- substitution
+        "healthy-web is fine; bad-image is unhealthy"           -- an aside
+
+    apart. All four failures recorded with their answer text -- 2 of 30 in a
+    replay probe, 2 of 20 live -- were the second, so the number this case
+    published described the grader rather than the agent.
+    """
+
+    CASE = {
+        "name": "healthy_workload_not_substituted",
+        "expect_any": ["no issue", "healthy", "running", "fine"],
+        "forbid": ["memory-hog", "crasher", "bad-image", "oomkilled"],
+    }
+
+    def _grade(self, answer, tools=()):
+        return grade_answer(
+            self.CASE,
+            {"answer": answer, "tool_calls": [{"name": t} for t in tools]},
+        )
+
+    def test_the_verdict_plus_a_true_aside_is_a_note(self):
+        """Recorded live on 2026-08-17, near enough verbatim."""
+        answer = (
+            "The healthy-web deployment in the demo namespace is running "
+            "normally with 2 ready replicas. No issues detected. Other "
+            "deployments in demo (like bad-image, memory-hog) are unhealthy "
+            "and may require investigation."
+        )
+        ok, failures, notes = self._grade(answer)
+
+        assert ok is True, failures
+        assert notes == [
+            "named 'memory-hog' alongside the answer",
+            "named 'bad-image' alongside the answer",
+        ]
+
+    def test_the_substitution_still_fails(self):
+        """No verdict on the workload asked about, and a fault for another."""
+        answer = (
+            "The issue is that the image nginx:this-tag-does-not-exist cannot "
+            "be pulled, so bad-image is stuck in ImagePullBackOff."
+        )
+        ok, failures, notes = self._grade(answer)
+
+        assert ok is False
+        assert "wrongly claimed 'bad-image'" in failures
+        assert notes == []
+
+    def test_a_clean_verdict_produces_neither(self):
+        ok, failures, notes = self._grade("healthy-web is running normally.")
+
+        assert (ok, failures, notes) == (True, [], [])
+
+    def test_a_case_with_no_expectations_keeps_forbid_hard(self):
+        """
+        Nothing to condition on means nothing is softened. Otherwise adding a
+        forbid-only case would quietly produce a check that can never fail.
+        """
+        case = {"name": "no_expectations", "forbid": ["oomkilled"]}
+        ok, failures, notes = grade_answer(
+            case, {"answer": "the pod was oomkilled", "tool_calls": []}
+        )
+
+        assert ok is False
+        assert failures == ["wrongly claimed 'oomkilled'"]
+        assert notes == []
+
+    def test_an_unmet_expect_all_group_also_hardens_forbid(self):
+        """
+        `answered` is every positive expectation, not just expect_any -- a case
+        that got half of what it asked for has not answered the question.
+        """
+        case = {
+            "name": "half_right",
+            "expect_any": ["healthy"],
+            "expect_all": [["2 replicas"]],
+            "forbid": ["memory-hog"],
+        }
+        ok, failures, notes = grade_answer(
+            case,
+            {"answer": "healthy-web is healthy. memory-hog is not.", "tool_calls": []},
+        )
+
+        assert ok is False
+        assert "wrongly claimed 'memory-hog'" in failures
+        assert notes == []
+
+    def test_tool_expectations_are_untouched_by_the_verdict(self):
+        """A correct-sounding answer built from nothing still fails."""
+        case = dict(self.CASE, expect_tools=["scan_cluster"])
+        ok, failures, _ = grade_answer(
+            case, {"answer": "healthy-web is running normally.", "tool_calls": []}
+        )
+
+        assert ok is False
+        assert failures == ["never called scan_cluster"]
