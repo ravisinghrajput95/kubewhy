@@ -64,6 +64,28 @@ signatures and response shapes may still change.
 
 ### Fixed
 
+- **The eval scored a true aside as the wrong answer.**
+  `healthy_workload_not_substituted` asks what is wrong with a workload that
+  is fine, in a namespace full of workloads that are not, and forbids the
+  neighbours' names so a confident substitution fails. A substring match
+  cannot separate *"the issue is that bad-image cannot pull its image"* from
+  *"healthy-web is running normally; bad-image and memory-hog are unhealthy"*,
+  and it was failing both. Every failure recorded with its answer text — 2 of
+  30 in a replay probe, 2 of 20 live — was the second shape; re-scored, those
+  sets are 30/30 and 20/20. `forbid` is now read against whether the case's
+  own expectations were met, the same way `tools_named_but_not_called` is read
+  against the root cause: unmet it fails the run, met it is a note that is
+  printed and recorded but not scored. A case that declares no expectations
+  keeps the unconditional behaviour.
+- **`scan_cluster` rejected the `namespaces` list the model sends.** It
+  documents a comma-separated string and called `.split()` on it. Measured
+  live over 20 runs of one case: twice qwen3 called
+  `scan_cluster(workload='healthy-web', namespaces=['demo'])` and got
+  `{"error": "AttributeError: 'list' object has no attribute 'split'"}` back.
+  The loop survived — that is what returning errors as data is for — but both
+  runs spent an extra round recovering, with a median of 38.4s against 18.7s
+  for the rest. A list, tuple or set is accepted now, and a single namespace
+  in list form still takes the cheap namespaced query.
 - **The controller diagnosed pods that no longer existed.** The watch reports a
   pod and the diagnosis runs a minute or two later; for a CronJob failing every
   minute with `failedJobsHistoryLimit: 2`, that gap is longer than the pod's
