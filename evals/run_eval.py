@@ -153,6 +153,13 @@ def main():
                 # checker getting stricter.
                 "unverified": result.get("unverified", []),
                 "tools": [c["name"] for c in result.get("tool_calls", [])],
+                # The answer itself, not just the strings it was missing. A
+                # failure recorded as ["missing ['memory-hog']"] cannot say
+                # whether the model looked and found nothing, described a
+                # different workload, or wrote a plan -- and those want three
+                # different fixes. Re-running to find out costs another hour
+                # and gets a different answer, this being a model.
+                "answer": result.get("answer", ""),
                 # How many times the run was sent back for naming a tool it
                 # never called. A run that reached get_pod_logs on its own and
                 # one that had to be told are the same trace without this.
@@ -193,10 +200,16 @@ def main():
             # 725s against a 62s median, with nothing to say the host had been
             # suspended for 548s of it. See agent._timing.
             slept = (result.get("timing") or {}).get("slept_ms") or 0.0
+            # flush, because stdout is block-buffered the moment this is
+            # redirected to a file -- which is how a long run is always
+            # started. The per-run line exists so an hour of silence can be
+            # told from the hang this suite measures, and a 4KB buffer gives
+            # exactly that silence back.
             print(
                 f"  r{round_index + 1:<3} {case['name']:32} "
                 f"{'PASS' if passes else 'FAIL':5} {elapsed:6.1f}s"
-                + (f"  [host asleep {slept / 1000:.0f}s]" if slept > 1000 else "")
+                + (f"  [host asleep {slept / 1000:.0f}s]" if slept > 1000 else ""),
+                flush=True,
             )
 
     print()
