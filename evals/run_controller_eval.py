@@ -183,12 +183,10 @@ def main():
     print(f"model={model}  cases={len(CASES)}  repeat={args.repeat}\n")
 
     for case in CASES:
-        pod = find_pod(case["workload"])
-        if pod is None:
+        if find_pod(case["workload"]) is None:
             print(f"SKIP   {case['workload']:<24} not in the demo namespace")
             continue
 
-        status = _pod_status(pod)
         for _ in range(args.repeat):
             sink = CaptureSink()
             # A fresh store per run: the cooldown is the controller's job and
@@ -199,8 +197,26 @@ def main():
                 model=model,
             )
 
+            # Re-resolved per repeat, not once per case. A nightly-sync pod
+            # lives about two minutes and a repeat takes longer than that, so
+            # the pod found before the first run is already collected by the
+            # second -- which made the later repeats of that case a test of
+            # still_there() rather than of the diagnosis.
+            pod = find_pod(case["workload"])
+            if pod is None:
+                print(f"SKIP   {case['workload']:<24} gone between repeats")
+                continue
+            status = _pod_status(pod)
+
+            # The order production uses: capture at enqueue, hand it to the
+            # diagnosis. Calling diagnose(pod, status) as this file used to
+            # skipped capture_evidence entirely, so the CronJob case measured
+            # the behaviour from before that fix existed and would have gone
+            # on reporting 0/3 however well the fix worked.
+            evidence = watcher.capture_evidence(pod)
+
             started = time.time()
-            finding = watcher.diagnose(pod, status)
+            finding = watcher.diagnose(pod, status, evidence)
             elapsed = time.time() - started
             total += 1
 
@@ -214,12 +230,25 @@ def main():
             passes += ok
 
             mark = "PASS" if ok else "FAIL"
+            # Whether evidence was actually captured, not just attempted.
+            # capture_pod_logs returns [] on any failure -- a 404, an error
+            # dict, a pod with no logs yet -- and an empty capture is exactly
+            # the old behaviour wearing the new code's clothes. Without this
+            # printed, a run that captured nothing is indistinguishable from
+            # one that captured the line the diagnosis turns on.
+            # flush, for the reason run_eval.py flushes: the moment this is
+            # redirected to a file, stdout is block-buffered and a run that
+            # takes half an hour shows nothing until it ends -- which is
+            # indistinguishable from a hang, on a suite whose whole subject is
+            # a diagnosis racing a pod's lifetime.
             print(
                 f"{mark:6} {case['workload']:<24} {status:<18} "
-                f"{finding['confidence']:<9} {elapsed:5.1f}s  {len(delivered)}c"
+                f"{finding['confidence']:<9} {elapsed:5.1f}s  {len(delivered)}c  "
+                f"evidence={'yes' if evidence else 'NONE'}",
+                flush=True,
             )
             for reason in why:
-                print(f"         - {reason}")
+                print(f"         - {reason}", flush=True)
             # Marked differently from failures on purpose: a run can be all
             # PASS and still have these, and reading them as failures is the
             # confusion this detector had built into it.
