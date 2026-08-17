@@ -79,8 +79,8 @@ body, so the server default applies exactly as before.
 ### Hold the machine awake, or the numbers are fiction
 
 ```bash
-caffeinate -is env OLLAMA_KEEP_ALIVE=24h python evals/run_eval.py --repeat 10 \
-    --json results/qwen3.json
+caffeinate -is env OLLAMA_KEEP_ALIVE=24h python evals/run_eval.py \
+    --context kind-triage-demo --repeat 10 --json results/qwen3.json
 ```
 
 **The stalls this project chased for two months were the laptop going to

@@ -7,13 +7,20 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `da6e96f`, tree clean, 391 tests pass, tags through v0.1.6.
-Updated 2026-08-17. No clusters running anywhere; Docker is stopped and the
-model is unloaded.**
+**State: `main` at `9df3a87`, tree clean, 399 tests pass, tags through v0.1.6.
+Updated 2026-08-17 (evening). No clusters running anywhere; Docker is stopped
+and the model is unloaded.**
 
-**Start with the wrong-workload substitution** — it is the highest-value open
-defect and the one with a precise signature (open defects, below). The stalls,
-the crashloop chain and the baseline all closed on 2026-08-17.
+**Start with `cluster_wide_scan` dropping a workload from its own summary.**
+It is the only case not at 10/10 on the current 100-run set, and unlike the
+last "highest-value defect" it has been shown to be real: the tool handed the
+model eight failing workloads and the answer listed six. See open defects.
+
+**The wrong-workload substitution was not the agent.** It was the grader
+matching a forbidden name anywhere in the answer, so "healthy-web is running
+normally; bad-image and memory-hog are unhealthy" scored as a substitution.
+Measured before touching anything, which is the only reason the projection
+was not rewritten to fix a defect that did not exist. Details below.
 
 Read README.md and CONTRIBUTING.md first.
 
@@ -30,7 +37,7 @@ Read README.md and CONTRIBUTING.md first.
 
 ```bash
 cd /Users/ravirajput/Projects/AIOps-agent
-.venv/bin/python -m pytest              # 318 tests, no cluster, no model needed
+.venv/bin/python -m pytest              # 399 tests, no cluster, no model needed
 ollama list                             # qwen3 (5.2GB) is the default model
 ```
 
@@ -54,7 +61,8 @@ benchmark suspends after a minute without keystrokes and the run reports the
 nap as its own slowness. That was the stall defect; see below.
 
 ```bash
-caffeinate -is env OLLAMA_KEEP_ALIVE=24h .venv/bin/python evals/run_eval.py --repeat 10 --json results/baseline.json
+caffeinate -is env OLLAMA_KEEP_ALIVE=24h .venv/bin/python evals/run_eval.py \
+    --context kind-triage-demo --repeat 10 --json results/baseline.json
 caffeinate -is env OLLAMA_KEEP_ALIVE=24h .venv/bin/python evals/run_controller_eval.py --repeat 3
 .venv/bin/python evals/summarise.py results/*.json
 .venv/bin/python evals/ask_ai/validate.py        # CI gate, no model needed
@@ -70,7 +78,58 @@ the `demo` namespace changes results — the `cluster_wide_scan` case asks about
 the whole cluster, so even the `shop` namespace can contaminate it. A run
 started before such a change is void.
 
-## What was settled on 2026-08-17
+## What was settled on 2026-08-17, evening
+
+**The wrong-workload substitution was a grading defect.** Three sets, all on
+kind + qwen3, all re-scored under the corrected grader:
+
+| set | n | old grader | re-scored |
+| --- | --- | --- | --- |
+| replay, full `list_deployments` projection | 30 | 28/30 | 30/30 |
+| replay, projection filtered to `healthy-web` | 30 | 30/30 | 30/30 |
+| live, real loop | 20 | 18/20 | 20/20 |
+
+Every failure recorded with its answer text was the same shape: the correct
+verdict on `healthy-web`, followed by a true remark that the neighbours are
+unhealthy. `forbid` matched the neighbour's name as a substring anywhere in
+the answer. The two replay arms are indistinguishable (Fisher exact p=0.49),
+so **the projection is not the lever either** — the filtered arm only "wins"
+by removing the model's ability to mention a name. Round-1 thinking on the
+failing runs shows no substitution intent at all.
+
+`forbid` now reads against whether the case's own expectations were met, the
+same way `tools_named_but_not_called` reads against the root cause: unmet it
+fails the run, met it is a note that is printed and recorded but not scored.
+A case declaring no expectations keeps the unconditional behaviour, so a
+forbid-only case cannot quietly become a check that never fails.
+
+**The 2026-08-17 morning baseline's two failures on this case stay
+unverified.** Same two reasons, but they predate answer text being kept.
+
+**A new 100-run baseline exists on current `main`:
+`results/baseline-n10-2.json`.** 99/100, 95% [95-100], median 54.0s, p95
+132.7s, grounded 86/100, `slept_ms` zero on every run, `context` recorded on
+every run. `cluster_wide_scan` 7/10 -> 9/10 (the nudge correction),
+`healthy_workload_not_substituted` 8/10 -> 10/10 (the grader), everything
+else 10/10. **The README table has been published from this set** — that
+decision is closed.
+
+**`scan_cluster` rejected the `namespaces` list the model sends.** 2 of 20
+live runs called `namespaces=['demo']` and got
+`{"error": "AttributeError: 'list' object has no attribute 'split'"}` back.
+The loop survived, but those runs took three rounds instead of two, median
+38.4s against 18.7s. Lists are accepted now.
+
+**An eval can no longer measure the wrong cluster silently.** A 100-run set
+started against kind and, one case in, `current-context` moved to a GKE
+cluster something else on the machine had just created; every tool call after
+that answered honestly about an empty cluster. `run_eval.py` takes
+`--context`, preflights the demo namespace before spending any model time,
+prints `context=... demo pods=N` in its header and records the context on
+every run. **Run it as `--context kind-triage-demo`**, or with a `KUBECONFIG`
+holding only that cluster.
+
+## What was settled on 2026-08-17, earlier
 
 **The stalls were the laptop sleeping.** Pending item 3, below, with the
 `pmset` evidence. Two hypotheses died on this before it was measured, and the
@@ -241,8 +300,20 @@ no entry for `TRIAGE_STATE_DB`.
   (17/23 pooled with the earlier sets). n=10 after: 9/10, `get_pod_logs`
   called 10/10. The count is on the answer event as `nudges`, so a run that
   got there alone can be told from one that was sent back.
-- **Wrong-workload substitution — the highest-value open defect, and now
-  quantified.** `healthy_workload_not_substituted` scored **8/10** in the
+- ~~**Wrong-workload substitution.**~~ — **not an agent defect; the grader
+  was scoring a true aside as a wrong answer. Closed 2026-08-17 evening**,
+  10/10 on the current baseline and 50/50 across two probes. The original
+  entry is kept below because its reasoning was sound and its conclusion was
+  wrong, which is the part worth remembering: every clue pointed at the
+  projection, and the projection was innocent.
+
+  One instance remains genuinely unexplained: an earlier session saw a run
+  asked about `crasher` answer about `log-shipper`, on `crashloop_root_cause`
+  rather than this case. That case is 10/10 in both baselines and no such run
+  has been recorded since answer text was kept, so there is nothing to read.
+  Do not treat it as closed; treat it as unobserved.
+
+- **The original entry, kept for its reasoning:** `healthy_workload_not_substituted` scored **8/10** in the
   2026-08-17 baseline: asked what is wrong with the healthy `healthy-web`
   deployment, two runs reported `memory-hog` and `bad-image` instead. A third
   instance turned up on `crashloop_root_cause`, where a run asked about
@@ -254,12 +325,24 @@ no entry for `TRIAGE_STATE_DB`.
   wrong workload is right there in the tool output next to the right one.
   Worth measuring first: whether the substitution survives a projection that
   answers about the named workload alone.
-- **`cluster_wide_scan` can drop a fault from its own list.** 9/10 after the
-  nudge correction; the remaining failure named four faults and left `crasher`
-  out, having called only `scan_cluster`. A summary that silently omits one of
-  five is a different fault from a summary that never looked. `run_eval` now
-  keeps the answer text, so the next occurrence can be read rather than
-  guessed at.
+- **`cluster_wide_scan` drops workloads from its own summary — now the
+  highest-value open defect, and the mechanism is measured.** 9/10 in both
+  the morning and evening baselines. The evening failure is on the record in
+  full: the model called `scan_cluster(only_unhealthy=True)`, and its answer
+  was a numbered list of six workloads. `scan_cluster` returned **eight** at
+  that moment — verified by calling it directly against the same cluster
+  minutes later — so `crasher` and `log-shipper` were dropped from a complete
+  list. Nothing was missed by the tools and nothing was invented.
+
+  What is not yet known is *why* two, and why those two: they were adjacent
+  in the tool's output, which is suggestive at n=1 and nothing more. Worth
+  measuring before designing anything: run that case alone at n=20 with the
+  tool result kept alongside the answer, and see whether the drops cluster by
+  position, by entry count, or by fault type. The morning failure dropped
+  `crasher` too, which is the one thing the two have in common.
+
+  Do not reach for the prompt first. The last defect on this list that looked
+  like model behaviour was a grader, and the one before that was the laptop.
 - **Eval `n=3` per case hides flaky cases.** `crashloop_root_cause` really
   passes ~85%, so at n=3 it reads 3/3 about 61% of the time.
 - **Grounding cannot check reasoning.** Speculation next to measured facts
@@ -301,14 +384,13 @@ Per case: `oomkill_root_cause`, `crashloop_root_cause`, `image_pull_failure`,
 all 10/10. `cluster_wide_scan` 7/10 and `healthy_workload_not_substituted`
 8/10.
 
-**The README table was deliberately left alone** and still quotes 21 runs
-over seven cases. This set measured the nudge as it was *before* the
-correction in 5678f11, so it does not describe what ships. Publishing needs
-either a re-run of all 100 on current `main` or a table that says which
-cases were re-measured. That is the next decision, not an oversight.
-
 Re-measured after the correction, n=10 each: `cluster_wide_scan` 9/10 (from
 7/10) and `crashloop_root_cause` 10/10 (held).
+
+**Superseded the same evening by `results/baseline-n10-2.json`**, 100 runs on
+current `main` at 1186c1f, and the README table is published from that set.
+Both files are kept: this one is the only measurement of the nudge as it was
+before 5678f11, and deleting it would leave the improvement unattributable.
 
 **3. ~~Settle the stalls.~~** **Answered 2026-08-17 — and the answer was the
 third of the three outcomes that probe was built to distinguish: the delay
