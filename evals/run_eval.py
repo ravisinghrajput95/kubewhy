@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import agent  # noqa: E402
+import routers.k8s_pods_info as k8s  # noqa: E402
 from cases import CASES  # noqa: E402
 from ollama_state import resident  # noqa: E402
 
@@ -109,12 +110,49 @@ def grade(case, result):
     return not failures, failures, notes
 
 
+def preflight(namespace="demo"):
+    """
+    Which cluster this is about to measure, and whether the fixtures are on it.
+
+    Both halves were learned the same way. A run started against the kind
+    cluster on 2026-08-17 and, one case in, `current-context` moved to a GKE
+    cluster somebody else had just created; every tool call after that
+    answered honestly about an empty cluster, and the model was left saying
+    "the namespace demo does not exist". Unattended, that is 100 runs and 90
+    minutes producing a score of zero that looks exactly like the agent having
+    catastrophically regressed.
+
+    The context is ambient state that anything on the machine can change --
+    `kind create`, `gcloud container clusters get-credentials`, another
+    terminal -- so an eval that reads it without recording it cannot say what
+    it measured. Returns the context name to store beside the results.
+    """
+    context = k8s.active_context()
+    pods = k8s.list_pods(namespace=namespace)
+
+    if isinstance(pods, dict) and pods.get("error"):
+        print(
+            f"cluster {context!r} cannot answer for namespace {namespace!r}: "
+            f"{pods['error']}\n"
+            "Point --context at the cluster holding demo/broken-pods.yaml.",
+            file=sys.stderr,
+        )
+        return None, context
+
+    return len(pods), context
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=agent.MODEL)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--case", help="run only this case by name")
     parser.add_argument("--json", help="write per-run results to this file")
+    parser.add_argument(
+        "--context",
+        help="kubeconfig context to measure against; defaults to current-context, "
+             "which anything on the machine is free to change mid-run",
+    )
     args = parser.parse_args()
 
     cases = [c for c in CASES if not args.case or c["name"] == args.case]
@@ -122,7 +160,17 @@ def main():
         print(f"no case named {args.case!r}", file=sys.stderr)
         return 2
 
-    print(f"model={args.model}  cases={len(cases)}  repeat={args.repeat}\n")
+    if args.context:
+        k8s.use_context(args.context)
+
+    pods, context = preflight()
+    if pods is None:
+        return 2
+
+    print(
+        f"model={args.model}  cases={len(cases)}  repeat={args.repeat}  "
+        f"context={context}  demo pods={pods}\n"
+    )
 
     total_passes = total_runs = 0
     ungrounded = 0
@@ -183,6 +231,13 @@ def main():
             records.append({
                 "case": case["name"],
                 "model": args.model,
+                # Which cluster this run asked about -- the context the client
+                # is bound to, not whatever current-context says now, since
+                # the two stop agreeing the moment anything else touches the
+                # kubeconfig. On the record rather than in a header because
+                # the record is the unit anyone reads a year later, and it is
+                # a cached lookup.
+                "context": k8s.active_context(),
                 "passed": bool(ok),
                 "seconds": round(time.time() - started, 1),
                 "confidence": result.get("confidence"),
