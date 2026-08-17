@@ -588,7 +588,19 @@ def scan_cluster(
     restrict the scan to, which is what you want on a large cluster; workload
     -- report only this workload, healthy or not.
     """
-    wanted = [n.strip() for n in namespaces.split(",") if n.strip()]
+    # A list is accepted as well as the documented comma-separated string,
+    # because the model sends both. Measured live on 2026-08-17: on 1 of 20
+    # runs qwen3 called scan_cluster(workload='healthy-web',
+    # namespaces=['demo']), and .split() on a list raised AttributeError. The
+    # loop survived it -- _run_tool hands the exception back as {"error": ...}
+    # -- but the call was wasted and the run spent an extra round recovering
+    # from a tool that had done nothing wrong. Coercing here is cheaper than a
+    # sentence in the docstring asking the model to be careful.
+    if isinstance(namespaces, (list, tuple, set)):
+        parts = list(namespaces)
+    else:
+        parts = str(namespaces or "").split(",")
+    wanted = [str(n).strip() for n in parts if str(n).strip()]
 
     try:
         # One namespace is a much cheaper query than the whole cluster; take it

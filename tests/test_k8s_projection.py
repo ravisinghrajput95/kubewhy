@@ -280,6 +280,37 @@ class TestScanAtScale:
             "staging/web",
         }
 
+    def test_a_list_is_accepted_as_well_as_the_string(self, api):
+        """
+        Because the model sends one. Measured live on 2026-08-17: 1 of 20 runs
+        called scan_cluster(namespaces=['demo']) and .split() raised, which
+        the agent loop turned into {"error": ...} and an extra round spent
+        recovering from a tool that was working correctly.
+        """
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[
+                crashing("web-abc123-1", "web-abc123", "prod"),
+                crashing("web-abc123-1", "web-abc123", "staging"),
+                crashing("web-abc123-1", "web-abc123", "sandbox"),
+            ],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert set(k8s.scan_cluster(namespaces=["prod", "staging"])) == {
+            "prod/web",
+            "staging/web",
+        }
+
+    def test_one_namespace_in_a_list_still_takes_the_cheap_query(self, api):
+        """The list form must not lose the namespaced-query optimisation."""
+        api.list_namespaced_pod.return_value = client.V1PodList(
+            items=[crashing("web-abc123-1", "web-abc123", "prod")],
+            metadata=client.V1ListMeta(_continue=None),
+        )
+
+        assert list(k8s.scan_cluster(namespaces=["prod"])) == ["prod/web"]
+        api.list_pod_for_all_namespaces.assert_not_called()
+
 
 class TestAskingAboutOneWorkload:
     """
