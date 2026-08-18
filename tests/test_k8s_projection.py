@@ -678,6 +678,80 @@ class TestScanCluster:
 
         assert not k8s._is_healthy(failed)
 
+    def test_a_running_but_unready_pod_says_why_it_is_in_the_list(self, api):
+        """
+        `only_unhealthy` returned this pod, so the entry has to say what is
+        wrong with it. `_pod_status` reports "Running" for a pod whose
+        readiness probe is failing, and "Running" is its own fault class, so
+        the entry used to carry no fault at all -- a row in a list of failing
+        workloads with nothing in it saying anything had failed.
+
+        Measured on 2026-08-18 over 18 runs with the scan's entry order
+        permuted: the model dropped that entry from its summary 7 times,
+        against 4 of 123 for every other entry. Dropping a row that states no
+        fault is a fair reading of it.
+        """
+        unready = make_pod(
+            name="never-ready-abc-xyz",
+            phase="Running",
+            owner="never-ready-abc",
+            statuses=[container_status(ready=False)],
+        )
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[unready]
+        )
+        entry = k8s.scan_cluster()["demo/never-ready"]
+
+        assert entry["status"] == "Running"
+        assert entry["fault"] == "not-ready"
+
+    def test_a_cleanly_finished_container_is_not_called_unready(self, api):
+        """
+        A CronJob pod is visible to the scan for the moment between its
+        container reporting Completed and its phase reaching Succeeded. It is
+        finished, not unready, and the first cut of the readiness label put
+        `fault: not-ready` on exactly that entry against a live cluster.
+        """
+        finished = make_pod(
+            name="backup-297-abc",
+            phase="Running",
+            owner="backup-297",
+            statuses=[
+                container_status(ready=False, terminated_reason="Completed", exit_code=0)
+            ],
+        )
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[finished]
+        )
+        entry = k8s.scan_cluster()["demo/backup"]
+
+        assert entry["status"] == "Completed"
+        assert "fault" not in entry
+
+    def test_a_named_fault_is_not_overwritten_by_readiness(self, api):
+        """
+        Every crashing pod is also unready, so a readiness check applied
+        without this guard would relabel every fault in the cluster
+        "not-ready" and lose the one word that says where to look.
+        """
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[crashing("web-abc123-xyz", "web-abc123", "prod")]
+        )
+
+        assert k8s.scan_cluster()["prod/web"]["fault"] == "crash"
+
+    def test_a_ready_pod_asked_about_by_name_still_carries_no_fault(self, api, healthy_pod):
+        """
+        The healthy case is the reason this reads readiness rather than
+        status: "it is fine" is an answer, and inventing a fault for a ready
+        pod would take it away.
+        """
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[healthy_pod]
+        )
+
+        assert "fault" not in k8s.scan_cluster(only_unhealthy=False)["demo/healthy"]
+
     def test_ignores_terminating_pods(self, api):
         pod = crashing("web-abc123-xyz", "web-abc123", "prod")
         pod.metadata.deletion_timestamp = "2026-01-01T00:00:00Z"

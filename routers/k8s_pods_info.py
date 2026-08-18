@@ -425,6 +425,36 @@ def fault_of(status):
     return FAULT_CLASS.get(base_status(status), status)
 
 
+def _not_ready(pod):
+    """
+    Whether this pod has containers that are not Ready.
+
+    Separate from `_is_healthy` because the two answer different questions.
+    `_is_healthy` decides whether to report a pod at all; this decides what to
+    say about one that is already being reported and whose status names no
+    fault.
+
+    A container that has terminated with exit code 0 is finished, not unready,
+    and the distinction is not academic: a CronJob pod is visible to the scan
+    for the moment between its container reporting Completed and its phase
+    reaching Succeeded, and a first cut of this labelled that pod
+    `fault: not-ready` on a live cluster. An entry that has to invent a fault
+    to explain itself is worse than one that carries none.
+    """
+    statuses = pod.status.container_statuses or []
+    if not statuses:
+        return False
+
+    for cs in statuses:
+        if cs.ready:
+            continue
+        terminated = cs.state.terminated if cs.state else None
+        if terminated and terminated.exit_code == 0:
+            continue
+        return True
+    return False
+
+
 def _is_healthy(pod):
     """
     Whether this pod is fine, meaning "do not report it".
@@ -646,6 +676,18 @@ def scan_cluster(
 
         status = _pod_status(pod)
         fault = fault_of(status)
+
+        # An entry in an unhealthy-only list has to say why it is in the list.
+        # A pod that is Running with a failing readiness probe reports status
+        # "Running", and "Running" is its own fault class, so the entry read
+        # `{"status": "Running", "pods": 1, "example": ...}` -- nothing in it
+        # said anything was wrong. Measured 2026-08-18 over 18 runs with the
+        # scan's entry order permuted: that entry was dropped from the model's
+        # summary 7 times against 4 out of 123 for every other entry
+        # (p<0.0001). Dropping an entry that states no fault is a reasonable
+        # reading of it; the omission was the tool's.
+        if fault == status and _not_ready(pod):
+            fault = "not-ready"
 
         # Fault rather than status in the key: a rollout part-way through has
         # replicas reporting ErrImagePull and ImagePullBackOff at the same
