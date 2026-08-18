@@ -7,7 +7,7 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `HEAD`, tree clean, 424 tests pass, tags through v0.1.6.
+**State: `main` at `HEAD`, tree clean, 409 tests pass, tags through v0.1.6.
 Updated 2026-08-18. No clusters running anywhere; Docker is stopped and the
 model is unloaded.**
 
@@ -44,7 +44,7 @@ Read README.md and CONTRIBUTING.md first.
 
 ```bash
 cd /Users/ravirajput/Projects/AIOps-agent
-.venv/bin/python -m pytest              # 399 tests, no cluster, no model needed
+.venv/bin/python -m pytest              # 409 tests, no cluster, no model needed
 ollama list                             # qwen3 (5.2GB) is the default model
 ```
 
