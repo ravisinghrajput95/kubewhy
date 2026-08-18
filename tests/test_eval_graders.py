@@ -9,6 +9,7 @@ No cluster and no model: the graders are pure functions over a finding dict.
 """
 
 import importlib.util
+import json
 import os
 
 EVALS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "evals")
@@ -256,3 +257,121 @@ class TestForbidReadsAgainstTheAnswer:
 
         assert ok is False
         assert failures == ["never called scan_cluster"]
+
+
+scan_probe = _load("probe_scan_summary")
+entries_of = scan_probe.entries_of
+named_in = scan_probe.named_in
+
+
+class TestScanSummaryProbeReadsTheToolResult:
+    """
+    The probe's whole claim is "the tool returned these and the answer named
+    those", so a parsing slip here does not produce a wrong number -- it
+    produces a defect that is not there. Both halves are worth pinning: an
+    error mistaken for an empty list would score every run as dropping
+    everything, and a workload named only by its example pod would be counted
+    as dropped when it was carried.
+    """
+
+    LISTING = json.dumps({
+        "demo/nightly-sync": {"status": "Error", "pods": 2,
+                              "example": "nightly-sync-297-abc", "fault": "crash"},
+        "demo/never-ready": {"status": "Running", "pods": 1,
+                             "example": "never-ready-7d8-vfp"},
+        "_truncated": "3 more not shown, across 1 namespace(s)",
+    })
+
+    def test_position_is_the_order_the_model_read(self):
+        entries = entries_of(self.LISTING)
+
+        assert [e["workload"] for e in entries] == ["nightly-sync", "never-ready"]
+        assert [e["position"] for e in entries] == [0, 1]
+
+    def test_truncation_notice_is_not_a_workload(self):
+        assert all(e["key"] != "_truncated" for e in entries_of(self.LISTING))
+
+    def test_fault_falls_back_to_status_when_it_adds_nothing(self):
+        """
+        `scan_cluster` omits `fault` where it would only repeat `status`, so a
+        probe reading `fault` directly would bucket those entries under None
+        and report a fault class that does not exist.
+        """
+        entries = {e["workload"]: e for e in entries_of(self.LISTING)}
+
+        assert entries["nightly-sync"]["fault"] == "crash"
+        assert entries["never-ready"]["fault"] == "Running"
+
+    def test_two_faults_on_one_workload_keep_their_own_rows(self):
+        """`ns/name:fault` is a key shape scan_cluster really emits."""
+        entries = entries_of(json.dumps({
+            "demo/rollout:image-pull": {"status": "ImagePullBackOff", "pods": 1,
+                                        "example": "rollout-new-1"},
+            "demo/rollout:crash": {"status": "CrashLoopBackOff", "pods": 2,
+                                   "example": "rollout-old-1"},
+        }))
+
+        assert [e["workload"] for e in entries] == ["rollout", "rollout"]
+        assert [e["fault"] for e in entries] == ["image-pull", "crash"]
+
+    def test_an_error_is_not_an_empty_cluster(self):
+        """
+        The difference between "the tool listed nothing" and "the tool
+        failed" is the difference between a run that dropped every entry and
+        a run that was never given any.
+        """
+        assert entries_of(json.dumps({"error": "kubernetes API error 404"})) == []
+        assert entries_of(json.dumps({"result": "no unhealthy workloads"})) == []
+        assert entries_of("not json at all") == []
+
+    def test_naming_the_example_pod_counts_as_carried(self):
+        entry = entries_of(self.LISTING)[1]
+
+        assert named_in("never-ready-7d8-vfp is not passing readiness", entry)
+        assert named_in("demo/never-ready is Running but not ready", entry)
+        assert named_in("NEVER-READY is not ready", entry)
+        assert not named_in("everything else looks fine", entry)
+
+
+class TestScanSummaryProbeShuffle:
+    """
+    The shuffle exists to break the confound between position and identity,
+    and it is only evidence if it changes nothing else about the result.
+    """
+
+    RESULT = {
+        "demo/a": {"status": "CrashLoopBackOff", "pods": 1, "example": "a-1"},
+        "demo/b": {"status": "Error", "pods": 2, "example": "b-1"},
+        "demo/c": {"status": "Running", "pods": 1, "example": "c-1"},
+        "_truncated": "1 more not shown, across 1 namespace(s)",
+    }
+
+    def _wrap(self, seed, result):
+        import agent
+
+        real = agent.TOOLS["scan_cluster"]
+        try:
+            agent.TOOLS["scan_cluster"] = lambda **kwargs: result
+            return scan_probe.shuffled(seed)()
+        finally:
+            agent.TOOLS["scan_cluster"] = real
+
+    def test_the_entries_survive_the_permutation(self):
+        out = self._wrap(1, self.RESULT)
+
+        assert dict(out) == dict(self.RESULT)
+
+    def test_truncation_notice_stays_last(self):
+        """It is a message about the list, not a member of it."""
+        for seed in range(8):
+            assert list(self._wrap(seed, self.RESULT))[-1] == "_truncated"
+
+    def test_some_seed_reorders_the_workloads(self):
+        orders = {tuple(self._wrap(seed, self.RESULT)) for seed in range(8)}
+
+        assert len(orders) > 1
+
+    def test_an_error_passes_through_untouched(self):
+        failure = {"error": "kubernetes API error 404"}
+
+        assert self._wrap(0, failure) == failure
