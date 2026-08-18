@@ -7,18 +7,21 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `c1ca882`, tree clean, 399 tests pass, tags through v0.1.6.
-Updated 2026-08-17 (evening). No clusters running anywhere; Docker is stopped
-and the model is unloaded.**
+**State: `main` at `HEAD`, tree clean, 424 tests pass, tags through v0.1.6.
+Updated 2026-08-18. No clusters running anywhere; Docker is stopped and the
+model is unloaded.**
 
 **`nightly-sync` is fixed — 3/3, from 0/3.** The fix was already written and
 the eval was not exercising it. See below before assuming any other "known
 cause, fix outstanding" item is really outstanding.
 
-**Start with `cluster_wide_scan` dropping a workload from its own summary.**
-It is the only case not at 10/10 on the current 100-run set, and unlike the
-last "highest-value defect" it has been shown to be real: the tool handed the
-model eight failing workloads and the answer listed six. See open defects.
+**`cluster_wide_scan` has been measured at n=40 and all three candidate
+mechanisms are dead.** It is not entry count, not a fixed position, and not
+the workload — permuting the tool's entry order moved which entry gets
+dropped, so it is a property of the arrangement rather than of any entry.
+It reproduces in roughly half of runs, about four times what the baseline
+reports, because the eval asserts three of the eight workloads the tool
+returns. See open defects before picking this up again.
 
 **The wrong-workload substitution was not the agent.** It was the grader
 matching a forbidden name anywhere in the answer, so "healthy-web is running
@@ -355,24 +358,75 @@ no entry for `TRIAGE_STATE_DB`.
   wrong workload is right there in the tool output next to the right one.
   Worth measuring first: whether the substitution survives a projection that
   answers about the named workload alone.
-- **`cluster_wide_scan` drops workloads from its own summary — now the
-  highest-value open defect, and the mechanism is measured.** 9/10 in both
-  the morning and evening baselines. The evening failure is on the record in
-  full: the model called `scan_cluster(only_unhealthy=True)`, and its answer
-  was a numbered list of six workloads. `scan_cluster` returned **eight** at
-  that moment — verified by calling it directly against the same cluster
-  minutes later — so `crasher` and `log-shipper` were dropped from a complete
-  list. Nothing was missed by the tools and nothing was invented.
+- **`cluster_wide_scan` drops workloads from its own summary — measured at
+  n=40 on 2026-08-18, and none of the three candidate mechanisms survived.**
+  It reproduces easily and it is roughly four times more common than the
+  baseline says, because the eval asks a narrower question than the defect.
 
-  What is not yet known is *why* two, and why those two: they were adjacent
-  in the tool's output, which is suggestive at n=1 and nothing more. Worth
-  measuring before designing anything: run that case alone at n=20 with the
-  tool result kept alongside the answer, and see whether the drops cluster by
-  position, by entry count, or by fault type. The morning failure dropped
-  `crasher` too, which is the one thing the two have in common.
+  `evals/probe_scan_summary.py` runs the case alone and keeps every
+  `scan_cluster` result in full beside the answer — the one thing no eval
+  record held, and the only place a complete tool result summarised
+  incompletely can be studied. `evals/analyse_scan_summary.py` reads it back
+  as marginals over position, entry count and fault class.
+
+  Two arms of 20 on kind + qwen3, `results/scan-summary-probe-n20.json` and
+  `results/scan-summary-probe-shuffled-n20.json`. The second permutes
+  `scan_cluster`'s entry order per run — same keys, same values, same count —
+  because the fixtures sort deterministically and `log-shipper` is at index 3
+  on every run, so position and identity are otherwise the same fact.
+
+  Three runs are excluded from the marginals and counted separately: one
+  exhausted `MAX_ROUNDS`, and two answered about `memory-hog` alone. Neither
+  wrote a summary of the list, so pooling them would add a phantom drop to
+  every position and every fault class at once. Of the remaining 37:
+
+  | | sorted | shuffled |
+  | --- | --- | --- |
+  | complete summaries | 11/19 (58% [36-77]) | 8/18 (44% [25-66]) |
+  | `demo/log-shipper` dropped | 7/19 | 2/18 |
+  | `demo/never-ready` dropped | 1/19 | 7/18 |
+
+  **Not entry count**: 7 entries 5/11 incomplete against 8+ 13/26, p=1.0.
+  **Not a fixed position**: no index effect once the order is permuted.
+  **Not the workload**: `log-shipper` fell from 7/19 to 2/18 when nothing but
+  the order changed. **Not the nudge** (p=0.48) and **not drilling past
+  `scan_cluster`** (p=1.0). Fault class is the strongest single predictor in
+  the shuffled arm — the one entry that does not *look* broken
+  (`never-ready`, `status: Running`, no `fault` key) drops 7/18 against 4/123
+  for everything else, p<0.0001 — and it explains nothing in the sorted arm,
+  where that same entry is the safest thing in the list at 1/19.
+
+  So the drop target *moved* when only the arrangement changed (`never-ready`
+  1/19 → 7/18, Fisher p=0.019). It is a property of the arrangement rather
+  than of the entry, its index, or the list's length, and the three
+  hypotheses this was designed to separate are all dead. **The
+  `crasher`+`log-shipper` adjacency from 2026-08-17 is now measured rather
+  than guessed**: 7/19 in the arm that reproduces that ordering, and it does
+  not survive re-ordering, so it was never about those two workloads.
+
+  Answers track the tool's order in both arms (Kendall tau median 0.90 sorted,
+  0.86 shuffled), so "the model re-sorts an arbitrary list and loses the
+  bottom of it" is not the story either.
+
+  **The eval is measuring a narrower thing than the defect, and this is the
+  most actionable finding here.** `cluster_wide_scan` asserts `memory-hog`,
+  `crasher` and `bad-image` — three of the eight workloads the tool returns —
+  so five of the eight incomplete sorted-arm runs scored as passes. 9/10 on
+  the baseline and 11/19 complete here are the same agent against two
+  different questions. Widening `expect_all` to every workload the tool
+  returned would make the defect visible to the suite; it would also change
+  what the published README number means, so it is a decision rather than a
+  fix, and it has deliberately not been taken.
 
   Do not reach for the prompt first. The last defect on this list that looked
   like model behaviour was a grader, and the one before that was the laptop.
+  This session added a third instance of the same trap in the probe itself:
+  the first shuffled arm produced 12 runs that called no tool at all, because
+  Ollama builds the tool schema by introspecting the callables in
+  `agent.TOOLS` and an un-`functools.wraps`'d wrapper handed the model a tool
+  named `wrapper` taking `**kwargs` with no docstring. Killed at run 12; the
+  probe carries a test pinning the schema now.
+
 - **Eval `n=3` per case hides flaky cases.** `crashloop_root_cause` really
   passes ~85%, so at n=3 it reads 3/3 about 61% of the time.
 - **Grounding cannot check reasoning.** Speculation next to measured facts
