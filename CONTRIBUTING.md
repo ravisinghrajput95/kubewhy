@@ -126,6 +126,40 @@ sleep evidence explains what they could not. Over 61 runs on 2026-08-15
 separated after the fact** — `slept_ms` did not exist to record them. Take
 new ones under `caffeinate`.
 
+### When the answer is wrong about the tool result, keep the tool result
+
+`run_eval.py` records the answer and which tools were called. It does not
+record what those tools returned, which is fine until the defect lives between
+the two -- a complete tool result summarised incompletely. That is what
+`probe_scan_summary.py` is for: one case, many repeats, every `scan_cluster`
+result in full beside the answer, and which of the returned workloads the
+answer named.
+
+```bash
+caffeinate -is env OLLAMA_KEEP_ALIVE=24h python evals/probe_scan_summary.py \
+    --context kind-triage-demo --repeat 20 --json results/probe.json
+python evals/analyse_scan_summary.py results/probe.json
+```
+
+`--shuffle` permutes the entry order per run without touching a value. It
+exists because the demo fixtures sort deterministically, so an entry's
+identity and its index are the same fact and no live run can say which one the
+model is responding to. Two arms, one shuffled, separate them.
+
+Two things that arm taught, both worth stealing for the next probe:
+
+**A wrapper around a tool changes the tool.** Ollama builds the schema by
+introspecting the callables in `agent.TOOLS`, so a closure without
+`functools.wraps` hands the model a tool named `wrapper` taking `**kwargs`
+with no description. It cost twelve runs that called no tool at all before
+anyone looked at why they were fast.
+
+**A run that wrote no summary is not a run that dropped everything.** One
+exhausted `MAX_ROUNDS`; two answered about a single pod. Pooled into the
+marginals they add a phantom drop to every position and every fault class at
+once, which is flat noise across exactly the thing being measured. Count them,
+report them, exclude them.
+
 The controller has its own eval, because it asks its own question:
 
 ```bash
