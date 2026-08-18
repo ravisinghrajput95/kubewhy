@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agent  # noqa: E402
 import routers.k8s_pods_info as k8s  # noqa: E402
 from cases import CASES  # noqa: E402
+from host_state import low_power_mode  # noqa: E402
 from ollama_state import resident  # noqa: E402
 
 
@@ -252,6 +253,15 @@ def main():
                 # telling you anything about the agent.
                 "load_before": round(load_before, 2),
                 "load_after": round(os.getloadavg()[0], 2),
+                # Whether macOS was throttling the machine. Measured
+                # 2026-08-18: a set's median run time doubled mid-run with
+                # every second attributed to model_ms, tools at 0.03s,
+                # slept_ms zero and load at 0.63 -- the battery had drained
+                # and Low Power Mode had switched itself on. Low Power Mode
+                # throttles the GPU, so a local model halves in speed while
+                # every timer stays honest and the host looks idle. See
+                # host_state.low_power_mode.
+                "low_power_mode": low_power_mode(),
                 # What was flagged, not just that something was: without this
                 # a rise in the unverified count cannot be told apart from the
                 # checker getting stricter.

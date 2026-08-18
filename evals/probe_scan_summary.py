@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agent  # noqa: E402
 import routers.k8s_pods_info as k8s  # noqa: E402
 from cases import CASES  # noqa: E402
+from host_state import low_power_mode  # noqa: E402
 
 CASE = "cluster_wide_scan"
 
@@ -252,6 +253,9 @@ def main():
             "context": k8s.active_context(),
             "started_at": began_at,
             "seconds": round(time.time() - started, 1),
+            # See host_state.low_power_mode: a throttled host halves the
+            # model's speed with every timer in the loop still honest.
+            "low_power_mode": low_power_mode(),
             "confidence": answer_event.get("confidence"),
             "nudges": answer_event.get("nudges", 0),
             "timing": answer_event.get("timing"),
