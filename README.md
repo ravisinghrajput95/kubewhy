@@ -628,6 +628,16 @@ the `llama3.2` row is the older seven-case set and is not directly comparable.
 | `qwen3:8b` | **99%** — CI [95–100] | 100 | 54s | 133s | 86/100 |
 | `llama3.2:3b` | **54%** — CI [38–70] | 35 | 3.2s | 6.1s | 20/35 |
 
+**This table predates one change to `scan_cluster`.** It is
+`results/baseline-n10-2.json`, taken before the tool began labelling a
+Running-but-unready workload `fault: not-ready`. Only `cluster_wide_scan` can
+reach that line — the other nine cases either never call `scan_cluster` (they
+use `list_pods`, unchanged) or call it as `scan_cluster(workload='healthy-web')`,
+which returns one workload that is Running *and* ready. That case was measured
+separately at n=98 against the tool result itself, which is a stricter check
+than this suite's grader applies: complete summaries went from 8/18 to 29/38.
+The table will be re-taken as a whole rather than patched.
+
 The interval matters more than the headline. At n=100 the lower bound is 95%,
 which is worth having; at the 21 runs this table used to quote it was 85%,
 which cannot distinguish a perfect agent from one that fails 15% of the time.

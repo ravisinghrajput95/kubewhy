@@ -7,9 +7,21 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `HEAD`, tree clean, 409 tests pass, tags through v0.1.6.
+**State: `main` at `52a93c8`, tree clean, 418 tests pass, tags through v0.1.6.
 Updated 2026-08-18. No clusters running anywhere; Docker is stopped and the
 model is unloaded.**
+
+**The README benchmark table has not been re-taken since `scan_cluster` began
+labelling a Running-but-unready workload `fault: not-ready`.** It is still
+`results/baseline-n10-2.json` and the README says so. Reachability was checked
+against the tool traces rather than assumed: of the ten cases, only
+`cluster_wide_scan` calls `scan_cluster` on the whole cluster — six use
+`list_pods`, which is unchanged, `host_not_cluster` asks about the host, and
+both `healthy-*` cases call `scan_cluster(workload='healthy-web')`, which
+returns one workload that is Running and ready, so the changed line cannot
+fire. A 100-run set would spend two hours re-measuring nine cases that cannot
+reach the change. Re-take it when the machine is idle and charged, for
+provenance rather than verification.
 
 **`nightly-sync` is fixed — 3/3, from 0/3.** The fix was already written and
 the eval was not exercising it. See below before assuming any other "known
