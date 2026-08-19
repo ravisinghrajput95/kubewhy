@@ -64,6 +64,12 @@ TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))
 # leaving it unset is byte-identical to not sending the field at all.
 KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE") or None
 
+# Thinking mode, on by default. Exposed so a benchmark can measure the
+# trade-off rather than argue about it: qwen3's reasoning tokens are where
+# essentially all of this agent's latency goes, and the question is what
+# turning them off costs in accuracy. The default does not change.
+THINK = os.getenv("TRIAGE_THINK", "true").lower() != "false"
+
 log = logging.getLogger("triage.agent")
 
 # Max tool-calling rounds before we give up. Guards against a model that
@@ -594,7 +600,7 @@ NUDGE = (
 )
 
 
-def stream(question, model=MODEL, think=True, prefetched=None):
+def stream(question, model=MODEL, think=None, prefetched=None):
     """
     Run the loop, yielding each step as it happens.
 
@@ -614,6 +620,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
     on a spinner. The CLI's --verbose trace, the browser UI and any streaming
     endpoint are all consumers of these events.
     """
+    think = THINK if think is None else think
     prefetched = list(prefetched or [])
     trace = []
     # Seeded with the prefetched results so grounding treats them as
@@ -817,7 +824,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
     }
 
 
-def ask(question, model=MODEL, verbose=False, think=True, prefetched=None):
+def ask(question, model=MODEL, verbose=False, think=None, prefetched=None):
     """
     Answer a question about this host, letting the model call collectors.
 
@@ -834,6 +841,7 @@ def ask(question, model=MODEL, verbose=False, think=True, prefetched=None):
     than a gate. Callers that need the steps as they happen want stream().
     """
     answer = None
+    think = THINK if think is None else think
 
     for event in stream(question, model=model, think=think, prefetched=prefetched):
         if verbose and event["type"] == "tool_call":

@@ -998,3 +998,31 @@ class TestThePolicyTargetsTheRightPod:
         gap = agent.evidence_gap(trace, out, "why is log-shipper crashing?")
 
         assert gap[1] == "log-shipper-8gnqk"
+
+
+class TestThinkingIsConfigurable:
+    """
+    Exposed so the latency trade-off can be measured rather than argued about.
+    The default must not move: without thinking, qwen3 answers multi-part
+    questions from the first tool it calls and invents the rest.
+    """
+
+    def test_thinking_is_on_by_default(self):
+        with mock_chat(return_value=reply(content="x")) as chat:
+            agent.ask("q")
+
+        assert chat.call_args.kwargs["think"] is True
+
+    def test_the_environment_can_turn_it_off_for_a_benchmark(self):
+        with patch.object(agent, "THINK", False):
+            with mock_chat(return_value=reply(content="x")) as chat:
+                agent.ask("q")
+
+        assert chat.call_args.kwargs["think"] is False
+
+    def test_an_explicit_argument_still_wins(self):
+        with patch.object(agent, "THINK", False):
+            with mock_chat(return_value=reply(content="x")) as chat:
+                agent.ask("q", think=True)
+
+        assert chat.call_args.kwargs["think"] is True
