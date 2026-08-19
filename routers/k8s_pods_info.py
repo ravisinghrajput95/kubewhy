@@ -513,14 +513,22 @@ def workload_of(pod):
     return None
 
 
-def list_pods(namespace: str = "default", only_unhealthy: bool = False):
+def list_pods(
+    namespace: str = "default",
+    only_unhealthy: bool = False,
+    limit: int = 60,
+    workload: str = "",
+):
     """
     Lists pods in a namespace with name, status, ready count, restarts and node.
 
     This is the entry point for any question about workloads in the cluster.
     Args: namespace -- which namespace to inspect, defaults to "default";
     only_unhealthy -- when true, return only pods that are not Running and
-    Ready, which is what you usually want when hunting for a problem.
+    Ready, which is what you usually want when hunting for a problem; limit --
+    how many pods to return, unhealthy first, default 60; workload -- report
+    only the pods owned by this workload, which is what you want when the
+    question names one.
     Follow up on a specific pod with describe_pod, get_pod_events or
     get_pod_logs.
     """
@@ -529,27 +537,62 @@ def list_pods(namespace: str = "default", only_unhealthy: bool = False):
     except Exception as exc:
         return _handle(exc)
 
-    result = {}
+    rows = []
     for pod in pods.items:
         statuses = pod.status.container_statuses or []
         ready = sum(1 for cs in statuses if cs.ready)
         restarts = sum(cs.restart_count for cs in statuses)
         status = _pod_status(pod)
+        healthy = _is_healthy(pod)
 
-        if only_unhealthy and _is_healthy(pod):
+        # Asked about one workload, answer about that workload -- and the
+        # order of these two filters is the whole point. only_unhealthy
+        # excludes a healthy X by construction, so a model asking "is X
+        # unhealthy?" with only_unhealthy=true got its neighbours back and
+        # described those instead. Observed on a live cluster 2026-08-19.
+        # Naming a workload therefore overrides only_unhealthy: "it is fine" is
+        # an answer, and this is the tool that has to be able to give it.
+        if workload:
+            if workload.lower() not in (
+                (workload_of(pod) or "").lower(),
+                pod.metadata.name.lower(),
+            ):
+                continue
+        elif only_unhealthy and healthy:
             continue
 
-        result[pod.metadata.name] = {
+        rows.append((healthy, pod.metadata.name, {
             "status": status,
             "ready": f"{ready}/{len(statuses)}",
             "restarts": restarts,
             "node": pod.spec.node_name,
-        }
+        }))
 
-    if not result:
+    if not rows:
         if _namespace_absent(namespace):
             return {"error": f"namespace {namespace!r} does not exist"}
+        if workload:
+            return {"result": f"no pods of workload {workload} in namespace {namespace}"}
         return {"result": f"no matching pods in namespace {namespace}"}
+
+    # Unhealthy first, so what survives the cap is what the question is about.
+    # scan_cluster has been bounded since it was written; this one was not, and
+    # a namespace is not a small number by nature. Measured 2026-08-18 on kind:
+    # ~114 chars per pod, so 5,000 pods in one namespace is ~140k tokens into
+    # a 32k context -- the whole projection strategy defeated by a loop with no
+    # ceiling on it.
+    rows.sort(key=lambda row: (row[0], row[1]))
+    ceiling = max(int(limit), 1)
+    shown, omitted = rows[:ceiling], rows[ceiling:]
+
+    result = {name: detail for _, name, detail in shown}
+    if omitted:
+        unhealthy = sum(1 for healthy, _, _ in omitted if not healthy)
+        result["_truncated"] = (
+            f"{len(omitted)} more pods not shown ({unhealthy} of them unhealthy); "
+            f"raise limit, pass workload to narrow to one, or use "
+            f"only_unhealthy=true"
+        )
     return result
 
 

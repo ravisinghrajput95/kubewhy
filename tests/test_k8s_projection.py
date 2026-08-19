@@ -789,6 +789,113 @@ class TestScanCluster:
         assert "prod/standalone" in k8s.scan_cluster()
 
 
+class TestListPodsStaysBounded:
+    """
+    A namespace is not a small number by nature, and this tool used to have no
+    ceiling at all while scan_cluster had one from the start.
+
+    Measured on kind, 2026-08-18: the projection costs ~114 characters (~28
+    tokens) per pod and grows linearly -- 10/25/50/100 pods produced
+    1,140/2,850/5,700/10,520 characters. That is fine at 100 and fatal at
+    5,000, which is ~140k tokens into a 32k context. These tests use generated
+    objects so the sizes above 100 are testable without a cluster that can hold
+    them.
+    """
+
+    @staticmethod
+    def _many(count, unhealthy=0):
+        pods = []
+        for i in range(count):
+            broken = i < unhealthy
+            pods.append(make_pod(
+                name=f"bulk-{i:04d}-abcde",
+                namespace="scale",
+                owner="bulk-replicaset",
+                statuses=[container_status(
+                    ready=not broken,
+                    waiting_reason="CrashLoopBackOff" if broken else None,
+                )],
+            ))
+        return client.V1PodList(items=pods)
+
+    @pytest.mark.parametrize("count", [10, 25, 50, 100, 250])
+    def test_output_stays_bounded_as_the_namespace_grows(self, api, count):
+        api.list_namespaced_pod.return_value = self._many(count)
+        result = k8s.list_pods("scale")
+
+        listed = [k for k in result if not k.startswith("_")]
+        assert len(listed) <= 60
+        # The ceiling is the point: 250 pods must not cost 2.5x what 100 does.
+        assert len(json.dumps(result)) < 12_000
+
+    def test_truncation_is_announced_rather_than_silent(self, api):
+        """
+        A silently short list is worse than a long one: the model reports on
+        what it was shown and has no way to know it was shown a slice.
+        """
+        api.list_namespaced_pod.return_value = self._many(250)
+        result = k8s.list_pods("scale")
+
+        assert "190 more pods not shown" in result["_truncated"]
+
+    def test_the_unhealthy_pods_survive_the_cap(self, api):
+        """
+        What gets truncated decides whether the cap is safe. Failing pods are
+        the answer to almost every question this tool is asked, so they sort
+        first and cannot be pushed out by healthy ones.
+        """
+        api.list_namespaced_pod.return_value = self._many(250, unhealthy=12)
+        result = k8s.list_pods("scale")
+
+        broken = [k for k, v in result.items()
+                  if isinstance(v, dict) and v["status"] == "CrashLoopBackOff"]
+        assert len(broken) == 12
+        assert "12 of them unhealthy" not in result["_truncated"]
+
+    def test_a_raised_limit_is_honoured(self, api):
+        api.list_namespaced_pod.return_value = self._many(250)
+        assert len([k for k in k8s.list_pods("scale", limit=200)
+                    if not k.startswith("_")]) == 200
+
+
+class TestListPodsWorkloadTargeting:
+    """
+    Asked "is X unhealthy?", the agent called list_pods(only_unhealthy=True) --
+    which excludes X by construction when X is healthy -- and then described
+    the neighbours it did get back. Observed on a live cluster 2026-08-19.
+    """
+
+    @staticmethod
+    def _mixed():
+        return client.V1PodList(items=[
+            make_pod(name="target-abc12-xyz", namespace="demo", owner="target-abc12"),
+            make_pod(
+                name="noisy-neighbour-def34-uvw", namespace="demo",
+                owner="noisy-neighbour-def34",
+                statuses=[container_status(ready=False, waiting_reason="CrashLoopBackOff")],
+            ),
+        ])
+
+    def test_reports_the_named_workload_even_when_it_is_healthy(self, api):
+        api.list_namespaced_pod.return_value = self._mixed()
+        result = k8s.list_pods("demo", only_unhealthy=True, workload="target")
+
+        assert list(result) == ["target-abc12-xyz"]
+        assert result["target-abc12-xyz"]["status"] == "Running"
+
+    def test_does_not_leak_the_neighbour(self, api):
+        api.list_namespaced_pod.return_value = self._mixed()
+        result = k8s.list_pods("demo", workload="target")
+
+        assert "noisy-neighbour-def34-uvw" not in result
+
+    def test_a_workload_that_does_not_exist_says_so(self, api):
+        api.list_namespaced_pod.return_value = self._mixed()
+        result = k8s.list_pods("demo", workload="ghost")
+
+        assert "no pods of workload ghost" in result["result"]
+
+
 class TestListPods:
     def test_projects_expected_fields_only(self, api, pod_list):
         api.list_namespaced_pod.return_value = pod_list

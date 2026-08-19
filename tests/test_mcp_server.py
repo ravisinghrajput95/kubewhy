@@ -44,6 +44,12 @@ class TestSchemas:
         assert set(by_name["list_pods"].input_schema["properties"]) == {
             "namespace",
             "only_unhealthy",
+            # Bounded like scan_cluster: a namespace is not a small number by
+            # nature, and an unbounded list defeats the projection strategy.
+            "limit",
+            # Answers "is X healthy?" about X, rather than listing the
+            # namespace and letting the model read a neighbour.
+            "workload",
         }
         assert set(by_name["scan_cluster"].input_schema["properties"]) == {
             "only_unhealthy",
