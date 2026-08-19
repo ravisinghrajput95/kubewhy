@@ -614,15 +614,27 @@ def stream(question, model=MODEL, think=True, prefetched=None):
                 continue
 
             verdict = grounding.check(answer, evidence)
+            # Verify, then rewrite. Auditing alone left "the pod has a 512Mi
+            # memory limit" standing in the prose with a correction printed
+            # underneath it, and a reader skimming for the number found the
+            # fabricated one. The draft is rewritten at the value: a measured
+            # counterpart replaces it, or it is marked so it cannot be read as
+            # a measurement.
+            verified, edits = grounding.verify(answer, verdict, evidence)
+            if edits:
+                log.info("rewrote_unsupported_claims", extra={"edits": edits})
 
             yield {
                 "type": "answer",
-                # Unsupported specifics are named underneath the answer rather
-                # than deleted out of it: a correct RCA carrying a fabricated
-                # figure is the failure mode an on-call reader cannot recover
-                # from, and rewriting the model's prose to fix it risks
-                # changing what the sentences say. See grounding.annotate.
-                "answer": grounding.annotate(answer, verdict),
+                "answer": grounding.annotate(verified, verdict),
+                # What the answer establishes, split by how well: observations
+                # carry the result id and field they came from, inferences do
+                # not, and unknowns are what the run stated and could not
+                # support. Built from the verified claims rather than asked of
+                # the model, which could invent a citation as easily as a
+                # figure.
+                "rca": grounding.contract(verdict, edits),
+                "rewrites": edits,
                 # How many times a deterministic policy sent this run back for
                 # evidence the status block provably does not contain. Separate
                 # from nudges: one is the model stopping short of a tool it

@@ -483,17 +483,20 @@ class TestNamedButNotCalled:
             reply(calls=[tool_call("get_pod_logs", {"name": "p"})]),
             reply(content="Connection refused to db:5432."),
         ]
-        with mock_chat(side_effect=responses):
+        # The log really carries the port, as it does on the demo cluster.
+        # Without it the verify stage correctly marks 5432 as unmeasured and
+        # this test stops being about the nudge at all.
+        stub = {"get_pod_logs": lambda **k: {
+            "pod": "p", "logs": "FATAL: could not connect to db:5432: connection refused"}}
+        with patch.dict(agent.TOOLS, stub), mock_chat(side_effect=responses):
             result = agent.ask("why is it crashing?")
 
         assert [c["name"] for c in result["tool_calls"]] == [
             "describe_pod", "get_pod_logs",
         ]
-        # startswith, not equality: the answer states 5432, which this test's
-        # stub never measured, so grounding appends its evidence audit. What
-        # this test is about is that the model's sentence survived the round
-        # trip, and it does.
-        assert result["answer"].startswith("Connection refused to db:5432.")
+        # Unchanged and unannotated: the port was measured, so nothing is
+        # rewritten and no audit is appended.
+        assert result["answer"] == "Connection refused to db:5432."
 
     def test_the_nudge_names_the_tool_and_prescribes_nothing_else(self):
         """

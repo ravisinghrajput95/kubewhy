@@ -486,3 +486,151 @@ class TestEvidenceAudit:
 
     def test_an_empty_answer_is_left_empty(self):
         assert grounding.annotate("", grounding.check("", [])) == ""
+
+
+class TestVerifyThenRewrite:
+    """
+    Detection was not prevention. The audit named the fabricated value and left
+    it standing in the prose, so "the pod has a 512Mi memory limit" still read
+    as a measurement and a reader skimming for the number found the wrong one.
+    These pin that no unsupported specific survives as a statement of fact.
+    """
+
+    POD = json.dumps({
+        "pod": "memory-hog-bc76968c6-87fbc",
+        "namespace": "demo",
+        "status": "OOMKilled",
+        "containers": {"hog": {"limits": {"memory": "64Mi"}}},
+    })
+
+    def rewrite(self, answer, tools=None):
+        tools = tools or [self.POD]
+        return grounding.verify(answer, grounding.check(answer, tools), tools)
+
+    # 1. correct RCA + wrong number
+    def test_a_wrong_number_does_not_survive(self):
+        out, edits = self.rewrite(
+            "memory-hog-bc76968c6-87fbc has a 512Mi memory limit and was OOMKilled."
+        )
+
+        assert "512Mi" not in out
+        assert edits[0]["action"] == "corrected"
+
+    # 4. contradictory evidence -> observed wins
+    def test_the_observed_value_replaces_it(self):
+        out, _ = self.rewrite(
+            "memory-hog-bc76968c6-87fbc has a 512Mi memory limit and was OOMKilled."
+        )
+
+        assert "64Mi (observed)" in out
+        assert "OOMKilled" in out          # the correct half is untouched
+
+    # 2. correct RCA + wrong status code
+    def test_a_fabricated_status_code_does_not_survive(self):
+        out, _ = self.rewrite(
+            "never-ready is not ready. The probe returned HTTP 503.",
+            [json.dumps({"pod": "never-ready", "status": "Running",
+                         "events": "probe failed: connection refused"})],
+        )
+
+        assert "HTTP 503." not in out
+        assert "[unverified: 503]" in out
+
+    # 3. unsupported causal explanation
+    def test_an_unsupported_cause_is_marked(self):
+        out, _ = self.rewrite("The application has a memory leak.")
+
+        assert "[unverified: memory leak]" in out
+
+    def test_a_hedged_cause_is_left_alone(self):
+        """The prompt asks the model to mark inference; punishing it would be
+        the wrong lesson."""
+        answer = "The pod was OOMKilled, likely a memory leak."
+        out, edits = self.rewrite(answer)
+
+        assert out == answer
+        assert edits == []
+
+    # 5. workload A's evidence cannot carry workload B's claim
+    def test_a_claim_cannot_borrow_another_workloads_evidence(self):
+        scan = json.dumps({
+            "demo/memory-hog": {"status": "OOMKilled", "pods": 1},
+            "demo/healthy-web": {"status": "Running", "pods": 2},
+        })
+        out, _ = self.rewrite("healthy-web was OOMKilled.", [scan])
+
+        assert "[unverified: OOMKilled]" in out
+
+    # 6 and 7
+    def test_an_empty_answer_is_never_grounded(self):
+        assert grounding.check("", [self.POD])["confidence"] == "ungrounded"
+        assert grounding.check("   ", [])["confidence"] == "ungrounded"
+
+    def test_an_answer_of_only_unsupported_claims_is_never_grounded(self):
+        answer = "The pod restarted 9 times and used 4096Mi."
+
+        assert grounding.check(answer, [self.POD])["confidence"] == "partial"
+        assert grounding.check(answer, [])["confidence"] == "ungrounded"
+
+    def test_a_measured_answer_is_returned_byte_identical(self):
+        answer = "memory-hog-bc76968c6-87fbc was OOMKilled at its 64Mi limit."
+        out, edits = self.rewrite(answer)
+
+        assert out == answer
+        assert edits == []
+
+    def test_a_recommendation_is_not_rewritten(self):
+        """Proposing 256Mi is not asserting it, and mangling advice is worse
+        than the fabrication this removes."""
+        out, _ = self.rewrite(
+            "The limit is 512Mi. Fix: raise it to 256Mi."
+        )
+
+        assert "raise it to 256Mi" in out
+
+    def test_a_pod_hash_is_never_corrupted(self):
+        """
+        A flagged "3" must not rewrite the 3 inside a ReplicaSet hash. A
+        redaction pass that corrupts pod names is worse than the fabrication.
+        """
+        answer = "memory-hog-bc76968c6-87fbc restarted 3 times."
+        out, _ = self.rewrite(answer)
+
+        assert "memory-hog-bc76968c6-87fbc" in out
+        assert "[unverified: 3]" in out
+
+    def test_a_decimal_is_not_split_by_its_integer_part(self):
+        out, _ = self.rewrite("CPU is at 3.5 percent.")
+
+        assert "[unverified: 3.5]" in out
+        assert "[unverified: 3].5" not in out
+
+    def test_rewriting_is_idempotent(self):
+        answer = "The limit is 512Mi."
+        once, _ = self.rewrite(answer)
+        twice, _ = self.rewrite(once)
+
+        assert once == twice
+
+
+class TestFactContract:
+    def test_observations_carry_their_evidence(self):
+        pod = json.dumps({"pod": "memory-hog", "status": "OOMKilled",
+                          "containers": {"hog": {"limits": {"memory": "64Mi"}}}})
+        verdict = grounding.check(
+            "memory-hog was OOMKilled at its 64Mi limit.",
+            grounding.records([pod], names=["describe_pod"]),
+        )
+        rca = grounding.contract(verdict)
+
+        assert {o["claim"] for o in rca["observations"]} == {"64", "oomkilled"}
+        assert all(o["evidence"][0]["tool"] == "describe_pod"
+                   for o in rca["observations"])
+
+    def test_unknowns_are_what_was_stated_and_could_not_be_supported(self):
+        pod = json.dumps({"pod": "p", "status": "OOMKilled"})
+        answer = "p was OOMKilled and restarted 9 times."
+        verdict = grounding.check(answer, [pod])
+        _, edits = grounding.verify(answer, verdict, [pod])
+
+        assert grounding.contract(verdict, edits)["unknowns"] == ["9"]

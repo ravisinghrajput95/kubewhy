@@ -70,6 +70,30 @@ KNOWN_STATUSES = {
     "pidpressure",
 }
 
+# Named causes: diagnoses that assert a mechanism rather than report a status.
+# A status is what the cluster said; these are claims about WHY, and the tools
+# either establish them or they are speculation wearing the same voice.
+#
+# Observed 2026-08-18: asked what caused "the application memory leak" in a pod
+# whose only evidence was OOMKilled, the agent accepted the premise and
+# explained the leak. polinux/stress allocates memory deliberately -- there is
+# no leak, and nothing measured could have shown one. The answer was scored
+# grounded because "memory leak" is neither a number nor a status.
+#
+# Deliberately short, and only phrases whose presence in tool output would be
+# unambiguous. A general "is this inference?" detector is not something a
+# regex can be, and a long list here would flag ordinary hedged prose.
+KNOWN_CAUSES = (
+    "memory leak",
+    "deadlock",
+    "race condition",
+    "network partition",
+    "dns failure",
+    "disk full",
+    "clock skew",
+    "certificate expired",
+)
+
 # Markdown list markers and headings: "1." starting a line is enumeration,
 # not a measurement, and flagging it would bury the real findings.
 _ORDINAL = re.compile(r"^[\s>*\-]*\d+[.)]\s", re.MULTILINE)
@@ -425,9 +449,30 @@ def check(answer, tool_outputs):
                 "evidence": cite(_format(claim)) if supported else [],
             })
 
+        lowered = clause.lower()
+
+        # A named cause is only a finding if a tool said so. Hedged, it is
+        # honest speculation and the prompt asks for exactly that, so a clause
+        # that marks itself is left alone -- flagging "possibly a memory leak"
+        # would punish the labelling this project asks for.
+        hedged = any(word in lowered for word in
+                     ("likely", "possibl", "probabl", "may ", "might", "could",
+                      "suspect", "perhaps", "appears", "seems", "worth checking"))
+        for cause in KNOWN_CAUSES:
+            if cause in lowered and not hedged:
+                checked += 1
+                supported = cause in scope_lower
+                if not supported:
+                    flag(cause)
+                claims.append({
+                    "value": cause,
+                    "kind": "cause",
+                    "status": "observed" if supported else "unverified",
+                    "evidence": cite(cause) if supported else [],
+                })
+
         # Status names are checked as plain substrings; the model may style
         # them as **OOMKilled** or `OOMKilled`, so compare lowered.
-        lowered = clause.lower()
         for status in KNOWN_STATUSES:
             if status in lowered:
                 checked += 1
@@ -522,3 +567,154 @@ def annotate(answer, verdict):
         )
 
     return text + "\n" + "\n".join(lines)
+
+
+# A value is only replaced where it stands alone. Without the neighbour guard
+# a flagged "3" rewrites the 3 inside `memory-hog-bc76968c6-87fbc`, and a
+# redaction pass that corrupts pod names is worse than the fabrication it was
+# built to remove.
+def _standalone(value):
+    """
+    The value as its own token, with any unit still attached.
+
+    _numbers extracts digits, so a fabricated "512Mi" is flagged as "512" --
+    and replacing only the digits would leave a dangling "Mi" in the sentence.
+    The optional suffix keeps the token whole, and the neighbour guards stop
+    it matching inside a pod hash.
+    """
+    # The dot is excluded only when it continues a number: "3.5" must not
+    # match a flagged "3", while "HTTP 503." at the end of a sentence must.
+    # The first cut excluded every following dot and silently skipped every
+    # claim that ended a sentence -- which is most of them.
+    return re.compile(
+        r"(?<![\w\-])(?<!\d\.)" + re.escape(value)
+        + r"(?:[a-zA-Z%]+)?(?![\w\-])(?!\.\d)",
+        re.IGNORECASE,
+    )
+
+_UNIT = re.compile(r"^(\d+(?:\.\d+)?)\s*([a-zA-Z%]+)$")
+
+
+def _observed_counterpart(token, scope_text):
+    """
+    The measured value this fabricated one was probably meant to be.
+
+    Only for a claim carrying a unit -- 512Mi against a measured 64Mi -- and
+    only when the evidence in scope holds exactly one value in that same unit.
+    One candidate is a correction; two is a guess, and this module does not
+    guess. Returns None when it cannot be sure, and the caller marks the claim
+    unverified instead of replacing it.
+    """
+    match = _UNIT.match(token.strip())
+    if not match:
+        return None
+
+    unit = match.group(2)
+    found = {
+        m.group(0) for m in
+        re.finditer(r"\d+(?:\.\d+)?" + re.escape(unit) + r"\b", scope_text)
+    }
+    found = {f for f in found if f.lower() != token.strip().lower()}
+    return found.pop() if len(found) == 1 else None
+
+
+def verify(answer, verdict, tool_outputs=()):
+    """
+    Rewrite a draft so no unsupported specific survives as a statement of fact.
+
+    The audit that preceded this named the fabricated values underneath the
+    answer and left them in the prose above it, which is only half a fix: the
+    sentence "the pod has a 512Mi memory limit" still read as a measurement,
+    and a reader skimming for the number found the wrong one. Detection is not
+    prevention.
+
+    Three outcomes per unsupported value, in order of what the evidence can
+    support:
+
+      corrected   the claim carries a unit and the evidence in scope holds
+                  exactly one value in that unit -> replaced, and labelled
+                  as the observed figure
+      marked      no counterpart -> wrapped as [unverified: X] so it can
+                  still be read, and can no longer be read as measured
+      untouched   the value sits in a recommendation rather than a claim,
+                  which _claims already excludes -- proposing 256Mi is not
+                  asserting it
+
+    Prose is rewritten at the value, never regenerated. Handing the draft back
+    to the model to rewrite would invite a second round of invention, and
+    deleting whole sentences changes what the answer says. Replacing the
+    fabricated token in place is the smallest edit that makes the sentence
+    true.
+    """
+    text = (answer or "").strip()
+    unverified = verdict.get("unverified") or []
+    if not text or not unverified:
+        return answer, []
+
+    scope_text = " ".join(
+        r["result"] if isinstance(r, dict) else r for r in (tool_outputs or [])
+    )
+
+    # Only reporting lines are rewritten. A prescriptive line is a proposal,
+    # and "raise it to 256Mi" must survive intact or the advice becomes
+    # nonsense.
+    claim_lines = set()
+    for line in text.splitlines():
+        if line.strip() and _claims(line):
+            claim_lines.add(line)
+
+    edits = []
+    out = []
+    for line in text.splitlines():
+        if line not in claim_lines:
+            out.append(line)
+            continue
+
+        for value in unverified:
+            pattern = _standalone(value)
+            if not pattern.search(line):
+                continue
+
+            # The token as it appears, e.g. "512Mi" for a flagged "512".
+            token = pattern.search(line).group(0)
+            observed = _observed_counterpart(token, scope_text)
+            if observed:
+                line = pattern.sub(f"{observed} (observed)", line)
+                edits.append({"claim": token, "action": "corrected",
+                              "observed": observed})
+            else:
+                line = pattern.sub(f"[unverified: {token}]", line)
+                edits.append({"claim": token, "action": "marked"})
+        out.append(line)
+
+    return "\n".join(out), edits
+
+
+def contract(verdict, edits=()):
+    """
+    The answer as a fact contract: what was observed, inferred, and unknown.
+
+    Built from the verified claims rather than asked of the model, because a
+    model that can invent a memory limit can invent the citation for it just
+    as easily. Every observation here carries the result id and field the
+    value was actually found in.
+    """
+    observations, inferences = [], []
+    for claim in verdict.get("claims", []):
+        if claim["status"] == "observed":
+            observations.append({
+                "claim": claim["value"],
+                "kind": claim["kind"],
+                "evidence": claim["evidence"],
+            })
+        else:
+            inferences.append({"claim": claim["value"], "kind": claim["kind"]})
+
+    return {
+        "observations": observations,
+        "inferences": inferences,
+        # What the run could not establish: every value it stated and could
+        # not support, after rewriting.
+        "unknowns": [e["claim"] for e in edits if e["action"] == "marked"],
+        "corrections": [e for e in edits if e["action"] == "corrected"],
+    }
