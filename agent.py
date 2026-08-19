@@ -416,6 +416,22 @@ EVIDENCE_IN_EVENTS = (
     "createcontainerconfigerror",
 )
 
+# A crashing pod reports the symptom in its status and the cause in its logs.
+# "Do not stop at the status name" is in the system prompt and mostly works;
+# this is the floor under it. Narrow on purpose: it fires only when NOTHING
+# was read for that pod beyond its status, so the ordinary
+# describe_pod -> get_pod_logs chain never sees it.
+EVIDENCE_IN_LOGS = ("crashloopbackoff", "error", "oomkilled")
+
+LOGS_POLICY = (
+    "You have {pod}'s status and nothing it wrote. {status} is the symptom, "
+    "not the cause -- the reason the container exited is in its logs. Call "
+    "get_pod_logs on {pod} in namespace {namespace}, read what it printed, and "
+    "then answer this question in full:\n\n{question}\n\nKeep every finding "
+    "you already have. If the logs are empty, say so rather than proposing a "
+    "cause they do not show."
+)
+
 EVIDENCE_POLICY = (
     "The evidence for a {status} pod is not in its status block -- the kubelet "
     "puts the reason in an Event and nowhere else, which is why {pod} looks "
@@ -437,10 +453,14 @@ def evidence_gap(trace, outputs):
     still chooses its own path -- this catches the one gap where stopping early
     is guaranteed to produce a guess.
     """
-    asked = {
-        (c["arguments"].get("name"), c["arguments"].get("namespace", "default"))
-        for c in trace if c["name"] == "get_pod_events"
-    }
+    def called(tool):
+        return {
+            (c["arguments"].get("name"), c["arguments"].get("namespace", "default"))
+            for c in trace if c["name"] == tool
+        }
+
+    asked = called("get_pod_events")
+    read = called("get_pod_logs")
 
     for output in outputs:
         try:
@@ -454,13 +474,35 @@ def evidence_gap(trace, outputs):
         status = str(data.get("status", "")).lower()
         if not pod or not status:
             continue
+        namespace = data.get("namespace", "default")
         if not any(marker in status for marker in EVIDENCE_IN_EVENTS):
+            continue
+        if (pod, namespace) in asked:
+            continue
+        return "events", pod, namespace, data.get("status")
+
+    # Logs second, so a pod that wants both is sent for events first: an
+    # unmountable volume means the container never started and has no logs to
+    # read at all.
+    for output in outputs:
+        try:
+            data = json.loads(output)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        pod = data.get("pod")
+        status = str(data.get("status", "")).lower()
+        if not pod or not status:
+            continue
+        if not any(marker in status for marker in EVIDENCE_IN_LOGS):
             continue
 
         namespace = data.get("namespace", "default")
-        if (pod, namespace) in asked:
+        if (pod, namespace) in read or (pod, namespace) in asked:
             continue
-        return pod, namespace, data.get("status")
+        return "logs", pod, namespace, data.get("status")
 
     return None
 
@@ -598,15 +640,17 @@ def stream(question, model=MODEL, think=True, prefetched=None):
             # on the last rounds.
             gap = evidence_gap(trace, outputs)
             if gap and policies < MAX_NUDGES and rounds_left >= 2:
-                pod, namespace, status = gap
+                kind, pod, namespace, status = gap
                 policies += 1
                 log.info(
                     "evidence_policy_applied",
-                    extra={"pod": pod, "namespace": namespace, "status": status},
+                    extra={"policy": kind, "pod": pod,
+                           "namespace": namespace, "status": status},
                 )
+                template = EVIDENCE_POLICY if kind == "events" else LOGS_POLICY
                 messages.append({
                     "role": "user",
-                    "content": EVIDENCE_POLICY.format(
+                    "content": template.format(
                         status=status, pod=pod, namespace=namespace,
                         question=question,
                     ),

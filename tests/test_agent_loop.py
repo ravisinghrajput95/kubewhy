@@ -772,7 +772,8 @@ class TestEvidencePolicy:
 
     def test_a_stuck_pod_without_events_is_a_gap(self):
         assert agent.evidence_gap([], [self.STUCK]) == (
-            "missing-configmap-volume", "config-faults", "ContainerCreating"
+            "events", "missing-configmap-volume", "config-faults",
+            "ContainerCreating",
         )
 
     def test_no_gap_once_events_were_read_for_that_pod(self):
@@ -787,15 +788,38 @@ class TestEvidencePolicy:
 
         assert agent.evidence_gap(trace, [self.STUCK]) is not None
 
-    @pytest.mark.parametrize("status", ["OOMKilled", "CrashLoopBackOff", "Running"])
-    def test_statuses_that_explain_themselves_are_left_alone(self, status):
-        """
-        describe_pod carries the termination reason for these, so demanding
-        events would be noise on every ordinary diagnosis.
-        """
-        pod = json.dumps({"pod": "p", "namespace": "demo", "status": status})
+    def test_a_healthy_pod_needs_nothing(self):
+        pod = json.dumps({"pod": "p", "namespace": "demo", "status": "Running"})
 
         assert agent.evidence_gap([], [pod]) is None
+
+    @pytest.mark.parametrize("status", ["OOMKilled", "CrashLoopBackOff", "Error"])
+    def test_a_crashing_pod_whose_logs_were_never_read_is_a_gap(self, status):
+        """
+        The status is the symptom. Reading it and stopping is how a run ends
+        up proposing a cause instead of quoting one.
+        """
+        pod = json.dumps({"pod": "c", "namespace": "demo", "status": status})
+
+        assert agent.evidence_gap([], [pod])[0] == "logs"
+
+    @pytest.mark.parametrize("tool", ["get_pod_logs", "get_pod_events"])
+    def test_reading_either_closes_the_logs_gap(self, tool):
+        pod = json.dumps({"pod": "c", "namespace": "demo", "status": "CrashLoopBackOff"})
+        trace = [{"name": tool, "arguments": {"name": "c", "namespace": "demo"}}]
+
+        assert agent.evidence_gap(trace, [pod]) is None
+
+    def test_events_win_when_a_pod_wants_both(self):
+        """
+        An unmountable volume means the container never started, so there are
+        no logs to read -- sending the run for logs first would waste its one
+        policy on an empty result.
+        """
+        both = json.dumps({"pod": "v", "namespace": "cf",
+                           "status": "CreateContainerConfigError"})
+
+        assert agent.evidence_gap([], [both])[0] == "events"
 
     def test_the_loop_sends_the_run_back_for_events(self):
         """End to end: the model answers early and is made to collect proof."""
