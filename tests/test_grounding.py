@@ -7,6 +7,8 @@ checker is pinned against real behaviour rather than invented examples.
 
 import json
 
+import pytest
+
 import grounding
 
 
@@ -634,3 +636,92 @@ class TestFactContract:
         _, edits = grounding.verify(answer, verdict, [pod])
 
         assert grounding.contract(verdict, edits)["unknowns"] == ["9"]
+
+
+class TestEntityIdentityIsChecked:
+    """
+    The last grounding hole: values were checked, identity was not. Observed
+    live 2026-08-19 -- "The crasher pod log-shipper-8gnqk is in Error with 7
+    restarts". Error and 7 were both measured, for log-shipper, so every value
+    checked out and the answer scored grounded while naming the wrong workload
+    in the same breath.
+    """
+
+    POD = json.dumps({
+        "pod": "crasher-abc123", "namespace": "demo",
+        "status": "CrashLoopBackOff", "restarts": 4,
+    })
+
+    def test_a_pod_no_tool_returned_fails_even_with_correct_values(self):
+        result = grounding.check(
+            "The pod log-shipper-xyz has 4 restarts and is in CrashLoopBackOff.",
+            [self.POD],
+        )
+
+        assert result["confidence"] == "partial"
+        assert "pod log-shipper-xyz" in result["unverified"]
+
+    def test_the_pod_the_tool_did_return_passes(self):
+        result = grounding.check(
+            "The pod crasher-abc123 has 4 restarts.", [self.POD]
+        )
+
+        assert result["confidence"] == "grounded"
+
+    def test_the_workload_name_still_reaches_its_pod(self):
+        """An answer says `crasher`; the tool keyed `crasher-abc123`."""
+        assert grounding.check(
+            "The pod crasher has 4 restarts.", [self.POD]
+        )["confidence"] == "grounded"
+
+    @pytest.mark.parametrize("kind", [
+        "pod", "deployment", "service", "node", "container", "daemonset",
+    ])
+    def test_every_labelled_kind_is_checked(self, kind):
+        result = grounding.check(f"The {kind} ghost-xyz-99 is failing.", [self.POD])
+
+        assert f"{kind} ghost-xyz-99" in result["unverified"]
+
+    def test_a_fabricated_entity_is_rewritten_out(self):
+        answer = "The pod log-shipper-xyz has 4 restarts."
+        out, edits = grounding.verify(
+            answer, grounding.check(answer, [self.POD]), [self.POD]
+        )
+
+        # The labelled phrase is marked, not the bare name: "the [unverified:
+        # pod log-shipper-xyz]" reads correctly, where marking only the name
+        # would leave a bare "pod" doing the asserting.
+        assert "[unverified: pod log-shipper-xyz]" in out
+        assert any(e["action"] == "marked" for e in edits)
+
+    def test_an_english_word_after_a_kind_is_not_an_entity(self):
+        """
+        "The pod restarted 9 times" captured `restarted` as a pod name in the
+        first cut and reported a nonexistent pod. A grounding check that flags
+        English is worse than no check.
+        """
+        result = grounding.check("The pod restarted 9 times.", [self.POD])
+
+        assert not any("restarted" in u for u in result["unverified"])
+
+    def test_a_namespace_that_is_only_a_field_value_is_known(self):
+        """
+        `demo` is a field in the result, not a document subject, so the index
+        does not key it. Flagging it would fire on almost every correct answer.
+        """
+        result = grounding.check(
+            "The pod crasher-abc123 in namespace demo has 4 restarts.", [self.POD]
+        )
+
+        assert result["confidence"] == "grounded"
+
+    def test_cross_contamination_between_two_real_workloads(self):
+        """Both pods exist; the claim attaches one's status to the other."""
+        scan = json.dumps({
+            "demo/memory-hog": {"status": "OOMKilled", "pods": 1},
+            "demo/healthy-web": {"status": "Running", "pods": 2},
+        })
+        result = grounding.check("The deployment healthy-web is OOMKilled.", [scan])
+
+        assert result["confidence"] == "partial"
+        assert "oomkilled" in result["unverified"]

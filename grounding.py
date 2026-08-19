@@ -94,6 +94,19 @@ KNOWN_CAUSES = (
     "certificate expired",
 )
 
+# A claim labelled with the kind of thing it is about: "pod log-shipper-xyz",
+# "deployment healthy-web", "namespace demo". The label is what makes the
+# check safe -- an unlabelled hyphenated token is as likely to be
+# "out-of-memory" as an object name, and flagging English would make this
+# signal worthless.
+_ENTITY_KINDS = ("pod", "deployment", "service", "namespace", "node",
+                 "container", "daemonset", "statefulset", "job", "cronjob")
+_LABELLED_ENTITY = re.compile(
+    r"\b(" + "|".join(_ENTITY_KINDS) + r")s?\b[\s:=]+[`\"'*]*"
+    r"([a-z0-9][a-z0-9.\-]{2,})[`\"'*]*",
+    re.IGNORECASE,
+)
+
 # Markdown list markers and headings: "1." starting a line is enumeration,
 # not a measurement, and flagging it would bury the real findings.
 _ORDINAL = re.compile(r"^[\s>*\-]*\d+[.)]\s", re.MULTILINE)
@@ -450,6 +463,49 @@ def check(answer, tool_outputs):
             })
 
         lowered = clause.lower()
+
+        # Entity identity, before any value is considered. A claim about a pod
+        # no tool ever returned cannot be grounded however correct its numbers
+        # are -- and its numbers are often correct, because the model lifted
+        # them from the pod it should have been talking about.
+        #
+        # Observed live 2026-08-19: "The crasher pod log-shipper-8gnqk is in
+        # Error with 7 restarts". Error and 7 were both measured, for
+        # log-shipper, so every value checked out and the answer scored
+        # grounded while naming the wrong workload in the same breath.
+        for kind, name in _LABELLED_ENTITY.findall(clause):
+            name = name.strip(".,;:").lower()
+            if not name or name in _ENTITY_KINDS:
+                continue
+            # Must look like a generated object name rather than the next
+            # English word. "The pod restarted 9 times" captured `restarted`
+            # and reported a nonexistent pod; requiring a hyphen or a digit
+            # keeps log-shipper-xyz and crasher-abc123 and drops every verb.
+            # A bare word like `demo` is skipped here and caught, when it is
+            # real, by the evidence test below.
+            if not any(ch.isdigit() or ch == "-" for ch in name):
+                continue
+            # Known if any indexed entity matches it either way round -- the
+            # answer may say the workload where the tool keyed the pod -- or
+            # if the name appears anywhere in what the tools returned. The
+            # second test matters for kinds the index does not key on:
+            # "namespace demo" is a field value, not a document subject, and
+            # flagging it would fire on almost every correct answer.
+            known = (
+                name in measured_text.lower()
+                or any(name == entity or name in entity or entity in name
+                       for entity in index)
+            )
+            if known:
+                continue
+            checked += 1
+            flag(f"{kind.lower()} {name}")
+            claims.append({
+                "value": f"{kind.lower()} {name}",
+                "kind": "entity",
+                "status": "unverified",
+                "evidence": [],
+            })
 
         # A named cause is only a finding if a tool said so. Hedged, it is
         # honest speculation and the prompt asks for exactly that, so a clause
