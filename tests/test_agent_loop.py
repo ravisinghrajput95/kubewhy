@@ -946,3 +946,55 @@ class TestEvidenceGapReadsEveryToolShape:
                json.dumps({"pod": "crasher-abc", "logs": "FATAL: db refused"})]
 
         assert agent.evidence_gap(trace, out) is None
+
+
+class TestThePolicyTargetsTheRightPod:
+    """
+    Observed live 2026-08-19: asked about `crasher`, the model listed every
+    unhealthy pod in the namespace and the policy pointed at the first one --
+    log-shipper. The run collected evidence about a workload nobody had
+    mentioned and answered "The crasher pod log-shipper-8gnqk", which is the
+    wrong-entity failure this project has spent months removing, reintroduced
+    by its own safety net.
+    """
+
+    TRACE = [{"name": "list_pods", "arguments": {"namespace": "demo"}}]
+    OUT = [json.dumps({
+        "log-shipper-8gnqk": {"status": "Error"},
+        "crasher-5964d99948-9g8vg": {"status": "Error"},
+    })]
+
+    def test_it_picks_the_pod_the_question_named(self):
+        gap = agent.evidence_gap(self.TRACE, self.OUT, "why is crasher failing?")
+
+        assert gap[1] == "crasher-5964d99948-9g8vg"
+
+    def test_a_question_naming_nothing_still_gets_a_gap(self):
+        gap = agent.evidence_gap(self.TRACE, self.OUT, "what is broken in demo?")
+
+        assert gap is not None
+
+    def test_the_full_pod_name_matches_too(self):
+        gap = agent.evidence_gap(
+            self.TRACE, self.OUT, "describe crasher-5964d99948-9g8vg please"
+        )
+
+        assert gap[1] == "crasher-5964d99948-9g8vg"
+
+    def test_both_suffix_shapes_are_candidates(self):
+        """
+        A Deployment pod carries two generated suffixes and a DaemonSet pod
+        one, and nothing in the name says which. Guessing a single trim turned
+        `log-shipper-8gnqk` into `log`, which matches nothing a person types.
+        """
+        assert "crasher" in agent.workload_prefix("crasher-5964d99948-9g8vg")
+        assert "log-shipper" in agent.workload_prefix("log-shipper-8gnqk")
+        assert "sidecar-app" in agent.workload_prefix("sidecar-app")
+
+    def test_a_daemonset_pod_is_matched_by_its_workload_name(self):
+        trace = [{"name": "list_pods", "arguments": {"namespace": "demo"}}]
+        out = [json.dumps({"crasher-59-9g8": {"status": "Error"},
+                           "log-shipper-8gnqk": {"status": "Error"}})]
+        gap = agent.evidence_gap(trace, out, "why is log-shipper crashing?")
+
+        assert gap[1] == "log-shipper-8gnqk"

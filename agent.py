@@ -448,6 +448,26 @@ EVIDENCE_POLICY = (
 )
 
 
+def workload_prefix(pod):
+    """
+    The names a question might use for this pod's workload.
+
+    A Deployment pod carries two generated suffixes
+    (`crasher-5964d99948-9g8vg` -> `crasher`) and a DaemonSet pod carries one
+    (`log-shipper-8gnqk` -> `log-shipper`). Nothing in the name says which, so
+    both candidates are returned and either may match -- guessing one trim
+    turned `log-shipper-8gnqk` into `log`, which matches nothing a person
+    would ever type.
+    """
+    parts = pod.split("-")
+    candidates = {pod}
+    if len(parts) >= 2:
+        candidates.add("-".join(parts[:-1]))
+    if len(parts) >= 3:
+        candidates.add("-".join(parts[:-2]))
+    return candidates
+
+
 def _reported_pods(trace, outputs):
     """
     Every (pod, namespace, status) a tool result described, whatever its shape.
@@ -500,7 +520,7 @@ def _reported_pods(trace, outputs):
     return seen
 
 
-def evidence_gap(trace, outputs):
+def evidence_gap(trace, outputs, question=""):
     """
     A pod whose cause lives in Events, that this run never asked Events about.
 
@@ -519,6 +539,26 @@ def evidence_gap(trace, outputs):
     asked = called("get_pod_events")
     read = called("get_pod_logs")
     reported = _reported_pods(trace, outputs)
+
+    # Prefer a pod the question actually asked about. Observed live
+    # 2026-08-19: asked about `crasher`, the model listed every unhealthy pod
+    # in the namespace and this policy pointed at the first one it found --
+    # log-shipper -- which sent the run to collect evidence about a workload
+    # nobody had mentioned. The answer came back "The crasher pod
+    # log-shipper-8gnqk", which is the wrong-entity failure this project has
+    # spent months removing, reintroduced by its own safety net.
+    #
+    # Substring on the pod name, since a question names the workload
+    # (`crasher`) and the listing keys the pod (`crasher-5964d99948-9g8vg`).
+    lowered_question = (question or "").lower()
+    if lowered_question:
+        named = [
+            row for row in reported
+            if any(part and part.lower() in lowered_question
+                   for part in workload_prefix(row[0]))
+        ]
+        if named:
+            reported = named
 
     # Events first: an unmountable volume means the container never started,
     # so there are no logs to read and sending the run for them would spend
@@ -673,7 +713,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
             # answering without reading events is guessing however confident
             # the prose sounds. Same budget as the nudge: once per run, never
             # on the last rounds.
-            gap = evidence_gap(trace, outputs)
+            gap = evidence_gap(trace, outputs, question)
             if gap and policies < MAX_NUDGES and rounds_left >= 2:
                 kind, pod, namespace, status = gap
                 policies += 1
