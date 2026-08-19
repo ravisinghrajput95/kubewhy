@@ -108,6 +108,25 @@ def grade(case, result):
         if tool in called:
             failures.append(f"should not have called {tool}")
 
+    # A correct root cause wrapped around an invented figure passed every case
+    # in this suite until 2026-08-19, because nothing here read the grounding
+    # verdict. Observed live the day before, all three inside otherwise
+    # correct diagnoses: 512Mi for a container measured at 64Mi, "503 Service
+    # Unavailable" for a connection that was refused, and "exit 137 means the
+    # OOM killer" for a pod with no memory limit at all.
+    #
+    # Opt-in per case rather than suite-wide, so the ten original cases keep
+    # measuring what they measured and stay comparable to every published
+    # number. The unverified claims are recorded as a note either way, because
+    # a fabrication next to a right answer is worth seeing even where it is
+    # not being scored.
+    unverified = result.get("unverified") or []
+    if unverified:
+        if case.get("require_grounded"):
+            failures.append(f"unverified claims: {unverified}")
+        else:
+            notes.append(f"stated {unverified} with no measurement behind it")
+
     return not failures, failures, notes
 
 
@@ -175,6 +194,10 @@ def main():
 
     total_passes = total_runs = 0
     ungrounded = 0
+    # The metric that matters: a right answer resting entirely on measurement.
+    # `score` alone cannot separate that from a right answer carrying an
+    # invented figure, and those are different products.
+    clean = 0
     records = []
     # Accumulated across rounds rather than printed as we go: repeat-major
     # ordering means no case is finished until the final round.
@@ -228,6 +251,8 @@ def main():
             reasons += why
             if result.get("confidence") != "grounded":
                 ungrounded += 1
+            if ok and not (result.get("unverified") or []):
+                clean += 1
 
             records.append({
                 "case": case["name"],
@@ -369,7 +394,11 @@ def main():
 
     rate = total_passes / total_runs * 100 if total_runs else 0
     print(f"\nscore: {total_passes}/{total_runs} ({rate:.0f}%)")
-    print(f"answers with unverified claims: {ungrounded}/{total_runs}")
+    print(
+        f"fully grounded and correct: {clean}/{total_runs} "
+        f"({clean / total_runs * 100:.0f}%)" if total_runs else ""
+    )
+    print(f"answers not fully grounded: {ungrounded}/{total_runs}")
 
     # Non-zero exit on a clear regression, so this can gate a release even
     # though it is too slow and too non-deterministic for CI.

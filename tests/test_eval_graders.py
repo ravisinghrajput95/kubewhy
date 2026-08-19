@@ -375,3 +375,62 @@ class TestScanSummaryProbeShuffle:
         failure = {"error": "kubernetes API error 404"}
 
         assert self._wrap(0, failure) == failure
+
+
+class TestFabricatedDetailsAreScored:
+    """
+    Until 2026-08-19 this suite scored the root cause and ignored the
+    grounding verdict entirely, so a correct RCA wrapped around an invented
+    figure passed. All three observed cases were that shape.
+    """
+
+    CASE = {
+        "name": "oom",
+        "expect_any": ["oomkilled"],
+        "require_grounded": True,
+    }
+
+    def test_a_fabricated_figure_fails_a_strict_case(self):
+        ok, failures, _ = grade_answer(self.CASE, {
+            "answer": "memory-hog was OOMKilled at its 512Mi limit.",
+            "tool_calls": [],
+            "unverified": ["512"],
+        })
+
+        assert ok is False
+        assert any("unverified" in f for f in failures)
+
+    def test_the_same_answer_measured_passes(self):
+        ok, failures, _ = grade_answer(self.CASE, {
+            "answer": "memory-hog was OOMKilled at its 64Mi limit.",
+            "tool_calls": [],
+            "unverified": [],
+        })
+
+        assert ok is True
+        assert failures == []
+
+    def test_a_lenient_case_records_it_as_a_note_instead(self):
+        """
+        The ten original cases keep measuring what they measured, so every
+        published number stays comparable -- but the fabrication is still
+        visible rather than silently dropped.
+        """
+        lenient = {"name": "oom", "expect_any": ["oomkilled"]}
+        ok, failures, notes = grade_answer(lenient, {
+            "answer": "memory-hog was OOMKilled at its 512Mi limit.",
+            "tool_calls": [],
+            "unverified": ["512"],
+        })
+
+        assert ok is True
+        assert failures == []
+        assert any("512" in note for note in notes)
+
+    def test_a_wrong_answer_still_fails_on_the_root_cause(self):
+        ok, failures, _ = grade_answer(self.CASE, {
+            "answer": "The pod is fine.", "tool_calls": [], "unverified": [],
+        })
+
+        assert ok is False
+        assert any("oomkilled" in f for f in failures)
