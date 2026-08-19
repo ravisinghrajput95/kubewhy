@@ -613,9 +613,16 @@ def stream(question, model=MODEL, think=True, prefetched=None):
                 })
                 continue
 
+            verdict = grounding.check(answer, evidence)
+
             yield {
                 "type": "answer",
-                "answer": answer,
+                # Unsupported specifics are named underneath the answer rather
+                # than deleted out of it: a correct RCA carrying a fabricated
+                # figure is the failure mode an on-call reader cannot recover
+                # from, and rewriting the model's prose to fix it risks
+                # changing what the sentences say. See grounding.annotate.
+                "answer": grounding.annotate(answer, verdict),
                 # How many times a deterministic policy sent this run back for
                 # evidence the status block provably does not contain. Separate
                 # from nudges: one is the model stopping short of a tool it
@@ -627,7 +634,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
                 # get_pod_logs cannot be told apart from one that had to be
                 # sent back for it, and the guard's own effect is unmeasurable.
                 "nudges": nudges,
-                **grounding.check(answer, evidence),
+                **verdict,
             }
             return
 

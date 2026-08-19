@@ -434,3 +434,55 @@ class TestObservedFailuresFrom20260818:
         answer = "liveness-flapper-5bd4f768c5-jq5k7 was OOMKilled after exit 137."
 
         assert grounding.check(answer, [pod])["confidence"] == "partial"
+
+
+class TestEvidenceAudit:
+    """
+    The dangerous failure is a correct RCA carrying a fabricated figure: the
+    headline is right, so a reader has no way to tell which half to trust.
+    """
+
+    POD = json.dumps({"pod": "memory-hog", "status": "OOMKilled",
+                      "containers": {"hog": {"limits": {"memory": "64Mi"}}}})
+
+    def test_an_unsupported_figure_is_named_as_inference(self):
+        answer = "memory-hog was OOMKilled. Memory limit: 512Mi."
+        out = grounding.annotate(answer, grounding.check(answer, [self.POD]))
+
+        assert "512" in out
+        assert "inference, not measurement" in out
+        # The model's own prose is preserved, not rewritten.
+        assert out.startswith(answer)
+
+    def test_a_grounded_answer_carries_no_boilerplate(self):
+        answer = "memory-hog was OOMKilled at its 64Mi limit."
+
+        assert grounding.annotate(answer, grounding.check(answer, [self.POD])) == answer
+
+    def test_a_correct_short_answer_is_not_annotated(self):
+        """
+        The first cut put "Root cause: UNKNOWN" under "It is healthy." --
+        a false alarm on a complete answer, which is how a signal becomes
+        something readers skip.
+        """
+        answer = "It is healthy."
+        verdict = grounding.check(answer, [self.POD])
+
+        assert verdict["confidence"] == grounding.INSUFFICIENT
+        assert grounding.annotate(answer, verdict) == answer
+
+    def test_an_answer_with_no_tools_says_nothing_was_measured(self):
+        answer = "The pod restarted 9 times."
+        out = grounding.annotate(answer, grounding.check(answer, []))
+
+        assert "Nothing here was measured" in out
+
+    def test_annotating_twice_does_not_stack(self):
+        answer = "memory-hog was OOMKilled. Memory limit: 512Mi."
+        once = grounding.annotate(answer, grounding.check(answer, [self.POD]))
+        twice = grounding.annotate(once, grounding.check(answer, [self.POD]))
+
+        assert once == twice
+
+    def test_an_empty_answer_is_left_empty(self):
+        assert grounding.annotate("", grounding.check("", [])) == ""

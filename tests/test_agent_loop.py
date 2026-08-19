@@ -489,7 +489,11 @@ class TestNamedButNotCalled:
         assert [c["name"] for c in result["tool_calls"]] == [
             "describe_pod", "get_pod_logs",
         ]
-        assert result["answer"] == "Connection refused to db:5432."
+        # startswith, not equality: the answer states 5432, which this test's
+        # stub never measured, so grounding appends its evidence audit. What
+        # this test is about is that the model's sentence survived the round
+        # trip, and it does.
+        assert result["answer"].startswith("Connection refused to db:5432.")
 
     def test_the_nudge_names_the_tool_and_prescribes_nothing_else(self):
         """

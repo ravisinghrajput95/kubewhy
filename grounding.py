@@ -462,3 +462,63 @@ def check(answer, tool_outputs):
 
 def _format(number):
     return str(int(number)) if number == int(number) else str(number)
+
+
+AUDIT_MARKER = "Evidence audit"
+
+
+def annotate(answer, verdict):
+    """
+    Append a deterministic evidence audit to an answer that needs one.
+
+    The model is told not to invent figures and mostly obeys; "mostly" is the
+    problem. Observed live 2026-08-18, all three inside otherwise correct
+    diagnoses: a 512Mi limit reported for a container measured at 64Mi, a
+    "503 Service Unavailable" for a probe that was refused a connection, and
+    "exit code 137 indicates the OOM killer" for a pod with no memory limit at
+    all. The RCA headline was right in every case, which is what makes this the
+    dangerous failure mode -- a reader has no way to tell which half to trust.
+
+    The prose is left alone rather than rewritten. Deleting a clause out of an
+    answer risks changing what it says, and this text is going to an on-call
+    engineer who has to be able to trust that the sentences are the model's.
+    So the unsupported values are named underneath, with the evidence that a
+    grounded claim rests on named the same way. Marking, not silent removal.
+
+    Returns the answer unchanged when there is nothing to say about it, so an
+    ordinary grounded answer carries no boilerplate.
+    """
+    text = (answer or "").strip()
+    if not text or AUDIT_MARKER in text:
+        return answer
+
+    confidence = verdict.get("confidence")
+    unverified = verdict.get("unverified") or []
+    checked = verdict.get("checked", 0)
+
+    # Only when something is actually wrong. The first cut also annotated
+    # `insufficient_evidence`, which put a "Root cause: UNKNOWN" banner under
+    # "It is healthy." -- a correct, complete answer to a question about a
+    # healthy workload. Crying wolf on good answers is how a signal becomes
+    # something readers learn to skip, and this module has been bitten by that
+    # before. The state stays on the record for callers and evals to read; it
+    # does not become prose.
+    if not unverified and confidence != "ungrounded":
+        return answer
+
+    lines = ["", "---", f"**{AUDIT_MARKER}.**"]
+
+    if unverified:
+        values = ", ".join(f"`{value}`" for value in unverified)
+        lines.append(
+            f"{len(unverified)} of {checked} stated values could not be traced "
+            f"to any tool result for the workload they were stated about: "
+            f"{values}. Treat these as inference, not measurement."
+        )
+
+    if confidence == "ungrounded":
+        lines.append(
+            "No tool result supports this answer. Nothing here was measured."
+        )
+
+    return text + "\n" + "\n".join(lines)
