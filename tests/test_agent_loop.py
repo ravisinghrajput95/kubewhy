@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import agent
+import grounding
 
 
 def tool_call(name, arguments):
@@ -147,7 +148,9 @@ class TestAskLoop:
         with mock_chat(side_effect=responses):
             result = agent.ask("q")
 
-        assert result["confidence"] in {"grounded", "partial", "ungrounded"}
+        assert result["confidence"] in {
+            "grounded", "partial", "ungrounded", grounding.INSUFFICIENT
+        }
 
     def test_invented_figure_is_flagged(self):
         """

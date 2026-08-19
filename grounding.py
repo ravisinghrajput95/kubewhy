@@ -43,6 +43,11 @@ a `partial` one. `partial` reliably means something was not measured;
 import json
 import re
 
+# The answer states nothing that can be traced to a measurement. Distinct from
+# `partial`, which means something was traced and failed, and from `grounded`,
+# which now requires at least one claim that succeeded.
+INSUFFICIENT = "insufficient_evidence"
+
 # Status words worth checking. A model that reports OOMKilled when no tool
 # said so is making exactly the mistake this module exists to catch.
 #
@@ -152,6 +157,50 @@ def _claims(answer):
 _SUBJECT_KEYS = ("pod", "service", "node", "deployment", "workload")
 
 
+def records(tool_outputs, names=None):
+    """
+    Wrap raw tool results as evidence records with stable ids.
+
+    A claim is only auditable if you can say *which* result supports it, so
+    every result gets an id ("tool-1") and, when the caller knows it, the name
+    of the tool that produced it. check() accepts either shape: a plain list
+    of JSON strings, as every existing caller passes, or these records.
+    """
+    names = names or []
+    out = []
+    for i, text in enumerate(tool_outputs, 1):
+        out.append({
+            "id": f"tool-{i}",
+            "tool": names[i - 1] if i - 1 < len(names) else None,
+            "result": text,
+        })
+    return out
+
+
+def _locate(value, data, path=""):
+    """
+    The field a value was found in, as a dotted path, or None.
+
+    This is what turns "the answer said 64Mi and so did some tool" into
+    "describe_pod reported containers.hog.limits.memory = 64Mi". Without the
+    field the citation is not much better than a substring match.
+    """
+    if isinstance(data, dict):
+        for key, item in data.items():
+            found = _locate(value, item, f"{path}.{key}" if path else str(key))
+            if found:
+                return found
+    elif isinstance(data, list):
+        for index, item in enumerate(data):
+            found = _locate(value, item, f"{path}[{index}]")
+            if found:
+                return found
+    else:
+        if value in str(data).lower():
+            return path or None
+    return None
+
+
 def _entity_index(tool_outputs):
     """
     Map each thing a tool described to the text describing *it*.
@@ -167,11 +216,11 @@ def _entity_index(tool_outputs):
     """
     index = {}
 
-    def add(name, text):
+    def add(name, text, source=None):
         name = str(name).strip().lower()
         if not name:
             return
-        index.setdefault(name, []).append(text)
+        index.setdefault(name, []).append({"text": text, "source": source})
 
         # Answers name the workload ("bad-image"), while the measurement is
         # filed under the pod ("bad-image-647c5576d5-pxmvr"). Register the
@@ -181,9 +230,13 @@ def _entity_index(tool_outputs):
         # workload that owns it.
         parts = name.split("-")
         if len(parts) >= 3:
-            index.setdefault("-".join(parts[:-2]), []).append(text)
+            index.setdefault("-".join(parts[:-2]), []).append(
+                {"text": text, "source": source}
+            )
 
-    for output in tool_outputs:
+    for record in tool_outputs:
+        output = record["result"] if isinstance(record, dict) else record
+        source = record if isinstance(record, dict) else None
         try:
             data = json.loads(output)
         except (TypeError, ValueError):
@@ -196,7 +249,7 @@ def _entity_index(tool_outputs):
             None,
         )
         if subject:
-            add(subject, output)
+            add(subject, output, source)
             continue
 
         for key, value in data.items():
@@ -205,9 +258,9 @@ def _entity_index(tool_outputs):
             if key in ("result", "error"):
                 continue
             fragment = json.dumps({key: value})
-            add(key, fragment)
+            add(key, fragment, source)
             if "/" in str(key):
-                add(str(key).rsplit("/", 1)[-1], fragment)
+                add(str(key).rsplit("/", 1)[-1], fragment, source)
 
     return index
 
@@ -229,9 +282,10 @@ def _scope(clause, index, everything):
     """
     lowered = clause.lower()
     hits = [
-        text for name, texts in index.items() if name in lowered for text in texts
+        entry for name, entries in index.items() if name in lowered
+        for entry in entries
     ]
-    return " ".join(hits) if hits else everything
+    return hits if hits else everything
 
 
 def _numbers(text, strip_ordinals=False):
@@ -262,27 +316,62 @@ def check(answer, tool_outputs):
     """
     Compare an answer against the tool results behind it.
 
-    tool_outputs is the list of raw JSON strings the tools returned. Returns
-    {"confidence": ..., "unverified": [...]} where confidence is:
+    tool_outputs is the list of raw JSON strings the tools returned, or the
+    records() shape when the caller knows which tool produced which result.
+    Returns {"confidence", "unverified", "checked", "claims"} where confidence
+    is:
 
-      grounded    every claim traces to tool output
-      partial     some claims do not
-      ungrounded  the model answered having called no tools at all
+      grounded               at least one claim, and every claim traces to a
+                             tool result for the entity it was made about
+      partial                some claims do not
+      ungrounded             claims were made with no tool result behind them,
+                             or the answer was empty
+      insufficient_evidence  the answer states nothing this can check
+
+    **grounded requires a verified claim.** It used to mean "nothing
+    contradicted the answer", which an empty string satisfies trivially: an
+    agent that returned "" scored the same badge as one that quoted the
+    kubelet. Measured against a live cluster on 2026-08-18 -- a run whose tool
+    call 404'd returned an empty answer and was reported `grounded`. Silence is
+    not evidence, and neither is prose with nothing falsifiable in it.
     """
+    text = (answer or "").strip()
+    if not text:
+        # No claims, no answer, nothing to be confident about. This is the
+        # case that motivated the rewrite; it must never come back grounded.
+        return {
+            "confidence": "ungrounded",
+            "unverified": [],
+            "checked": 0,
+            "claims": [],
+        }
+
     if not tool_outputs:
         # No measurements were taken, so nothing in the answer is grounded --
         # but an answer with no factual claims is fine.
         claims = _numbers(_claim_text(answer), strip_ordinals=True) or set()
         return {
-            "confidence": "ungrounded" if claims else "grounded",
+            "confidence": "ungrounded" if claims else INSUFFICIENT,
             "unverified": sorted(_format(c) for c in claims),
             "checked": len(claims),
+            "claims": [
+                {"value": _format(c), "kind": "number", "status": "unverified",
+                 "evidence": []}
+                for c in sorted(claims)
+            ],
         }
 
-    measured_text = " ".join(tool_outputs)
-    index = _entity_index(tool_outputs)
+    evidence = (
+        tool_outputs
+        if tool_outputs and isinstance(tool_outputs[0], dict)
+        else records(tool_outputs)
+    )
+    everything = [{"text": r["result"], "source": r} for r in evidence]
+    measured_text = " ".join(r["result"] for r in evidence)
+    index = _entity_index(evidence)
 
     unverified = []
+    claims = []
     # How many claims were actually examined, which is not the same question as
     # how many failed. With no claims at all, unverified is empty and the answer
     # comes back "grounded" -- a green badge on "I could not identify any
@@ -301,14 +390,40 @@ def check(answer, tool_outputs):
         # names, not against every measurement taken. Otherwise a status
         # measured for one workload silently supports the same status claimed
         # about another -- and the wider the tool result, the more it covers.
-        scope = _scope(clause, index, measured_text)
+        entries = _scope(clause, index, everything)
+        scope = " ".join(e["text"] for e in entries)
         scope_numbers = _numbers(scope)
         scope_lower = scope.lower()
 
+        def cite(value):
+            """Which result, and which field in it, carries this value."""
+            for entry in entries:
+                source = entry["source"] or {}
+                try:
+                    data = json.loads(entry["text"])
+                except (TypeError, ValueError):
+                    continue
+                field = _locate(str(value).lower(), data)
+                if field:
+                    return [{
+                        "id": source.get("id"),
+                        "tool": source.get("tool"),
+                        "field": field,
+                        "value": str(value),
+                    }]
+            return []
+
         for claim in sorted(_numbers(clause, strip_ordinals=True)):
             checked += 1
-            if not _matches(claim, scope_numbers):
+            supported = _matches(claim, scope_numbers)
+            if not supported:
                 flag(_format(claim))
+            claims.append({
+                "value": _format(claim),
+                "kind": "number",
+                "status": "observed" if supported else "unverified",
+                "evidence": cite(_format(claim)) if supported else [],
+            })
 
         # Status names are checked as plain substrings; the model may style
         # them as **OOMKilled** or `OOMKilled`, so compare lowered.
@@ -316,13 +431,32 @@ def check(answer, tool_outputs):
         for status in KNOWN_STATUSES:
             if status in lowered:
                 checked += 1
-                if status not in scope_lower:
+                supported = status in scope_lower
+                if not supported:
                     flag(status)
+                claims.append({
+                    "value": status,
+                    "kind": "status",
+                    "status": "observed" if supported else "unverified",
+                    "evidence": cite(status) if supported else [],
+                })
+
+    if not checked:
+        # Tools ran and the answer asserts nothing this can trace. Not a
+        # failure and not a confirmation: the honest word for it is that there
+        # is no evidence either way, and a caller badging this as grounded is
+        # putting a tick next to an unfalsifiable sentence.
+        confidence = INSUFFICIENT
+    elif unverified:
+        confidence = "partial"
+    else:
+        confidence = "grounded"
 
     return {
-        "confidence": "partial" if unverified else "grounded",
+        "confidence": confidence,
         "unverified": unverified,
         "checked": checked,
+        "claims": claims,
     }
 
 

@@ -392,6 +392,13 @@ def stream(question, model=MODEL, think=True, prefetched=None):
     # live cluster -- and the alternative is an answer quoting the one piece of
     # evidence that survived being marked unverified for doing so.
     outputs = [item["result"] for item in prefetched]
+    # The same results as `outputs`, carrying which tool produced each one so
+    # a verified claim can cite the tool and field it came from rather than
+    # "something in the transcript said this". See grounding.records.
+    evidence = [
+        {"id": f"tool-{i}", "tool": item.get("name"), "result": item["result"]}
+        for i, item in enumerate(prefetched, 1)
+    ]
 
     content = question + (_prefetched_block(prefetched) if prefetched else "")
     messages = [
@@ -478,7 +485,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
                 # get_pod_logs cannot be told apart from one that had to be
                 # sent back for it, and the guard's own effect is unmeasurable.
                 "nudges": nudges,
-                **grounding.check(answer, outputs),
+                **grounding.check(answer, evidence),
             }
             return
 
@@ -492,6 +499,9 @@ def stream(question, model=MODEL, think=True, prefetched=None):
             started = time.perf_counter()
             output = _run_tool(name, arguments)
             outputs.append(output)
+            evidence.append(
+                {"id": f"tool-{len(outputs)}", "tool": name, "result": output}
+            )
             duration_ms = round((time.perf_counter() - started) * 1000, 1)
             tool_ms += duration_ms
 

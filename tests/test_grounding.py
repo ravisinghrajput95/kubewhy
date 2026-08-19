@@ -239,9 +239,19 @@ class TestFalsePositives:
 
         assert grounding.check(answer, tools)["unverified"] == ["47"]
 
-    def test_answer_with_no_figures_is_grounded(self):
+    def test_an_answer_with_nothing_falsifiable_is_not_grounded(self):
+        """
+        Corrected 2026-08-19. "Everything looks fine." asserts nothing this
+        module can trace, and calling that `grounded` puts the same badge on
+        an unfalsifiable sentence as on a quoted kubelet message. It is not a
+        failure either -- nothing was contradicted -- so it gets its own state.
+        """
         tools = [json.dumps({"status": "Running"})]
-        assert grounding.check("Everything looks fine.", tools)["confidence"] == "grounded"
+        result = grounding.check("Everything looks fine.", tools)
+
+        assert result["confidence"] == grounding.INSUFFICIENT
+        assert result["checked"] == 0
+        assert result["unverified"] == []
 
     def test_ordinary_english_status_words_are_not_claims(self):
         """
@@ -283,8 +293,17 @@ class TestNoToolsCalled:
         assert result["confidence"] == "ungrounded"
         assert result["unverified"] == ["42"]
 
-    def test_refusal_without_tools_is_not_penalised(self):
-        assert grounding.check("I could not determine that.", [])["confidence"] == "grounded"
+    def test_refusal_without_tools_is_insufficient_not_confirmed(self):
+        """
+        Corrected 2026-08-19. An honest refusal is still not a grounded
+        finding: nothing was measured. `insufficient_evidence` says that
+        without penalising the refusal as a wrong answer, which is what
+        `partial` or `ungrounded` would imply.
+        """
+        result = grounding.check("I could not determine that.", [])
+
+        assert result["confidence"] == grounding.INSUFFICIENT
+        assert result["unverified"] == []
 
 
 class TestCheckedCount:
@@ -298,7 +317,8 @@ class TestCheckedCount:
         tools = [json.dumps({"pods": []})]
         result = grounding.check("I cannot identify any failing pods.", tools)
 
-        assert result["confidence"] == "grounded"
+        # Corrected 2026-08-19: zero claims checked is its own verdict now.
+        assert result["confidence"] == grounding.INSUFFICIENT
         assert result["checked"] == 0
 
     def test_traceable_claims_are_counted(self):
@@ -318,3 +338,99 @@ class TestCheckedCount:
 
     def test_no_tools_and_no_claims_checks_nothing(self):
         assert grounding.check("I could not determine that.", [])["checked"] == 0
+
+
+class TestObservedFailuresFrom20260818:
+    """
+    One test per failure seen against a live cluster on 2026-08-18. Each of
+    these was a real answer from qwen3 that the old classifier accepted.
+    """
+
+    POD = json.dumps({
+        "pod": "memory-hog-bc76968c6-87fbc",
+        "namespace": "demo",
+        "status": "OOMKilled",
+        "containers": {"hog": {"limits": {"memory": "64Mi"}}},
+    })
+
+    def test_a_the_empty_answer_is_not_grounded(self):
+        """
+        Observed: a run whose only tool call 404'd returned "" and the
+        classifier called it grounded, because an empty string contradicts
+        nothing.
+        """
+        tools = [json.dumps({"error": 'kubernetes API error 404: services "x" not found'})]
+
+        assert grounding.check("", tools)["confidence"] == "ungrounded"
+        assert grounding.check("   \n  ", tools)["confidence"] == "ungrounded"
+
+    def test_b_a_fabricated_number_beside_a_correct_rca(self):
+        """Observed: "Memory limit: 512Mi" when the tool reported 64Mi."""
+        answer = "memory-hog was OOMKilled. Memory limit: 512Mi."
+        result = grounding.check(answer, [self.POD])
+
+        assert result["confidence"] == "partial"
+        assert "512" in result["unverified"]
+
+    def test_c_a_fabricated_status_beside_a_correct_rca(self):
+        """
+        Observed: "readiness probe fails with 503 Service Unavailable" when
+        the kubelet reported connection refused.
+        """
+        pod = json.dumps({
+            "pod": "never-ready-7d86d8c5f7-6rw9t",
+            "status": "Running",
+            "events": "Readiness probe failed: connect: connection refused",
+        })
+        answer = "never-ready-7d86d8c5f7-6rw9t is in CreateContainerConfigError."
+
+        assert grounding.check(answer, [pod])["confidence"] == "partial"
+
+    def test_d_evidence_from_one_workload_cannot_support_another(self):
+        scan = json.dumps({
+            "demo/memory-hog": {"status": "OOMKilled", "pods": 1},
+            "demo/healthy-web": {"status": "Running", "pods": 2},
+        })
+        result = grounding.check("healthy-web is OOMKilled.", [scan])
+
+        assert result["confidence"] == "partial"
+        assert "oomkilled" in result["unverified"]
+
+    def test_e_claims_with_no_tool_call_are_ungrounded(self):
+        result = grounding.check("The pod restarted 5 times.", [])
+
+        assert result["confidence"] == "ungrounded"
+
+    def test_f_a_claim_matching_an_exact_field_is_grounded_and_cited(self):
+        result = grounding.check(
+            "memory-hog-bc76968c6-87fbc was OOMKilled at its 64Mi limit.",
+            grounding.records([self.POD], names=["describe_pod"]),
+        )
+
+        assert result["confidence"] == "grounded"
+        cited = {c["value"]: c for c in result["claims"]}
+        assert cited["oomkilled"]["evidence"][0]["tool"] == "describe_pod"
+        assert cited["oomkilled"]["evidence"][0]["field"] == "status"
+        assert cited["64"]["evidence"][0]["field"] == "containers.hog.limits.memory"
+
+    def test_g_an_answer_stating_nothing_checkable_is_insufficient(self):
+        result = grounding.check("The workload appears to be having trouble.", [self.POD])
+
+        assert result["confidence"] == grounding.INSUFFICIENT
+        assert result["checked"] == 0
+
+    def test_the_exit_137_misattribution_is_caught(self):
+        """
+        Observed: "exit code 137 indicates the container was killed by the OOM
+        killer" for a pod whose termination reason was Error and which had no
+        memory limit at all.
+        """
+        pod = json.dumps({
+            "pod": "liveness-flapper-5bd4f768c5-jq5k7",
+            "status": "CrashLoopBackOff",
+            "last_termination": {"reason": "Error", "exit_code": 137},
+            "containers": {"app": {"limits": {}}},
+        })
+        answer = "liveness-flapper-5bd4f768c5-jq5k7 was OOMKilled after exit 137."
+
+        assert grounding.check(answer, [pod])["confidence"] == "partial"
