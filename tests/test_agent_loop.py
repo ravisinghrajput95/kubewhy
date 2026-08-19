@@ -1026,3 +1026,42 @@ class TestThinkingIsConfigurable:
                 agent.ask("q", think=True)
 
         assert chat.call_args.kwargs["think"] is True
+
+
+class TestThePolicyStaysOutOfTheWay:
+    """
+    The policy caused the wrong-entity failure it was hardened against.
+    Measured 2026-08-19: "Is the correctly-configured pod unhealthy?" -- the
+    model listed only unhealthy pods, which excludes the healthy one asked
+    about, the policy fell back to the first pod listed, and 2 of 3 runs came
+    back diagnosing missing-configmap-key instead. 1/3 on a case that had been
+    2/2.
+    """
+
+    TRACE = [{"name": "list_pods", "arguments": {"namespace": "config-faults"}}]
+    OUT = [json.dumps({"missing-configmap-key": {"status": "CreateContainerConfigError"}})]
+
+    def test_it_does_not_fire_on_a_pod_nobody_asked_about(self):
+        gap = agent.evidence_gap(
+            self.TRACE, self.OUT,
+            "Is the correctly-configured pod in config-faults unhealthy?",
+        )
+
+        assert gap is None
+
+    def test_it_still_fires_for_the_pod_that_was_asked_about(self):
+        gap = agent.evidence_gap(
+            self.TRACE, self.OUT, "why is missing-configmap-key stuck?"
+        )
+
+        assert gap is not None and gap[1] == "missing-configmap-key"
+
+    def test_a_question_naming_no_object_still_gets_help(self):
+        """"What is broken here?" has no target to miss."""
+        assert agent.evidence_gap(self.TRACE, self.OUT, "what is broken here?")
+
+    def test_ordinary_words_are_not_mistaken_for_targets(self):
+        assert not agent._looks_like_a_target("the")
+        assert not agent._looks_like_a_target("unhealthy")
+        assert agent._looks_like_a_target("correctly-configured")
+        assert agent._looks_like_a_target("crasher-abc123")

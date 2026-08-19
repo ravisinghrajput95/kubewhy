@@ -1,0 +1,177 @@
+[
+ {
+  "case": "stuck_volume_needs_events",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 112.2,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-19T13:30:07",
+  "load_before": 1.71,
+  "load_after": 1.61,
+  "low_power_mode": true,
+  "unverified": [
+   "2"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "scan_references",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "config-faults",
+    "workload": "missing-configmap-volume"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults"
+   },
+   {
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "answer": "The pod `missing-configmap-volume` is stuck in **ContainerCreating** due to a **volume mount failure** caused by a missing ConfigMap. Here's the full breakdown:\n\n### Key Findings:\n1. **Event Log**:  \n   - The kubelet reports `FailedMount` with the message:  \n     *\"MountVolume.SetUp failed for volume \\\"conf\\\": configmap \\\"nginx-conf\\\" not found\"*.  \n     This confirms the pod's volume mount configuration references a non-existent ConfigMap named `nginx-conf`.\n\n[unverified: 2]. **Pod Spec Analysis**:  \n   - The pod's volume mounts explicitly use `nginx-conf` (via volume), but no such ConfigMap exists in the `config-faults` namespace.  \n   - The `updates_in_place: true` field in the `describe_pod` output indicates the pod expects the ConfigMap to be pre-created and mounted at startup.\n\n3. **Reference Check**:  \n   - `scan_references` confirmed all references in the namespace resolve, but this only applies to objects like Services or PVCs. It does **not** validate the existence of ConfigMaps referenced by volumes.\n\n### Root Cause:\nThe pod cannot proceed past `ContainerCreating` because the required ConfigMap (`nginx-conf`) is missing. Kubernetes fails to mount the volume, blocking container initialization.\n\n### Fix:\n- **Option 1**: Create the missing ConfigMap `nginx-conf` in the `config-faults` namespace with the required data.  \n- **Option [unverified: 2]**: Correct the ConfigMap name in the pod's volume configuration to match an existing ConfigMap (e.g., `configmap-volume`).  \n\nWithout this fix, the pod will remain in `ContainerCreating` indefinitely.\n\n---\n**Evidence audit.**\n1 of 4 stated values could not be traced to any tool result for the workload they were stated about: `2`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['2'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 112108.4,
+   "tool_ms": 49.0,
+   "rounds": 6,
+   "round_ms": [
+    17777.7,
+    14036.8,
+    19106.4,
+    29809.5,
+    9155.8,
+    22222.2
+   ],
+   "slowest_round_ms": 29809.5,
+   "model_share": 1.0,
+   "wall_ms": 112159.2,
+   "unaccounted_ms": 1.8,
+   "slept_ms": 0.0
+  }
+ },
+ {
+  "case": "stuck_volume_needs_events",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 101.8,
+  "confidence": "insufficient_evidence",
+  "model_resident": true,
+  "started_at": "2026-08-19T13:31:59",
+  "load_before": 1.61,
+  "load_after": 1.18,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "workload": "missing-configmap-volume",
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults"
+   },
+   {
+    "limit": 5,
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults"
+   }
+  ],
+  "answer": "The pod is stuck because the ConfigMap `nginx-conf` referenced in its volume configuration does not exist in the `config-faults` namespace. The `FailedMount` event confirms the volume mount failed due to the missing ConfigMap. \n\n**Solution**:  \n1. Verify if `nginx-conf` exists in `config-faults` using `kubectl get configmap nginx-conf -n config-faults`.  \n2. If missing, recreate it with `kubectl create configmap nginx-conf --from-file=path/to/nginx.conf -n config-faults`.  \n3. Ensure the ConfigMap name matches exactly, including case, in both the pod's spec and the actual resource.",
+  "nudges": 0,
+  "policies": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 101766.2,
+   "tool_ms": 21.2,
+   "rounds": 4,
+   "round_ms": [
+    21202.6,
+    22158.9,
+    40066.1,
+    18338.6
+   ],
+   "slowest_round_ms": 40066.1,
+   "model_share": 1.0,
+   "wall_ms": 101787.7,
+   "unaccounted_ms": 0.3,
+   "slept_ms": 0.0
+  }
+ },
+ {
+  "case": "stuck_volume_needs_events",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 72.8,
+  "confidence": "insufficient_evidence",
+  "model_resident": true,
+  "started_at": "2026-08-19T13:33:41",
+  "load_before": 1.18,
+  "load_after": 1.82,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "workload": "missing-configmap-volume",
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "answer": "The pod is stuck because the ConfigMap `nginx-conf` referenced in the volume mount does not exist in the `config-faults` namespace. The `FailedMount` event confirms the volume setup failed due to the missing ConfigMap. \n\n**Solution**: Create the missing ConfigMap `nginx-conf` in the `config-faults` namespace. This will allow the pod to proceed with container creation.",
+  "nudges": 0,
+  "policies": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 72753.4,
+   "tool_ms": 21.0,
+   "rounds": 4,
+   "round_ms": [
+    14537.6,
+    17099.1,
+    24744.2,
+    16372.6
+   ],
+   "slowest_round_ms": 24744.2,
+   "model_share": 1.0,
+   "wall_ms": 72774.7,
+   "unaccounted_ms": 0.2,
+   "slept_ms": 0.0
+  }
+ }
+]

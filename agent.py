@@ -454,6 +454,16 @@ EVIDENCE_POLICY = (
 )
 
 
+def _looks_like_a_target(word):
+    """
+    Whether a word in the question names a Kubernetes object rather than
+    ordinary English. Hyphenated or digit-bearing, the same shape test the
+    grounding entity check uses.
+    """
+    word = word.strip(".,;:?!'\"`")
+    return len(word) > 3 and any(ch == "-" or ch.isdigit() for ch in word)
+
+
 def workload_prefix(pod):
     """
     The names a question might use for this pod's workload.
@@ -565,6 +575,15 @@ def evidence_gap(trace, outputs, question=""):
         ]
         if named:
             reported = named
+        elif any(_looks_like_a_target(word) for word in lowered_question.split()):
+            # The question names something and none of it is here. Firing now
+            # would send the run to collect evidence about whichever unrelated
+            # pod happened to be listed first, and the answer comes back about
+            # that pod -- which is how "is correctly-configured unhealthy?"
+            # became a diagnosis of missing-configmap-key on 2 of 3 runs.
+            # Measured 2026-08-19; the policy caused the very wrong-entity
+            # failure it was hardened against.
+            return None
 
     # Events first: an unmountable volume means the container never started,
     # so there are no logs to read and sending the run for them would spend

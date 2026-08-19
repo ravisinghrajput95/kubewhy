@@ -1,0 +1,176 @@
+[
+ {
+  "case": "unhealthy_question_about_a_healthy_pod",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": false,
+  "seconds": 71.4,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-19T13:24:40",
+  "load_before": 1.71,
+  "load_after": 1.23,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "config-faults",
+    "only_unhealthy": true
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "answer": "The pod `missing-configmap-key` in the `config-faults` namespace is **unhealthy**. The kubelet logs explicitly state:  \n**\"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"** (event age: 4m).  \n\nThis confirms the pod fails to start because a required key (`LOGLEVEL`) is missing from the `config-faults/app-settings` ConfigMap. The pod remains in `ContainerCreating` state with `ready: 0/1` and no restarts, but the error is persistent and unresolved.  \n\n**Fix:** Create the missing `LOGLEVEL` key in the `config-faults/app-settings` ConfigMap. Reapply the pod spec after resolving this dependency.",
+  "nudges": 0,
+  "policies": 1,
+  "failures": [
+   "none of ['correctly-configured'] in answer",
+   "wrongly claimed 'missing-configmap-key'"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 71383.1,
+   "tool_ms": 14.2,
+   "rounds": 4,
+   "round_ms": [
+    16259.8,
+    24022.9,
+    13615.8,
+    17484.6
+   ],
+   "slowest_round_ms": 24022.9,
+   "model_share": 1.0,
+   "wall_ms": 71397.7,
+   "unaccounted_ms": 0.4,
+   "slept_ms": 0.0
+  }
+ },
+ {
+  "case": "unhealthy_question_about_a_healthy_pod",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 159.4,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-19T13:25:51",
+  "load_before": 1.23,
+  "load_after": 1.69,
+  "low_power_mode": true,
+  "unverified": [
+   "pod correctly-configured"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "config-faults",
+    "only_unhealthy": true
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "answer": "The pod **`correctly-configured`** is **not listed** in the unhealthy pods of the `config-faults` namespace, meaning it is either:\n\n1. **Healthy** (not marked as unhealthy by the system), or  \n2. **Does not exist** in the namespace.  \n\n### Key Findings from Existing Data:\n- The pod **`missing-configmap-key`** is unhealthy due to a missing key (`LOGLEVEL`) in the `app-settings` ConfigMap.  \n- No evidence exists for a pod named **`correctly-configured`** in the `config-faults` namespace.  \n\n### Conclusion:\nThe **correctly-configured pod** is **not unhealthy** based on the available data. If it exists, it is likely healthy. If it does not exist, the pod name may be incorrect or misconfigured. Verify its existence with `list_pods` or check for typos in the pod name.\n\n---\n**Evidence audit.**\n1 of 1 stated values could not be traced to any tool result for the workload they were stated about: `pod correctly-configured`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "named 'missing-configmap-key' alongside the answer",
+   "stated ['pod correctly-configured'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 159343.1,
+   "tool_ms": 20.7,
+   "rounds": 6,
+   "round_ms": [
+    12849.7,
+    21071.5,
+    36073.2,
+    30875.9,
+    33899.7,
+    24573.0
+   ],
+   "slowest_round_ms": 36073.2,
+   "model_share": 1.0,
+   "wall_ms": 159365.8,
+   "unaccounted_ms": 2.0,
+   "slept_ms": 0.0
+  }
+ },
+ {
+  "case": "unhealthy_question_about_a_healthy_pod",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": false,
+  "seconds": 95.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-19T13:28:31",
+  "load_before": 1.69,
+  "load_after": 1.71,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "config-faults",
+    "only_unhealthy": true
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults"
+   },
+   {
+    "namespace": "config-faults",
+    "limit": 5,
+    "name": "missing-configmap-key"
+   }
+  ],
+  "answer": "The pod **missing-configmap-key** in the **config-faults** namespace is **unhealthy**. Here's the full analysis:\n\n### **Root Cause**\n- **Error**: `CreateContainerConfigError`  \n- **Reason**: The kubelet reports:  \n  `\"couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"`  \n- **Source**: The pod's environment variables reference the `LOGLEVEL` key in the `app-settings` ConfigMap, but this key is missing.\n\n### **State Details**\n- **Status**: `CreateContainerConfigError` (pod remains in this state until the ConfigMap issue is resolved).  \n- **Restart Count**: 0 (no restarts attempted yet).  \n- **Node**: `aiops-test-control-plane`.\n\n### **Why It\u2019s Unhealthy**\nThe pod fails to initialize because the ConfigMap `app-settings` does not contain the required `LOGLEVEL` key. This prevents the container from starting, as the environment variable cannot be resolved.\n\n---\n\n### **Fix Steps**\n1. **Add the missing key** to the `app-settings` ConfigMap:  \n   ```yaml\n   apiVersion: v1\n   kind: ConfigMap\n   metadata:\n     name: app-settings\n     namespace: config-faults\n   data:\n     LOGLEVEL: \"info\"  # or desired value\n   ```\n2. **Update the pod specification** if the key should come from a different source (e.g., a Secret).  \n3. **Restart the pod** (since `updates_in_place: false` for the ConfigMap; changes require a restart to take effect).\n\n---\n\n### **Conclusion**\nThe pod is unhealthy due to a missing ConfigMap key. The error is explicitly confirmed by both `describe_pod` and `get_pod_events`. No other issues are indicated in the events. Fixing the ConfigMap will resolve the issue.",
+  "nudges": 0,
+  "policies": 1,
+  "failures": [
+   "none of ['correctly-configured'] in answer",
+   "wrongly claimed 'missing-configmap-key'"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 95774.5,
+   "tool_ms": 22.1,
+   "rounds": 5,
+   "round_ms": [
+    10780.1,
+    20323.7,
+    18393.5,
+    15670.9,
+    30606.4
+   ],
+   "slowest_round_ms": 30606.4,
+   "model_share": 1.0,
+   "wall_ms": 95799.0,
+   "unaccounted_ms": 2.4,
+   "slept_ms": 0.0
+  }
+ }
+]
