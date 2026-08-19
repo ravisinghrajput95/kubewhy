@@ -702,3 +702,122 @@ class TestTimingAttribution:
 
         assert "Gave up" in result["answer"]
         assert result["timing"]["rounds"] == agent.MAX_ROUNDS
+
+
+class TestPlaceholderArguments:
+    """
+    Observed live 2026-08-18: llama3.2 called
+    describe_pod(name="bad-image-<random chars>") -- a placeholder out of its
+    own reasoning, sent as a literal Kubernetes name. The cluster answers 404,
+    which the model reads as "no such pod" rather than "you did not name one".
+    """
+
+    def test_a_placeholder_never_reaches_kubernetes(self):
+        with patch.dict(agent.TOOLS, {"describe_pod": MagicMock()}) as tools:
+            out = json.loads(
+                agent._run_tool("describe_pod", {"name": "bad-image-<random chars>"})
+            )
+            tools["describe_pod"].assert_not_called()
+
+        assert "placeholder" in out["error"]
+
+    def test_the_error_says_what_to_do_instead(self):
+        """A 404 does not tell the model it failed to supply a name."""
+        out = json.loads(agent._run_tool("describe_pod", {"name": "{pod-name}"}))
+
+        assert "list_pods" in out["error"] or "scan_cluster" in out["error"]
+
+    @pytest.mark.parametrize("value", [
+        "bad-image-<random chars>", "<pod-name>", "{name}", "{{ pod }}",
+        "your-pod", "the-namespace", "pod_name", "...",
+    ])
+    def test_placeholder_shapes_are_caught(self, value):
+        assert agent.unresolved({"name": value})
+
+    @pytest.mark.parametrize("value", [
+        "memory-hog-bc76968c6-87fbc", "demo", "healthy-web", "kube-system",
+        "nightly-sync-29784601-4x4b9", "log-shipper-44sbc",
+    ])
+    def test_real_names_are_untouched(self, value):
+        """A guard that rejects real names is worse than no guard."""
+        assert agent.unresolved({"name": value}) == []
+
+    def test_an_empty_argument_is_not_a_placeholder(self):
+        # Optional arguments are routinely blank; that is a default, not a
+        # fabrication.
+        assert agent.unresolved({"workload": "", "namespaces": ""}) == []
+
+
+class TestEvidencePolicy:
+    """
+    A ConfigMap referenced by a VOLUME leaves the pod in ContainerCreating with
+    no waiting message: the name is only in a FailedMount event. Observed live
+    2026-08-18 -- the agent read describe_pod, never called get_pod_events, and
+    hedged "these ConfigMaps may not exist ... or are misreferenced" when the
+    evidence it skipped said `configmap "nginx-conf" not found`.
+    """
+
+    STUCK = json.dumps({
+        "pod": "missing-configmap-volume",
+        "namespace": "config-faults",
+        "status": "ContainerCreating",
+    })
+
+    def test_a_stuck_pod_without_events_is_a_gap(self):
+        assert agent.evidence_gap([], [self.STUCK]) == (
+            "missing-configmap-volume", "config-faults", "ContainerCreating"
+        )
+
+    def test_no_gap_once_events_were_read_for_that_pod(self):
+        trace = [{"name": "get_pod_events", "arguments": {
+            "name": "missing-configmap-volume", "namespace": "config-faults"}}]
+
+        assert agent.evidence_gap(trace, [self.STUCK]) is None
+
+    def test_events_for_a_different_pod_do_not_close_the_gap(self):
+        trace = [{"name": "get_pod_events", "arguments": {
+            "name": "some-other-pod", "namespace": "config-faults"}}]
+
+        assert agent.evidence_gap(trace, [self.STUCK]) is not None
+
+    @pytest.mark.parametrize("status", ["OOMKilled", "CrashLoopBackOff", "Running"])
+    def test_statuses_that_explain_themselves_are_left_alone(self, status):
+        """
+        describe_pod carries the termination reason for these, so demanding
+        events would be noise on every ordinary diagnosis.
+        """
+        pod = json.dumps({"pod": "p", "namespace": "demo", "status": status})
+
+        assert agent.evidence_gap([], [pod]) is None
+
+    def test_the_loop_sends_the_run_back_for_events(self):
+        """End to end: the model answers early and is made to collect proof."""
+        responses = [
+            reply(calls=[tool_call("describe_pod", {"name": "x", "namespace": "config-faults"})]),
+            reply(content="It is stuck. The ConfigMap may not exist."),
+            reply(calls=[tool_call("get_pod_events", {"name": "missing-configmap-volume",
+                                                      "namespace": "config-faults"})]),
+            reply(content='configmap "nginx-conf" not found'),
+        ]
+        stub = {
+            "describe_pod": lambda **k: json.loads(TestEvidencePolicy.STUCK),
+            "get_pod_events": lambda **k: {"events": ['configmap "nginx-conf" not found']},
+        }
+        with patch.dict(agent.TOOLS, stub), mock_chat(side_effect=responses):
+            result = agent.ask("why is it stuck?")
+
+        assert result["policies"] == 1
+        assert "get_pod_events" in [c["name"] for c in result["tool_calls"]]
+        assert "nginx-conf" in result["answer"]
+
+    def test_a_run_that_collected_events_itself_is_not_sent_back(self):
+        responses = [
+            reply(calls=[tool_call("get_pod_events", {"name": "missing-configmap-volume",
+                                                      "namespace": "config-faults"})]),
+            reply(content="done"),
+        ]
+        stub = {"get_pod_events": lambda **k: json.loads(TestEvidencePolicy.STUCK)}
+        with patch.dict(agent.TOOLS, stub), mock_chat(side_effect=responses):
+            result = agent.ask("why is it stuck?")
+
+        assert result["policies"] == 0

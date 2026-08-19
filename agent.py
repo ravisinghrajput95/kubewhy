@@ -13,6 +13,7 @@ Ollama model call them to work out what is wrong and why.
 import json
 import logging
 import os
+import re
 import sys
 import time
 
@@ -168,11 +169,52 @@ def _chat(model, messages, think):
         raise
 
 
+# Argument values that are a model describing an argument rather than supplying
+# one. Observed live 2026-08-18: llama3.2 called
+# describe_pod(name="bad-image-<random chars>") -- the placeholder from its own
+# reasoning, sent as a literal Kubernetes object name. The API answers 404 to
+# that, which reads to the model as "the pod does not exist" rather than "you
+# did not name a pod", and the run continues down a false trail.
+_PLACEHOLDER = re.compile(
+    r"<[^>]*>"                      # <random chars>, <pod-name>, <name>
+    r"|\{\{?[a-z_ -]+\}?\}"        # {name}, {{ pod }}
+    r"|^\.\.\.$"                    # bare ellipsis
+    r"|^(pod|deployment|service|workload|namespace)[-_]?(name|here)$"
+    r"|^(your|the|some|any)[-_ ]",   # "your-pod", "the namespace"
+    re.IGNORECASE,
+)
+
+
+def unresolved(arguments):
+    """
+    The arguments whose values are placeholders rather than real names.
+
+    A tool argument is a fact about the cluster, and a model that has not
+    discovered a name yet must go and discover it -- not invent something
+    shaped like one. Returning this as a tool error rather than raising keeps
+    rule 3: the loop survives, and the model is told what it actually did
+    wrong, which "404 not found" never says.
+    """
+    bad = []
+    for key, value in (arguments or {}).items():
+        if isinstance(value, str) and value.strip() and _PLACEHOLDER.search(value.strip()):
+            bad.append(f"{key}={value!r}")
+    return bad
+
+
 def _run_tool(name, arguments):
     """Execute one tool call, returning its result as a JSON string."""
     func = TOOLS.get(name)
     if func is None:
         return json.dumps({"error": f"no such tool: {name}"})
+
+    placeholders = unresolved(arguments)
+    if placeholders:
+        log.info("rejected_placeholder_argument", extra={"tool": name, "arguments": arguments})
+        return json.dumps({"error":
+            f"{', '.join(placeholders)} is a placeholder, not a real name. "
+            "Call a discovery tool first -- list_pods or scan_cluster -- and "
+            "use a name it returned."})
 
     try:
         result = func(**arguments)
@@ -353,6 +395,76 @@ def named_but_not_called(answer, called):
 # last thing in its context by then is one pod's detail and an instruction to
 # call a tool and answer, so a model that answers exactly that is not being
 # unreasonable. The question has to be put back in front of it.
+# Statuses whose cause is not in the pod's own status block. The kubelet puts
+# the reason in an Event and nowhere else, so describe_pod returns a pod that
+# is plainly stuck and silent about why.
+#
+# Measured 2026-08-15 and again live on 2026-08-18: a ConfigMap referenced by a
+# VOLUME leaves the pod in ContainerCreating with NO waiting message at all --
+# the name appears only in a FailedMount event. Asked why such a pod was stuck,
+# the agent read describe_pod, never called get_pod_events, and hedged: "these
+# ConfigMaps may not exist ... or are misreferenced". The right answer, from
+# evidence it never collected, was `configmap "nginx-conf" not found`.
+#
+# An env-var reference is the opposite: the name IS in the waiting message, so
+# describe_pod is sufficient and requiring events would be noise. The split is
+# by volume-versus-env, not by ConfigMap-versus-Secret.
+EVIDENCE_IN_EVENTS = (
+    "containercreating",
+    "podinitializing",
+    "failedmount",
+    "createcontainerconfigerror",
+)
+
+EVIDENCE_POLICY = (
+    "The evidence for a {status} pod is not in its status block -- the kubelet "
+    "puts the reason in an Event and nowhere else, which is why {pod} looks "
+    "stuck and says nothing about why. Call get_pod_events on {pod} in "
+    "namespace {namespace}, read the reason it reports, and then answer this "
+    "question in full:\n\n{question}\n\nKeep every finding you already have "
+    "and add to it. If the events do not establish the cause either, say that "
+    "plainly rather than proposing one."
+)
+
+
+def evidence_gap(trace, outputs):
+    """
+    A pod whose cause lives in Events, that this run never asked Events about.
+
+    Returns (pod, namespace, status) or None. Deterministic, and deliberately
+    narrow: it fires on the statuses whose cause is provably not in the status
+    block, and only when get_pod_events was not called for that pod. The model
+    still chooses its own path -- this catches the one gap where stopping early
+    is guaranteed to produce a guess.
+    """
+    asked = {
+        (c["arguments"].get("name"), c["arguments"].get("namespace", "default"))
+        for c in trace if c["name"] == "get_pod_events"
+    }
+
+    for output in outputs:
+        try:
+            data = json.loads(output)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        pod = data.get("pod")
+        status = str(data.get("status", "")).lower()
+        if not pod or not status:
+            continue
+        if not any(marker in status for marker in EVIDENCE_IN_EVENTS):
+            continue
+
+        namespace = data.get("namespace", "default")
+        if (pod, namespace) in asked:
+            continue
+        return pod, namespace, data.get("status")
+
+    return None
+
+
 NUDGE = (
     "You wrote that {tools} should be run, but you did not run {them}. You "
     "have {them} available now, and the person asking cannot run tools -- an "
@@ -425,6 +537,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
     tool_ms = 0.0
     round_ms = []
     nudges = 0
+    policies = 0
 
     # Two clocks, deliberately. perf_counter is monotonic and stops while the
     # machine is asleep; time.time() does not. Their difference over the same
@@ -476,9 +589,38 @@ def stream(question, model=MODEL, think=True, prefetched=None):
                 })
                 continue
 
+            # Deterministic evidence policy, checked after the tool-naming
+            # nudge because that one is about what the model SAID and this one
+            # is about what the cluster REQUIRES. A pod stuck in
+            # ContainerCreating has its reason in an Event and nowhere else, so
+            # answering without reading events is guessing however confident
+            # the prose sounds. Same budget as the nudge: once per run, never
+            # on the last rounds.
+            gap = evidence_gap(trace, outputs)
+            if gap and policies < MAX_NUDGES and rounds_left >= 2:
+                pod, namespace, status = gap
+                policies += 1
+                log.info(
+                    "evidence_policy_applied",
+                    extra={"pod": pod, "namespace": namespace, "status": status},
+                )
+                messages.append({
+                    "role": "user",
+                    "content": EVIDENCE_POLICY.format(
+                        status=status, pod=pod, namespace=namespace,
+                        question=question,
+                    ),
+                })
+                continue
+
             yield {
                 "type": "answer",
                 "answer": answer,
+                # How many times a deterministic policy sent this run back for
+                # evidence the status block provably does not contain. Separate
+                # from nudges: one is the model stopping short of a tool it
+                # named, the other is the cluster requiring a tool it did not.
+                "policies": policies,
                 "tool_calls": trace,
                 "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
                 # Recorded, not just acted on: without it a run that called
@@ -531,6 +673,7 @@ def stream(question, model=MODEL, think=True, prefetched=None):
         "tool_calls": trace,
         "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
         "nudges": nudges,
+        "policies": policies,
         "confidence": "ungrounded",
         "unverified": [],
     }
