@@ -18,6 +18,17 @@ import agent
 import grounding
 
 
+# A cluster with nothing wrong in it. Used wherever a loop test calls a pod
+# tool it does not care about the result of -- otherwise the test reads
+# whatever cluster is running on the machine, and the evidence policy reacts
+# to it.
+HEALTHY_STUB = {
+    "list_pods": lambda **k: {"web-abc-xyz": {"status": "Running", "ready": "1/1"}},
+    "describe_pod": lambda **k: {"pod": "web-abc-xyz", "namespace": "demo",
+                                 "status": "Running"},
+}
+
+
 def tool_call(name, arguments):
     return SimpleNamespace(function=SimpleNamespace(name=name, arguments=arguments))
 
@@ -120,7 +131,13 @@ class TestAskLoop:
             reply(calls=[tool_call("describe_pod", {"name": "p", "namespace": "demo"})]),
             reply(content="OOMKilled"),
         ]
-        with mock_chat(side_effect=responses):
+        # Stubbed, because the real tools reach a cluster if one happens to be
+        # running on the machine. These passed either way until the evidence
+        # policy started reading tool RESULTS: with a live kind cluster they
+        # then found a crashing pod, fired, and asked for a round this list of
+        # mocked replies does not have. A loop test must not depend on whether
+        # a cluster exists.
+        with patch.dict(agent.TOOLS, HEALTHY_STUB), mock_chat(side_effect=responses):
             result = agent.ask("what is broken?")
 
         assert [c["name"] for c in result["tool_calls"]] == ["list_pods", "describe_pod"]
@@ -272,7 +289,7 @@ class TestStream:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="done"),
         ]
-        with mock_chat(side_effect=responses):
+        with patch.dict(agent.TOOLS, HEALTHY_STUB), mock_chat(side_effect=responses):
             events = list(agent.stream("q"))
 
         assert [event["type"] for event in events].count("answer") == 1
@@ -537,7 +554,13 @@ class TestNamedButNotCalled:
                           "Run describe_pod for detail."),
             reply(content="still all three"),
         ]
-        with mock_chat(side_effect=responses) as chat:
+        # Stubbed for the same reason as the loop tests: unstubbed,
+        # scan_cluster reads whatever cluster is running and the evidence
+        # policy then asks for a round these mocked replies do not have.
+        stub = {"scan_cluster": lambda **k: {
+            "demo/memory-hog": {"status": "OOMKilled", "pods": 1,
+                                "example": "memory-hog-abc"}}}
+        with patch.dict(agent.TOOLS, stub), mock_chat(side_effect=responses) as chat:
             agent.ask("Is anything broken anywhere in the cluster?")
 
         sent = chat.call_args.kwargs["messages"]
@@ -793,7 +816,18 @@ class TestEvidencePolicy:
 
         assert agent.evidence_gap([], [pod]) is None
 
-    @pytest.mark.parametrize("status", ["OOMKilled", "CrashLoopBackOff", "Error"])
+    def test_an_oomkill_does_not_demand_logs(self):
+        """
+        The kernel killed it for exceeding a limit describe_pod already
+        reports: the status IS the cause, and the logs usually end
+        mid-sentence. Requiring them would spend a round on every ordinary
+        memory diagnosis.
+        """
+        pod = json.dumps({"pod": "c", "namespace": "demo", "status": "OOMKilled"})
+
+        assert agent.evidence_gap([], [pod]) is None
+
+    @pytest.mark.parametrize("status", ["CrashLoopBackOff", "Error"])
     def test_a_crashing_pod_whose_logs_were_never_read_is_a_gap(self, status):
         """
         The status is the symptom. Reading it and stopping is how a run ends
@@ -852,3 +886,63 @@ class TestEvidencePolicy:
             result = agent.ask("why is it stuck?")
 
         assert result["policies"] == 0
+
+
+class TestEvidenceGapReadsEveryToolShape:
+    """
+    Observed live 2026-08-19: asked for the crasher pod's status, the model
+    called list_pods, answered "Error with 4 restarts" and stopped. The policy
+    saw nothing, because the detector only read documents with a top-level
+    "pod" key -- and answering straight from a listing is the commonest way to
+    stop early.
+    """
+
+    def test_a_list_pods_result_is_read(self):
+        trace = [{"name": "list_pods", "arguments": {"namespace": "demo"}}]
+        out = [json.dumps({"crasher-abc-xyz": {"status": "Error", "ready": "0/1"}})]
+
+        assert agent.evidence_gap(trace, out) == (
+            "logs", "crasher-abc-xyz", "demo", "Error",
+        )
+
+    def test_the_namespace_comes_from_the_call_that_listed(self):
+        """A listing result does not carry one; the call's arguments do."""
+        trace = [{"name": "list_pods", "arguments": {"namespace": "payments"}}]
+        out = [json.dumps({"api-1": {"status": "CrashLoopBackOff"}})]
+
+        assert agent.evidence_gap(trace, out)[2] == "payments"
+
+    def test_a_scan_cluster_result_points_at_its_example_pod(self):
+        trace = [{"name": "scan_cluster", "arguments": {}}]
+        out = [json.dumps({"demo/crasher": {
+            "status": "CrashLoopBackOff", "pods": 1, "example": "crasher-abc"}})]
+
+        assert agent.evidence_gap(trace, out) == (
+            "logs", "crasher-abc", "demo", "CrashLoopBackOff",
+        )
+
+    def test_a_healthy_listing_is_not_a_gap(self):
+        trace = [{"name": "list_pods", "arguments": {"namespace": "demo"}}]
+        out = [json.dumps({"healthy-web-x": {"status": "Running", "ready": "1/1"}})]
+
+        assert agent.evidence_gap(trace, out) is None
+
+    def test_the_truncation_notice_is_not_a_pod(self):
+        trace = [{"name": "list_pods", "arguments": {"namespace": "demo"}}]
+        out = [json.dumps({
+            "crasher-abc": {"status": "Error"},
+            "_truncated": "40 more pods not shown",
+        })]
+        gap = agent.evidence_gap(trace, out)
+
+        assert gap[1] == "crasher-abc"
+
+    def test_reading_logs_for_that_pod_closes_it(self):
+        trace = [
+            {"name": "list_pods", "arguments": {"namespace": "demo"}},
+            {"name": "get_pod_logs", "arguments": {"name": "crasher-abc", "namespace": "demo"}},
+        ]
+        out = [json.dumps({"crasher-abc": {"status": "Error"}}),
+               json.dumps({"pod": "crasher-abc", "logs": "FATAL: db refused"})]
+
+        assert agent.evidence_gap(trace, out) is None

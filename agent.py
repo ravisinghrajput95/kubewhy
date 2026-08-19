@@ -421,7 +421,12 @@ EVIDENCE_IN_EVENTS = (
 # this is the floor under it. Narrow on purpose: it fires only when NOTHING
 # was read for that pod beyond its status, so the ordinary
 # describe_pod -> get_pod_logs chain never sees it.
-EVIDENCE_IN_LOGS = ("crashloopbackoff", "error", "oomkilled")
+# OOMKilled is deliberately absent. The kernel killed the container for
+# exceeding a limit describe_pod already reports, so the status IS the cause
+# and the logs usually end mid-sentence. Requiring them there would spend a
+# round on every ordinary memory diagnosis -- the same reason the events
+# policy ignores statuses that explain themselves.
+EVIDENCE_IN_LOGS = ("crashloopbackoff", "error")
 
 LOGS_POLICY = (
     "You have {pod}'s status and nothing it wrote. {status} is the symptom, "
@@ -443,6 +448,58 @@ EVIDENCE_POLICY = (
 )
 
 
+def _reported_pods(trace, outputs):
+    """
+    Every (pod, namespace, status) a tool result described, whatever its shape.
+
+    Three shapes, and missing two of them was a real hole: reading only
+    documents with a top-level "pod" key meant a run that answered straight
+    from list_pods was invisible to the policy, and answering straight from a
+    listing is the commonest way to stop early. Observed live 2026-08-19 --
+    asked for the crasher pod's status, the model called list_pods, reported
+    "Error with 4 restarts" and stopped, and the gap detector saw nothing.
+
+    trace and outputs are appended in lockstep, so the call's arguments supply
+    the namespace that a listing result does not carry. Paired by index with a
+    fallback rather than zipped, because a strict zip silently drops every
+    result once the two lists disagree by one -- which is a bug that would
+    disable the policy rather than announce itself.
+    """
+    seen = []
+    for index, output in enumerate(outputs):
+        call = trace[index] if index < len(trace) else {}
+        try:
+            data = json.loads(output)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        namespace = (call.get("arguments") or {}).get("namespace", "default")
+
+        # describe_pod / get_pod_logs: one document about one pod.
+        if isinstance(data.get("pod"), str):
+            seen.append((data["pod"], data.get("namespace", namespace),
+                         str(data.get("status", ""))))
+            continue
+
+        # list_pods / scan_cluster: a mapping of name to detail.
+        for key, value in data.items():
+            if not isinstance(value, dict) or str(key).startswith("_"):
+                continue
+            status = str(value.get("status", ""))
+            if not status:
+                continue
+            if "example" in value:
+                # scan_cluster keys are "namespace/workload"; the pod to look
+                # at is the example it names.
+                where = key.split("/")[0] if "/" in key else namespace
+                seen.append((value["example"], where, status))
+            else:
+                seen.append((key, namespace, status))
+    return seen
+
+
 def evidence_gap(trace, outputs):
     """
     A pod whose cause lives in Events, that this run never asked Events about.
@@ -461,48 +518,26 @@ def evidence_gap(trace, outputs):
 
     asked = called("get_pod_events")
     read = called("get_pod_logs")
+    reported = _reported_pods(trace, outputs)
 
-    for output in outputs:
-        try:
-            data = json.loads(output)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(data, dict):
-            continue
-
-        pod = data.get("pod")
-        status = str(data.get("status", "")).lower()
-        if not pod or not status:
-            continue
-        namespace = data.get("namespace", "default")
-        if not any(marker in status for marker in EVIDENCE_IN_EVENTS):
+    # Events first: an unmountable volume means the container never started,
+    # so there are no logs to read and sending the run for them would spend
+    # its one policy on an empty result.
+    for pod, namespace, status in reported:
+        lowered = status.lower()
+        if not any(marker in lowered for marker in EVIDENCE_IN_EVENTS):
             continue
         if (pod, namespace) in asked:
             continue
-        return "events", pod, namespace, data.get("status")
+        return "events", pod, namespace, status
 
-    # Logs second, so a pod that wants both is sent for events first: an
-    # unmountable volume means the container never started and has no logs to
-    # read at all.
-    for output in outputs:
-        try:
-            data = json.loads(output)
-        except (TypeError, ValueError):
+    for pod, namespace, status in reported:
+        lowered = status.lower()
+        if not any(marker in lowered for marker in EVIDENCE_IN_LOGS):
             continue
-        if not isinstance(data, dict):
-            continue
-
-        pod = data.get("pod")
-        status = str(data.get("status", "")).lower()
-        if not pod or not status:
-            continue
-        if not any(marker in status for marker in EVIDENCE_IN_LOGS):
-            continue
-
-        namespace = data.get("namespace", "default")
         if (pod, namespace) in read or (pod, namespace) in asked:
             continue
-        return "logs", pod, namespace, data.get("status")
+        return "logs", pod, namespace, status
 
     return None
 
