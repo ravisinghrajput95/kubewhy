@@ -14,6 +14,7 @@ import pytest
 from kubernetes import client
 
 import controller as ctrl
+import store
 from conftest import container_status, make_pod
 
 # Fixed, and timezone-aware because the Kubernetes client returns aware
@@ -650,3 +651,37 @@ class TestEvidenceIsCapturedWhileThePodIsAlive:
             controller.diagnose(pod, "Error", evidence)
 
         assert ask.call_args.kwargs["prefetched"] is evidence
+
+
+class TestControllerLeaseWiring:
+    """
+    The lease shipped calling self.store on a Controller that reaches its
+    store through self.budget. Every unit test passed, because none of them
+    calls run() -- it needs a cluster -- and the first live start crashed with
+    AttributeError before the watch began.
+    """
+
+    def test_the_controller_can_reach_the_store_it_leases_on(self):
+        c = ctrl.Controller(sink=object(), budget=ctrl.Budget())
+
+        assert c.budget.store.claim_lease(c.identity, at=1000) is True
+
+    def test_the_identity_is_on_the_controller_not_the_budget(self):
+        c = ctrl.Controller(sink=object(), budget=ctrl.Budget())
+
+        assert isinstance(c.identity, str) and "/" in c.identity
+        assert not hasattr(c.budget, "identity")
+
+    def test_a_second_process_is_refused_on_a_shared_store(self, tmp_path):
+        """
+        Two Controllers in ONE process share hostname/pid, so the second claim
+        is a renewal and not a conflict -- which is right, and means this has
+        to simulate the second process rather than construct it.
+        """
+        shared = store.SqliteStore(str(tmp_path / "s.db"))
+        first = ctrl.Controller(sink=object(), budget=ctrl.Budget(state=shared))
+        second = ctrl.Controller(sink=object(), budget=ctrl.Budget(state=shared))
+        second.identity = "other-host/999"
+
+        assert shared.claim_lease(first.identity, at=1000) is True
+        assert shared.claim_lease(second.identity, at=1010) is False

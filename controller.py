@@ -95,10 +95,6 @@ class Budget:
         self.cooldown = cooldown
         self.max_per_hour = max_per_hour
         self.store = state if state is not None else store.build()
-        # Host and pid, so the log line names something a reader can go and
-        # look at. A pod name would be better in-cluster and is what
-        # HOSTNAME gives there.
-        self.identity = f"{os.getenv('HOSTNAME', 'local')}/{os.getpid()}"
         self._lock = threading.Lock()
 
     def spend(self, key, now=None):
@@ -158,6 +154,9 @@ class Controller:
         # rather than growing a queue that delivers stale findings later.
         self.work = queue.Queue(maxsize=32)
         self.stopping = threading.Event()
+        # Host and pid, so the log line names something a reader can go and
+        # look at. In-cluster HOSTNAME is the pod name, which is better.
+        self.identity = f"{os.getenv('HOSTNAME', 'local')}/{os.getpid()}"
         # Bounded by the number of pods present at startup, and never added
         # to after that window closes.
         self.preexisting_uids = set()
@@ -503,7 +502,7 @@ class Controller:
         # hourly ceiling exist to prevent, reintroduced by the Deployment doing
         # its ordinary job. Advisory, and only meaningful with TRIAGE_STATE_DB
         # set: without one there is no shared state to contend for.
-        if not self.store.claim_lease(self.identity, store.now()):
+        if not self.budget.store.claim_lease(self.identity, store.now()):
             log.error(
                 "controller_already_running",
                 extra={"identity": self.identity, "state_db": os.getenv("TRIAGE_STATE_DB")},
@@ -529,7 +528,7 @@ class Controller:
             # Renewed each cycle rather than held for the process lifetime: a
             # controller that is SIGKILLed never releases anything, so the
             # claim has to expire on its own or the next one can never start.
-            self.store.claim_lease(self.identity, store.now())
+            self.budget.store.claim_lease(self.identity, store.now())
             try:
                 self.watch_once(api)
             except Exception as exc:
