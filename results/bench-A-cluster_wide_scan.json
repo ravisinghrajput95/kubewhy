@@ -1,0 +1,75 @@
+[
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 195.2,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-19T12:29:01",
+  "load_before": 1.58,
+  "load_after": 1.57,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs",
+   "list_pods",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "namespace": "demo",
+    "name": "nightly-sync-29785378-v9rcn"
+   },
+   {
+    "name": "nightly-sync-29785378-v9rcn",
+    "namespace": "demo",
+    "container": "sync",
+    "tail": 50
+   },
+   {
+    "namespace": "demo",
+    "only_unhealthy": true
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "answer": "The cluster has multiple broken workloads, including the newly identified configuration error. Here's the full breakdown:\n\n1. **Image Pull Failure**  \n   - **Pod**: `bad-image-647c5576d5-dp2gv`  \n   - **Status**: `ImagePullBackOff`  \n   - **Issue**: The image pull failed. Verify the image name/registry is correct and accessible.\n\n2. **Crash Loops**  \n   - **Pods**: `crasher-5964d99948-9g8vg`, `log-shipper-8gnqk`, `memory-hog-bc76968c6-mhn4m`, `slow-starter-56c8f89495-g9c47`  \n   - **Status**: `CrashLoopBackOff`  \n   - **Action**: Check logs (`get_pod_logs`) for exit codes. The `memory-hog` may be [unverified: OOMKilled]\u2014verify resource limits.\n\n3. **Init Container Failure**  \n   - **Pod**: `needs-db-58886b67f-m874p`  \n   - **Status**: `Init:CrashLoopBackOff`  \n   - **Issue**: Init container failed. Inspect init container logs for database connection errors.\n\n4. **Unhealthy but Running**  \n   - **Pod**: `never-ready-7d86d8c5f7-478jw`  \n   - **Status**: `Running` but not ready. Check readiness probe configurations and application health.\n\n5. **Missing ConfigMap Key**  \n   - **Pod**: `missing-configmap-key` (namespace: `config-faults`)  \n   - **Error**: `Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings`  \n   - **Fix**: Verify the ConfigMap `app-settings` exists and contains the `LOGLEVEL` key. The pod will not start until this is resolved.\n\n**Next Steps**:  \n- Resolve the missing ConfigMap key immediately.  \n- Prioritize the `bad-image` pod to unblock its workload.  \n- Investigate crash loops via logs to identify root causes (e.g., OOM, app errors).  \n- Check the init container logs for `needs-db` to resolve database connectivity issues.\n\n---\n**Evidence audit.**\n1 of 26 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 195166.1,
+   "tool_ms": 54.7,
+   "rounds": 7,
+   "round_ms": [
+    26573.2,
+    28194.3,
+    33319.7,
+    16647.4,
+    42182.6,
+    14481.0,
+    33767.9
+   ],
+   "slowest_round_ms": 42182.6,
+   "model_share": 1.0,
+   "wall_ms": 195226.9,
+   "unaccounted_ms": 6.0,
+   "slept_ms": 0.5
+  }
+ }
+]

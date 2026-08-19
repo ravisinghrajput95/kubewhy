@@ -1,0 +1,62 @@
+[
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 92.1,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-19T12:22:30",
+  "load_before": 1.58,
+  "load_after": 1.45,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true
+   },
+   {
+    "name": "memory-hog-bc76968c6-mhn4m",
+    "namespace": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-mhn4m",
+    "namespace": "demo",
+    "tail": 50
+   }
+  ],
+  "answer": "The **memory-hog pod** keeps restarting due to **Out-Of-Memory (OOM)** errors, confirmed by the `[unverified: OOMKilled]` termination reason and exit code `137`. Here's the full breakdown:\n\n---\n\n### **Key Findings**\n1. **Root Cause**:  \n   - The container uses the `polinux/stress` image, which allocates memory aggressively.  \n   - Its memory **limits** are set to `64Mi` (as per `describe_pod`), but the stress tool exhausts this limit, triggering a kernel OOM kill.\n\n2. **Logs Confirmation**:  \n   - The last log line shows the stress tool is allocating memory:  \n     `\"stress: info: [1] dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd\"`  \n   - While the logs don\u2019t explicitly mention OOM, the behavior matches the `[unverified: OOMKilled]` exit code, confirming memory exhaustion.\n\n3. **Resource Settings**:  \n   - **Requests**: `32Mi` (minimum guaranteed memory).  \n   - **Limits**: `64Mi` (maximum allowed memory).  \n   - The stress tool likely exceeds the `64Mi` limit, causing the container to be terminated.\n\n---\n\n### **Fix**\n- **Increase memory limits**:  \n  Raise `limits.memory` in the pod's spec (e.g., `256Mi` or higher) to accommodate the stress workload.  \n- **Monitor usage**:  \n  Ensure the new limits are sufficient without causing repeated OOM kills.  \n- **Avoid stress testing in production**:  \n  The `polinux/stress` image is for stress testing, not for actual workloads.  \n\nThe pod\u2019s restarts are a direct result of the memory limits being too low for the application\u2019s needs.\n\n---\n**Evidence audit.**\n1 of 9 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 92098.2,
+   "tool_ms": 32.3,
+   "rounds": 5,
+   "round_ms": [
+    11745.5,
+    11386.7,
+    19441.6,
+    20528.6,
+    28995.9
+   ],
+   "slowest_round_ms": 28995.9,
+   "model_share": 1.0,
+   "wall_ms": 92134.3,
+   "unaccounted_ms": 3.8,
+   "slept_ms": 0.1
+  }
+ }
+]

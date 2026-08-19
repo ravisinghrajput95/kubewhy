@@ -8,6 +8,7 @@ it matters.
 """
 
 import datetime as dt
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -685,3 +686,100 @@ class TestControllerLeaseWiring:
 
         assert shared.claim_lease(first.identity, at=1000) is True
         assert shared.claim_lease(second.identity, at=1010) is False
+
+
+class TestControllerRunPath:
+    """
+    `Controller.run()` was uncovered, and it cost a real bug: the lease
+    referenced self.store on an object that reaches its store through
+    self.budget, 508 unit tests passed, and the first live start died with
+    AttributeError before the watch began.
+
+    These execute the real run() -- only the Kubernetes client, the kubeconfig
+    loader and the watch body are replaced. The lease code under test is not
+    mocked; that is the whole point.
+    """
+
+    def _controller(self, state):
+        c = ctrl.Controller(sink=MagicMock(), budget=ctrl.Budget(state=state))
+        # One pass through the while loop, then stop. watch_once is the body
+        # of the loop, not the code under test.
+        def one_cycle(api):
+            c.stopping.set()
+        c.watch_once = one_cycle
+        return c
+
+    def _run(self, controller):
+        with patch.object(ctrl.config, "load_kube_config"), \
+             patch.object(ctrl.client, "CoreV1Api", return_value=MagicMock()):
+            controller.run()
+
+    def test_run_acquires_the_lease_and_starts(self, tmp_path, caplog):
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = self._controller(state)
+
+        with caplog.at_level("INFO"):
+            self._run(controller)
+
+        assert "controller_started" in caplog.text
+        assert state.claim_lease("someone-else/1", at=store.now()) is False
+
+    def test_run_renews_the_lease_each_cycle(self, tmp_path):
+        """
+        A held-forever claim would never expire for the next controller; a
+        renewed one keeps this process's hold alive while it works.
+        """
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = self._controller(state)
+        state.claim_lease = MagicMock(return_value=True)
+
+        self._run(controller)
+
+        # Once to acquire, once inside the loop body.
+        assert state.claim_lease.call_count >= 2
+        assert all(call.args[0] == controller.identity
+                   for call in state.claim_lease.call_args_list)
+
+    def test_run_exits_when_another_controller_holds_the_lease(self, tmp_path, caplog):
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        state.claim_lease("other-host/999", at=store.now())
+        controller = self._controller(state)
+        started = MagicMock()
+        controller.watch_once = started
+
+        with caplog.at_level("ERROR"):
+            self._run(controller)
+
+        assert "controller_already_running" in caplog.text
+        started.assert_not_called()
+
+    def test_a_lost_lease_does_not_crash_the_loop(self, tmp_path):
+        """
+        Losing the lease mid-flight is a state the process must survive: the
+        renewal simply fails and the cycle continues rather than raising.
+        """
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = self._controller(state)
+        state.claim_lease = MagicMock(side_effect=[True, False])
+
+        self._run(controller)   # must not raise
+
+    def test_the_worker_thread_is_joined_on_shutdown(self, tmp_path):
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = self._controller(state)
+
+        self._run(controller)
+
+        assert not any(t.name.startswith("worker") and t.is_alive()
+                       for t in threading.enumerate())
+
+    def test_run_reaches_the_store_through_the_budget(self, tmp_path):
+        """
+        The exact shape of the shipped bug: run() must not assume the
+        Controller owns a `store` attribute.
+        """
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = self._controller(state)
+
+        assert not hasattr(controller, "store")
+        self._run(controller)

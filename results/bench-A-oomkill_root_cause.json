@@ -1,0 +1,67 @@
+[
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 163.3,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-19T12:24:32",
+  "load_before": 1.08,
+  "load_after": 0.85,
+  "low_power_mode": true,
+  "unverified": [
+   "128",
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_nodes",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true
+   },
+   {
+    "name": "memory-hog-bc76968c6-mhn4m",
+    "namespace": "demo"
+   },
+   {},
+   {
+    "tail": 50,
+    "name": "memory-hog-bc76968c6-mhn4m",
+    "namespace": "demo"
+   }
+  ],
+  "answer": "The **memory-hog pod** keeps restarting due to **[unverified: OOMKilled]** (Out-Of-Memory Killed) with exit code **137**, caused by the container exceeding its memory limit. Here's the full diagnosis:\n\n---\n\n### \ud83d\udd0d **Key Findings**\n1. **Pod Behavior**:\n   - The `memory-hog` pod is in **CrashLoopBackOff** after being **[unverified: OOMKilled]** (kernel-terminated for exceeding memory limits).\n   - The container uses the `polinux/stress` image, designed to consume memory aggressively.\n\n2. **Resource Limits**:\n   - The container's memory **limit** is set to **64Mi** (`limits.memory: 64Mi`).\n   - The **stress** tool in the container is likely allocating memory beyond this limit, triggering the kernel to kill the process.\n\n3. **Logs**:\n   - The latest logs show:  \n     ```\n     stress: info: [1] dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd\n     ```\n     - This indicates the stress tool is active but does not explicitly show an error. However, the **[unverified: OOMKilled]** exit code confirms memory exhaustion occurred.\n\n4. **Node Pressure**:\n   - The node `aiops-test-control-plane` has **no memory pressure** (`pressure: null`) and ample allocatable memory (**8GB+**), ruling out node-level constraints.\n\n---\n\n### \ud83d\udee0\ufe0f **Root Cause**\nThe pod's **memory limit is too low** for the workload. The `stress` image consumes memory beyond the 64Mi limit, triggering the kernel to kill the container. The node has sufficient memory, so the issue is purely the container's resource limits.\n\n---\n\n### \u2705 **Fix**\n1. **Increase Memory Limit**:\n   - Raise the container's memory limit (e.g., to **128Mi** or higher) in the pod's spec to accommodate the workload.\n   - Example:  \n     ```yaml\n     resources:\n       limits:\n         memory: \"[unverified: 128Mi]\"\n     ```\n\n2. **Monitor Usage**:\n   - After adjusting the limit, monitor actual memory usage to ensure the new limit is sufficient without overcommitting resources.\n\n---\n\n### \ud83d\udccc **Why Logs Are Silent**\nThe logs do not show an explicit error, but the **[unverified: OOMKilled]** exit code and the stress tool's behavior confirm memory exhaustion. The stress tool may not log errors when it is terminated by the kernel.\n\n---\n**Evidence audit.**\n2 of 11 stated values could not be traced to any tool result for the workload they were stated about: `128`, `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['128', 'oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 163286.3,
+   "tool_ms": 33.8,
+   "rounds": 7,
+   "round_ms": [
+    23005.6,
+    20324.1,
+    22702.8,
+    14258.3,
+    31940.6,
+    13670.7,
+    37384.2
+   ],
+   "slowest_round_ms": 37384.2,
+   "model_share": 1.0,
+   "wall_ms": 163323.3,
+   "unaccounted_ms": 3.2,
+   "slept_ms": 0.1
+  }
+ }
+]
