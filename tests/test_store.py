@@ -205,3 +205,48 @@ class TestJobApi:
 
             assert job["state"] == "failed"
             assert "ollama is down" in job["result"]["error"]
+
+
+class TestControllerLease:
+    """
+    Two controllers on one state file deliver every finding twice: dedup is
+    keyed on the workload, so a second process has its own idea of what has
+    already been reported. A rollout produces exactly that pairing.
+    """
+
+    def test_the_first_claim_succeeds(self, tmp_path):
+        db = store.SqliteStore(str(tmp_path / "s.db"))
+
+        assert db.claim_lease("pod-a/1", at=1000) is True
+
+    def test_a_second_holder_is_refused_while_the_lease_is_live(self, tmp_path):
+        db = store.SqliteStore(str(tmp_path / "s.db"))
+        db.claim_lease("pod-a/1", at=1000)
+
+        assert db.claim_lease("pod-b/2", at=1030) is False
+
+    def test_the_holder_can_renew_its_own_lease(self, tmp_path):
+        db = store.SqliteStore(str(tmp_path / "s.db"))
+        db.claim_lease("pod-a/1", at=1000)
+
+        assert db.claim_lease("pod-a/1", at=1030) is True
+
+    def test_a_stale_lease_is_taken_over(self, tmp_path):
+        """
+        A SIGKILLed controller never releases anything, so the claim has to
+        expire by itself or the next one could never start.
+        """
+        db = store.SqliteStore(str(tmp_path / "s.db"))
+        db.claim_lease("dead-pod/1", at=1000)
+
+        assert db.claim_lease("new-pod/2", at=1000 + 121) is True
+
+    def test_the_lease_survives_a_restart(self, tmp_path):
+        path = str(tmp_path / "s.db")
+        store.SqliteStore(path).claim_lease("pod-a/1", at=1000)
+
+        assert store.SqliteStore(path).claim_lease("pod-b/2", at=1030) is False
+
+    def test_in_memory_always_holds_the_lease(self):
+        """There is no second process to exclude, and the CLI must not block."""
+        assert store.MemoryStore().claim_lease("anything", at=0) is True

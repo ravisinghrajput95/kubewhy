@@ -95,6 +95,10 @@ class Budget:
         self.cooldown = cooldown
         self.max_per_hour = max_per_hour
         self.store = state if state is not None else store.build()
+        # Host and pid, so the log line names something a reader can go and
+        # look at. A pod name would be better in-cluster and is what
+        # HOSTNAME gives there.
+        self.identity = f"{os.getenv('HOSTNAME', 'local')}/{os.getpid()}"
         self._lock = threading.Lock()
 
     def spend(self, key, now=None):
@@ -492,6 +496,20 @@ class Controller:
         ) else config.load_kube_config()
         api = client.CoreV1Api()
 
+        # One controller per state file. Two of them watching the same cluster
+        # is what a rollout produces by default -- old pod and new pod both
+        # running -- and since dedup is keyed on the workload, two controllers
+        # deliver every finding twice. That is the noise the cooldown and the
+        # hourly ceiling exist to prevent, reintroduced by the Deployment doing
+        # its ordinary job. Advisory, and only meaningful with TRIAGE_STATE_DB
+        # set: without one there is no shared state to contend for.
+        if not self.store.claim_lease(self.identity, store.now()):
+            log.error(
+                "controller_already_running",
+                extra={"identity": self.identity, "state_db": os.getenv("TRIAGE_STATE_DB")},
+            )
+            return
+
         thread = threading.Thread(target=self.worker, daemon=True)
         thread.start()
 
@@ -508,6 +526,10 @@ class Controller:
         )
 
         while not self.stopping.is_set():
+            # Renewed each cycle rather than held for the process lifetime: a
+            # controller that is SIGKILLed never releases anything, so the
+            # claim has to expire on its own or the next one can never start.
+            self.store.claim_lease(self.identity, store.now())
             try:
                 self.watch_once(api)
             except Exception as exc:

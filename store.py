@@ -75,6 +75,13 @@ class MemoryStore:
             self._emissions = [t for t in self._emissions if t >= cutoff]
             return len(self._emissions)
 
+    def claim_lease(self, holder, at, ttl=120):
+        """
+        In memory there is no second process to exclude; the lease is always
+        this one's. Present so the controller can call it unconditionally.
+        """
+        return True
+
     def undo_report(self, key, at, previous):
         with self._lock:
             # Any emission with this timestamp will do -- they are counted,
@@ -162,10 +169,50 @@ class SqliteStore:
                 "CREATE TABLE IF NOT EXISTS emissions (at REAL NOT NULL)"
             )
             connection.execute(
+                "CREATE TABLE IF NOT EXISTS lease "
+                "(id INTEGER PRIMARY KEY CHECK (id = 1), holder TEXT NOT NULL,"
+                " renewed_at REAL NOT NULL)"
+            )
+            connection.execute(
                 "CREATE TABLE IF NOT EXISTS jobs ("
                 "id TEXT PRIMARY KEY, state TEXT NOT NULL, question TEXT NOT NULL,"
                 "created_at REAL NOT NULL, finished_at REAL, result TEXT)"
             )
+
+    def claim_lease(self, holder, at, ttl=120):
+        """
+        Whether this process may act as *the* controller for this state file.
+
+        Two controllers sharing a state DB is not a hypothetical: a rollout
+        overlaps old and new pods, and both watch the same cluster. Dedup is
+        keyed on the workload, so two of them means every finding is delivered
+        twice -- the exact noise the cooldown and hourly ceiling exist to stop,
+        reintroduced by the deployment doing its normal job.
+
+        A row with a TTL rather than a file lock: a file lock dies with the
+        process and says nothing about a controller that was SIGKILLed, while a
+        stale timestamp expires on its own. The holder renews as it works, so a
+        live controller keeps its claim and a dead one loses it after `ttl`.
+
+        Advisory. It cannot stop a second controller that ignores the answer,
+        which is the same guarantee a Lease gives in-cluster, and it is honest
+        about the single-writer design rather than pretending SQLite over an
+        RWX volume would be safe.
+        """
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT holder, renewed_at FROM lease WHERE id = 1"
+            ).fetchone()
+
+            if row and row["holder"] != holder and at - row["renewed_at"] < ttl:
+                return False
+
+            connection.execute(
+                "INSERT INTO lease (id, holder, renewed_at) VALUES (1, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET holder = ?, renewed_at = ?",
+                (holder, at, holder, at),
+            )
+        return True
 
     def last_reported(self, key):
         with self._connect() as connection:
