@@ -313,6 +313,13 @@ def main():
                 # never called. A run that reached get_pod_logs on its own and
                 # one that had to be told are the same trace without this.
                 "nudges": result.get("nudges", 0),
+                # How many times a deterministic policy sent the run back for
+                # evidence the status block provably does not contain. Without
+                # it, a run that collected events on its own cannot be told
+                # from one that had to be made to -- and the first 32-run set
+                # after the policy shipped could not say whether it had ever
+                # fired.
+                "policies": result.get("policies", 0),
                 "failures": why,
                 # Not failures, and not noise either: an answer that names a
                 # broken neighbour beside a correct verdict is one edit away
