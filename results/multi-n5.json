@@ -1,0 +1,315 @@
+[
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 221.9,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-20T23:22:26",
+  "load_before": 0.82,
+  "load_after": 1.19,
+  "low_power_mode": true,
+  "unverified": [
+   "1.21",
+   "3",
+   "137",
+   "oomkilled",
+   "512",
+   "memory leak",
+   "503",
+   "10"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "list_pods",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "name": "nightly-sync-29787471-fb277",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "only_unhealthy": true
+   },
+   {
+    "limit": 5,
+    "name": "missing-configmap-key",
+    "namespace": "config-faults"
+   }
+  ],
+  "answer": "Here is the **complete and updated diagnosis** of the cluster's health, incorporating all findings:\n\n---\n\n### **1. `config-faults/missing-configmap-key`**  \n- **Pod**: `missing-configmap-key`  \n- **Status**: `ContainerCreating` (stuck due to config error)  \n- **Root Cause**:  \n  - **Event**: `Failed` (258 times)  \n    - **Message**: `\"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"`  \n  - This confirms the pod cannot start because the required ConfigMap key is missing.  \n- **Action**:  \n  - Verify the ConfigMap `config-faults/app-settings` exists and contains the `LOGLEVEL` key.  \n  - Check for typos in the key name or namespace.  \n\n---\n\n### **2. `demo/bad-image`**  \n- **Pod**: `bad-image-647c5576d5-5vv5j`  \n- **Status**: `ImagePullBackOff`  \n- **Root Cause**:  \n  - Invalid image name or registry authentication failure.  \n- **Action**:  \n  - Validate the image name in the deployment spec (e.g., `nginx:latest` vs. `nginx:[unverified: 1.21]`).  \n  - Check registry credentials if using a private registry.  \n\n---\n\n### **[unverified: 3]. `demo/crasher`**  \n- **Pod**: `crasher-5964d99948-5f6db`  \n- **Status**: `CrashLoopBackOff` (15 restarts)  \n- **Root Cause**:  \n  - Likely [unverified: OOMKilled] (exit code [unverified: 137]) or application crash.  \n- **Action**:  \n  - Check resource limits in the pod spec (e.g., `memory: \"[unverified: 512Mi]\"`).  \n  - Inspect logs for runtime errors.  \n\n---\n\n### **4. `demo/log-shipper`**  \n- **Pod**: `log-shipper-vzqh6`  \n- **Status**: `CrashLoopBackOff` (15 restarts)  \n- **Root Cause**:  \n  - Potential connection errors to a logging service or misconfigured environment variables.  \n- **Action**:  \n  - Validate dependencies (e.g., Kafka, Elasticsearch) are reachable.  \n  - Check environment variables for correctness.  \n\n---\n\n### **5. `demo/memory-hog`**  \n- **Pod**: `memory-hog-bc76968c6-dxltd`  \n- **Status**: `CrashLoopBack, 15 restarts`  \n- **Root Cause**:  \n  - [unverified: Memory leak] or excessive resource usage.  \n- **Action**:  \n  - Monitor memory usage via metrics server.  \n  - Adjust `resources.limits.memory` in the pod spec.  \n\n---\n\n### **6. `demo/needs-db`**  \n- **Pod**: `needs-db-58886b67f-c4j6m`  \n- **Status**: `Init:CrashLoopBackOff`  \n- **Root Cause**:  \n  - Init container failed (e.g., database connection timeout).  \n- **Action**:  \n  - Ensure the database service is running and accessible.  \n  - Verify init container commands and environment variables.  \n\n---\n\n### **7. `demo/never-ready`**  \n- **Pod**: `never-ready-7d86d8c5f7-4csds`  \n- **Status**: `Running` but `0/1` ready  \n- **Root Cause**:  \n  - Readiness probe failure (e.g., HTTP [unverified: 503], timeout, or misconfigured endpoint).  \n- **Action**:  \n  - Inspect probe settings (`readinessProbe.httpGet.path`, `port`).  \n  - Ensure the application endpoint is correctly exposed.  \n\n---\n\n### **8. `demo/nightly-sync`**  \n- **Pods**: `nightly-sync-29787472-67mpp` and `nightly-sync-29787473-7xx6p`  \n- **Status**: `Error` (last [unverified: 10m])  \n- **Root Cause**:  \n  - Likely [unverified: OOMKilled] or exit code `1` (general error).  \n- **Action**:  \n  - Check logs for batch job errors (e.g., missing files, permissions).  \n  - Adjust memory limits if resource contention is suspected.  \n\n---\n\n### **9. `adversarial/annotation-injector`**  \n- **Pod**: `annotation-injector-58b845fb95-v9vlf`  \n- **Status**: `CrashLoopBackOff`  \n- **Root Cause**:  \n  - Likely application crash or misconfiguration.  \n- **Action**:  \n  - Inspect logs via `get_pod_logs` for error details.  \n\n---\n\n### **Summary**  \nThe cluster has **9 active issues** across 8 workloads. All are **non-fatal** but require immediate attention to avoid cascading failures. Prioritize:  \n1. **ConfigMap missing key** (`missing-configmap-key`).  \n2. **Image pull errors** (`bad-image`).  \n[unverified: 3]. **CrashLoopBackOff** pods (`crasher`, `log-shipper`, `memory-hog`).  \n4. **Readiness probe failures** (`never-ready`).  \n5. **Init container failures** (`needs-db`).  \n\nUse `describe_pod` and `get_pod_logs` on each affected pod to confirm root causes.\n\n---\n**Evidence audit.**\n8 of 61 stated values could not be traced to any tool result for the workload they were stated about: `1.21`, `3`, `137`, `oomkilled`, `512`, `memory leak`, `503`, `10`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['1.21', '3', '137', 'oomkilled', '512', 'memory leak', '503', '10'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 221851.4,
+   "tool_ms": 44.8,
+   "rounds": 7,
+   "round_ms": [
+    5056.7,
+    31898.4,
+    21883.7,
+    14800.6,
+    65826.8,
+    17568.8,
+    64816.4
+   ],
+   "slowest_round_ms": 65826.8,
+   "model_share": 1.0,
+   "wall_ms": 221922.8,
+   "unaccounted_ms": 26.5,
+   "slept_ms": 13.6
+  }
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 114.7,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-20T23:26:08",
+  "load_before": 1.19,
+  "load_after": 0.85,
+  "low_power_mode": true,
+  "unverified": [
+   "3"
+  ],
+  "tools": [
+   "scan_cluster",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "namespace": "config-faults",
+    "limit": 5,
+    "name": "missing-configmap-key"
+   }
+  ],
+  "answer": "The cluster has multiple issues, with the following confirmed findings:\n\n### **1. Configuration Errors (Confirmed by Events)**  \n- **`config-faults/missing-configmap-key`** is in `CreateContainerConfigError` due to:  \n  - **Missing ConfigMap key**: The kubelet reports `couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings`. This confirms the pod fails during container creation because the required configuration is absent.  \n  - **Fix**: Ensure the `LOGLEVEL` key exists in the `config-faults/app-settings` ConfigMap.  \n\n---\n\n### **2. Crash Loops (Unchanged)**  \n- **`demo/crasher`, `demo/log-shipper`, `demo/memory-hog`, `demo/slow-starter`, `demo/needs-db`** are in `CrashLoopBackOff` \u2014 likely due to application crashes, failed liveness probes, or misconfigurations.  \n- **`adversarial/annotation-injector`, `adversarial/log-injector`, `adversarial/payments`** also crash repeatedly.  \n\n---\n\n### **[unverified: 3]. Image Pull Failure (Unchanged)**  \n- **`demo/bad-image`** is stuck in `ImagePullBackOff` \u2014 verify the image repository or manifest.  \n\n---\n\n### **4. Other Configuration Issues (Pending Verification)**  \n- **`config-faults/missing-secret-key`** and **`config-faults/missing-volume-key`** are `ContainerCreating` \u2014 likely due to missing Secrets or volume keys.  \n- **`config-faults/missing-configmap-volume`** and **`config-faults/projected-source-missing`** are also stuck, possibly due to misconfigured volumes.  \n\n---\n\n### **5. Not Ready Pod (Unchanged)**  \n- **`demo/never-ready`** is `Running` but not ready \u2014 check readiness probes or application health checks.  \n\n---\n\n### **6. Scheduling Issue (New Finding)**  \n- **`missing-configmap-key`** had a **FailedScheduling** event (1h ago) due to a taint on the node. However, this is likely unrelated to the current `CreateContainerConfigError` (which occurred after scheduling succeeded).  \n\n---\n\n### **Next Steps**  \n1. Fix the missing `LOGLEVEL` key in `config-faults/app-settings`.  \n2. Investigate the root cause of `CrashLoopBackOff` pods (e.g., logs, liveness probes).  \n[unverified: 3]. Verify image availability for `demo/bad-image`.  \n4. Check if other ConfigMap/Secret issues (e.g., `missing-secret-key`) have similar event logs.  \n\nWould you like to inspect specific pods or events further?\n\n---\n**Evidence audit.**\n1 of 13 stated values could not be traced to any tool result for the workload they were stated about: `3`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['3'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 114662.3,
+   "tool_ms": 28.0,
+   "rounds": 4,
+   "round_ms": [
+    23733.6,
+    34090.5,
+    17426.3,
+    39411.9
+   ],
+   "slowest_round_ms": 39411.9,
+   "model_share": 1.0,
+   "wall_ms": 114694.0,
+   "unaccounted_ms": 3.7,
+   "slept_ms": 0.7
+  }
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 217.9,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-20T23:28:03",
+  "load_before": 0.85,
+  "load_after": 0.52,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "list_pods",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "name": "nightly-sync-29787477-2hhj8",
+    "namespace": "demo"
+   },
+   {
+    "only_unhealthy": true,
+    "namespace": "demo"
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "answer": "The cluster has multiple critical issues across workloads. Here's the full diagnosis with updated details:\n\n---\n\n### **1. Image Pull Failure**  \n- **Pod**: `bad-image-647c5576d5-5vv5j`  \n- **Status**: `ImagePullBackOff`  \n- **Cause**: The specified image is invalid or unreachable. Verify the image name/tag in the deployment configuration.  \n\n---\n\n### **2. Repeated Crashes**  \n- **Pod**: `crasher-5964d99948-5f6db` (17 restarts)  \n- **Status**: `Error`  \n- **Cause**: Likely a crash loop (e.g., application crash, missing dependencies). Check logs via `get_pod_logs` to identify the exit code or error.  \n\n- **Pod**: `log-shipper-vzqh6` (16 restarts)  \n- **Status**: `CrashLoopBackOff`  \n- **Cause**: Application failure (e.g., misconfiguration, unhandled exceptions). Inspect logs for detailed errors.  \n\n- **Pod**: `memory-hog-bc76968c6-dxltd` (16 restarts)  \n- **Status**: `CrashLoopBackOff`  \n- **Cause**: Likely [unverified: OOMKilled] (memory exhaustion). Check resource limits in the pod's spec.  \n\n- **Pod**: `needs-db-58886b67f-c4j6m`  \n- **Status**: `Init:CrashLoopBackOff`  \n- **Cause**: Init container failed (e.g., database connection issues, missing secrets). Inspect init container logs.  \n\n---\n\n### **3. Not Ready Despite Running**  \n- **Pod**: `never-ready-7d86d8c5f7-4csds`  \n- **Status**: `Running` but `ready: 0/1`  \n- **Cause**: Failed readiness probe (e.g., application not listening on port, misconfigured health checks). Verify probe settings and application availability.  \n\n---\n\n### **4. Configuration Faults**  \n- **Pod**: `missing-configmap-key`  \n- **Status**: `CreateContainerConfigError`  \n- **Cause**: **Confirmed** by event: \"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\". Verify the ConfigMap exists and contains the required key.  \n\n- **Pod**: `missing-secret-key`  \n- **Status**: `CreateContainerConfigError`  \n- **Cause**: Missing secret key in a Secret. Ensure the Secret exists and has the required keys.  \n\n- **Pod**: `missing-configmap-volume`  \n- **Status**: `ContainerCreating`  \n- **Cause**: Misconfigured volume mount. Check volume claims and permissions.  \n\n- **Pod**: `missing-volume-key`  \n- **Status**: `ContainerCreating`  \n- **Cause**: Missing key in a volume source. Verify volume configuration.  \n\n---\n\n### **5. Other Issues**  \n- **Pod**: `demo/nightly-sync` (2 pods) and `adversarial/annotation-injector` (1 pod) are in `Error`/`CrashLoopBackOff` states.  \n- **Pod**: `adversarial/log-injector`, `adversarial/payments`, and `demo/needs-db` are also crashing repeatedly.  \n\n---\n\n### **Next Steps**  \n- For crashing pods, run `get_pod_logs` to identify root causes.  \n- For config issues, validate referenced ConfigMaps/Secrets and volume configurations.  \n- For the `never-ready` pod, check readiness probe targets and application health.  \n\nWould you like to investigate one of these specific issues further?\n\n---\n**Evidence audit.**\n1 of 41 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 217856.7,
+   "tool_ms": 42.4,
+   "rounds": 7,
+   "round_ms": [
+    24552.1,
+    30733.2,
+    23043.2,
+    20095.7,
+    49792.4,
+    18106.9,
+    51533.2
+   ],
+   "slowest_round_ms": 51533.2,
+   "model_share": 1.0,
+   "wall_ms": 217907.7,
+   "unaccounted_ms": 8.6,
+   "slept_ms": 1.3
+  }
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 128.6,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-20T23:31:41",
+  "load_before": 0.52,
+  "load_after": 0.92,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "limit": 5,
+    "name": "missing-configmap-key",
+    "namespace": "config-faults"
+   }
+  ],
+  "answer": "The cluster has multiple broken or degraded workloads, with confirmed causes for some:\n\n1. **config-faults/missing-configmap-key**  \n   - **Status**: `CreateContainerConfigError`  \n   - **Cause**: The pod failed to start because the key `LOGLEVEL` is missing from the ConfigMap `config-faults/app-settings` (event: `couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings`).  \n   - **Fix**: Add the missing key to the ConfigMap or adjust the application to avoid requiring it.\n\n2. **demo/nightly-sync**  \n   - 2 pods in error state, crashing repeatedly. Likely due to application crashes (check `describe_pod` for exit codes or logs).\n\n3. **adversarial/** workloads  \n   - `annotation-injector`, `log-injector`, `payments`, `crasher`, `log-shipper`, `memory-hog`, `slow-starter`, and `needs-db` are in `CrashLoopBackOff` or `Init:CrashLoopBackOff`. Possible causes: misconfigured dependencies, infinite loops, incompatible libraries, or resource limits (e.g., [unverified: OOMKilled] for memory-hog).\n\n4. **demo/bad-image**  \n   - `ImagePullBackOff`: The image cannot be pulled (check registry access, image name, or pull secrets).\n\n5. **demo/never-ready**  \n   - Pod is `Running` but not ready. Likely failing readiness probes (check probe configurations or application health endpoints).\n\n6. **config-faults/missing-configmap-volume, missing-volume-key, projected-source-missing**  \n   - These pods are stuck in `ContainerCreating` due to missing volume configurations or sources. Verify volume definitions, permissions, and projected sources.\n\n**Summary**: The cluster has critical issues in multiple namespaces. The `missing-configmap-key` pod\u2019s failure is now confirmed to be caused by a missing ConfigMap key. Other workloads require deeper inspection (e.g., `describe_pod` for crash details) to identify root causes. No healthy workloads were found.\n\n---\n**Evidence audit.**\n1 of 6 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 128612.5,
+   "tool_ms": 28.0,
+   "rounds": 5,
+   "round_ms": [
+    17092.8,
+    26261.9,
+    33296.5,
+    19744.7,
+    32216.6
+   ],
+   "slowest_round_ms": 33296.5,
+   "model_share": 1.0,
+   "wall_ms": 128644.4,
+   "unaccounted_ms": 3.9,
+   "slept_ms": 0.8
+  }
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 199.4,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-20T23:33:49",
+  "load_before": 0.92,
+  "load_after": 0.98,
+  "low_power_mode": true,
+  "unverified": [
+   "1.36",
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "name": "nightly-sync-29787483-s2fx2",
+    "namespace": "demo"
+   },
+   {
+    "name": "annotation-injector-58b845fb95-v9vlf",
+    "namespace": "adversarial"
+   },
+   {
+    "limit": 5,
+    "name": "missing-configmap-key",
+    "namespace": "config-faults"
+   }
+  ],
+  "answer": "The cluster has multiple confirmed issues, with the following critical findings:\n\n---\n\n### 1. **Crashing Pod: `annotation-injector-58b845fb95-v9vlf` (adversarial namespace)**  \n   - **Status**: `CrashLoopBackOff` (17 restarts).  \n   - **Root Cause**: Container exited with **exit code 2** (general error). The pod uses `busybox:[unverified: 1.36]` and likely lacks a valid entrypoint/command, or a dependency is missing.  \n\n---\n\n### 2. **ConfigMap Key Missing: `missing-configmap-key` (config-faults namespace)**  \n   - **Status**: `CreateContainerConfigError`.  \n   - **Root Cause**: The pod cannot find the key `LOGLEVEL` in the ConfigMap `config-faults/app-settings`. This is confirmed by the event:  \n     `\"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"`.  \n   - **Fix**: Ensure the ConfigMap `app-settings` exists and contains the `LOGLEVEL` key.  \n\n---\n\n### 3. **Other Critical Issues from Scan_Cluster**  \n   - **`demo/bad-image`**:  \n     - **Status**: `ImagePullBackOff`.  \n     - **Root Cause**: The image `bad-image` cannot be pulled (invalid name, registry issue, or network problem).  \n   - **`config-faults/missing-configmap-volume` and `missing-volume-key`**:  \n     - **Status**: `ContainerCreating`.  \n     - **Root Cause**: Missing keys in ConfigMaps or volumes (similar to `missing-configmap-key` but related to volume mounts).  \n   - **`demo/never-ready`**:  \n     - **Status**: `Running` but marked `not-ready`.  \n     - **Root Cause**: Likely failing readiness probes (check probe configurations).  \n   - **`demo/memory-hog`**:  \n     - **Status**: `CrashLoopBackOff`.  \n     - **Root Cause**: Likely [unverified: OOMKilled] (check memory limits in `describe_pod`).  \n\n---\n\n### 4. **Adversarial Workloads**  \n   - **`log-injector`, `payments`, `crasher`, `log-shipper`, `memory-hog`, `slow-starter`**:  \n     - All in `CrashLoopBackOff` or `Error` states. These may be due to application bugs, resource limits, or misconfigurations.  \n\n---\n\n### Summary of Actions Needed  \n- **Fix ConfigMap issues**: Ensure all required keys exist in `config-faults/app-settings` and related ConfigMaps.  \n- **Resolve image pull errors**: Verify the image name and registry for `demo/bad-image`.  \n- **Investigate crashing pods**: Use `describe_pod` on `memory-hog`, `crasher`, and others to check for [unverified: OOMKilled], exit codes, or resource limits.  \n- **Check readiness probes**: For `demo/never-ready`, validate probe endpoints and timeouts.  \n\nAll listed pods are critical and require immediate attention to prevent cascading failures.\n\n---\n**Evidence audit.**\n2 of 19 stated values could not be traced to any tool result for the workload they were stated about: `1.36`, `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['1.36', 'oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 199318.6,
+   "tool_ms": 37.8,
+   "rounds": 7,
+   "round_ms": [
+    19441.9,
+    45041.6,
+    16583.2,
+    11681.5,
+    35090.6,
+    24085.8,
+    47393.9
+   ],
+   "slowest_round_ms": 47393.9,
+   "model_share": 1.0,
+   "wall_ms": 199362.8,
+   "unaccounted_ms": 6.5,
+   "slept_ms": 1.2
+  }
+ }
+]
