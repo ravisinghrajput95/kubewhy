@@ -21,6 +21,7 @@ import ollama
 
 import grounding
 import observability
+import targeting
 from routers.platform_info import get_platform_info
 from routers.system_info import get_system_info
 from routers.process_info import get_processes
@@ -640,6 +641,20 @@ def stream(question, model=MODEL, think=None, prefetched=None):
     endpoint are all consumers of these events.
     """
     think = THINK if think is None else think
+    # The entity this question is about, fixed before the first round and not
+    # revisable by the model. It may choose how to investigate; it may not
+    # change what it is investigating. See targeting.py.
+    target = targeting.target_of(question)
+    if target:
+        # Prefixed keys: `name` is reserved on LogRecord and logging raises
+        # KeyError rather than overwriting it. Caught by the suite only
+        # because another test enables INFO -- which is how the controller
+        # runs, so this would have crashed there and nowhere else.
+        log.info("investigation_target", extra={
+            "target_kind": target["kind"],
+            "target_name": target["name"],
+            "target_namespace": target["namespace"],
+        })
     prefetched = list(prefetched or [])
     trace = []
     # Seeded with the prefetched results so grounding treats them as
@@ -798,12 +813,34 @@ def stream(question, model=MODEL, think=None, prefetched=None):
         for call in calls:
             name = call.function.name
             arguments = dict(call.function.arguments or {})
-            trace.append({"name": name, "arguments": arguments})
 
-            yield {"type": "tool_call", "name": name, "arguments": arguments}
+            # Hold the call to the target before it runs. A call that can carry
+            # the scope is rewritten; one that names a different entity
+            # outright is refused, because no rewrite could be honest about it.
+            arguments, violation = targeting.enforce(target, name, arguments)
+            if violation:
+                log.info("scope_violation", extra={
+                    "requested": target,
+                    "attempted_tool": violation["tool"],
+                    "reason": violation["reason"],
+                    "action": violation["action"],
+                })
+
+            trace.append({"name": name, "arguments": arguments,
+                          **({"scope": violation} if violation else {})})
+
+            yield {"type": "tool_call", "name": name, "arguments": arguments,
+                   **({"scope_violation": violation} if violation else {})}
 
             started = time.perf_counter()
-            output = _run_tool(name, arguments)
+            if violation and violation["action"] == "refused":
+                # Handed back as data, like any other tool failure, so the loop
+                # survives and the model is told what it may look at.
+                output = json.dumps({"error":
+                    f"{violation['reason']}. This question is about "
+                    f"{target['name']}; investigate that."})
+            else:
+                output = _run_tool(name, arguments)
             outputs.append(output)
             evidence.append(
                 {"id": f"tool-{len(outputs)}", "tool": name, "result": output}

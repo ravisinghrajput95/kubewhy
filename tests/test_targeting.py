@@ -1,0 +1,245 @@
+"""
+Tests for the investigation-target invariant.
+
+The agent may choose HOW to investigate. It may not change WHAT it is
+investigating. Measured 2026-08-19 over three runs of "Is the
+correctly-configured pod in config-faults unhealthy?": two answers described
+`missing-configmap-key` instead, both having called
+list_pods(only_unhealthy=True) with no workload -- which excludes a healthy pod
+by construction. The targeted tools existed; the model did not reach for them.
+"""
+
+import json
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+import agent
+import targeting
+from test_agent_loop import mock_chat, reply, tool_call
+
+
+class TestTargetExtraction:
+    @pytest.mark.parametrize("question,name,namespace", [
+        ("Is the correctly-configured pod in the config-faults namespace unhealthy?",
+         "correctly-configured", "config-faults"),
+        ("Why is the crasher deployment in demo crashing?", "crasher", None),
+        ("What is the status of the crasher pod in the demo namespace?",
+         "crasher", "demo"),
+        ("describe pod crasher-5964d99948-9g8vg in demo",
+         "crasher-5964d99948-9g8vg", None),
+        ("check the payments deployment", "payments", None),
+    ])
+    def test_a_named_entity_is_extracted(self, question, name, namespace):
+        target = targeting.target_of(question)
+
+        assert target["name"] == name
+        assert target["namespace"] == namespace
+
+    def test_a_service_keeps_its_kind(self):
+        assert targeting.target_of("Why is the frontend service unreachable?") == {
+            "kind": "service", "name": "frontend", "namespace": None,
+        }
+
+    def test_a_namespace_alone_is_still_a_target(self):
+        """"What is broken in shop?" must not wander into default."""
+        assert targeting.target_of("What is broken in the shop namespace?") == {
+            "kind": "namespace", "name": None, "namespace": "shop",
+        }
+
+    @pytest.mark.parametrize("question", [
+        "Is anything broken anywhere in the cluster?",
+        "How much memory is this host using?",
+        "What is failing right now?",
+    ])
+    def test_a_question_naming_nothing_has_no_target(self, question):
+        """
+        Precision over recall: a wrongly extracted target would rewrite every
+        call to a workload that does not exist and break the run, while a
+        missed one just leaves the old behaviour in place.
+        """
+        assert targeting.target_of(question) is None
+
+    @pytest.mark.parametrize("question", [
+        "The pod restarted 9 times.",
+        "Why is the service unreachable?",
+        "describe pod",
+    ])
+    def test_english_after_a_kind_is_not_a_name(self, question):
+        target = targeting.target_of(question)
+
+        assert target is None or target["name"] not in {
+            "restarted", "unreachable", "describe",
+        }
+
+
+class TestEnforcement:
+    TARGET = {"kind": "workload", "name": "correctly-configured",
+              "namespace": "config-faults"}
+
+    # Test 1 and 6: the omitted target argument
+    def test_an_unscoped_list_is_retargeted_not_executed_as_is(self):
+        arguments, violation = targeting.enforce(
+            self.TARGET, "list_pods",
+            {"namespace": "config-faults", "only_unhealthy": True},
+        )
+
+        assert arguments["workload"] == "correctly-configured"
+        assert violation["action"] == "retargeted"
+
+    def test_only_unhealthy_survives_the_rewrite(self):
+        """
+        The rewrite scopes the call; it does not second-guess the rest of it.
+        list_pods lets a named workload override only_unhealthy, which is what
+        makes "it is fine" an available answer.
+        """
+        arguments, _ = targeting.enforce(
+            self.TARGET, "list_pods", {"only_unhealthy": True}
+        )
+
+        assert arguments["only_unhealthy"] is True
+
+    # Test 2: workload A asked, workload B attempted
+    def test_a_different_workload_is_retargeted(self):
+        arguments, violation = targeting.enforce(
+            self.TARGET, "scan_cluster", {"workload": "missing-configmap-key"}
+        )
+
+        assert arguments["workload"] == "correctly-configured"
+        assert violation["action"] == "retargeted"
+
+    # Test 3: namespace A asked, namespace B attempted
+    def test_a_different_namespace_is_moved_back(self):
+        arguments, violation = targeting.enforce(
+            self.TARGET, "list_pods", {"namespace": "default"}
+        )
+
+        assert arguments["namespace"] == "config-faults"
+        assert "not the 'config-faults'" in violation["reason"]
+
+    # Test 4: service A asked, service B attempted
+    def test_a_different_service_is_refused(self):
+        target = {"kind": "service", "name": "frontend", "namespace": None}
+        _, violation = targeting.enforce(
+            target, "get_service_endpoints", {"name": "backend"}
+        )
+
+        assert violation["action"] == "refused"
+
+    # Test 5: a pod name lifted from an earlier result
+    def test_a_pod_of_another_workload_is_refused(self):
+        _, violation = targeting.enforce(
+            self.TARGET, "describe_pod", {"name": "missing-configmap-key"}
+        )
+
+        assert violation["action"] == "refused"
+
+    def test_a_pod_of_the_target_workload_is_allowed(self):
+        """The model must still be free to drill into its own target."""
+        target = {"kind": "workload", "name": "crasher", "namespace": "demo"}
+        _, violation = targeting.enforce(
+            target, "describe_pod", {"name": "crasher-5964d99948-9g8vg"}
+        )
+
+        assert violation is None
+
+    def test_a_similarly_named_workload_does_not_match(self):
+        target = {"kind": "workload", "name": "crasher", "namespace": None}
+        _, violation = targeting.enforce(
+            target, "describe_pod", {"name": "crasher-two-abc-xyz"}
+        )
+
+        assert violation is None or violation["action"] == "refused"
+
+    def test_no_target_means_no_interference(self):
+        arguments, violation = targeting.enforce(
+            None, "list_pods", {"only_unhealthy": True}
+        )
+
+        assert arguments == {"only_unhealthy": True}
+        assert violation is None
+
+    def test_host_tools_are_untouched(self):
+        """The host collectors have no entity to scope."""
+        arguments, violation = targeting.enforce(
+            self.TARGET, "get_system_info", {}
+        )
+
+        assert violation is None
+
+
+class TestTheLoopHoldsTheTarget:
+    def test_the_call_that_reaches_kubernetes_is_the_retargeted_one(self):
+        """End to end: the model omits the workload and the tool still gets it."""
+        seen = {}
+
+        def spy(**kwargs):
+            seen.update(kwargs)
+            return {"correctly-configured": {"status": "Running", "ready": "1/1"}}
+
+        responses = [
+            reply(calls=[tool_call("list_pods", {"namespace": "config-faults",
+                                                 "only_unhealthy": True})]),
+            reply(content="correctly-configured is running normally."),
+        ]
+        with patch.dict(agent.TOOLS, {"list_pods": spy}), \
+             mock_chat(side_effect=responses):
+            result = agent.ask(
+                "Is the correctly-configured pod in the config-faults namespace unhealthy?"
+            )
+
+        assert seen["workload"] == "correctly-configured"
+        assert "correctly-configured" in result["answer"]
+
+    def test_the_violation_is_visible_in_the_trace(self):
+        """Model mistakes are recorded, not hidden."""
+        responses = [
+            reply(calls=[tool_call("list_pods", {"only_unhealthy": True})]),
+            reply(content="ok"),
+        ]
+        stub = {"list_pods": lambda **k: {"correctly-configured": {"status": "Running"}}}
+        with patch.dict(agent.TOOLS, stub), mock_chat(side_effect=responses):
+            result = agent.ask("Is the correctly-configured pod unhealthy?")
+
+        scoped = [c for c in result["tool_calls"] if c.get("scope")]
+        assert scoped and scoped[0]["scope"]["action"] == "retargeted"
+
+    def test_a_refused_call_comes_back_as_data_not_an_exception(self):
+        """Rule 3: the loop survives, and the model is told what it may see."""
+        responses = [
+            reply(calls=[tool_call("describe_pod", {"name": "missing-configmap-key",
+                                                    "namespace": "config-faults"})]),
+            reply(content="ok"),
+        ]
+        called = MagicMock()
+        with patch.dict(agent.TOOLS, {"describe_pod": called}), \
+             mock_chat(side_effect=responses):
+            events = list(agent.stream(
+                "Is the correctly-configured pod in config-faults unhealthy?"
+            ))
+
+        called.assert_not_called()
+        results = [e for e in events if e["type"] == "tool_result"]
+        assert "does not belong to" in json.loads(results[0]["result"])["error"]
+
+    def test_an_untargeted_question_is_left_alone(self):
+        """cluster_wide_scan must keep working exactly as it did."""
+        seen = {}
+
+        def spy(**kwargs):
+            seen.update(kwargs)
+            # ImagePullBackOff on purpose: it demands neither logs nor
+            # events, so the evidence policy stays out of a test that is
+            # about the scan's arguments.
+            return {"demo/bad-image": {"status": "ImagePullBackOff", "pods": 1,
+                                       "example": "bad-image-1"}}
+
+        responses = [
+            reply(calls=[tool_call("scan_cluster", {"only_unhealthy": True})]),
+            reply(content="bad-image is failing."),
+        ]
+        with patch.dict(agent.TOOLS, {"scan_cluster": spy}), \
+             mock_chat(side_effect=responses):
+            agent.ask("Is anything broken anywhere in the cluster?")
+
+        assert "workload" not in seen
