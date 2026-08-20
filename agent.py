@@ -28,6 +28,7 @@ from routers.process_info import get_processes
 from routers.top_cpu import get_top_cpu_processes
 from routers.top_memory import get_top_memory_processes
 from routers.k8s_pods_info import (
+    service_namespace,
     scan_cluster,
     list_pods,
     describe_pod,
@@ -207,6 +208,38 @@ def unresolved(arguments):
         if isinstance(value, str) and value.strip() and _PLACEHOLDER.search(value.strip()):
             bad.append(f"{key}={value!r}")
     return bad
+
+
+def _resolve_entity(name):
+    """
+    Where the cluster has a workload or service by this name.
+
+    Returns {"kind", "namespace"} so the caller inherits the namespace the
+    lookup already had to find. Returning the kind alone left the model to
+    guess `default` and report a service in `demo` as nonexistent.
+
+    One read-only lookup, the same scan_cluster the agent would call, so the
+    check costs a single API request and can never see anything the agent
+    could not. Returns None on any error: an unreachable cluster must leave
+    the target unset rather than guess, because a wrong target is worse than
+    none.
+    """
+    try:
+        found = scan_cluster(workload=name)
+    except Exception:
+        return None
+
+    if isinstance(found, dict) and found and "error" not in found and "result" not in found:
+        # scan_cluster keys are "namespace/workload".
+        key = next((k for k in found if not str(k).startswith("_")), "")
+        namespace = str(key).split("/")[0] if "/" in str(key) else None
+        return {"kind": "workload", "namespace": namespace}
+
+    # A Service is not a workload and scan_cluster does not report one, which
+    # is why "Why is crasher-svc unreachable?" resolved to nothing on the
+    # first cut of this.
+    namespace = service_namespace(name)
+    return {"kind": "service", "namespace": namespace} if namespace else None
 
 
 def _run_tool(name, arguments):
@@ -645,6 +678,23 @@ def stream(question, model=MODEL, think=None, prefetched=None):
     # revisable by the model. It may choose how to investigate; it may not
     # change what it is investigating. See targeting.py.
     target = targeting.target_of(question)
+    if not (target or {}).get("name"):
+        # The question names something and never says what kind of thing it
+        # is -- "Why is crasher-svc unreachable?". Guessing from the text
+        # alone would be worse than not guessing: a target the cluster has
+        # never heard of rewrites every call and breaks the run. So the guess
+        # is checked against the cluster first, with the same read-only tools
+        # the agent uses, and only a name that resolves becomes a target.
+        guessed = targeting.confirm(
+            targeting.candidate_names(question), _resolve_entity
+        )
+        if guessed:
+            # A namespace the question stated wins over the one the lookup
+            # found: the user may be asking about one of two same-named things.
+            guessed["namespace"] = (
+                (target or {}).get("namespace") or guessed.get("namespace")
+            )
+            target = guessed
     if target:
         # Prefixed keys: `name` is reserved on LogRecord and logging raises
         # KeyError rather than overwriting it. Caught by the suite only

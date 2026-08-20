@@ -243,3 +243,129 @@ class TestTheLoopHoldsTheTarget:
             agent.ask("Is anything broken anywhere in the cluster?")
 
         assert "workload" not in seen
+
+
+class TestUnlabelledTargets:
+    """
+    "Why is crasher-svc unreachable?" names its target and never says what kind
+    of thing it is, so target_of finds nothing and the invariant did not bind.
+    Guessing from the text alone would be worse than not guessing -- a target
+    the cluster has never heard of rewrites every call and breaks the run --
+    so the guess is checked against the cluster first.
+    """
+
+    @pytest.mark.parametrize("question,expected", [
+        ("Why is crasher-svc unreachable?", ["crasher-svc"]),
+        ("Why is memory-hog failing?", ["memory-hog"]),
+        ("Is crasher-svc affecting log-shipper?", ["crasher-svc", "log-shipper"]),
+    ])
+    def test_object_shaped_tokens_are_candidates(self, question, expected):
+        assert targeting.candidate_names(question) == expected
+
+    @pytest.mark.parametrize("question", [
+        "Is anything broken anywhere in the cluster?",
+        "What is failing right now?",
+        "How much memory is this host using?",
+    ])
+    def test_ordinary_english_yields_no_candidate(self, question):
+        assert targeting.candidate_names(question) == []
+
+    def test_a_version_is_not_a_workload(self):
+        assert "1.21" not in targeting.candidate_names("Why is nginx:1.21 failing?")
+
+    def test_one_resolving_candidate_becomes_the_target(self):
+        target = targeting.confirm(
+            ["crasher-svc"],
+            lambda n: {"kind": "service", "namespace": "demo"} if n == "crasher-svc" else None,
+        )
+
+        assert target == {"kind": "service", "name": "crasher-svc", "namespace": "demo"}
+
+    def test_the_namespace_the_lookup_found_is_carried(self):
+        """
+        The resolver had to find the object to confirm it, so it already knows
+        where it lives. Throwing that away left the model guessing `default`:
+        measured live 2026-08-21, asked why crasher-svc was unreachable, the
+        run looked in `default`, found nothing and reported that the service
+        does not exist. It exists, in `demo`.
+        """
+        target = targeting.confirm(
+            ["crasher-svc"], lambda n: {"kind": "service", "namespace": "demo"}
+        )
+
+        assert target["namespace"] == "demo"
+
+    def test_two_resolving_candidates_are_refused(self):
+        """
+        The question mentions two real things. Picking the first is the
+        entity-scoping mistake this module exists to prevent, so it declines.
+        """
+        assert targeting.confirm(
+            ["a-one", "b-two"], lambda n: {"kind": "workload", "namespace": "demo"}
+        ) is None
+
+    def test_a_candidate_the_cluster_never_heard_of_is_not_a_target(self):
+        assert targeting.confirm(["ghost-xyz"], lambda n: None) is None
+
+    def test_an_unreachable_cluster_leaves_the_target_unset(self):
+        """A wrong target is worse than none, so a failed lookup guesses nothing."""
+        def broken(name):
+            raise ConnectionError("no cluster")
+
+        with patch.object(agent, "scan_cluster", broken):
+            assert agent._resolve_entity("anything") is None
+
+    def test_a_workload_resolves_before_a_service_is_consulted(self):
+        looked_up = MagicMock(return_value=None)
+        with patch.object(agent, "scan_cluster",
+                          lambda **k: {"demo/memory-hog": {"status": "OOMKilled"}}), \
+             patch.object(agent, "service_namespace", looked_up):
+            assert agent._resolve_entity("memory-hog")["kind"] == "workload"
+
+        looked_up.assert_not_called()
+
+    def test_a_service_resolves_when_no_workload_does(self):
+        with patch.object(agent, "scan_cluster",
+                          lambda **k: {"result": "no workload named crasher-svc"}), \
+             patch.object(agent, "service_namespace", lambda n: "demo"):
+            resolved = agent._resolve_entity("crasher-svc")
+
+        assert resolved == {"kind": "service", "namespace": "demo"}
+
+    def test_the_loop_binds_an_unlabelled_target_it_could_confirm(self):
+        seen = {}
+
+        def spy(**kwargs):
+            seen.update(kwargs)
+            return {"memory-hog-abc": {"status": "OOMKilled", "ready": "0/1"}}
+
+        responses = [
+            reply(calls=[tool_call("list_pods", {"namespace": "demo"})]),
+            reply(content="memory-hog was OOMKilled."),
+        ]
+        with patch.object(agent, "_resolve_entity",
+                          lambda n: {"kind": "workload", "namespace": "demo"}), \
+             patch.dict(agent.TOOLS, {"list_pods": spy}), \
+             mock_chat(side_effect=responses):
+            agent.ask("Why is memory-hog failing?")
+
+        assert seen["workload"] == "memory-hog"
+
+    def test_the_loop_stays_out_when_nothing_confirms(self):
+        seen = {}
+
+        def spy(**kwargs):
+            seen.update(kwargs)
+            return {"demo/bad-image": {"status": "ImagePullBackOff", "pods": 1,
+                                       "example": "bad-image-1"}}
+
+        responses = [
+            reply(calls=[tool_call("scan_cluster", {"only_unhealthy": True})]),
+            reply(content="bad-image is failing."),
+        ]
+        with patch.object(agent, "_resolve_entity", lambda n: None), \
+             patch.dict(agent.TOOLS, {"scan_cluster": spy}), \
+             mock_chat(side_effect=responses):
+            agent.ask("Why is ghost-workload failing?")
+
+        assert "workload" not in seen

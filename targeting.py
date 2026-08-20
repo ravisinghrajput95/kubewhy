@@ -215,3 +215,68 @@ def enforce(target, tool, arguments):
             }
 
     return arguments, None
+
+
+# A token shaped like a Kubernetes object rather than an English word. The same
+# hyphen-or-digit test the grounding entity check uses, for the same reason.
+_OBJECT_SHAPED = re.compile(r"\b([a-z][a-z0-9]*(?:[-.][a-z0-9]+)+)\b", re.IGNORECASE)
+
+
+def candidate_names(question):
+    """
+    Object-shaped tokens a question mentions, for a question that labels none.
+
+    "Why is crasher-svc unreachable?" names its target and never says what kind
+    of thing it is, so target_of finds nothing and the invariant does not bind.
+    This is the other half: guess, then check.
+
+    Guessing alone would be worse than not guessing -- a target that does not
+    exist rewrites every call to a workload the cluster has never heard of and
+    breaks the run. So these are candidates, not targets, and confirm() decides.
+    """
+    text = (question or "")
+    seen = []
+    for match in _OBJECT_SHAPED.finditer(text):
+        name = match.group(1).strip(".,;:").lower()
+        if name in _NOT_A_NAME or name in _ALL_KINDS or name in seen:
+            continue
+        # A version or an image tag is not a workload.
+        if name.replace(".", "").isdigit():
+            continue
+        seen.append(name)
+    return seen
+
+
+def confirm(candidates, resolver):
+    """
+    The one candidate that exists in the cluster, or None.
+
+    `resolver(name)` returns {"kind": ..., "namespace": ...} or None. The
+    namespace matters as much as the kind: the resolver had to find the object
+    to confirm it, so it already knows where it lives, and throwing that away
+    left the model guessing `default`. Measured live 2026-08-21 -- asked why
+    crasher-svc was unreachable, the run looked in `default`, found nothing,
+    and reported that the service does not exist. It exists, in `demo`.
+
+    Ambiguity is
+    resolved by refusing: if two candidates both exist, the question mentions
+    two real things and picking one would scope the investigation to whichever
+    happened to be written first. That is the mistake this whole module exists
+    to prevent, so it declines instead.
+    """
+    found = []
+    for name in candidates or []:
+        resolved = resolver(name)
+        if resolved:
+            found.append((name, resolved))
+        if len(found) > 1:
+            return None
+
+    if len(found) != 1:
+        return None
+    name, resolved = found[0]
+    return {
+        "kind": resolved["kind"],
+        "name": name,
+        "namespace": resolved.get("namespace"),
+    }

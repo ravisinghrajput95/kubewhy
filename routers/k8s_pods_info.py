@@ -1497,6 +1497,31 @@ def _port_mismatch(api, namespace, svc):
     return None
 
 
+def service_namespace(name):
+    """
+    The namespace a Service by this name lives in, or None.
+
+    Not a tool and not registered as one: it answers a question the agent loop
+    asks about the user's phrasing, not a question the model asks about the
+    cluster. One list call narrowed by field selector, inside the `services`
+    get/list/watch the RBAC already grants -- it can see nothing the agent
+    could not see anyway.
+
+    None when the name is ambiguous across namespaces as well as when it is
+    absent: two services of the same name mean the question has not identified
+    one, and picking either would be the entity-scoping mistake in a new place.
+    """
+    try:
+        found = _api().list_service_for_all_namespaces(
+            field_selector=f"metadata.name={name}", _request_timeout=TIMEOUT
+        )
+    except Exception:
+        return None
+
+    items = getattr(found, "items", []) or []
+    return items[0].metadata.namespace if len(items) == 1 else None
+
+
 def get_service_endpoints(name: str, namespace: str = "default"):
     """
     Returns a service's selector, ports, and the pod endpoints currently
