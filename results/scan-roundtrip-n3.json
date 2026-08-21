@@ -1,0 +1,208 @@
+[
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 148.1,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-21T13:49:45",
+  "load_before": 1.25,
+  "load_after": 0.67,
+  "low_power_mode": true,
+  "unverified": [
+   "3"
+  ],
+  "tools": [
+   "scan_cluster",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/nightly-sync\": {\"status\": \"Error\", \"pods\": 2, \"example\": \"nightly-sync-29788338-g5plb\", \"fault\": \"crash\"}, \"adversarial/annotation-injector\": {\"status\": \"Error\", \"pods\": 1, \"example\": \"annotation-injector-58b845fb95-62g5r\", \"fault\": \"crash\"}, \"adversarial/log-injector\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-injector-85c5c67578-kg46f\", \"fault\": \"crash\"}, \"config-faults/missing-configmap-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-configmap-key\", \"fault\": \"config\"}, \"config-faults/missing-configmap-volume\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-configmap-volume\", \"fault\": \"not-ready\"}, \"config-faults/missing-secret-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-secret-key\", \"fault\": \"config\"}, \"config-faults/missing-volume-key\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-volume-key\", \"fault\": \"not-ready\"}, \"config-faults/projected-source-missing\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"projected-source-missing\", \"fault\": \"not-ready\"}, \"demo/bad-image\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"bad-image-647c5576d5-lft6h\", \"fault\": \"image-pull\"}, \"demo/crasher\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"crasher-5964d99948-lpgvd\", \"fault\": \"crash\"}, \"demo/log-shipper\": {\"status\": \"Error\", \"pods\": 1, \"example\": \"log-shipper-ztsdb\", \"fault\": \"crash\"}, \"demo/memory-hog\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-5hlhb\", \"fault\": \"crash\"}, \"demo/needs-db\": {\"status\": \"Init:CrashLoopBackOff\", \"pods\": 1, \"example\": \"needs-db-58886b67f-zb49w\", \"fault\": \"crash\"}, \"demo/never-ready\": {\"status\": \"Running\", \"pods\": 1, \"example\": \"never-ready-7d86d8c5f7-pqcgt\", \"fault\": \"not-ready\"}, \"demo/slow-starter\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"slow-starter-56c8f89495-gbshf\", \"fault\": \"crash\"}, \"shop/archive\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"archive-bbdcbb574-426wn\"}, \"shop/billing-worker\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"billing-worker\", \"fault\": \"config\"}, \"shop/cert-rotator\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"cert-rotator\", \"fault\": \"not-ready\"}, \"shop/gpu-scoring\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"gpu-scoring-f98d89cc5-7qjs2\"}, \"shop/pricing\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"pricing-bd4d4f8ff-dh5b5\", \"fault\": \"config\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-key\", \"events\": [{\"reason\": \"Failed\", \"count\": 439, \"age\": \"1m\", \"message\": \"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"}]}"
+   }
+  ],
+  "draft": "The cluster has multiple issues, with the following confirmed breakdown:\n\n---\n\n### **1. Crashing Pods (CrashLoopBackOff)**\n- **`demo/nightly-sync` (2 pods)**: Likely due to application failures or unhandled exceptions.\n- **`adversarial/annotation-injector`**: CrashLoopBackOff, possibly from misconfigurations or infinite loops.\n- **`adversarial/log-injector`**: CrashLoopBackOff, likely due to log injection issues or resource exhaustion.\n- **`demo/crasher`**: Intentional crash loop for testing, but may indicate a faulty application.\n- **`demo/log-shipper`**: CrashLoopBackOff, possibly due to log processing errors.\n- **`demo/memory-hog`**: CrashLoopBackOff, likely caused by OOM (out-of-memory) errors.\n- **`demo/needs-db`**: CrashLoopBackOff during init, suggesting database connection failures.\n- **`demo/slow-starter`**: CrashLoopBackOff, possibly due to liveness probe timeouts or slow application startup.\n\n---\n\n### **2. Configuration Errors (CreateContainerConfigError)**\n- **`config-faults/missing-configmap-key`**: **Confirmed cause**: The pod failed to find the `LOGLEVEL` key in the `config-faults/app-settings` ConfigMap. This is a direct configuration error, preventing the container from initializing.\n- **`shop/billing-worker`**: CreateContainerConfigError, likely due to misconfigured volumes or environment variables.\n- **`shop/pricing`**: CreateContainerConfigError, possibly from volume or secret misconfigurations.\n\n---\n\n### **3. Image Pull Errors**\n- **`demo/bad-image`**: ImagePullBackOff, indicating the image is unavailable, mislabeled, or requires authentication.\n\n---\n\n### **4. Pending Pods**\n- **`shop/archive`**: Pending, possibly due to node resource constraints or scheduling conflicts.\n- **`shop/gpu-scoring`**: Pending, likely waiting for GPU resources or node availability.\n\n---\n\n### **5. Not-Ready Pods**\n- **`demo/never-ready`**: Running but not ready, likely due to failing readiness probes (e.g., incorrect endpoints or application issues).\n- **`config-faults/missing-configmap-volume` and `config-faults/missing-volume-key`**: ContainerCreating, indicating volume mounting failures.\n\n---\n\n### **Critical Findings**\n- The **`missing-configmap-key`** pod\u2019s failure is explicitly tied to the absence of the `LOGLEVEL` key in the `app-settings` ConfigMap. This is a clear configuration error that requires adding the key to the ConfigMap or adjusting the application to handle its absence.\n- Other issues remain unresolved but are documented as per the cluster scan and event logs.\n\n---\n\n### **Next Steps**\n1. **Fix the missing ConfigMap key** in `config-faults/app-settings` to resolve `missing-configmap-key`.\n2. **Verify ConfigMaps/Secrets** for `shop/billing-worker` and `shop/pricing` to ensure all referenced keys exist.\n3. **Validate image tags** for `demo/bad-image` to ensure the image exists in the registry.\n4. **Investigate node pressure** for pending pods (e.g., `shop/gpu-scoring`) using `list_nodes`.\n\nThe cluster has **multiple critical issues**, primarily configuration errors and application failures, requiring immediate attention to restore stability.",
+  "answer": "The cluster has multiple issues, with the following confirmed breakdown:\n\n---\n\n### **1. Crashing Pods (CrashLoopBackOff)**\n- **`demo/nightly-sync` (2 pods)**: Likely due to application failures or unhandled exceptions.\n- **`adversarial/annotation-injector`**: CrashLoopBackOff, possibly from misconfigurations or infinite loops.\n- **`adversarial/log-injector`**: CrashLoopBackOff, likely due to log injection issues or resource exhaustion.\n- **`demo/crasher`**: Intentional crash loop for testing, but may indicate a faulty application.\n- **`demo/log-shipper`**: CrashLoopBackOff, possibly due to log processing errors.\n- **`demo/memory-hog`**: CrashLoopBackOff, likely caused by OOM (out-of-memory) errors.\n- **`demo/needs-db`**: CrashLoopBackOff during init, suggesting database connection failures.\n- **`demo/slow-starter`**: CrashLoopBackOff, possibly due to liveness probe timeouts or slow application startup.\n\n---\n\n### **2. Configuration Errors (CreateContainerConfigError)**\n- **`config-faults/missing-configmap-key`**: **Confirmed cause**: The pod failed to find the `LOGLEVEL` key in the `config-faults/app-settings` ConfigMap. This is a direct configuration error, preventing the container from initializing.\n- **`shop/billing-worker`**: CreateContainerConfigError, likely due to misconfigured volumes or environment variables.\n- **`shop/pricing`**: CreateContainerConfigError, possibly from volume or secret misconfigurations.\n\n---\n\n### **[unverified: 3]. Image Pull Errors**\n- **`demo/bad-image`**: ImagePullBackOff, indicating the image is unavailable, mislabeled, or requires authentication.\n\n---\n\n### **4. Pending Pods**\n- **`shop/archive`**: Pending, possibly due to node resource constraints or scheduling conflicts.\n- **`shop/gpu-scoring`**: Pending, likely waiting for GPU resources or node availability.\n\n---\n\n### **5. Not-Ready Pods**\n- **`demo/never-ready`**: Running but not ready, likely due to failing readiness probes (e.g., incorrect endpoints or application issues).\n- **`config-faults/missing-configmap-volume` and `config-faults/missing-volume-key`**: ContainerCreating, indicating volume mounting failures.\n\n---\n\n### **Critical Findings**\n- The **`missing-configmap-key`** pod\u2019s failure is explicitly tied to the absence of the `LOGLEVEL` key in the `app-settings` ConfigMap. This is a clear configuration error that requires adding the key to the ConfigMap or adjusting the application to handle its absence.\n- Other issues remain unresolved but are documented as per the cluster scan and event logs.\n\n---\n\n### **Next Steps**\n1. **Fix the missing ConfigMap key** in `config-faults/app-settings` to resolve `missing-configmap-key`.\n2. **Verify ConfigMaps/Secrets** for `shop/billing-worker` and `shop/pricing` to ensure all referenced keys exist.\n[unverified: 3]. **Validate image tags** for `demo/bad-image` to ensure the image exists in the registry.\n4. **Investigate node pressure** for pending pods (e.g., `shop/gpu-scoring`) using `list_nodes`.\n\nThe cluster has **multiple critical issues**, primarily configuration errors and application failures, requiring immediate attention to restore stability.\n\n---\n**Evidence audit.**\n1 of 18 stated values could not be traced to any tool result for the workload they were stated about: `3`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['3'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 148048.4,
+   "tool_ms": 42.5,
+   "rounds": 5,
+   "round_ms": [
+    13190.8,
+    30474.8,
+    40282.3,
+    18487.6,
+    45613.0
+   ],
+   "slowest_round_ms": 45613.0,
+   "model_share": 1.0,
+   "wall_ms": 148098.4,
+   "unaccounted_ms": 7.5,
+   "slept_ms": 0.0
+  }
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 141.7,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-21T13:52:13",
+  "load_before": 0.67,
+  "load_after": 1.27,
+  "low_power_mode": true,
+  "unverified": [
+   "3",
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/nightly-sync\": {\"status\": \"Error\", \"pods\": 2, \"example\": \"nightly-sync-29788341-8xphv\", \"fault\": \"crash\"}, \"adversarial/annotation-injector\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"annotation-injector-58b845fb95-62g5r\", \"fault\": \"crash\"}, \"adversarial/log-injector\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-injector-85c5c67578-kg46f\", \"fault\": \"crash\"}, \"adversarial/payments\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"payments-5f58f7649b-b9ddq\", \"fault\": \"crash\"}, \"config-faults/missing-configmap-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-configmap-key\", \"fault\": \"config\"}, \"config-faults/missing-configmap-volume\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-configmap-volume\", \"fault\": \"not-ready\"}, \"config-faults/missing-secret-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-secret-key\", \"fault\": \"config\"}, \"config-faults/missing-volume-key\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-volume-key\", \"fault\": \"not-ready\"}, \"config-faults/projected-source-missing\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"projected-source-missing\", \"fault\": \"not-ready\"}, \"demo/bad-image\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"bad-image-647c5576d5-lft6h\", \"fault\": \"image-pull\"}, \"demo/crasher\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"crasher-5964d99948-lpgvd\", \"fault\": \"crash\"}, \"demo/log-shipper\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-shipper-ztsdb\", \"fault\": \"crash\"}, \"demo/memory-hog\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-5hlhb\", \"fault\": \"crash\"}, \"demo/needs-db\": {\"status\": \"Init:CrashLoopBackOff\", \"pods\": 1, \"example\": \"needs-db-58886b67f-zb49w\", \"fault\": \"crash\"}, \"demo/never-ready\": {\"status\": \"Running\", \"pods\": 1, \"example\": \"never-ready-7d86d8c5f7-pqcgt\", \"fault\": \"not-ready\"}, \"shop/archive\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"archive-bbdcbb574-426wn\"}, \"shop/billing-worker\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"billing-worker\", \"fault\": \"config\"}, \"shop/cert-rotator\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"cert-rotator\", \"fault\": \"not-ready\"}, \"shop/gpu-scoring\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"gpu-scoring-f98d89cc5-7qjs2\"}, \"shop/pricing\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"pricing-bd4d4f8ff-dh5b5\", \"fault\": \"config\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-key\", \"events\": [{\"reason\": \"Failed\", \"count\": 439, \"age\": \"4m\", \"message\": \"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"}]}"
+   }
+  ],
+  "draft": "The cluster has multiple critical issues, with confirmed causes for some. Here's the full, updated diagnosis:\n\n---\n\n### **1. Image Pull Failures**\n- **Workload**: `demo/bad-image`  \n  - **Status**: `ImagePullBackOff`  \n  - **Issue**: The container image cannot be pulled. Verify the image name, repository, and network connectivity.  \n\n---\n\n### **2. Configuration Errors**\n- **Workloads**:  \n  - `config-faults/missing-configmap-key` / `config-faults/missing-secret-key`  \n  - `config-faults/missing-configmap-volume` / `config-faults/missing-volume-key`  \n  - `config-faults/projected-source-missing`  \n  - `shop/billing-worker` / `shop/pricing`  \n  - **Status**: `CreateContainerConfigError` or `ContainerCreating`  \n  - **Confirmed Cause**:  \n    - `missing-configmap-key` is failing due to **missing key \"LOGLEVEL\" in ConfigMap `config-faults/app-settings`** (event: `Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings`).  \n    - Other entries likely involve missing keys, invalid volumes, or misconfigured projected sources. Verify ConfigMaps/Secrets and volume mounts.  \n\n---\n\n### **3. CrashLoopBackOff Pods**\n- **Workloads**:  \n  - `adversarial/annotation-injector`  \n  - `demo/crasher` / `demo/log-shipper` / `demo/memory-hog` / `demo/needs-db`  \n  - **Status**: `CrashLoopBackOff`  \n  - **Issue**: Pods crash repeatedly. Use `describe_pod` to check exit codes, resource limits, or logs. Likely causes: OOMKilled, application errors, or misconfigured probes.  \n\n---\n\n### **4. Pending Pods**\n- **Workloads**:  \n  - `shop/archive` / `shop/gpu-scoring`  \n  - **Status**: `Pending`  \n  - **Issue**: Pods cannot be scheduled. Check node resource pressure (e.g., memory, CPU) with `list_nodes` (if available). Ensure nodes have sufficient capacity and no taints blocking scheduling.  \n\n---\n\n### **5. Not Ready Pods**\n- **Workload**: `demo/never-ready`  \n  - **Status**: `Running` but not `Ready`  \n  - **Issue**: Failing readiness probes. Check probe configurations in `describe_pod` (if available) and ensure backend services are functional.  \n\n---\n\n### **Next Steps**  \n1. **Fix missing ConfigMap keys** (e.g., add \"LOGLEVEL\" to `config-faults/app-settings`).  \n2. **Resolve image pull failures** for `demo/bad-image`.  \n3. **Investigate CrashLoopBackOff pods** (e.g., check for OOMKilled or application errors).  \n4. **Address node pressure** for Pending pods.  \n\nLet me know if you\u2019d like to drill into a specific workload!",
+  "answer": "The cluster has multiple critical issues, with confirmed causes for some. Here's the full, updated diagnosis:\n\n---\n\n### **1. Image Pull Failures**\n- **Workload**: `demo/bad-image`  \n  - **Status**: `ImagePullBackOff`  \n  - **Issue**: The container image cannot be pulled. Verify the image name, repository, and network connectivity.  \n\n---\n\n### **2. Configuration Errors**\n- **Workloads**:  \n  - `config-faults/missing-configmap-key` / `config-faults/missing-secret-key`  \n  - `config-faults/missing-configmap-volume` / `config-faults/missing-volume-key`  \n  - `config-faults/projected-source-missing`  \n  - `shop/billing-worker` / `shop/pricing`  \n  - **Status**: `CreateContainerConfigError` or `ContainerCreating`  \n  - **Confirmed Cause**:  \n    - `missing-configmap-key` is failing due to **missing key \"LOGLEVEL\" in ConfigMap `config-faults/app-settings`** (event: `Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings`).  \n    - Other entries likely involve missing keys, invalid volumes, or misconfigured projected sources. Verify ConfigMaps/Secrets and volume mounts.  \n\n---\n\n### **[unverified: 3]. CrashLoopBackOff Pods**\n- **Workloads**:  \n  - `adversarial/annotation-injector`  \n  - `demo/crasher` / `demo/log-shipper` / `demo/memory-hog` / `demo/needs-db`  \n  - **Status**: `CrashLoopBackOff`  \n  - **Issue**: Pods crash repeatedly. Use `describe_pod` to check exit codes, resource limits, or logs. Likely causes: [unverified: OOMKilled], application errors, or misconfigured probes.  \n\n---\n\n### **4. Pending Pods**\n- **Workloads**:  \n  - `shop/archive` / `shop/gpu-scoring`  \n  - **Status**: `Pending`  \n  - **Issue**: Pods cannot be scheduled. Check node resource pressure (e.g., memory, CPU) with `list_nodes` (if available). Ensure nodes have sufficient capacity and no taints blocking scheduling.  \n\n---\n\n### **5. Not Ready Pods**\n- **Workload**: `demo/never-ready`  \n  - **Status**: `Running` but not `Ready`  \n  - **Issue**: Failing readiness probes. Check probe configurations in `describe_pod` (if available) and ensure backend services are functional.  \n\n---\n\n### **Next Steps**  \n1. **Fix missing ConfigMap keys** (e.g., add \"LOGLEVEL\" to `config-faults/app-settings`).  \n2. **Resolve image pull failures** for `demo/bad-image`.  \n3. **Investigate CrashLoopBackOff pods** (e.g., check for OOMKilled or application errors).  \n4. **Address node pressure** for Pending pods.  \n\nLet me know if you\u2019d like to drill into a specific workload!\n\n---\n**Evidence audit.**\n2 of 11 stated values could not be traced to any tool result for the workload they were stated about: `3`, `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "failures": [],
+  "notes": [
+   "stated ['3', 'oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 141693.1,
+   "tool_ms": 47.5,
+   "rounds": 5,
+   "round_ms": [
+    5687.6,
+    29715.9,
+    49367.2,
+    17164.3,
+    39758.2
+   ],
+   "slowest_round_ms": 49367.2,
+   "model_share": 1.0,
+   "wall_ms": 141749.1,
+   "unaccounted_ms": 8.5,
+   "slept_ms": 0.0
+  }
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 125.1,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-21T13:54:35",
+  "load_before": 1.27,
+  "load_after": 2.28,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "get_pod_events",
+   "list_nodes"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   },
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/nightly-sync\": {\"status\": \"Error\", \"pods\": 2, \"example\": \"nightly-sync-29788343-9rjvp\", \"fault\": \"crash\"}, \"adversarial/annotation-injector\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"annotation-injector-58b845fb95-62g5r\", \"fault\": \"crash\"}, \"adversarial/log-injector\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-injector-85c5c67578-kg46f\", \"fault\": \"crash\"}, \"adversarial/payments\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"payments-5f58f7649b-b9ddq\", \"fault\": \"crash\"}, \"config-faults/missing-configmap-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-configmap-key\", \"fault\": \"config\"}, \"config-faults/missing-configmap-volume\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-configmap-volume\", \"fault\": \"not-ready\"}, \"config-faults/missing-secret-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-secret-key\", \"fault\": \"config\"}, \"config-faults/missing-volume-key\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-volume-key\", \"fault\": \"not-ready\"}, \"config-faults/projected-source-missing\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"projected-source-missing\", \"fault\": \"not-ready\"}, \"demo/bad-image\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"bad-image-647c5576d5-lft6h\", \"fault\": \"image-pull\"}, \"demo/crasher\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"crasher-5964d99948-lpgvd\", \"fault\": \"crash\"}, \"demo/log-shipper\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-shipper-ztsdb\", \"fault\": \"crash\"}, \"demo/memory-hog\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-5hlhb\", \"fault\": \"crash\"}, \"demo/needs-db\": {\"status\": \"Init:CrashLoopBackOff\", \"pods\": 1, \"example\": \"needs-db-58886b67f-zb49w\", \"fault\": \"crash\"}, \"demo/never-ready\": {\"status\": \"Running\", \"pods\": 1, \"example\": \"never-ready-7d86d8c5f7-pqcgt\", \"fault\": \"not-ready\"}, \"demo/slow-starter\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"slow-starter-56c8f89495-gbshf\", \"fault\": \"crash\"}, \"shop/archive\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"archive-bbdcbb574-426wn\"}, \"shop/billing-worker\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"billing-worker\", \"fault\": \"config\"}, \"shop/cert-rotator\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"cert-rotator\", \"fault\": \"not-ready\"}, \"shop/gpu-scoring\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"gpu-scoring-f98d89cc5-7qjs2\"}, \"_truncated\": \"1 more not shown, across 1 namespace(s); raise limit, or use list_pods on one namespace\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-key\", \"events\": [{\"reason\": \"Failed\", \"count\": 463, \"age\": \"46s\", \"message\": \"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"}]}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_nodes",
+    "result": "{\"aiops-test-control-plane\": {\"ready\": true, \"pressure\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The cluster has multiple issues, with the following confirmed findings:\n\n1. **Crashing Pods** (9 workloads):  \n   - `demo/nightly-sync` (2 pods), `adversarial/annotation-injector`, `adversarial/log-injector`, `adversarial/payments`, `demo/crasher`, `demo/log-shipper`, `demo/memory-hog`, `demo/slow-starter`, and `demo/needs-db` are in `CrashLoopBackOff` or `Error` states, indicating repeated crashes (likely due to bugs, OOM kills, or failed liveness probes).\n\n2. **Image Pull Failure**:  \n   - `demo/bad-image` is stuck in `ImagePullBackOff`, meaning the container image cannot be pulled (e.g., invalid image name, network issues, or registry authentication problems).\n\n3. **Configuration Errors**:  \n   - `config-faults/missing-configmap-key` is in `CreateContainerConfigError` due to a **missing key** (`LOGLEVEL`) in the `config-faults/app-settings` ConfigMap.  \n   - `config-faults/missing-secret-key`, `config-faults/missing-volume-key`, and `config-faults/missing-configmap-volume` are in `ContainerCreating` due to missing Secrets, volume mounts, or misconfigured volume sources.\n\n4. **Pending Pods**:  \n   - `shop/archive` and `shop/gpu-scoring` are `Pending`, but node pressure is **not** the cause. The node `aiops-test-control-plane` is fully ready with no resource pressure (`allocatable_cpu`: 15, `allocatable_memory`: ~8GiB). This suggests the issue may stem from scheduling constraints, resource limits, or misconfigured pod specifications.\n\n5. **Not-Ready Pod**:  \n   - `demo/never-ready` is `Running` but `not-ready`, likely due to failing readiness probes (e.g., application not initializing correctly).\n\n**Next Steps**:  \n- Fix the missing `LOGLEVEL` key in `config-faults/app-settings` to resolve `missing-configmap-key`.  \n- Investigate the root cause of `demo/nightly-sync` crashes (e.g., logs or resource limits).  \n- Resolve the image pull failure for `demo/bad-image` (e.g., verify image name/registry access).  \n- Check pod specifications for `shop/archive` and `shop/gpu-scoring` to identify scheduling or resource constraints.  \n\nNo node-level resource pressure is detected, so the pending pods likely require deeper inspection of their configurations or scheduling rules. Would you like to drill into a specific pod (e.g., logs, resource limits, or probe configurations)?",
+  "answer": "The cluster has multiple issues, with the following confirmed findings:\n\n1. **Crashing Pods** (9 workloads):  \n   - `demo/nightly-sync` (2 pods), `adversarial/annotation-injector`, `adversarial/log-injector`, `adversarial/payments`, `demo/crasher`, `demo/log-shipper`, `demo/memory-hog`, `demo/slow-starter`, and `demo/needs-db` are in `CrashLoopBackOff` or `Error` states, indicating repeated crashes (likely due to bugs, OOM kills, or failed liveness probes).\n\n2. **Image Pull Failure**:  \n   - `demo/bad-image` is stuck in `ImagePullBackOff`, meaning the container image cannot be pulled (e.g., invalid image name, network issues, or registry authentication problems).\n\n3. **Configuration Errors**:  \n   - `config-faults/missing-configmap-key` is in `CreateContainerConfigError` due to a **missing key** (`LOGLEVEL`) in the `config-faults/app-settings` ConfigMap.  \n   - `config-faults/missing-secret-key`, `config-faults/missing-volume-key`, and `config-faults/missing-configmap-volume` are in `ContainerCreating` due to missing Secrets, volume mounts, or misconfigured volume sources.\n\n4. **Pending Pods**:  \n   - `shop/archive` and `shop/gpu-scoring` are `Pending`, but node pressure is **not** the cause. The node `aiops-test-control-plane` is fully ready with no resource pressure (`allocatable_cpu`: 15, `allocatable_memory`: ~8GiB). This suggests the issue may stem from scheduling constraints, resource limits, or misconfigured pod specifications.\n\n5. **Not-Ready Pod**:  \n   - `demo/never-ready` is `Running` but `not-ready`, likely due to failing readiness probes (e.g., application not initializing correctly).\n\n**Next Steps**:  \n- Fix the missing `LOGLEVEL` key in `config-faults/app-settings` to resolve `missing-configmap-key`.  \n- Investigate the root cause of `demo/nightly-sync` crashes (e.g., logs or resource limits).  \n- Resolve the image pull failure for `demo/bad-image` (e.g., verify image name/registry access).  \n- Check pod specifications for `shop/archive` and `shop/gpu-scoring` to identify scheduling or resource constraints.  \n\nNo node-level resource pressure is detected, so the pending pods likely require deeper inspection of their configurations or scheduling rules. Would you like to drill into a specific pod (e.g., logs, resource limits, or probe configurations)?",
+  "nudges": 1,
+  "policies": 1,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 125000.8,
+   "tool_ms": 47.4,
+   "rounds": 6,
+   "round_ms": [
+    5404.2,
+    25006.0,
+    16115.7,
+    30949.0,
+    13928.1,
+    33597.9
+   ],
+   "slowest_round_ms": 33597.9,
+   "model_share": 1.0,
+   "wall_ms": 125058.5,
+   "unaccounted_ms": 10.3,
+   "slept_ms": 5.5
+  }
+ }
+]

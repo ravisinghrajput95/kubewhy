@@ -406,16 +406,59 @@ class TestEvidenceIsReturnedOnRequest:
 
         assert isinstance(asked["evidence"][0]["result"], str)
 
-    def test_a_recorded_run_re_scores_to_the_verdict_it_was_given(self):
-        """The whole point. check(answer, evidence) offline must reproduce the
-        confidence the live run recorded -- otherwise the field is decoration
-        and a re-scoring built on it would be measuring its own gaps."""
-        asked = TestStream._drain(lambda: agent.ask("q", evidence=True))
+    @staticmethod
+    def _fabricating():
+        """A run whose answer states a figure no tool reported, so the verdict
+        is non-empty and the published answer really is rewritten and marked
+        up. The first version of this test used an answer with nothing
+        checkable in it; annotate() left that untouched, the draft and the
+        answer were the same string, and the test passed while the field it
+        was guarding did not work on any real run."""
+        with mock_chat(
+            side_effect=[
+                reply(calls=[tool_call("get_system_info", {})]),
+                reply(content="cpu is at 99.9% and has been for 47 minutes"),
+            ]
+        ):
+            return agent.ask("q", evidence=True)
 
-        replayed = grounding.check(asked["answer"], asked["evidence"])
+    def test_the_published_answer_is_not_the_checked_one(self):
+        """Pins the reason "draft" exists. If these ever become the same
+        string for an answer with unsupported claims in it, verify() and
+        annotate() have stopped doing anything."""
+        asked = self._fabricating()
+
+        assert asked["unverified"], "test needs a run with something flagged"
+        assert asked["draft"] != asked["answer"]
+        assert grounding.AUDIT_MARKER in asked["answer"]
+        assert grounding.AUDIT_MARKER not in asked["draft"]
+
+    def test_a_recorded_run_re_scores_to_the_verdict_it_was_given(self):
+        """The whole point. check(draft, evidence) offline must reproduce the
+        verdict the live run recorded -- otherwise the field is decoration and
+        a re-scoring built on it would be measuring its own gaps."""
+        asked = self._fabricating()
+
+        replayed = grounding.check(asked["draft"], asked["evidence"])
 
         assert replayed["confidence"] == asked["confidence"]
         assert replayed["unverified"] == asked["unverified"]
+
+    def test_re_scoring_the_published_answer_is_the_thing_not_to_do(self):
+        """Recorded because it is the mistake this field was added to prevent,
+        and it is silent: the audit footer lists the flagged values and
+        contributes digits of its own, so a replay against the published text
+        returns a plausible verdict that is not the one the run was given."""
+        asked = self._fabricating()
+
+        wrong = grounding.check(asked["answer"], asked["evidence"])
+
+        assert wrong["unverified"] != asked["unverified"]
+
+    def test_the_draft_is_not_returned_by_default(self):
+        asked = TestStream._drain(lambda: agent.ask("q"))
+
+        assert "draft" not in asked
 
 
 class TestPrefetchedEvidence:

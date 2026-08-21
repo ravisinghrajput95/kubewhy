@@ -350,7 +350,7 @@ def ask_agent_streaming(body: Question):
                 # streaming client's way of getting the same data as it lands.
                 payload = json.dumps({
                     k: v for k, v in event.items()
-                    if k not in ("type", "evidence")
+                    if k not in ("type", "evidence", "draft")
                 })
                 yield f"event: {event['type']}\ndata: {payload}\n\n"
         except Exception as exc:

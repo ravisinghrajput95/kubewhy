@@ -129,14 +129,25 @@ new ones under `caffeinate`.
 ### When the answer is wrong about the tool result, keep the tool result
 
 `run_eval.py` records the answer, which tools were called, and -- since
-2026-08-21 -- what those tools returned, in the `evidence` field. It is in
-`grounding.records()` shape, so re-scoring a recorded run offline is
+2026-08-21 -- both of the checker's inputs: `evidence`, what those tools
+returned, and `draft`, the answer as it was checked. Re-scoring a recorded
+run offline is
 
 ```python
-grounding.check(record["answer"], record["evidence"])
+grounding.check(record["draft"], record["evidence"])
 ```
 
-with the same ids and ordering the live check saw. **This is the only field in
+with the same ids and ordering the live check saw.
+
+**Re-check `draft`, never `answer`.** `answer` is the published text, which
+has been through `verify()` (unsupported values rewritten) and `annotate()`
+(markers and the evidence audit appended). Replaying the check against it
+returns a plausible verdict that is not the one the run recorded -- measured
+on five live runs the day the field was added, two came back with a different
+unverified list, one having lost a claim and gained two contributed by the
+audit footer's own digits. `draft` is never returned by `ask()` or sent over
+`/ask/stream`: it still carries the figures `verify()` exists to keep out of
+a reader's way. **This is the only field in
 the record that a re-run cannot reproduce**, because the cluster has moved on
 and the model answers differently the second time. It costs about 2.6 KB per
 run against the 1.8 KB of answer text already stored.

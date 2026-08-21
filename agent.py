@@ -859,6 +859,20 @@ def stream(question, model=MODEL, think=None, prefetched=None):
                 # can be read a year later but never re-derived. ask() drops it
                 # unless the caller asks, so no surface pays for it by default.
                 "evidence": evidence,
+                # The answer as the checker saw it: the model's draft, before
+                # verify() rewrote its unsupported values and annotate() added
+                # the markers. Recorded with the evidence because the two are
+                # only useful together -- `answer` below has been through both
+                # transformations, so check(answer, evidence) cannot reproduce
+                # the verdict this run recorded. Measured 2026-08-21 on five
+                # live runs: two came back with a different unverified list,
+                # one of them having lost a claim and gained two that are
+                # artefacts of the audit footer's own digits.
+                #
+                # Never put on a wire. verify() exists so that a reader
+                # skimming the prose for a number finds the measured one, and
+                # handing back the draft would undo exactly that.
+                "draft": answer,
                 "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
                 # Recorded, not just acted on: without it a run that called
                 # get_pod_logs cannot be told apart from one that had to be
@@ -931,6 +945,10 @@ def stream(question, model=MODEL, think=None, prefetched=None):
         "answer": f"Gave up after {MAX_ROUNDS} rounds of tool calls.",
         "tool_calls": trace,
         "evidence": evidence,
+        # No model answer was ever checked here, so there is no draft to keep
+        # apart from the text above. Present for shape, so a consumer does not
+        # have to special-case the one event that lacks the field.
+        "draft": None,
         "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
         "nudges": nudges,
         "policies": policies,
@@ -953,14 +971,21 @@ def ask(question, model=MODEL, verbose=False, think=None, prefetched=None,
          "confidence": "grounded" | "partial" | "ungrounded",
          "unverified": [claims not found in any tool result]}
 
-    evidence=True adds "evidence": the tool results the answer was checked
-    against, in grounding.records() shape. Off by default because every
-    caller of this function returns its result over a wire -- REST, MCP,
-    Slack -- and a projected scan of a busy cluster is a large thing to put
-    in a reply nobody asked for. The evals turn it on: a recorded run whose
-    tool output was thrown away cannot be re-scored when the checker changes,
-    and re-running to find out costs an hour and asks a non-deterministic
-    model a second time.
+    evidence=True adds the checker's two inputs: "evidence", the tool results
+    in grounding.records() shape, and "draft", the model's answer before
+    verify() rewrote it and annotate() marked it up. Both or neither --
+    "answer" has been through both transformations, so replaying the check
+    against it reproduces a different verdict.
+
+    Off by default. Every other caller of this function returns its result
+    over a wire -- REST, MCP, Slack -- and a projected scan of a busy cluster
+    is a large thing to put in a reply nobody asked for, while the draft is
+    the text still carrying the unsupported figures that verify() exists to
+    take out of the reader's way.
+
+    The evals turn it on: a recorded run whose tool output was thrown away
+    cannot be re-scored when the checker changes, and re-running to find out
+    costs an hour and asks a non-deterministic model a second time.
 
     See grounding.py for what confidence means and why it is a lint rather
     than a gate. Callers that need the steps as they happen want stream().
@@ -975,8 +1000,9 @@ def ask(question, model=MODEL, verbose=False, think=None, prefetched=None,
             answer = event
 
     # "type" is a routing field for stream() consumers, not part of this
-    # function's long-standing contract. "evidence" is opt-in for size.
-    dropped = {"type"} if evidence else {"type", "evidence"}
+    # function's long-standing contract. "evidence" and "draft" are opt-in:
+    # one for size, the other because it is the un-rewritten text.
+    dropped = {"type"} if evidence else {"type", "evidence", "draft"}
     return {key: value for key, value in answer.items() if key not in dropped}
 
 

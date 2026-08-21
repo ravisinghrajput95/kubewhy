@@ -324,6 +324,13 @@ def main():
                 # verbatim -- same ids, same ordering, prefetched entries in
                 # the same places the live check saw them.
                 "evidence": result.get("evidence", []),
+                # The answer as the checker read it. `answer` below is the
+                # published text, after unsupported values were rewritten and
+                # the audit markers added, so it is the right field to read
+                # and the wrong one to re-check: replaying check() against it
+                # scored 3 of 5 live runs differently on 2026-08-21, since the
+                # audit footer contributes digits of its own.
+                "draft": result.get("draft"),
                 # The answer itself, not just the strings it was missing. A
                 # failure recorded as ["missing ['memory-hog']"] cannot say
                 # whether the model looked and found nothing, described a
