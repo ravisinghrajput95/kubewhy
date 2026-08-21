@@ -7,9 +7,28 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `52a93c8`, tree clean, 418 tests pass, tags through v0.1.6.
-Updated 2026-08-18. No clusters running anywhere; Docker is stopped and the
-model is unloaded.**
+**State: `main` at `bf6375c`, tree clean and pushed, 580 tests pass, tags
+through v0.1.6. Updated 2026-08-21. No clusters running anywhere; Docker is
+stopped and the model is unloaded.**
+
+**Start here: the agent-loop target invariant is built and only smoke-tested.**
+`targeting.py` fixes the entity-scoping defect that had
+`unhealthy_question_about_a_healthy_pod` at 1/3 -- the model called
+`list_pods(only_unhealthy=True)` without a workload, which excludes a healthy
+pod by construction, and described the neighbours. The target is now extracted
+once and every tool call is held to it: rewritten where the arguments can carry
+the scope, refused where they name a different entity. Measured 5/5 on that
+case, 32/32 on the suite at n=2, 0 entity violations across 5 multi-incident
+runs.
+
+Then it was widened, and **the widening is the part that is unfinished.** An
+unlabelled name ("Why is crasher-svc unreachable?") is now confirmed against
+the cluster before it becomes a target -- one read-only lookup, and a name the
+cluster does not have leaves the target unset. **Its regression run was stopped
+at 13 of 16 cases** (13/13 passed, 11/13 fully grounded, n=1). Three cases are
+unmeasured. Finish that before treating the widening as verified: it changed
+which questions bind a target, so it can over-scope in a way the smoke test
+would not show.
 
 **The README benchmark table has not been re-taken since `scan_cluster` began
 labelling a Running-but-unready workload `fault: not-ready`.** It is still
@@ -41,6 +60,27 @@ Measured before touching anything, which is the only reason the projection
 was not rewritten to fix a defect that did not exist. Details below.
 
 Read README.md and CONTRIBUTING.md first.
+
+## Open, in priority order
+
+1. **Finish the widened-targeting regression run.** 16 cases, n>=2, under
+   `caffeinate`. The stopped set is `results/widened-n1.json`.
+2. **`cluster_wide_scan` is 0/5 fully grounded** while being 5/5 correct. Four
+   of those five are a single hedged "Likely OOMKilled" that is TRUE of the
+   cluster and simply was not measured in that run. `KNOWN_CAUSES` already
+   exempts a hedged cause; a hedged *status* arguably deserves the same, and
+   that one change may account for most of the gap.
+3. **Latency is unresolved.** ~67s median, 99.88% model generation. Thinking
+   off (`TRIAGE_THINK=false`) is ~6x faster and failed `crashloop_root_cause`
+   at n=1 -- too thin to decide either way. Configs B/C/E were never run.
+4. **Controller and noise evidence is two rounds old.** Both passed when last
+   measured (3s detect, 52.5s RCA; 10 failing pods -> 1 finding).
+5. **The README benchmark table predates the `not-ready` projection change**
+   and says so. Re-take for provenance when the machine is idle.
+
+**Score, honestly assessed: 8.8/10.** Blockers are performance (unimproved,
+benchmark incomplete) and production readiness (autonomous evidence stale).
+Do not round it.
 
 ## Three rules that are not negotiable
 
