@@ -29,6 +29,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import controller  # noqa: E402
+import grounding  # noqa: E402
 import sinks  # noqa: E402
 import store  # noqa: E402
 from routers.k8s_pods_info import _api, _pod_status, workload_of  # noqa: E402
@@ -142,7 +143,14 @@ def grade(case, finding, delivered):
     if case["workload"] not in text:
         failures.append(f"never named the workload {case['workload']!r}")
 
-    if finding.get("confidence") not in ("grounded", "partial", "ungrounded"):
+    # Against grounding.VERDICTS, not a tuple retyped here. This check used to
+    # list three of the four and failed every finding that came back
+    # `insufficient_evidence` -- a real verdict, meaning the diagnosis stated
+    # nothing the checker could trace, which sinks.py renders like any other.
+    # Found 2026-08-21 in fresh validation: crasher and bad-image both met
+    # every content expectation and were scored as failures on this line
+    # alone.
+    if finding.get("confidence") not in grounding.VERDICTS:
         failures.append(f"no usable confidence: {finding.get('confidence')!r}")
 
     # The same signal, read two ways, because on its own it cannot tell a

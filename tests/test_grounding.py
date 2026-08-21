@@ -288,6 +288,36 @@ class TestStatusClaims:
         assert grounding.check("`CrashLoopBackOff`", tools)["unverified"] == []
 
 
+class TestEveryVerdictIsNamed:
+    """
+    A caller that retypes check()'s return values goes stale when a fourth is
+    added, and one did: evals/run_controller_eval.py listed grounded, partial
+    and ungrounded, and failed any finding carrying insufficient_evidence as
+    "no usable confidence". Fresh controller validation on 2026-08-21 scored
+    correct diagnoses of crasher and bad-image as failures on that line alone.
+    """
+
+    def test_every_verdict_check_can_return_is_in_verdicts(self):
+        tools = [json.dumps({"pod": "p-1", "status": "OOMKilled"})]
+        produced = {
+            # grounded: a claim that traces
+            grounding.check("pod p-1 was OOMKilled.", tools)["confidence"],
+            # partial: a claim that does not
+            grounding.check("pod p-1 was OOMKilled after 512 restarts.",
+                            tools)["confidence"],
+            # ungrounded: claims with no tool call at all
+            grounding.check("CPU is at 42%.", [])["confidence"],
+            # insufficient: nothing checkable
+            grounding.check("The pod looks fine.", tools)["confidence"],
+        }
+        assert produced <= grounding.VERDICTS
+        assert len(produced) == 4, f"expected all four, got {produced}"
+
+    def test_insufficient_evidence_is_a_member(self):
+        """The one that was missing, pinned by name."""
+        assert grounding.INSUFFICIENT in grounding.VERDICTS
+
+
 class TestExampleClausesAreNotClaims:
     """
     "check the logs (e.g., OOMKilled)" names a status as an example of what to

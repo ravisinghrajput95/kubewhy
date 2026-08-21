@@ -434,3 +434,23 @@ class TestFabricatedDetailsAreScored:
 
         assert ok is False
         assert any("oomkilled" in f for f in failures)
+
+class TestControllerGraderAcceptsEveryVerdict:
+    """
+    The controller grader reads grounding.VERDICTS rather than a tuple of its
+    own. Pinned because the drift was silent: a correct diagnosis was reported
+    as a failure, with a reason that reads like a defect in the agent.
+    """
+
+    def test_no_verdict_is_rejected_as_unusable(self):
+        import grounding
+        from evals.run_controller_eval import grade
+
+        case = {"workload": "crasher", "expect_all": [["database"]]}
+        for verdict in sorted(grounding.VERDICTS):
+            finding = {"confidence": verdict, "diagnosis": "crasher cannot "
+                       "reach the database", "tool_calls": ["get_pod_logs"]}
+            ok, failures, _ = grade(case, finding,
+                                    "crasher cannot reach the database")
+            assert not any("no usable confidence" in f for f in failures), \
+                f"{verdict} was rejected"

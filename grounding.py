@@ -48,6 +48,13 @@ import re
 # which now requires at least one claim that succeeded.
 INSUFFICIENT = "insufficient_evidence"
 
+# Every value check() can put in "confidence". Named because a caller that
+# enumerates them by hand goes stale the moment a fourth is added, and one
+# did: evals/run_controller_eval.py listed three of these and failed any
+# finding carrying the fourth, reporting a correct diagnosis of crasher and
+# bad-image as "no usable confidence". Read this rather than retyping it.
+VERDICTS = frozenset({"grounded", "partial", "ungrounded", INSUFFICIENT})
+
 # Status words worth checking. A model that reports OOMKilled when no tool
 # said so is making exactly the mistake this module exists to catch.
 #
