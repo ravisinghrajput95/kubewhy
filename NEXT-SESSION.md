@@ -7,9 +7,31 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `cc714ef`, tree clean and pushed, 603 tests pass, tags
-through v0.1.6. Updated 2026-08-21, evening. No clusters running anywhere;
+**State: `main` at `2ae93bf`, tree clean and pushed, 624 tests pass, tags
+through v0.1.6. Updated 2026-08-21, late. No clusters running anywhere;
 Docker is stopped and the model is unloaded.**
+
+**The summary drop is fixed and the cause was list length.** Holding workload
+identity and order constant by permuting and varying only entry count:
+8/8 complete summaries at five entries, 0/8 at ten, 0/8 at twenty, Fisher
+exact p=0.000155. Drops spread evenly over fault class and position, so the
+two suspects that survived the earlier rounds both die once count is the
+variable being held rather than the one drifting. Latency was flat across the
+arms (145s/144s/169s) and entries-named did not cap at a constant, so it is
+proportional loss and not a timeout or a ceiling -- which is why no wording
+change would have touched it.
+
+The fix is a third deterministic policy (`uncovered_workloads()` plus a
+re-ask, same budget as the tool nudge and the evidence policy) with a
+deterministic appendix behind it, because at twenty entries a run named as
+few as 7 and re-asking can trade one omission for another. **0/8 -> 8/8
+complete, 47/160 -> 0/159 entries dropped, and 5/5 on the graded eval case at
+n=5.** Six of the eight got there on the re-ask alone; two needed the
+appendix, so both layers earn their place. **The cost is +43% latency on the
+slowest case in the suite** (169s -> 242s median) and that is a real cost.
+
+**Controller at n=5: 25/26 (96%).** `never-ready`'s earlier failure was noise
+(5/5 here). The one failure is `crasher`, and it is the lead below.
 
 **The agent-loop target invariant is built and now regression-tested.**
 `targeting.py` fixes the entity-scoping defect that had
@@ -140,9 +162,31 @@ Read README.md and CONTRIBUTING.md first.
    same summary differently every run, so a fix aimed at one phrasing does not
    generalise; the other two defects were found only by reading why each
    individual flag fired.
-3. **Latency is unresolved.** ~67s median, 99.88% model generation. Thinking
-   off (`TRIAGE_THINK=false`) is ~6x faster and failed `crashloop_root_cause`
-   at n=1 -- too thin to decide either way. Configs B/C/E were never run.
+3. **The loop verifies evidence was gathered, never that it was read.** A
+   controller run on `crasher` produced a 52-character `ungrounded` diagnosis
+   after one wrong tool call, with `FATAL: could not connect to db:5432`
+   already in its prompt from `capture_evidence()`. `LOGS_POLICY` was
+   satisfied because prefetched logs count as called -- correctly, they were
+   gathered -- and nothing downstream asks whether the answer engaged with
+   them. **The rate is unknown and two attempts to measure it failed.** Token
+   overlap between log and answer is the wrong instrument: punctuation
+   boundaries (`db:5432:` against `db:5432`), a JSON-escaped `\n` glued onto
+   `FATAL`, and then a "fix" that stripped punctuation before testing for it.
+   The model paraphrases -- `db:5432` becomes `db-service:5432`, `upstream
+   returned 503` becomes "the 503 error" -- so any real probe needs
+   per-workload ground-truth phrases with accepted paraphrases. Only `crasher`
+   and `nightly-sync` qualify: `memory-hog`'s log is stress output and its
+   cause is in the status, so ignoring that log is correct.
+4. **Latency is unresolved, and thinking-off is NOT settled.** ~67s median,
+   99.88% model generation. Three cases at n=5 per arm: thinking on 13/15,
+   thinking off 15/15, **Fisher exact p=0.483**, median 43.7s against 8.0s.
+   That retires the old claim that thinking-off degrades RCA -- which rested
+   on one n=1 failure of `crashloop_root_cause`, now 5/5 in both arms -- and
+   establishes nothing in its place. p=0.483 is undetermined, not equivalent.
+   Do not flip the default; run the full sixteen-case suite in the off arm,
+   where `inference_is_marked` and `service_unreachable_chain` have never been
+   measured. Note thinking *on* lost two `image_pull_failure` runs, stopping
+   at list_pods + get_pod_events.
 4. **Controller and noise evidence is two rounds old.** Both passed when last
    measured (3s detect, 52.5s RCA; 10 failing pods -> 1 finding).
 5. **The README benchmark table predates the `not-ready` projection change**
