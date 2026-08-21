@@ -128,12 +128,37 @@ new ones under `caffeinate`.
 
 ### When the answer is wrong about the tool result, keep the tool result
 
-`run_eval.py` records the answer and which tools were called. It does not
-record what those tools returned, which is fine until the defect lives between
-the two -- a complete tool result summarised incompletely. That is what
-`probe_scan_summary.py` is for: one case, many repeats, every `scan_cluster`
-result in full beside the answer, and which of the returned workloads the
-answer named.
+`run_eval.py` records the answer, which tools were called, and -- since
+2026-08-21 -- what those tools returned, in the `evidence` field. It is in
+`grounding.records()` shape, so re-scoring a recorded run offline is
+
+```python
+grounding.check(record["answer"], record["evidence"])
+```
+
+with the same ids and ordering the live check saw. **This is the only field in
+the record that a re-run cannot reproduce**, because the cluster has moved on
+and the model answers differently the second time. It costs about 2.6 KB per
+run against the 1.8 KB of answer text already stored.
+
+It exists because of a question that could not be answered on 2026-08-21.
+`grounding.py` stopped treating a hedged status as a fabrication, and the
+obvious check -- re-score the existing sets under both versions -- was
+impossible, since no set held the tool output the checker reads. The
+comparison had to fall back on `probe_scan_summary.py`'s records, which cover
+one case. Sets recorded before that date still cannot be re-scored.
+
+`ask()` returns it only for callers that pass `evidence=True`. Every other
+caller puts its result on a wire -- REST, MCP, Slack -- and a projected scan
+of a busy cluster is a large thing to add to a reply nobody asked for. The
+`/ask/stream` answer event drops it too, since that event is documented as
+matching what `/ask` returns and every result in it has already been sent as
+its own `tool_result` event.
+
+`probe_scan_summary.py` remains the tool for going deeper on one case: many
+repeats, every `scan_cluster` result in full beside the answer, and which of
+the returned workloads the answer named -- plus `--shuffle`, which the eval
+has no equivalent of.
 
 ```bash
 caffeinate -is env OLLAMA_KEEP_ALIVE=24h python evals/probe_scan_summary.py \

@@ -162,6 +162,27 @@ class TestAskStream:
         # "type" is SSE framing, not part of the payload.
         assert data == {k: v for k, v in answer.items() if k != "type"}
 
+    def test_the_evidence_the_loop_carries_is_not_put_on_the_wire(self, open_client):
+        """The answer event grew an "evidence" field for the evals, which
+        record it so a run can be re-scored offline. /ask does not return it,
+        so the event documented as matching /ask must not either -- and every
+        result in it has already gone out as its own tool_result event."""
+        answer = {
+            "type": "answer",
+            "answer": "memory-hog is OOMKilled",
+            "tool_calls": [{"name": "describe_pod", "arguments": {}}],
+            "evidence": [{"id": "tool-1", "tool": "describe_pod",
+                          "result": '{"status": "OOMKilled"}'}],
+            "confidence": "grounded",
+            "unverified": [],
+        }
+        with patch.object(app_module, "stream", return_value=iter([answer])):
+            response = open_client.post("/ask/stream", json={"question": "q"})
+
+        _, data = sse_events(response.text)[-1]
+        assert "evidence" not in data
+        assert data["answer"] == "memory-hog is OOMKilled"
+
     def test_a_mid_stream_failure_arrives_as_an_event(self, open_client):
         """
         The status line is long gone by then, so a failure that is not sent as

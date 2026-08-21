@@ -851,6 +851,14 @@ def stream(question, model=MODEL, think=None, prefetched=None):
                 # named, the other is the cluster requiring a tool it did not.
                 "policies": policies,
                 "tool_calls": trace,
+                # The measurements themselves, in the records() shape that was
+                # handed to grounding.check() -- ids, tool names and the raw
+                # projected result, prefetched entries included and numbered as
+                # the checker numbered them. `tool_calls` says what was asked;
+                # this says what came back, and without it a grounding verdict
+                # can be read a year later but never re-derived. ask() drops it
+                # unless the caller asks, so no surface pays for it by default.
+                "evidence": evidence,
                 "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
                 # Recorded, not just acted on: without it a run that called
                 # get_pod_logs cannot be told apart from one that had to be
@@ -922,6 +930,7 @@ def stream(question, model=MODEL, think=None, prefetched=None):
         "type": "answer",
         "answer": f"Gave up after {MAX_ROUNDS} rounds of tool calls.",
         "tool_calls": trace,
+        "evidence": evidence,
         "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
         "nudges": nudges,
         "policies": policies,
@@ -930,7 +939,8 @@ def stream(question, model=MODEL, think=None, prefetched=None):
     }
 
 
-def ask(question, model=MODEL, verbose=False, think=None, prefetched=None):
+def ask(question, model=MODEL, verbose=False, think=None, prefetched=None,
+        evidence=False):
     """
     Answer a question about this host, letting the model call collectors.
 
@@ -942,6 +952,15 @@ def ask(question, model=MODEL, verbose=False, think=None, prefetched=None):
          "tool_calls": [{"name":..., "arguments":...}],
          "confidence": "grounded" | "partial" | "ungrounded",
          "unverified": [claims not found in any tool result]}
+
+    evidence=True adds "evidence": the tool results the answer was checked
+    against, in grounding.records() shape. Off by default because every
+    caller of this function returns its result over a wire -- REST, MCP,
+    Slack -- and a projected scan of a busy cluster is a large thing to put
+    in a reply nobody asked for. The evals turn it on: a recorded run whose
+    tool output was thrown away cannot be re-scored when the checker changes,
+    and re-running to find out costs an hour and asks a non-deterministic
+    model a second time.
 
     See grounding.py for what confidence means and why it is a lint rather
     than a gate. Callers that need the steps as they happen want stream().
@@ -956,8 +975,9 @@ def ask(question, model=MODEL, verbose=False, think=None, prefetched=None):
             answer = event
 
     # "type" is a routing field for stream() consumers, not part of this
-    # function's long-standing contract.
-    return {key: value for key, value in answer.items() if key != "type"}
+    # function's long-standing contract. "evidence" is opt-in for size.
+    dropped = {"type"} if evidence else {"type", "evidence"}
+    return {key: value for key, value in answer.items() if key not in dropped}
 
 
 def _report_unverified(result):

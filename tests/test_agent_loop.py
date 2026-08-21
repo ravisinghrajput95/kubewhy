@@ -335,33 +335,87 @@ class TestStream:
         assert events[-1]["type"] == "answer"
         assert "Gave up" in events[-1]["answer"]
 
-    def test_ask_matches_the_streams_answer(self):
-        """ask() is stream() drained; if these drift, one of them is a lie."""
-        def run(func):
-            with mock_chat(
-                side_effect=[
-                    reply(calls=[tool_call("get_system_info", {})]),
-                    reply(content="cpu is low"),
-                ]
-            ):
-                return func()
+    @staticmethod
+    def _drain(func):
+        with mock_chat(
+            side_effect=[
+                reply(calls=[tool_call("get_system_info", {})]),
+                reply(content="cpu is low"),
+            ]
+        ):
+            return func()
 
-        streamed = run(lambda: list(agent.stream("q"))[-1])
-        asked = run(lambda: agent.ask("q"))
+    def test_ask_matches_the_streams_answer(self):
+        """ask() is stream() drained; if these drift, one of them is a lie.
+
+        Asked with evidence=True, because that is the call that returns the
+        whole answer event -- the default drops one field deliberately, and
+        the test below pins that.
+        """
+        streamed = self._drain(lambda: list(agent.stream("q"))[-1])
+        asked = self._drain(lambda: agent.ask("q", evidence=True))
 
         assert "type" not in asked
         # Same fields, both ways. This is the half that catches drift.
         assert set(asked) == set(streamed) - {"type"}
 
-        # Everything except timing must be equal. Timing is measured, so two
-        # runs of the same mocked chain legitimately differ by a few
-        # microseconds -- comparing it by value would make this test flaky for
-        # the one field that is supposed to vary.
-        ignore = {"type", "timing"}
+        # Everything except the measured fields must be equal. Timing is
+        # measured, so two runs of the same mocked chain legitimately differ
+        # by a few microseconds. So is evidence: mock_chat replaces the model,
+        # not the tools, and get_system_info really does read this host's CPU,
+        # which moves between the two drains. Comparing either by value would
+        # make this test flaky for the fields that are supposed to vary, and
+        # the set comparison above is what actually catches drift. Evidence
+        # is pinned by value in TestEvidenceIsReturnedOnRequest.
+        ignore = {"type", "timing", "evidence"}
         assert {k: v for k, v in asked.items() if k not in ignore} == {
             k: v for k, v in streamed.items() if k not in ignore
         }
         assert set(asked["timing"]) == set(streamed["timing"])
+
+
+class TestEvidenceIsReturnedOnRequest:
+    """
+    The tool results the answer was checked against, kept so a recorded run
+    can be re-scored when the checker changes rather than re-run against a
+    cluster that has moved on.
+
+    Opt-in: every other caller of ask() puts its return on a wire.
+    """
+
+    def test_ask_does_not_carry_evidence_by_default(self):
+        asked = TestStream._drain(lambda: agent.ask("q"))
+
+        assert "evidence" not in asked
+
+    def test_ask_carries_it_when_asked(self):
+        asked = TestStream._drain(lambda: agent.ask("q", evidence=True))
+
+        assert [e["tool"] for e in asked["evidence"]] == ["get_system_info"]
+        assert all(set(e) == {"id", "tool", "result"} for e in asked["evidence"])
+
+    def test_the_ids_are_the_ones_grounding_was_given(self):
+        """The record is only a faithful replay if the citations still resolve,
+        so the ids must be records() shape and in call order."""
+        asked = TestStream._drain(lambda: agent.ask("q", evidence=True))
+
+        assert [e["id"] for e in asked["evidence"]] == ["tool-1"]
+
+    def test_the_result_is_the_string_the_tool_returned(self):
+        asked = TestStream._drain(lambda: agent.ask("q", evidence=True))
+
+        assert isinstance(asked["evidence"][0]["result"], str)
+
+    def test_a_recorded_run_re_scores_to_the_verdict_it_was_given(self):
+        """The whole point. check(answer, evidence) offline must reproduce the
+        confidence the live run recorded -- otherwise the field is decoration
+        and a re-scoring built on it would be measuring its own gaps."""
+        asked = TestStream._drain(lambda: agent.ask("q", evidence=True))
+
+        replayed = grounding.check(asked["answer"], asked["evidence"])
+
+        assert replayed["confidence"] == asked["confidence"]
+        assert replayed["unverified"] == asked["unverified"]
 
 
 class TestPrefetchedEvidence:

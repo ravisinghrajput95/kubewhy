@@ -234,7 +234,8 @@ def main():
             load_before = os.getloadavg()[0]
             started = time.time()
             try:
-                result = agent.ask(case["question"], model=args.model)
+                result = agent.ask(case["question"], model=args.model,
+                                   evidence=True)
             except ConnectionError as exc:
                 # Infrastructure, not the model. Scoring this as a failed case
                 # would report a plausible-looking low score for what is
@@ -302,6 +303,27 @@ def main():
                 "arguments": [
                     c.get("arguments", {}) for c in result.get("tool_calls", [])
                 ],
+                # What the tools returned, not only what they were asked. This
+                # is the record's only irreplaceable field: everything else
+                # here can be recomputed from a re-run, and this cannot,
+                # because the cluster has moved on and the model answers
+                # differently the second time.
+                #
+                # It exists because of a question that could not be answered
+                # on 2026-08-21. grounding.py was changed to stop treating a
+                # hedged status as a fabrication, and the obvious check --
+                # re-score the existing sets under both versions and compare
+                # -- was impossible, since no set held the tool output the
+                # checker reads. The comparison had to be run against
+                # probe_scan_summary.py's records instead, which cover one
+                # case. With this field any past set can be re-scored offline,
+                # for free, against any future checker.
+                #
+                # grounding.records() shape, so a replay is
+                # grounding.check(record["answer"], record["evidence"])
+                # verbatim -- same ids, same ordering, prefetched entries in
+                # the same places the live check saw them.
+                "evidence": result.get("evidence", []),
                 # The answer itself, not just the strings it was missing. A
                 # failure recorded as ["missing ['memory-hog']"] cannot say
                 # whether the model looked and found nothing, described a

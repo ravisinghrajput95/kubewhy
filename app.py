@@ -341,7 +341,17 @@ def ask_agent_streaming(body: Question):
             for event in stream(_question(body)):
                 # SSE frames the type separately so a client can dispatch on it
                 # without parsing the payload first.
-                payload = json.dumps({k: v for k, v in event.items() if k != "type"})
+                #
+                # "evidence" is dropped for the same reason ask() drops it:
+                # this event is documented above as carrying the same body
+                # /ask would have returned, and /ask does not carry it. It
+                # would be duplication here in any case -- every result in it
+                # was already sent as its own tool_result event, which is the
+                # streaming client's way of getting the same data as it lands.
+                payload = json.dumps({
+                    k: v for k, v in event.items()
+                    if k not in ("type", "evidence")
+                })
                 yield f"event: {event['type']}\ndata: {payload}\n\n"
         except Exception as exc:
             # The stream has already begun, so the status line is long gone --
