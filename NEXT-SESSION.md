@@ -223,9 +223,42 @@ kubectl apply -f demo/tricky-pods.yaml   # namespace shop — relational faults
 .venv/bin/python agent.py --scan
 ```
 
-**Always `kind delete cluster --name triage-demo` before finishing**, and
-unload the model afterwards if you set a long keep-alive:
-`curl -s http://localhost:11434/api/generate -d '{"model":"qwen3","prompt":"x","stream":false,"keep_alive":0}'`
+### Teardown, and check it with this rather than from memory
+
+**Always `kind delete cluster --name aiops-test` before finishing**, unload
+the model if you set a long keep-alive, and quit Docker. Then run the check
+below -- all of it, not the half you remember arming.
+
+```bash
+kind delete cluster --name aiops-test
+curl -s http://localhost:11434/api/generate \
+    -d '{"model":"qwen3","prompt":"x","stream":false,"keep_alive":0}'
+osascript -e 'quit app "Docker Desktop"'
+kubectl delete namespace noise-test --ignore-not-found     # if a noise run ran
+kubectl delete -f deploy/rbac.yaml --ignore-not-found      # if RBAC was tested
+
+# The check. Every line must come back empty or DOWN.
+ps -eo pid,command | grep -E 'sleep [0-9]+$' | grep -v grep   # waiter shells
+ps -eo pid,command | grep -E 'until |caffeinate -is' | grep -v grep
+pgrep -fl 'run_eval|run_controller_eval|probe_scan|ab_prompt'
+kind get clusters
+curl -s localhost:11434/api/ps          # want {"models":[]}
+docker info >/dev/null 2>&1 && echo UP || echo DOWN
+git status -sb | head -1                # want no ahead/behind
+```
+
+**The `sleep`/`until` lines are the ones that get missed, and they were missed
+on 2026-08-21.** A polling loop written as
+`until ! pgrep -f run_eval; do sleep 30; done` is not matched by a grep for
+`run_eval` -- the *evals* were all long gone and eleven waiter shells were
+still spinning, two of which surfaced later as `exit code 144`. Grepping for
+the job names only finds jobs; the loops waiting on them are a separate class
+of leftover and need their own line.
+
+They accumulate because it is tempting to arm a fresh waiter every time
+someone asks whether a run has finished. **One waiter per job, stopped when
+that job reports** -- and if a background task is already armed for it, read
+the log instead of arming a second.
 
 Evals (need a cluster and a model, never run in CI). **Run them under
 `caffeinate`** — on battery this Mac is set to `sleep 1`, so an unattended
