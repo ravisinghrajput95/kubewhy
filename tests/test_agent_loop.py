@@ -374,6 +374,153 @@ class TestStream:
         assert set(asked["timing"]) == set(streamed["timing"])
 
 
+class TestSummaryCoverage:
+    """
+    A cluster summary that silently drops workloads is worse than a long one:
+    the reader cannot tell a workload that is fine from one that was not
+    mentioned.
+
+    Measured 2026-08-21 by holding workload identity and order constant and
+    varying only how many entries scan_cluster returned -- 8/8 complete at
+    five entries, 0/8 at ten and 0/8 at twenty, Fisher p=0.000155. So this is
+    a capacity limit, not a wording problem, which is why there is a
+    deterministic backstop behind the re-ask.
+    """
+
+    SCAN = {
+        "demo/memory-hog": {"status": "OOMKilled", "pods": 1,
+                            "example": "memory-hog-abc"},
+        "demo/crasher": {"status": "Error", "pods": 1,
+                         "example": "crasher-def"},
+        "shop/pricing": {"status": "CreateContainerConfigError", "pods": 1,
+                         "example": "pricing-ghi"},
+    }
+
+    def _run(self, *contents):
+        """
+        Drive a run whose scan returns three workloads.
+
+        The replies are padded with the last one repeated. The evidence policy
+        fires on these statuses too -- OOMKilled with no logs read is exactly
+        what it exists for -- and a fixture that supplies one reply per
+        expected round breaks the moment another policy takes a turn. Padding
+        makes the test about the coverage counter and the final answer rather
+        than about how many rounds something else used.
+        """
+        stub = {"scan_cluster": lambda **k: dict(self.SCAN)}
+        responses = [reply(calls=[tool_call("scan_cluster", {})])]
+        responses += [reply(content=c) for c in contents]
+        responses += [reply(content=contents[-1])] * 6
+        with patch.dict(agent.TOOLS, stub), mock_chat(side_effect=responses) as chat:
+            return agent.ask("What is broken in the cluster?"), chat
+
+    @staticmethod
+    def _user_messages(chat):
+        sent = chat.call_args.kwargs["messages"]
+        return [m["content"] for m in sent
+                if isinstance(m, dict) and m.get("role") == "user"]
+
+    def test_a_complete_summary_is_left_alone(self):
+        result, chat = self._run(
+            "memory-hog is OOMKilled, crasher is in Error, pricing is misconfigured.")
+
+        assert result["coverage"] == 0
+        assert "not covered above" not in result["answer"]
+
+    def test_an_incomplete_summary_is_sent_back_once(self):
+        """
+        Three answers, not two. The evidence policy is checked first and
+        spends its single turn on the first incomplete answer -- OOMKilled
+        with no logs read is what it is for -- so the coverage policy only
+        gets its turn on the second. Written as two answers this read
+        `coverage == 0`, which was the loop behaving correctly and the
+        fixture testing the wrong round.
+        """
+        result, chat = self._run(
+            "memory-hog is OOMKilled.",
+            "memory-hog is OOMKilled.",
+            "memory-hog is OOMKilled, crasher is in Error, pricing is misconfigured.")
+
+        assert result["coverage"] == 1
+        policy = [m for m in self._user_messages(chat)
+                  if "not covered" in m or "leaves out" in m]
+        assert len(policy) == 1, "expected exactly one coverage re-ask"
+        assert "demo/crasher" in policy[0]
+        assert "shop/pricing" in policy[0]
+        # The question goes back with it, for the same reason the tool nudge
+        # quotes it: otherwise the last thing in context is a list of names.
+        assert "What is broken in the cluster?" in policy[0]
+
+    def test_the_re_ask_is_spent_only_once(self):
+        """A model that cannot carry the list is not argued with twice."""
+        result, _ = self._run("memory-hog is OOMKilled.",
+                              "memory-hog is OOMKilled.")
+
+        assert result["coverage"] == 1
+
+    def test_what_the_model_still_leaves_out_is_appended(self):
+        """The backstop. At twenty entries a run named as few as 7, so the
+        re-ask cannot be the guarantee -- the missing workloads are stated as
+        data rather than left invisible."""
+        result, _ = self._run("memory-hog is OOMKilled.",
+                              "memory-hog is OOMKilled.")
+
+        assert "not covered above" in result["answer"]
+        assert "- demo/crasher" in result["answer"]
+        assert "- shop/pricing" in result["answer"]
+        assert "- demo/memory-hog" not in result["answer"]
+
+    def test_the_appendix_does_not_claim_they_were_investigated(self):
+        """It is a completeness guarantee, not a second diagnosis. If it ever
+        reads like one, a reader will trust findings nothing produced."""
+        result, _ = self._run("memory-hog is OOMKilled.",
+                              "memory-hog is OOMKilled.")
+
+        tail = result["answer"].split("not covered above")[1]
+        for claimed in ("root cause", "because", "diagnos", "investigated"):
+            assert claimed not in tail.lower()
+
+
+class TestUncoveredWorkloads:
+    """The check itself, away from the loop."""
+
+    SCAN = json.dumps({
+        "demo/memory-hog": {"status": "OOMKilled", "pods": 1,
+                            "example": "memory-hog-abc"},
+        "demo/crasher": {"status": "Error", "pods": 1, "example": "crasher-def"},
+        "_truncated": "3 more not shown",
+    })
+
+    def test_naming_the_example_pod_counts_as_covered(self):
+        """Naming the pod instead of its workload is a worse answer, not a
+        dropped entry, and folding the two together would hide which is which."""
+        answer = "memory-hog-abc was OOMKilled and crasher-def is erroring."
+
+        assert agent.uncovered_workloads([self.SCAN], answer) == []
+
+    def test_the_truncation_marker_is_not_a_workload(self):
+        answer = "memory-hog and crasher are both broken."
+
+        assert agent.uncovered_workloads([self.SCAN], answer) == []
+
+    def test_a_missing_workload_is_reported_in_scan_order(self):
+        assert agent.uncovered_workloads([self.SCAN], "nothing to report") == [
+            "demo/memory-hog", "demo/crasher"]
+
+    def test_another_tools_output_is_not_read_as_a_scan(self):
+        """describe_pod returns a dict too. Treating it as a scan would report
+        workloads nothing ever listed."""
+        describe = json.dumps({"pod": "memory-hog-abc", "status": "OOMKilled",
+                               "containers": {"hog": {"exit_code": 137}}})
+
+        assert agent.uncovered_workloads([describe], "nothing to report") == []
+
+    def test_an_error_result_is_not_read_as_a_scan(self):
+        err = json.dumps({"error": "kubernetes API error 404: not found"})
+
+        assert agent.uncovered_workloads([err], "nothing") == []
+
+
 class TestEvidenceIsReturnedOnRequest:
     """
     The tool results the answer was checked against, kept so a recorded run
@@ -649,7 +796,12 @@ class TestNamedButNotCalled:
             reply(calls=[tool_call("scan_cluster", {})]),
             reply(content="memory-hog, crasher and bad-image are broken. "
                           "Run describe_pod for detail."),
-            reply(content="still all three"),
+            # Names the workload the stub returns. It did not, and the
+            # coverage policy correctly asked for a round this fixture does
+            # not have -- an answer reading "still all three" names no
+            # workload at all, which is the very thing that policy exists to
+            # catch. Fixing the fixture rather than the policy.
+            reply(content="still all three, memory-hog included"),
         ]
         # Stubbed for the same reason as the loop tests: unstubbed,
         # scan_cluster reads whatever cluster is running and the evidence

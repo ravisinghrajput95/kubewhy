@@ -303,6 +303,12 @@ def main():
         record = {
             "run": run_index + 1,
             "case": CASE,
+            # How many times the coverage policy sent this run back for
+            # leaving workloads out of its own summary. Beside `nudges` and
+            # for the same reason: without it a run that listed everything
+            # first time cannot be told from one that was asked twice, nor
+            # from one that needed the deterministic appendix behind it.
+            "coverage": (answer_event or {}).get("coverage", 0),
             "shuffled": bool(args.shuffle or args.limit),
             "seed": seed if (args.shuffle or args.limit) else None,
             # The cap asked for, beside `returned_count` which is what the

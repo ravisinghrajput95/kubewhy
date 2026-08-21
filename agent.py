@@ -468,6 +468,74 @@ EVIDENCE_IN_EVENTS = (
 # policy ignores statuses that explain themselves.
 EVIDENCE_IN_LOGS = ("crashloopbackoff", "error")
 
+def uncovered_workloads(outputs, answer):
+    """
+    Workloads a `scan_cluster` result reported that the answer never names.
+
+    Measured 2026-08-21, and the mechanism is list length rather than which
+    workloads or where they sit. Holding identity and order constant by
+    permuting, and varying only how many entries the tool returned:
+
+        entries   complete summaries   entries dropped
+              5             8/8                 0/40
+             10             0/8                13/80
+             20             0/8                47/160
+
+    Fisher exact p=0.000155 for 5 against either longer arm. Drops spread
+    evenly over fault class and position, so the two hypotheses that survived
+    earlier rounds die once count is the variable being held. Latency is flat
+    across the arms -- 145s, 144s, 169s -- so this is not the model running
+    out of time; it produces an answer just as fast and leaves entries out.
+
+    Generous about what counts as named, deliberately: the defect is an entry
+    vanishing entirely, so naming the example pod instead of its workload is a
+    worse answer and not a dropped one. A strict check would fold two defects
+    into one number.
+
+    Returns keys in the order the tool reported them, so the caller can name
+    the missing ones in an order the reader can follow back to the scan.
+    """
+    lowered = (answer or "").lower()
+    missing = []
+    for text in outputs:
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError):
+            continue
+        # A scan result is a mapping of "namespace/workload" to a projection.
+        # An error, a bare {"result": ...} message, or any other tool's output
+        # is not one, and treating it as an empty scan would report every
+        # workload as covered.
+        if not isinstance(parsed, dict) or "error" in parsed or "result" in parsed:
+            continue
+        for key, value in parsed.items():
+            if key == "_truncated" or not isinstance(value, dict):
+                continue
+            if "status" not in value or "pods" not in value:
+                continue
+            _, _, workload = key.partition("/")
+            workload = workload.partition(":")[0]
+            example = value.get("example") or ""
+            if any(form and form.lower() in lowered
+                   for form in (workload, key, example)):
+                continue
+            if key not in missing:
+                missing.append(key)
+    return missing
+
+
+COVERAGE_POLICY = (
+    "Your answer leaves out {count} of the workloads the scan reported: "
+    "{missing}. A cluster summary that silently drops entries is worse than a "
+    "long one -- the reader has no way to tell the difference between a "
+    "workload that is fine and one you did not mention. Answer this question "
+    "again, in full:\n\n{question}\n\nCover every workload the scan "
+    "returned, including the ones above and everything you already reported. "
+    "One line each is enough; brevity per workload is fine, leaving a "
+    "workload out is not."
+)
+
+
 LOGS_POLICY = (
     "You have {pod}'s status and nothing it wrote. {status} is the symptom, "
     "not the cause -- the reason the container exited is in its logs. Call "
@@ -641,6 +709,11 @@ def evidence_gap(trace, outputs, question=""):
     return None
 
 
+COVERAGE_NOTE = (
+    "**Also reported by the scan, not covered above ({count}):**\n{missing}"
+)
+
+
 NUDGE = (
     "You wrote that {tools} should be run, but you did not run {them}. You "
     "have {them} available now, and the person asking cannot run tools -- an "
@@ -746,6 +819,7 @@ def stream(question, model=MODEL, think=None, prefetched=None):
     round_ms = []
     nudges = 0
     policies = 0
+    coverage = 0
 
     # Two clocks, deliberately. perf_counter is monotonic and stops while the
     # machine is asleep; time.time() does not. Their difference over the same
@@ -823,6 +897,49 @@ def stream(question, model=MODEL, think=None, prefetched=None):
                 })
                 continue
 
+            # Coverage, checked last of the three because the other two are
+            # about going and getting evidence and this one is about
+            # reporting what is already in hand. Same budget, same
+            # never-on-the-last-rounds rule.
+            uncovered = uncovered_workloads(outputs, answer)
+            if uncovered and coverage < MAX_NUDGES and rounds_left >= 2:
+                coverage += 1
+                log.info(
+                    "coverage_policy_applied",
+                    extra={"missing": uncovered, "count": len(uncovered)},
+                )
+                messages.append({
+                    "role": "user",
+                    "content": COVERAGE_POLICY.format(
+                        count=len(uncovered),
+                        missing=", ".join(uncovered),
+                        question=question,
+                    ),
+                })
+                continue
+
+            # The backstop. The re-ask above helps and does not guarantee:
+            # at twenty entries a run named as few as 7, and asking again can
+            # trade one omission for another rather than closing the set. A
+            # summary that silently drops workloads is the defect, so when the
+            # model has had its round and entries are still missing, they are
+            # appended as data. Deliberately terse and clearly separated --
+            # this is a completeness guarantee, not a second diagnosis, and it
+            # must not read as though the model investigated them.
+            #
+            # Precedent: annotate() already appends an evidence audit the
+            # model did not write, for the same reason -- the reader has to be
+            # able to trust what the answer does not say.
+            still_missing = uncovered_workloads(outputs, answer)
+            if still_missing:
+                log.info("coverage_appended",
+                         extra={"missing": still_missing,
+                                "count": len(still_missing)})
+                answer = answer.rstrip() + "\n\n" + COVERAGE_NOTE.format(
+                    count=len(still_missing),
+                    missing="\n".join(f"- {key}" for key in still_missing),
+                )
+
             verdict = grounding.check(answer, evidence)
             # Verify, then rewrite. Auditing alone left "the pod has a 512Mi
             # memory limit" standing in the prose with a correction printed
@@ -850,6 +967,11 @@ def stream(question, model=MODEL, think=None, prefetched=None):
                 # from nudges: one is the model stopping short of a tool it
                 # named, the other is the cluster requiring a tool it did not.
                 "policies": policies,
+                # How many times the run was sent back for leaving workloads
+                # out of its own summary. Separate from policies, which is
+                # about evidence the run never gathered: this one is about
+                # evidence it had and did not report.
+                "coverage": coverage,
                 "tool_calls": trace,
                 # The measurements themselves, in the records() shape that was
                 # handed to grounding.check() -- ids, tool names and the raw
@@ -952,6 +1074,7 @@ def stream(question, model=MODEL, think=None, prefetched=None):
         "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
         "nudges": nudges,
         "policies": policies,
+        "coverage": coverage,
         "confidence": "ungrounded",
         "unverified": [],
     }
