@@ -288,6 +288,78 @@ class TestStatusClaims:
         assert grounding.check("`CrashLoopBackOff`", tools)["unverified"] == []
 
 
+class TestAHedgedStatusIsInferenceNotFabrication:
+    """
+    `scan_cluster` reports a workload's phase, not its termination reason, so
+    "CrashLoopBackOff (likely OOMKilled)" is an inference no tool in that run
+    could settle. Holding it to the evidence scored a correctly labelled
+    answer `partial` -- the opposite of what `inference_is_marked` grades for.
+
+    A hedged cause was already exempt. These pin the same treatment for a
+    status, and pin that the exemption does not extend to a flat assertion.
+    """
+
+    SCAN = json.dumps({"demo/memory-hog": {"status": "CrashLoopBackOff",
+                                           "pods": 1}})
+
+    def test_a_hedged_status_does_not_count_against_grounding(self):
+        answer = "demo/memory-hog is in CrashLoopBackOff, likely OOMKilled."
+        result = grounding.check(answer, [self.SCAN])
+
+        assert result["unverified"] == []
+        assert result["confidence"] == "grounded"
+
+    def test_the_same_status_asserted_flatly_is_still_caught(self):
+        answer = "demo/memory-hog is in CrashLoopBackOff and was OOMKilled."
+        result = grounding.check(answer, [self.SCAN])
+
+        assert "oomkilled" in result["unverified"]
+        assert result["confidence"] == "partial"
+
+    def test_a_hedged_status_is_recorded_as_an_inference(self):
+        """Exempt from the evidence test, not dropped from the record: the
+        reader has to be able to see what the answer guessed at."""
+        answer = "demo/memory-hog is in CrashLoopBackOff, likely OOMKilled."
+        verdict = grounding.check(answer, [self.SCAN])
+
+        inferred = [c for c in verdict["claims"] if c["status"] == "inferred"]
+        assert [c["value"] for c in inferred] == ["oomkilled"]
+        assert inferred[0]["evidence"] == []
+
+        contract = grounding.contract(verdict)
+        assert {"claim": "oomkilled", "kind": "status"} in contract["inferences"]
+        assert "oomkilled" not in [o["claim"] for o in contract["observations"]]
+
+    def test_a_hedged_status_a_tool_did_report_is_still_an_observation(self):
+        """Hedging cannot demote a measurement. The model may write "appears
+        to be OOMKilled" about a pod describe_pod says was OOMKilled, and that
+        claim is evidenced whatever voice it is in."""
+        tools = [json.dumps({"pod": "memory-hog-x", "status": "OOMKilled"})]
+        verdict = grounding.check("pod memory-hog-x appears OOMKilled.", tools)
+
+        observed = {c["value"]: c for c in verdict["claims"]}
+        assert observed["oomkilled"]["status"] == "observed"
+        assert observed["oomkilled"]["evidence"]
+
+    def test_an_answer_of_only_hedged_statuses_is_not_grounded(self):
+        """The exemption must not manufacture confidence. With nothing else
+        checkable, a wholly speculative answer has no verified claim, and
+        `grounded` requires one."""
+        result = grounding.check("The pod may be OOMKilled.", [self.SCAN])
+
+        assert result["checked"] == 0
+        assert result["confidence"] == grounding.INSUFFICIENT
+
+    def test_a_hedged_cause_is_recorded_too(self):
+        """It used to be skipped outright, so a hedged cause left no trace at
+        all. Same exemption, same record."""
+        verdict = grounding.check("Possibly a memory leak in pod memory-hog-x.",
+                                  [json.dumps({"pod": "memory-hog-x"})])
+
+        inferred = [c for c in verdict["claims"] if c["status"] == "inferred"]
+        assert [c["value"] for c in inferred] == ["memory leak"]
+
+
 class TestNoToolsCalled:
     def test_figures_without_any_tool_call_are_ungrounded(self):
         result = grounding.check("CPU is at 42%.", [])

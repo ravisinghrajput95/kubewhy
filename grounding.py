@@ -349,6 +349,17 @@ def _matches(claim, measured):
     return any(round(value, decimals) == claim for value in measured)
 
 
+def _inference(value, kind):
+    """
+    A hedged claim, recorded but not held to the evidence.
+
+    It carries no citation by construction -- a tool did not say this -- and
+    `contract()` files anything that is not "observed" under inferences, so
+    the claim stays visible in the record without counting against grounding.
+    """
+    return {"value": value, "kind": kind, "status": "inferred", "evidence": []}
+
+
 def check(answer, tool_outputs):
     """
     Compare an answer against the tool results behind it.
@@ -509,15 +520,20 @@ def check(answer, tool_outputs):
 
         # A named cause is only a finding if a tool said so. Hedged, it is
         # honest speculation and the prompt asks for exactly that, so a clause
-        # that marks itself is left alone -- flagging "possibly a memory leak"
-        # would punish the labelling this project asks for.
+        # that marks itself is not held to the evidence -- flagging "possibly
+        # a memory leak" would punish the labelling this project asks for.
+        # It is still recorded, as an inference, so the claim stays auditable
+        # rather than disappearing from the record for having been hedged.
         hedged = any(word in lowered for word in
                      ("likely", "possibl", "probabl", "may ", "might", "could",
                       "suspect", "perhaps", "appears", "seems", "worth checking"))
         for cause in KNOWN_CAUSES:
-            if cause in lowered and not hedged:
-                checked += 1
+            if cause in lowered:
                 supported = cause in scope_lower
+                if not supported and hedged:
+                    claims.append(_inference(cause, "cause"))
+                    continue
+                checked += 1
                 if not supported:
                     flag(cause)
                 claims.append({
@@ -529,10 +545,27 @@ def check(answer, tool_outputs):
 
         # Status names are checked as plain substrings; the model may style
         # them as **OOMKilled** or `OOMKilled`, so compare lowered.
+        #
+        # A hedged status is treated exactly as a hedged cause, and for the
+        # same reason. `scan_cluster` reports a workload's phase and not its
+        # termination reason, so "CrashLoopBackOff (likely OOMKilled)" is an
+        # inference the tools cannot settle either way -- correctly labelled,
+        # which is the behaviour `inference_is_marked` grades for. Holding it
+        # to the evidence made a correctly hedged answer score `partial`:
+        # replayed over the 34 scan_cluster-only probe runs, 22 of the 30
+        # unverified flags were `oomkilled` and 15 of those sat in a hedged
+        # clause; exempting them moves the set from 10/34 grounded to 20/34,
+        # with no run moving the other way (McNemar exact, p=0.002).
+        #
+        # An unhedged status is still checked, so a flat "the pod was
+        # OOMKilled" with nothing behind it is caught as before.
         for status in KNOWN_STATUSES:
             if status in lowered:
-                checked += 1
                 supported = status in scope_lower
+                if not supported and hedged:
+                    claims.append(_inference(status, "status"))
+                    continue
+                checked += 1
                 if not supported:
                     flag(status)
                 claims.append({
