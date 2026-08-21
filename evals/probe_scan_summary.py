@@ -91,6 +91,51 @@ def shuffled(seed, real=None):
     return wrapper
 
 
+def trimmed(limit, seed, real=None):
+    """
+    Wrap `scan_cluster` so it returns the same workloads, at most `limit` of
+    them, in a permuted order.
+
+    Entry count is the last of the three mechanisms this probe was built to
+    separate and the only one never tested, because nothing could vary it.
+    The fixtures produce whatever they produce; the 2026-08-18 arms ranged
+    over 7-9 entries, and the one signal that survived -- every run seeing
+    nine entries dropped something, 3/3, against 16/53 at eight or fewer,
+    p=0.035 -- rests on three runs. Entry count had been "ruled out" earlier
+    at 7 against 8, a range far too narrow to have tested it.
+
+    So this makes the count the independent variable. Same keys, same values,
+    same statuses, same example pods; only how many of them arrive. Shuffling
+    before trimming is what stops `limit` from silently also being a test of
+    *which* workloads survive: scan_cluster sorts deterministically, so taking
+    the first N without permuting would hand every short arm the same N
+    workloads and confound count with identity all over again.
+
+    `_truncated` is deliberately NOT synthesised when this trims. The model
+    reads that field, and a probe that adds it would be measuring how the
+    model responds to being told the list is incomplete -- a different and
+    also interesting question, but not this one.
+    """
+    real = real or agent.TOOLS["scan_cluster"]
+    rng = random.Random(seed)
+
+    @functools.wraps(real)
+    def wrapper(**kwargs):
+        result = real(**kwargs)
+        if not isinstance(result, dict) or "error" in result or "result" in result:
+            return result
+        keys = [k for k in result if k != "_truncated"]
+        rng.shuffle(keys)
+        if limit:
+            keys = keys[:limit]
+        out = {k: result[k] for k in keys}
+        if "_truncated" in result:
+            out["_truncated"] = result["_truncated"]
+        return out
+
+    return wrapper
+
+
 def entries_of(result_text):
     """
     The workloads a `scan_cluster` result reported, in the order it reported
@@ -165,6 +210,13 @@ def main():
              "from workload identity (see shuffled())",
     )
     parser.add_argument("--seed", type=int, default=0, help="base seed for --shuffle")
+    parser.add_argument(
+        "--limit", type=int, default=0,
+        help="return at most this many workloads per scan, permuted first. "
+             "Makes entry count the independent variable; 0 leaves the result "
+             "whole. Implies the shuffle, because taking the first N of a "
+             "deterministically sorted list confounds count with identity.",
+    )
     args = parser.parse_args()
 
     case = next(c for c in CASES if c["name"] == CASE)
@@ -195,9 +247,13 @@ def main():
     records = []
     for run_index in range(args.repeat):
         seed = args.seed + run_index
-        agent.TOOLS["scan_cluster"] = (
-            shuffled(seed, real_scan) if args.shuffle else real_scan
-        )
+        if args.limit:
+            # --limit implies the permutation; see trimmed().
+            agent.TOOLS["scan_cluster"] = trimmed(args.limit, seed, real_scan)
+        elif args.shuffle:
+            agent.TOOLS["scan_cluster"] = shuffled(seed, real_scan)
+        else:
+            agent.TOOLS["scan_cluster"] = real_scan
         began_at = dt.datetime.now().isoformat(timespec="seconds")
         started = time.time()
         calls = []
@@ -247,8 +303,13 @@ def main():
         record = {
             "run": run_index + 1,
             "case": CASE,
-            "shuffled": args.shuffle,
-            "seed": seed if args.shuffle else None,
+            "shuffled": bool(args.shuffle or args.limit),
+            "seed": seed if (args.shuffle or args.limit) else None,
+            # The cap asked for, beside `returned_count` which is what the
+            # model actually saw -- they differ whenever the cluster has
+            # fewer failing workloads than the cap, and an arm that silently
+            # collapsed into another would otherwise be invisible.
+            "limit": args.limit or None,
             "model": args.model,
             "context": k8s.active_context(),
             "started_at": began_at,
