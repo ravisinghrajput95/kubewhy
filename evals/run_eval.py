@@ -349,6 +349,11 @@ def main():
                 # after the policy shipped could not say whether it had ever
                 # fired.
                 "policies": result.get("policies", 0),
+                # How many times the run was sent back for leaving workloads
+                # out of its own summary. Beside nudges and policies for the
+                # same reason they are there: a run that listed everything
+                # first time reads identically to one that was asked twice.
+                "coverage": result.get("coverage", 0),
                 "failures": why,
                 # Not failures, and not noise either: an answer that names a
                 # broken neighbour beside a correct verdict is one edit away

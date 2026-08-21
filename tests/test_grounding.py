@@ -288,6 +288,46 @@ class TestStatusClaims:
         assert grounding.check("`CrashLoopBackOff`", tools)["unverified"] == []
 
 
+class TestEnumeratedHeadingsAreNotMeasurements:
+    """
+    "### **11. demo/crasher (1 pod)**" is the eleventh item in a list, not a
+    measurement of eleven of anything.
+
+    Latent until the coverage policy made cluster summaries complete: before
+    that a run listed six or eight workloads and its ordinals stayed in the
+    range of numbers nobody looks twice at. A complete summary of twenty
+    workloads writes ordinals up to twenty, and one live run was flagged for
+    11, 12, 13, 14, 17, 18, 19, 20 and 21 out of a single answer -- burying
+    the one figure in it that was worth reading.
+    """
+
+    TOOLS = [json.dumps({"demo/crasher": {"status": "Error", "pods": 1}})]
+
+    def test_an_enumerated_heading_is_not_a_claim(self):
+        answer = ("### **11. demo/crasher (1 pod)**\n"
+                  "The container exits with an error.")
+
+        assert grounding.check(answer, self.TOOLS)["unverified"] == []
+
+    @pytest.mark.parametrize("line", [
+        "11. demo/crasher",
+        "- 11. demo/crasher",
+        "  * 11) demo/crasher",
+        "### 11. demo/crasher",
+        "#### **11.** demo/crasher",
+        "> 11. demo/crasher",
+    ])
+    def test_every_marker_the_model_uses_is_stripped(self, line):
+        assert grounding._ORDINAL.sub(" ", line).lstrip()[0] not in "0123456789"
+
+    def test_a_number_in_prose_is_still_a_claim(self):
+        """The exemption is the position, not the digit. Only a number that
+        opens a line after list punctuation is enumeration."""
+        answer = "pod crasher-1 restarted 11 times."
+
+        assert "11" in grounding.check(answer, self.TOOLS)["unverified"]
+
+
 class TestEveryVerdictIsNamed:
     """
     A caller that retypes check()'s return values goes stale when a fourth is

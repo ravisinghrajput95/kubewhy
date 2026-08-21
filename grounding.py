@@ -134,7 +134,15 @@ _LABELLED_ENTITY = re.compile(
 
 # Markdown list markers and headings: "1." starting a line is enumeration,
 # not a measurement, and flagging it would bury the real findings.
-_ORDINAL = re.compile(r"^[\s>*\-]*\d+[.)]\s", re.MULTILINE)
+#
+# `#` is in the prefix class because the model writes enumerated headings --
+# "### **11. demo/crasher (1 pod)**" -- and without it every ordinal from a
+# numbered heading was scored as a measurement. Latent until 2026-08-21, when
+# the coverage policy made summaries complete: a run listing all twenty
+# workloads writes ordinals up to 20, and one such run was flagged for
+# 11, 12, 13, 14, 17, 18, 19, 20 and 21 in a single answer. The bold markers
+# between the hashes and the digit are already covered by `*`.
+_ORDINAL = re.compile(r"^[\s>*\-#]*\d+[.)]\s", re.MULTILINE)
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 # A number in a recommendation ("raise the limit to 128Mi") is a proposal, not
