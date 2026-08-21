@@ -70,6 +70,24 @@ KNOWN_STATUSES = {
     "pidpressure",
 }
 
+# How a tool spells a status the model writes as one word. Checked in addition
+# to the canonical form, never instead of it.
+#
+# scan_cluster labels a Running-but-unready workload `fault: not-ready`
+# (routers/k8s_pods_info.py) -- a label added to stop the model dropping that
+# entry from its summary. "notready" is not a substring of "not-ready", so the
+# checker could not see a fault its own tool had just reported, and an answer
+# repeating it verbatim scored `partial`. Observed live on 2026-08-21.
+#
+# An explicit table rather than stripping punctuation before comparing. The
+# citation has to resolve too: cite() looks the value up in the JSON to name
+# the field it came from, so the checker has to know which spelling is
+# actually present rather than compare against a normalised copy that no
+# longer matches anything on disk.
+_TOOL_SPELLINGS = {
+    "notready": ("not-ready", "not_ready"),
+}
+
 # Named causes: diagnoses that assert a mechanism rather than report a status.
 # A status is what the cluster said; these are claims about WHY, and the tools
 # either establish them or they are speculation wearing the same voice.
@@ -115,9 +133,23 @@ _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 # A number in a recommendation ("raise the limit to 128Mi") is a proposal, not
 # a claim about what was measured, and flagging it would train the reader to
 # ignore this whole signal.
+#
+# `e\.g\.` is a separate alternative rather than a member of the word list,
+# and that is the whole point. Inside the list it carried the list's trailing
+# `\b`, which can only match where the next character is a word character --
+# and "e.g." is followed by a comma or a space every time it is ever written.
+# The branch could not fire, so "check the logs (e.g., OOMKilled)" was scored
+# as a claim that the pod was OOMKilled. Found 2026-08-21 in a live
+# cluster_wide_scan run; measured across every recorded result file, 10 of
+# 138 unverified flags were introduced by it, in four different cases.
+#
+# Only the abbreviation is moved out. Widening this pattern further ("such
+# as", "for example") would exempt more text from checking, which is the
+# direction that hides fabrications, and no measurement asks for it.
 _PRESCRIPTIVE = re.compile(
     r"\b(increase|raise|bump|set|change|update|adjust|scale|allocate|"
-    r"try|consider|recommend|suggest|should be|fix|e\.g\.)\b",
+    r"try|consider|recommend|suggest|should be|fix)\b"
+    r"|e\.g\.",
     re.IGNORECASE,
 )
 
@@ -561,7 +593,15 @@ def check(answer, tool_outputs):
         # OOMKilled" with nothing behind it is caught as before.
         for status in KNOWN_STATUSES:
             if status in lowered:
-                supported = status in scope_lower
+                # Whichever spelling the tool used, so the citation below can
+                # find it in the result it came from.
+                present = next(
+                    (spelling
+                     for spelling in (status, *_TOOL_SPELLINGS.get(status, ()))
+                     if spelling in scope_lower),
+                    None,
+                )
+                supported = present is not None
                 if not supported and hedged:
                     claims.append(_inference(status, "status"))
                     continue
@@ -572,7 +612,7 @@ def check(answer, tool_outputs):
                     "value": status,
                     "kind": "status",
                     "status": "observed" if supported else "unverified",
-                    "evidence": cite(status) if supported else [],
+                    "evidence": cite(present) if supported else [],
                 })
 
     if not checked:

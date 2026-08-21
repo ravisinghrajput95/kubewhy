@@ -288,6 +288,90 @@ class TestStatusClaims:
         assert grounding.check("`CrashLoopBackOff`", tools)["unverified"] == []
 
 
+class TestExampleClausesAreNotClaims:
+    """
+    "check the logs (e.g., OOMKilled)" names a status as an example of what to
+    look for. It is not an assertion that anything was OOMKilled, and the
+    prescriptive exemption has always meant to cover it.
+
+    It did not. Inside the alternation the abbreviation carried the group's
+    trailing `\b`, which cannot match before the comma or space that always
+    follows "e.g.", so the branch was unreachable from the day it was written.
+    """
+
+    SCAN = json.dumps({"demo/crasher": {"status": "CrashLoopBackOff",
+                                        "pods": 1}})
+
+    def test_the_abbreviation_is_recognised_at_all(self):
+        assert grounding._PRESCRIPTIVE.search("(e.g., OOMKilled)")
+        assert grounding._PRESCRIPTIVE.search("(e.g. OOMKilled)")
+
+    def test_a_status_named_as_an_example_is_not_a_claim(self):
+        answer = ("demo/crasher is in CrashLoopBackOff. Use describe_pod to "
+                  "identify crash reasons (e.g., OOMKilled, startup failures).")
+        result = grounding.check(answer, [self.SCAN])
+
+        assert result["unverified"] == []
+        assert result["confidence"] == "grounded"
+
+    def test_the_same_status_asserted_is_still_a_claim(self):
+        """The exemption is the word, not the status: drop the "e.g." and the
+        sentence becomes an assertion again."""
+        answer = ("demo/crasher is in CrashLoopBackOff. The container was "
+                  "OOMKilled.")
+        result = grounding.check(answer, [self.SCAN])
+
+        assert "oomkilled" in result["unverified"]
+
+    def test_the_ordinary_verbs_still_fire(self):
+        for phrase in ("Increase the limit", "consider raising it",
+                       "recommend 256Mi", "the value should be higher"):
+            assert grounding._PRESCRIPTIVE.search(phrase), phrase
+
+
+class TestAToolsOwnSpellingCounts:
+    """
+    scan_cluster labels a Running-but-unready workload `fault: not-ready`.
+    The model reports it as `NotReady`, which is how KNOWN_STATUSES spells it,
+    and "notready" is not a substring of "not-ready" -- so the checker flagged
+    a status its own tool had reported in the same run.
+    """
+
+    SCAN = json.dumps({"demo/never-ready": {"status": "Running",
+                                            "fault": "not-ready", "pods": 1}})
+
+    def test_the_hyphenated_label_grounds_the_one_word_claim(self):
+        answer = "deployment never-ready is Running but NotReady."
+        result = grounding.check(answer, [self.SCAN])
+
+        assert result["unverified"] == []
+        assert result["confidence"] == "grounded"
+
+    def test_the_citation_names_the_field_the_tool_wrote(self):
+        """supported=True with an empty citation would be worse than the flag:
+        it asserts evidence exists and cannot say where."""
+        answer = "deployment never-ready is Running but NotReady."
+        verdict = grounding.check(answer, [self.SCAN])
+
+        cited = {c["value"]: c for c in verdict["claims"]}
+        assert cited["notready"]["status"] == "observed"
+        assert cited["notready"]["evidence"][0]["field"].endswith("fault")
+
+    def test_a_status_no_tool_spelled_any_way_is_still_flagged(self):
+        answer = "deployment never-ready is NotReady."
+        scan = json.dumps({"demo/never-ready": {"status": "Running", "pods": 1}})
+
+        assert "notready" in grounding.check(answer, [scan])["unverified"]
+
+    def test_an_alias_does_not_ground_a_different_status(self):
+        """The table maps one status to its own spellings, and must not become
+        a general loosening of the substring test."""
+        answer = "deployment never-ready was OOMKilled."
+        result = grounding.check(answer, [self.SCAN])
+
+        assert "oomkilled" in result["unverified"]
+
+
 class TestAHedgedStatusIsInferenceNotFabrication:
     """
     `scan_cluster` reports a workload's phase, not its termination reason, so
