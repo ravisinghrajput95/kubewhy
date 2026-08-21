@@ -1,0 +1,444 @@
+[
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 132.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-21T15:56:19",
+  "load_before": 1.36,
+  "load_after": 0.66,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs",
+   "get_service_endpoints"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "crasher"
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "namespace": "demo",
+    "tail": 50,
+    "name": "crasher-5964d99948-gzb98"
+   },
+   {
+    "name": "database",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"crasher-5964d99948-gzb98\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 18, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 18, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-gzb98_demo(8ad49c43-200b-4457-aa1e-6605f428158c)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"events\": [{\"reason\": \"BackOff\", \"count\": 52, \"age\": \"2m\", \"message\": \"Back-off restarting failed container crasher in pod crasher-5964d99948-gzb98_demo(8ad49c43-200b-4457-aa1e-6605f428158c)\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"}"
+   },
+   {
+    "id": "tool-5",
+    "tool": "get_service_endpoints",
+    "result": "{\"error\": \"kubernetes API error 404: services \\\"database\\\" not found\"}"
+   }
+  ],
+  "draft": "The crasher pod is failing because its container cannot connect to the database service, and the service named `database` does not exist in the `demo` namespace. Here's the breakdown:\n\n### Key Findings:\n1. **Database Connection Failure**:  \n   - Logs show `FATAL: could not connect to db:5432: connection refused`, confirming the container cannot reach the database.\n   - The application likely uses a service name like `database` to resolve the database's IP and port.\n\n2. **Service Does Not Exist**:  \n   - `get_service_endpoints` returned a 404 error for service `database` in the `demo` namespace.  \n   - This means the service is either misconfigured, missing, or exists in a different namespace.\n\n### Likely Causes:\n- **Missing Service**: The database service might not be deployed in `demo` (e.g., it could be in `default` or another namespace).\n- **Typo or Incorrect Name**: The service name in the application's configuration (e.g., `database`) might be incorrect (e.g., should be `db-service` or `postgres`).\n- **Deployment Issue**: The database pod/statefulset might not be running, preventing the service from having endpoints.\n\n### Next Steps:\n1. **Verify Service Existence**:  \n   Run `kubectl get services -n demo` to check if `database` exists. If not, confirm the correct service name and namespace.\n2. **Check Application Configuration**:  \n   Ensure the application uses the correct service name and port (e.g., `DATABASE_SERVICE_HOST` and `DATABASE_SERVICE_PORT` environment variables).\n3. **Deploy Missing Service**:  \n   If the service is missing, create it with the appropriate selector to target the database pods.\n\nWithout the `database` service, the crasher pod has no way to resolve the database's address, leading to persistent connection failures and the `CrashLoopBackOff` state.",
+  "answer": "The crasher pod is failing because its container cannot connect to the database service, and the service named `database` does not exist in the `demo` namespace. Here's the breakdown:\n\n### Key Findings:\n1. **Database Connection Failure**:  \n   - Logs show `FATAL: could not connect to db:5432: connection refused`, confirming the container cannot reach the database.\n   - The application likely uses a service name like `database` to resolve the database's IP and port.\n\n2. **Service Does Not Exist**:  \n   - `get_service_endpoints` returned a 404 error for service `database` in the `demo` namespace.  \n   - This means the service is either misconfigured, missing, or exists in a different namespace.\n\n### Likely Causes:\n- **Missing Service**: The database service might not be deployed in `demo` (e.g., it could be in `default` or another namespace).\n- **Typo or Incorrect Name**: The service name in the application's configuration (e.g., `database`) might be incorrect (e.g., should be `db-service` or `postgres`).\n- **Deployment Issue**: The database pod/statefulset might not be running, preventing the service from having endpoints.\n\n### Next Steps:\n1. **Verify Service Existence**:  \n   Run `kubectl get services -n demo` to check if `database` exists. If not, confirm the correct service name and namespace.\n2. **Check Application Configuration**:  \n   Ensure the application uses the correct service name and port (e.g., `DATABASE_SERVICE_HOST` and `DATABASE_SERVICE_PORT` environment variables).\n3. **Deploy Missing Service**:  \n   If the service is missing, create it with the appropriate selector to target the database pods.\n\nWithout the `database` service, the crasher pod has no way to resolve the database's address, leading to persistent connection failures and the `CrashLoopBackOff` state.",
+  "nudges": 1,
+  "policies": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 132622.0,
+   "tool_ms": 57.3,
+   "rounds": 7,
+   "round_ms": [
+    8391.3,
+    9319.5,
+    21817.5,
+    21300.7,
+    23704.7,
+    15973.2,
+    32115.2
+   ],
+   "slowest_round_ms": 32115.2,
+   "model_share": 1.0,
+   "wall_ms": 132681.5,
+   "unaccounted_ms": 2.2,
+   "slept_ms": 0.3
+  }
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 99.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-21T15:58:32",
+  "load_before": 0.66,
+  "load_after": 0.86,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "crasher"
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "limit": 5,
+    "name": "crasher-5964d99948-gzb98"
+   },
+   {
+    "container": "crasher",
+    "tail": 100,
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"crasher-5964d99948-gzb98\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 18, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 18, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-gzb98_demo(8ad49c43-200b-4457-aa1e-6605f428158c)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"events\": [{\"reason\": \"BackOff\", \"count\": 52, \"age\": \"4m\", \"message\": \"Back-off restarting failed container crasher in pod crasher-5964d99948-gzb98_demo(8ad49c43-200b-4457-aa1e-6605f428158c)\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\", \"container\": \"crasher\"}"
+   }
+  ],
+  "draft": "The **crasher-5964d99948-gzb98** pod in the `demo` namespace is failing because its container cannot connect to the database. Here's the breakdown:\n\n### Root Cause\n- **Database Connection Refused**: The logs show the container is trying to connect to a database on port `5432` but receives a `connection refused` error. This indicates the database service is either:\n  - Not running,\n  - Unreachable (networking issue),\n  - Misconfigured (wrong host/port/credentials),\n  - Or the service is not exposed properly (e.g., firewall rules, Kubernetes Service misconfiguration).\n\n### Key Evidence\n- **Exit Code 1**: The container exits with a non-zero code (`exit_code: 1`), confirming a runtime error.\n- **CrashLoopBackOff**: Kubernetes restarts the pod repeatedly, but the underlying issue (database connection) persists, causing the loop.\n- **Logs**: The explicit log line `\"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"` directly points to the database as the failure point.\n\n### Next Steps\n1. Verify the database service (e.g., PostgreSQL) is running and accessible from the pod's network namespace.\n2. Check if the database credentials or connection string in the pod's configuration are correct.\n3. Ensure the database service is exposed correctly (e.g., Kubernetes Service, port forwarding, or host IP).\n4. If using a Kubernetes Service for the database, confirm it has the correct selector and endpoints. Use `get_service_endpoints` to validate this.",
+  "answer": "The **crasher-5964d99948-gzb98** pod in the `demo` namespace is failing because its container cannot connect to the database. Here's the breakdown:\n\n### Root Cause\n- **Database Connection Refused**: The logs show the container is trying to connect to a database on port `5432` but receives a `connection refused` error. This indicates the database service is either:\n  - Not running,\n  - Unreachable (networking issue),\n  - Misconfigured (wrong host/port/credentials),\n  - Or the service is not exposed properly (e.g., firewall rules, Kubernetes Service misconfiguration).\n\n### Key Evidence\n- **Exit Code 1**: The container exits with a non-zero code (`exit_code: 1`), confirming a runtime error.\n- **CrashLoopBackOff**: Kubernetes restarts the pod repeatedly, but the underlying issue (database connection) persists, causing the loop.\n- **Logs**: The explicit log line `\"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"` directly points to the database as the failure point.\n\n### Next Steps\n1. Verify the database service (e.g., PostgreSQL) is running and accessible from the pod's network namespace.\n2. Check if the database credentials or connection string in the pod's configuration are correct.\n3. Ensure the database service is exposed correctly (e.g., Kubernetes Service, port forwarding, or host IP).\n4. If using a Kubernetes Service for the database, confirm it has the correct selector and endpoints. Use `get_service_endpoints` to validate this.",
+  "nudges": 1,
+  "policies": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 99270.6,
+   "tool_ms": 49.2,
+   "rounds": 6,
+   "round_ms": [
+    11055.1,
+    10547.7,
+    12339.0,
+    26781.1,
+    13354.7,
+    25193.1
+   ],
+   "slowest_round_ms": 26781.1,
+   "model_share": 1.0,
+   "wall_ms": 99322.7,
+   "unaccounted_ms": 2.9,
+   "slept_ms": 0.2
+  }
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 97.4,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-21T16:00:11",
+  "load_before": 0.86,
+  "load_after": 1.29,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "crasher"
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo"
+   },
+   {
+    "tail": 50,
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo",
+    "container": "crasher"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"crasher-5964d99948-gzb98\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 19, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"namespace\": \"demo\", \"status\": \"Error\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 19, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\", \"container\": \"crasher\"}"
+   }
+  ],
+  "draft": "The **crasher pod** in the `demo` namespace is failing because its container cannot connect to the database server. Here's the breakdown:\n\n### Root Cause:\n- **Logs** from the `crasher` container show:  \n  ```\n  connecting to database...\n  FATAL: could not connect to db:5432: connection refused\n  ```  \n  This indicates the container is attempting to connect to a PostgreSQL database (port 5432) but is unable to establish a connection.\n\n---\n\n### Key Findings:\n1. **Exit Code 1**:  \n   The container exits with code `1`, which typically signifies a startup failure (e.g., application crash, missing dependencies, or failed initialization).\n\n2. **Database Connectivity Issue**:  \n   The pod\u2019s application is explicitly trying to connect to a database on port `5432`, but the connection is refused. This could mean:\n   - The **database service is not running** or unreachable.\n   - The **database service is misconfigured** (e.g., incorrect host/port).\n   - A **network policy** or firewall is blocking access to the database port.\n\n3. **ConfigMap Mounting**:  \n   The pod mounts the `kube-root-ca.crt` ConfigMap, but this is likely unrelated to the database connection issue. The `updates_in_place: true` flag means the container won\u2019t reload the ConfigMap unless restarted, but this doesn\u2019t explain the connection refusal.\n\n---\n\n### Next Steps:\n1. **Verify Database Service**:  \n   Check if the database service (e.g., `postgres` or `db-service`) is running and reachable. Use `get_service_endpoints` to confirm the service has active endpoints.\n\n2. **Check Network Policies**:  \n   Ensure there are no network policies or firewall rules blocking traffic from the pod to the database port (`5432`).\n\n3. **Validate Application Configuration**:  \n   Confirm the application inside the container is configured to connect to the correct database host, port, and credentials. If environment variables are used, verify they are correctly set (e.g., via ConfigMaps or Secrets).\n\n---\n\n### Summary:\nThe pod is failing because its container cannot connect to the database server. The immediate fix requires ensuring the database is reachable and the application is configured correctly.",
+  "answer": "The **crasher pod** in the `demo` namespace is failing because its container cannot connect to the database server. Here's the breakdown:\n\n### Root Cause:\n- **Logs** from the `crasher` container show:  \n  ```\n  connecting to database...\n  FATAL: could not connect to db:5432: connection refused\n  ```  \n  This indicates the container is attempting to connect to a PostgreSQL database (port 5432) but is unable to establish a connection.\n\n---\n\n### Key Findings:\n1. **Exit Code 1**:  \n   The container exits with code `1`, which typically signifies a startup failure (e.g., application crash, missing dependencies, or failed initialization).\n\n2. **Database Connectivity Issue**:  \n   The pod\u2019s application is explicitly trying to connect to a database on port `5432`, but the connection is refused. This could mean:\n   - The **database service is not running** or unreachable.\n   - The **database service is misconfigured** (e.g., incorrect host/port).\n   - A **network policy** or firewall is blocking access to the database port.\n\n3. **ConfigMap Mounting**:  \n   The pod mounts the `kube-root-ca.crt` ConfigMap, but this is likely unrelated to the database connection issue. The `updates_in_place: true` flag means the container won\u2019t reload the ConfigMap unless restarted, but this doesn\u2019t explain the connection refusal.\n\n---\n\n### Next Steps:\n1. **Verify Database Service**:  \n   Check if the database service (e.g., `postgres` or `db-service`) is running and reachable. Use `get_service_endpoints` to confirm the service has active endpoints.\n\n2. **Check Network Policies**:  \n   Ensure there are no network policies or firewall rules blocking traffic from the pod to the database port (`5432`).\n\n3. **Validate Application Configuration**:  \n   Confirm the application inside the container is configured to connect to the correct database host, port, and credentials. If environment variables are used, verify they are correctly set (e.g., via ConfigMaps or Secrets).\n\n---\n\n### Summary:\nThe pod is failing because its container cannot connect to the database server. The immediate fix requires ensuring the database is reachable and the application is configured correctly.",
+  "nudges": 1,
+  "policies": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 97323.7,
+   "tool_ms": 30.0,
+   "rounds": 5,
+   "round_ms": [
+    7515.1,
+    8905.4,
+    19541.7,
+    20773.0,
+    40588.5
+   ],
+   "slowest_round_ms": 40588.5,
+   "model_share": 1.0,
+   "wall_ms": 97355.5,
+   "unaccounted_ms": 1.8,
+   "slept_ms": 0.2
+  }
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 103.6,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-21T16:01:48",
+  "load_before": 1.29,
+  "load_after": 0.63,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "crasher"
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo",
+    "container": "crasher",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"crasher-5964d99948-gzb98\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 19, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 19, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-gzb98_demo(8ad49c43-200b-4457-aa1e-6605f428158c)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"events\": [{\"reason\": \"BackOff\", \"count\": 57, \"age\": \"2m\", \"message\": \"Back-off restarting failed container crasher in pod crasher-5964d99948-gzb98_demo(8ad49c43-200b-4457-aa1e-6605f428158c)\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\", \"container\": \"crasher\"}"
+   }
+  ],
+  "draft": "The **crasher pod** in the `demo` namespace is failing because its container cannot connect to the database. Here's the breakdown:\n\n### Root Cause\n- **Log Evidence**: The container logs show:  \n  ```\n  connecting to database...\n  FATAL: could not connect to db:5432: connection refused\n  ```  \n  This indicates the container is attempting to connect to a PostgreSQL/PostgreSQL-like database on port `5432` but is being denied access.\n\n### Why It\u2019s Failing\n1. **Database Unreachable**:  \n   - The database service might be down, not exposed, or misconfigured (e.g., incorrect host/port).\n   - If the database is in a different namespace or cluster, network policies or service discovery might be blocking the connection.\n\n2. **Missing Dependencies**:  \n   - The container might rely on environment variables or secrets (e.g., `DATABASE_URL`, credentials) that are missing or misconfigured.\n\n3. **Firewall/Network Rules**:  \n   - The pod\u2019s node might have firewall rules blocking outbound traffic to the database\u2019s port (`5432`).\n\n### Next Steps\n1. **Verify Database Availability**:  \n   - Check if the database pod/service is running and accessible (e.g., `kubectl get pods -n <db-namespace>`).  \n   - Test connectivity from the crasher pod\u2019s node using `telnet <db-host> 5432` or `nc -zv <db-host> 5432`.\n\n2. **Inspect Secrets/ConfigMaps**:  \n   - Ensure the container has the correct credentials (e.g., `DATABASE_USER`, `DATABASE_PASSWORD`) injected via secrets or environment variables.\n\n3. **Check Network Policies**:  \n   - If using network policies, ensure they allow traffic from the crasher pod\u2019s namespace to the database\u2019s namespace or IP range.\n\nWithout resolving this connection issue, the container will continue crashing and restarting.",
+  "answer": "The **crasher pod** in the `demo` namespace is failing because its container cannot connect to the database. Here's the breakdown:\n\n### Root Cause\n- **Log Evidence**: The container logs show:  \n  ```\n  connecting to database...\n  FATAL: could not connect to db:5432: connection refused\n  ```  \n  This indicates the container is attempting to connect to a PostgreSQL/PostgreSQL-like database on port `5432` but is being denied access.\n\n### Why It\u2019s Failing\n1. **Database Unreachable**:  \n   - The database service might be down, not exposed, or misconfigured (e.g., incorrect host/port).\n   - If the database is in a different namespace or cluster, network policies or service discovery might be blocking the connection.\n\n2. **Missing Dependencies**:  \n   - The container might rely on environment variables or secrets (e.g., `DATABASE_URL`, credentials) that are missing or misconfigured.\n\n3. **Firewall/Network Rules**:  \n   - The pod\u2019s node might have firewall rules blocking outbound traffic to the database\u2019s port (`5432`).\n\n### Next Steps\n1. **Verify Database Availability**:  \n   - Check if the database pod/service is running and accessible (e.g., `kubectl get pods -n <db-namespace>`).  \n   - Test connectivity from the crasher pod\u2019s node using `telnet <db-host> 5432` or `nc -zv <db-host> 5432`.\n\n2. **Inspect Secrets/ConfigMaps**:  \n   - Ensure the container has the correct credentials (e.g., `DATABASE_USER`, `DATABASE_PASSWORD`) injected via secrets or environment variables.\n\n3. **Check Network Policies**:  \n   - If using network policies, ensure they allow traffic from the crasher pod\u2019s namespace to the database\u2019s namespace or IP range.\n\nWithout resolving this connection issue, the container will continue crashing and restarting.",
+  "nudges": 1,
+  "policies": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 103573.2,
+   "tool_ms": 50.4,
+   "rounds": 6,
+   "round_ms": [
+    8861.1,
+    11870.9,
+    10942.1,
+    21965.5,
+    21856.6,
+    28077.1
+   ],
+   "slowest_round_ms": 28077.1,
+   "model_share": 1.0,
+   "wall_ms": 103627.1,
+   "unaccounted_ms": 3.5,
+   "slept_ms": 0.2
+  }
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "passed": true,
+  "seconds": 119.3,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-21T16:03:32",
+  "load_before": 0.63,
+  "load_after": 0.94,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "crasher"
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "name": "crasher-5964d99948-gzb98",
+    "namespace": "demo",
+    "container": "crasher",
+    "tail": 50
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"crasher-5964d99948-gzb98\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 19, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 19, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-gzb98_demo(8ad49c43-200b-4457-aa1e-6605f428158c)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"events\": [{\"reason\": \"BackOff\", \"count\": 57, \"age\": \"4m\", \"message\": \"Back-off restarting failed container crasher in pod crasher-5964d99948-gzb98_demo(8ad49c43-200b-4457-aa1e-6605f428158c)\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-gzb98\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\", \"container\": \"crasher\"}"
+   }
+  ],
+  "draft": "The **crasher-5964d99948-gzb98** pod is failing because its container cannot connect to the database. Here's the breakdown:\n\n### Root Cause\n- **Database Connection Failure**: The logs show the application is trying to connect to a database at `db:5432` but is being refused. This indicates the database service is either:\n  - **Unreachable** (e.g., not running, incorrect host/port, network policy blocking traffic).\n  - **Misconfigured** (e.g., wrong hostname, port, or authentication credentials).\n\n### Supporting Evidence\n1. **Exit Code 1**: The container exits with code 1, confirming a runtime error (not a syntax/launch issue).\n2. **CrashLoopBackOff**: Kubernetes detects the crash and delays restarts, as seen in `get_pod_events`.\n3. **Logs**: The explicit error `FATAL: could not connect to db:5432: connection refused` confirms the database is unreachable.\n\n### Next Steps\n1. **Check Database Service**:\n   - Ensure the database (e.g., PostgreSQL) is running.\n   - Verify the service is exposed correctly (e.g., via `get_service_endpoints` if the database is a Kubernetes service).\n   - Confirm the host/port in the app's configuration matches the actual database endpoint.\n2. **Network Policies**: Ensure no network rules (e.g., firewalls, CNI policies) block traffic between the pod and the database.\n3. **Configuration**: Validate environment variables or config maps used by the app to connect to the database.\n\nThis is not a resource exhaustion issue (no OOMKilled or memory limits reported) or a code bug (the container launches but fails at runtime). The fix requires ensuring the database is accessible.",
+  "answer": "The **crasher-5964d99948-gzb98** pod is failing because its container cannot connect to the database. Here's the breakdown:\n\n### Root Cause\n- **Database Connection Failure**: The logs show the application is trying to connect to a database at `db:5432` but is being refused. This indicates the database service is either:\n  - **Unreachable** (e.g., not running, incorrect host/port, network policy blocking traffic).\n  - **Misconfigured** (e.g., wrong hostname, port, or authentication credentials).\n\n### Supporting Evidence\n1. **Exit Code 1**: The container exits with code 1, confirming a runtime error (not a syntax/launch issue).\n2. **CrashLoopBackOff**: Kubernetes detects the crash and delays restarts, as seen in `get_pod_events`.\n3. **Logs**: The explicit error `FATAL: could not connect to db:5432: connection refused` confirms the database is unreachable.\n\n### Next Steps\n1. **Check Database Service**:\n   - Ensure the database (e.g., PostgreSQL) is running.\n   - Verify the service is exposed correctly (e.g., via `get_service_endpoints` if the database is a Kubernetes service).\n   - Confirm the host/port in the app's configuration matches the actual database endpoint.\n2. **Network Policies**: Ensure no network rules (e.g., firewalls, CNI policies) block traffic between the pod and the database.\n3. **Configuration**: Validate environment variables or config maps used by the app to connect to the database.\n\nThis is not a resource exhaustion issue (no [unverified: OOMKilled] or memory limits reported) or a code bug (the container launches but fails at runtime). The fix requires ensuring the database is accessible.\n\n---\n**Evidence audit.**\n1 of 9 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "failures": [],
+  "notes": [
+   "stated ['oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 119241.1,
+   "tool_ms": 50.1,
+   "rounds": 6,
+   "round_ms": [
+    12562.8,
+    11101.6,
+    21353.0,
+    30840.0,
+    17221.9,
+    26161.7
+   ],
+   "slowest_round_ms": 30840.0,
+   "model_share": 1.0,
+   "wall_ms": 119294.9,
+   "unaccounted_ms": 3.7,
+   "slept_ms": 0.3
+  }
+ }
+]
