@@ -7,11 +7,11 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at `bf6375c`, tree clean and pushed, 580 tests pass, tags
-through v0.1.6. Updated 2026-08-21. No clusters running anywhere; Docker is
-stopped and the model is unloaded.**
+**State: `main` at `cc714ef`, tree clean and pushed, 603 tests pass, tags
+through v0.1.6. Updated 2026-08-21, evening. No clusters running anywhere;
+Docker is stopped and the model is unloaded.**
 
-**Start here: the agent-loop target invariant is built and only smoke-tested.**
+**The agent-loop target invariant is built and now regression-tested.**
 `targeting.py` fixes the entity-scoping defect that had
 `unhealthy_question_about_a_healthy_pod` at 1/3 -- the model called
 `list_pods(only_unhealthy=True)` without a workload, which excludes a healthy
@@ -21,14 +21,26 @@ the scope, refused where they name a different entity. Measured 5/5 on that
 case, 32/32 on the suite at n=2, 0 entity violations across 5 multi-incident
 runs.
 
-Then it was widened, and **the widening is the part that is unfinished.** An
-unlabelled name ("Why is crasher-svc unreachable?") is now confirmed against
-the cluster before it becomes a target -- one read-only lookup, and a name the
-cluster does not have leaves the target unset. **Its regression run was stopped
-at 13 of 16 cases** (13/13 passed, 11/13 fully grounded, n=1). Three cases are
-unmeasured. Finish that before treating the widening as verified: it changed
-which questions bind a target, so it can over-scope in a way the smoke test
-would not show.
+Then it was widened, and **the widening is now verified.** An unlabelled name
+("Why is crasher-svc unreachable?") is confirmed against the cluster before it
+becomes a target -- one read-only lookup, and a name the cluster does not have
+leaves the target unset. `results/widened-n3.json`: all 16 cases at n=3, 47/48,
+95% CI [89-100], on a cluster rebuilt from scratch so nothing had drifted into
+the namespaces `cluster_wide_scan` reads.
+
+**The three cases the stopped run never reached all pass 3/3 and ground 3/3**
+-- `healthy_workload_with_no_logs`, `stuck_volume_needs_events` (calling
+`get_pod_events`, which the volume-reference ground truth requires) and
+`unhealthy_question_about_a_healthy_pod`, the case that read 1/3 before the
+invariant existed. Nothing over-scoped, which was the specific risk.
+
+The one failure is `cluster_wide_scan` dropping `memory-hog` from its summary:
+the known summary-drop defect, not a targeting regression.
+
+**Correction to the previous handoff: `widened-n1` was 9/13 grounded, not
+11/13.** The 11 counted `insufficient_evidence` as grounded, which
+`grounding.py` rejects in as many words. There are four verdicts; never sum
+two of them.
 
 **The README benchmark table has not been re-taken since `scan_cluster` began
 labelling a Running-but-unready workload `fault: not-ready`.** It is still
@@ -59,17 +71,75 @@ normally; bad-image and memory-hog are unhealthy" scored as a substitution.
 Measured before touching anything, which is the only reason the projection
 was not rewritten to fix a defect that did not exist. Details below.
 
+**Start here: an eval record now keeps the checker's inputs, and every set
+recorded before 2026-08-21 evening cannot be re-scored.** `run_eval.py`
+records `evidence` (what the tools returned, in `grounding.records()` shape)
+and `draft` (the answer as `check()` read it). Re-scoring a recorded run
+offline is
+
+```python
+grounding.check(record["draft"], record["evidence"])
+```
+
+**Re-check `draft`, never `answer`.** `answer` is the published text, after
+`verify()` rewrote its unsupported values and `annotate()` appended the
+markers and the audit footer -- and the footer's own digits read back as
+fresh claims. Measured: 3 of 5 live runs re-scored correctly against
+`answer`, 3 of 3 against `draft`.
+
+This was built because a question could not be answered this session. The
+grounding checker changed, and the obvious check -- re-score every existing
+set under both versions -- was impossible, because no set held the tool
+output. The comparison had to fall back on `probe_scan_summary.py`, which
+covers one case of sixteen. It costs ~2.6 KB per run.
+
+**The first version of that field shipped broken and its test passed.** The
+test drained a mocked run whose answer was "cpu is low" -- nothing checkable,
+so the verdict was empty, `annotate()` left the string alone, and draft and
+answer were identical. **That is the fourth time in this repo a green test or
+a clean eval has been measuring a code path production does not take.** The
+others: `nightly-sync` (the eval called `diagnose()` directly and skipped the
+prefetch), the wrong-workload substitution (the grader, not the agent), and
+the un-`functools.wraps`'d tool wrapper that handed the model a tool named
+`wrapper`. Before diagnosing a model, check the harness is exercising the
+thing you think it is -- and write the test with an input that makes the
+code under test actually do something.
+
 Read README.md and CONTRIBUTING.md first.
 
 ## Open, in priority order
 
-1. **Finish the widened-targeting regression run.** 16 cases, n>=2, under
-   `caffeinate`. The stopped set is `results/widened-n1.json`.
-2. **`cluster_wide_scan` is 0/5 fully grounded** while being 5/5 correct. Four
-   of those five are a single hedged "Likely OOMKilled" that is TRUE of the
-   cluster and simply was not measured in that run. `KNOWN_CAUSES` already
-   exempts a hedged cause; a hedged *status* arguably deserves the same, and
-   that one change may account for most of the gap.
+1. ~~**Finish the widened-targeting regression run.**~~ Done --
+   `results/widened-n3.json`, 16 cases at n=3, 47/48. See above.
+2. ~~**`cluster_wide_scan` grounding.**~~ **Largely closed 2026-08-21, and the
+   stated cause was only a third of it.** Three checker defects, all measured:
+
+   - A **hedged status** was scored as a fabrication. `scan_cluster` returns a
+     phase, not a termination reason, so "CrashLoopBackOff (likely OOMKilled)"
+     is an inference no tool in that run could settle. A hedged *cause* was
+     already exempt. Hedged claims are recorded with status `"inferred"` now
+     rather than dropped, so they still appear in `contract()`.
+   - **`e.g.` had never been recognised at all.** Inside `_PRESCRIPTIVE`'s
+     alternation it carried the group's trailing `\b`, which cannot match
+     before the comma or space that always follows it. The branch was dead
+     from the day it was written, so "crash reasons (e.g., OOMKilled)" scored
+     as an assertion. 10 of 138 flags across every recorded set, in four cases.
+   - **`scan_cluster` says `not-ready`; `KNOWN_STATUSES` said `notready`.** The
+     substring test cannot bridge the hyphen, so the checker flagged a status
+     its own tool had reported. Fixed with an explicit spelling table, because
+     `cite()` has to find the value in the JSON to name its field.
+
+   Replayed over the 34 probe runs with complete recorded evidence: **10/34
+   grounded to 24/34**, no run moving down, McNemar exact p=0.0001. Live at
+   n=5 afterwards: 3/5 grounded, from 0/3, **with no status flagged in any
+   run** -- every residual flag is a number. n=5 is a smoke test; the replay
+   is the load-bearing measurement.
+
+   **The prediction in the old text was wrong and worth remembering.** The
+   hedge fix alone was measured at n=3 and came back 0/3. The model words the
+   same summary differently every run, so a fix aimed at one phrasing does not
+   generalise; the other two defects were found only by reading why each
+   individual flag fired.
 3. **Latency is unresolved.** ~67s median, 99.88% model generation. Thinking
    off (`TRIAGE_THINK=false`) is ~6x faster and failed `crashloop_root_cause`
    at n=1 -- too thin to decide either way. Configs B/C/E were never run.
@@ -95,7 +165,7 @@ Do not round it.
 
 ```bash
 cd /Users/ravirajput/Projects/AIOps-agent
-.venv/bin/python -m pytest              # 409 tests, no cluster, no model needed
+.venv/bin/python -m pytest              # 603 tests, no cluster, no model needed
 ollama list                             # qwen3 (5.2GB) is the default model
 ```
 
