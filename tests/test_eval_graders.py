@@ -454,3 +454,46 @@ class TestControllerGraderAcceptsEveryVerdict:
                                     "crasher cannot reach the database")
             assert not any("no usable confidence" in f for f in failures), \
                 f"{verdict} was rejected"
+
+
+class TestFixturesArePresentBeforeAnyModelTime:
+    """
+    A case declares `needs` and, until 2026-08-22, nothing read it.
+
+    A sixteen-case set ran against a cluster carrying only broken-pods.yaml
+    and reported 36/48. Six cases were unreachable, and the damage was in both
+    directions: four failed for want of a workload, and two *passed*, because
+    "is this healthy?" is satisfied by an answer about a pod that is not there.
+    A missing fixture is a silent defect, so the check has to refuse rather
+    than warn.
+    """
+
+    def _cases(self):
+        return [
+            {"name": "plain", "needs": None},
+            {"name": "adversarial", "needs": "demo/adversarial.yaml"},
+        ]
+
+    def test_an_unapplied_fixture_is_reported_by_namespace(self, monkeypatch):
+        monkeypatch.setattr(agent_eval.k8s, "list_pods", lambda namespace: [])
+        absent = agent_eval.fixtures_present(self._cases())
+        assert absent == {"demo/adversarial.yaml": ["adversarial", "adversarial-b"]}
+
+    def test_a_populated_cluster_reports_nothing_missing(self, monkeypatch):
+        monkeypatch.setattr(agent_eval.k8s, "list_pods",
+                            lambda namespace: [{"name": "x"}])
+        assert agent_eval.fixtures_present(self._cases()) == {}
+
+    def test_an_error_from_the_api_counts_as_absent(self, monkeypatch):
+        # list_pods returns {"error": ...} rather than raising. Treating that
+        # dict as truthy would read a broken cluster as a populated one.
+        monkeypatch.setattr(agent_eval.k8s, "list_pods",
+                            lambda namespace: {"error": "namespace not found"})
+        assert "demo/adversarial.yaml" in agent_eval.fixtures_present(self._cases())
+
+    def test_cases_without_a_fixture_need_no_cluster_lookup(self, monkeypatch):
+        def refuse(namespace):
+            raise AssertionError("looked up a namespace for a case with no needs")
+
+        monkeypatch.setattr(agent_eval.k8s, "list_pods", refuse)
+        assert agent_eval.fixtures_present([{"name": "plain"}]) == {}

@@ -130,6 +130,55 @@ def grade(case, result):
     return not failures, failures, notes
 
 
+def fixtures_present(cases):
+    """
+    Cases whose fixture file has not been applied to this cluster.
+
+    A case declares `needs`, and until now nothing read it. On 2026-08-22 a
+    sixteen-case set ran against a cluster carrying only demo/broken-pods.yaml
+    and reported 36/48 for the thinking-off arm. Six of those cases were
+    unreachable: four failed because the workload they ask about does not
+    exist, and -- worse -- two PASSED, because a question of the form "is this
+    healthy?" is satisfied by an answer about a pod that is not there at all.
+    A missing fixture is therefore not a visible failure. It is a silent one
+    in both directions.
+
+    Checked by namespace: every namespace the manifest declares must hold at
+    least one pod. That catches the case this is built for, a file never
+    applied, without asserting a pod-by-pod inventory that would go stale
+    every time a fixture gains a workload.
+    """
+    import yaml
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    missing = {}
+    checked = {}
+    for case in cases:
+        needs = case.get("needs")
+        if not needs:
+            continue
+        path = os.path.join(root, needs)
+        try:
+            with open(path) as handle:
+                docs = [d for d in yaml.safe_load_all(handle) if d]
+        except OSError as exc:
+            missing.setdefault(needs, set()).add(f"unreadable: {exc}")
+            continue
+
+        for namespace in {
+            (doc.get("metadata") or {}).get("namespace") for doc in docs
+        } - {None}:
+            if namespace not in checked:
+                pods = k8s.list_pods(namespace=namespace)
+                checked[namespace] = (
+                    not isinstance(pods, dict) and bool(pods)
+                )
+            if not checked[namespace]:
+                missing.setdefault(needs, set()).add(namespace)
+
+    return {needs: sorted(where) for needs, where in missing.items()}
+
+
 def preflight(namespace="demo"):
     """
     Which cluster this is about to measure, and whether the fixtures are on it.
@@ -185,6 +234,18 @@ def main():
 
     pods, context = preflight()
     if pods is None:
+        return 2
+
+    # Before any model time is spent. A case whose fixture is absent does not
+    # measure the agent, and it does not announce itself either -- see
+    # fixtures_present. Refuse rather than warn: the whole value of the number
+    # at the end is that every case in it was reachable.
+    absent = fixtures_present(cases)
+    if absent:
+        for needs, where in absent.items():
+            print(f"{needs} has not been applied: no pods in "
+                  f"{', '.join(where)}", file=sys.stderr)
+        print("kubectl apply -f " + " -f ".join(sorted(absent)), file=sys.stderr)
         return 2
 
     print(
