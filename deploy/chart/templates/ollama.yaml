@@ -1,0 +1,147 @@
+{{- if .Values.ollama.enabled }}
+{{- /*
+Optional in-cluster Ollama.
+
+Off by default, and that default is deliberate. `model.ollamaHost` has always
+pointed at a service this chart did not create, because most clusters that run
+a local model already have one -- on a GPU node, behind a gateway, or shared
+between teams -- and quietly standing up a second copy would waste a node's
+worth of memory. Turning this on is a decision to let the chart own the model
+server too.
+
+Validated on GKE 2026-08-22: llama3.2 served from this Deployment, reached at
+ollama.ollama.svc.cluster.local:11434, answering a real diagnosis end to end.
+The model was resident in the cluster and absent from the workstation, so the
+inference provably happened here.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.ollama.name }}
+  namespace: {{ .Values.ollama.namespace | default .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.ollama.name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: model
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .Values.ollama.name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.ollama.port }}
+      targetPort: {{ .Values.ollama.port }}
+      name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.ollama.name }}
+  namespace: {{ .Values.ollama.namespace | default .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.ollama.name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: model
+spec:
+  replicas: 1
+  {{- /* One replica, and Recreate rather than RollingUpdate: two pods would
+         each pull the model and each hold it in memory, which on the node
+         sizes people use for this is enough to make neither schedulable. */}}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.ollama.name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.ollama.name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: model
+    spec:
+      {{- with .Values.ollama.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ollama.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ollama
+          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.ollama.port }}
+              name: http
+          env:
+            {{- /* Ollama binds loopback by default, which a Service cannot
+                   reach. The symptom is a pod that never passes its readiness
+                   probe, which reads as a slow model rather than as a bind
+                   address. */}}
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:{{ .Values.ollama.port }}"
+            - name: OLLAMA_KEEP_ALIVE
+              value: {{ .Values.ollama.keepAlive | quote }}
+            {{- with .Values.ollama.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.ollama.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.ollama.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.ollama.port }}
+            {{- /* Generous: a cold model load blocks the HTTP handler, and a
+                   liveness probe that fires during it restarts the pod
+                   forever without ever serving a request. */}}
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 6
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          {{- if .Values.ollama.pullModelOnStart }}
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh", "-c", "ollama pull {{ .Values.model.name }} || true"]
+          {{- end }}
+      volumes:
+        - name: models
+          {{- if .Values.ollama.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.ollama.name }}-models
+          {{- else }}
+          {{- /* emptyDir means the model is re-pulled whenever the pod moves.
+                 Fine for a test cluster, expensive on a 5GB model in
+                 production -- which is why persistence defaults to on. */}}
+          emptyDir: {}
+          {{- end }}
+{{- if .Values.ollama.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.ollama.name }}-models
+  namespace: {{ .Values.ollama.namespace | default .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.ollama.name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: model
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.ollama.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.ollama.persistence.size }}
+{{- end }}
+{{- end }}

@@ -28,10 +28,58 @@ sink:
 
 model:
   # The controller does not run a model. Point this at an Ollama reachable
-  # from the cluster: a node with a GPU, a sidecar, or a host address.
+  # from the cluster: a node with a GPU, a sidecar, or a host address --
+  # or set ollama.enabled below and let this chart run one.
   ollamaHost: http://ollama.ollama.svc.cluster.local:11434
   name: qwen3
   timeoutSeconds: 300
+
+# An in-cluster Ollama, off by default.
+#
+# Off because most clusters running a local model already have one -- on a GPU
+# node, behind a gateway, shared between teams -- and standing up a second copy
+# silently wastes a node's worth of memory. Turning this on is a decision to
+# let the chart own the model server too; when you do, point model.ollamaHost
+# at it: http://<name>.<namespace>.svc.cluster.local:11434
+#
+# Validated on GKE 2026-08-22 serving llama3.2 to a real diagnosis.
+ollama:
+  enabled: false
+  name: ollama
+  # Defaults to the release namespace. The stock model.ollamaHost above
+  # assumes a namespace literally called "ollama", so set both or neither.
+  namespace: ""
+  port: 11434
+  image:
+    repository: ollama/ollama
+    tag: latest
+    pullPolicy: IfNotPresent
+  # Long, for the reason CONTRIBUTING gives: Ollama unloads five minutes after
+  # the last request by default, and a controller that diagnoses twice an hour
+  # would pay the load cost every single time.
+  keepAlive: 24h
+  # Pull the model named above when the container starts. Convenient, and it
+  # makes the first readiness window long -- a 5GB pull on a cold node is
+  # minutes, and the liveness probe above is tuned to survive it.
+  pullModelOnStart: true
+  # Sized for a ~2GB model on CPU. qwen3 at 5.2GB needs roughly 8Gi of request
+  # and a good deal more CPU to be usable; a GPU node wants the vendor's
+  # device plugin and a resource limit naming the GPU instead.
+  resources:
+    requests:
+      cpu: "1"
+      memory: 3Gi
+    limits:
+      cpu: "3500m"
+      memory: 10Gi
+  # Keep the weights across restarts. emptyDir re-pulls the model whenever the
+  # pod moves, which is cheap for a test and expensive for 5GB in production.
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+  nodeSelector: {}
+  tolerations: []
 
 watch:
   # Empty means all namespaces. Narrow this in a large cluster: every pod
