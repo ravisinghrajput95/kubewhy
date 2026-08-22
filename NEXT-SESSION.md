@@ -233,12 +233,17 @@ Read README.md and CONTRIBUTING.md first.
 
    | arm | score | 95% CI | median | p95 |
    | --- | --- | --- | --- | --- |
-   | OFF (today) | 46/48 (96%) | [86-99] | 9.0s | 36.1s |
+   | OFF (today) | 45/48 (94%) | [83-98] | 9.0s | 36.1s |
    | ON (`widened-n3`) | 47/48 (98%) | [89-100] | 67.4s | 183.7s |
 
-   **Fisher exact p=1.000.** No accuracy difference is detectable over sixteen
+   **Fisher exact p=0.617.** No accuracy difference is detectable over sixteen
    cases, which is the same undetermined answer the three-case comparison gave
-   at p=0.483 -- wider, not settled. Fourteen of sixteen cases are 3/3, and
+   at p=0.483 -- wider, not settled. **Both figures are post-repair**: the
+   off arm was scored 46/48 when it ran and lost one run when the
+   `service_unreachable_chain` expectation stopped accepting `crash` matched
+   inside `crasher-svc`. The model did not get worse; the grader stopped
+   accepting an answer that repeated the question. `widened-n3` re-grades
+   unchanged. Thirteen of sixteen cases are 3/3, and
    `inference_is_marked` and `service_unreachable_chain`, which had never been
    measured in this arm, are 3/3 each.
 
@@ -261,37 +266,44 @@ Read README.md and CONTRIBUTING.md first.
    anywhere in the text, the same grading defect already found here once.
    Measured and deliberately not fixed: separating "repeated the injection
    while flagging it" from "obeyed it" is a design decision, not a typo.
-5. ~~**Two eval cases pass by repeating the question back.**~~ **Repaired
-   2026-08-22, verified by replay.** `healthy_workload_with_no_logs` now asks
-   for an asserted verdict instead of `fine` (which matched inside
-   `quiet-and-fine`), and `unhealthy_question_about_a_healthy_pod` keeps the
-   pod's name as one group and adds the verdict as another. Bare `healthy` is
-   deliberately not one of the second's verdict terms: it is a substring of
-   `unhealthy` and would be satisfied by the opposite answer.
+5. ~~**Five eval cases could be passed by repeating the question back.**~~
+   **All repaired 2026-08-22, each verified by replay before it was changed.**
+   An expectation term that appears in the case's own question tests nothing,
+   and one echoed term carries a whole group -- `expect_any` passes on one and
+   each `expect_all` group passes on one.
 
-   Every recorded answer either case has -- 40 across nine sets -- re-graded
-   through `run_eval.grade()`: **7 flip, all in the right direction.** Six are
-   the void-set answers saying the workload does not exist. The seventh, in
-   `after-n2`, described `missing-configmap-key` and `missing-secret-key`
-   instead of the pod it was asked about, which is the exact failure that case
-   was written for. No legitimate answer changes verdict, so `widened-n3`
-   stays 47/48, `think-OFF-16cases-n3` stays 46/48, and the README table is
-   untouched (`baseline-n10-2` predates both cases). `after-n2` would now read
-   30/32.
+   | case | matched on | from |
+   | --- | --- | --- |
+   | `healthy_workload_with_no_logs` | `fine` | `quiet-and-fine` |
+   | `unhealthy_question_about_a_healthy_pod` | the pod's name | the whole expectation was the name |
+   | `healthy_not_reported_broken` | `healthy`, `working` | `healthy-web`, "working correctly?" |
+   | `healthy_workload_not_substituted` | `healthy` | `healthy-web` |
+   | `service_unreachable_chain` | `crash` | `crasher-svc` |
 
-   **Three cases are still echo-satisfiable and are pinned, not repaired:**
-   `healthy_not_reported_broken` and `healthy_workload_not_substituted`
-   (`healthy`, from `healthy-web`) and `service_unreachable_chain` (`crash`,
-   inside `crasher-svc`). These are harder than the pair above -- the question
-   asks whether a workload named `healthy-web` is healthy, so the word cannot
-   be dropped without removing the answer's natural phrasing -- and repairing
-   them needs its own before/after replay. `tests/test_eval_graders.py`
-   asserts that list exactly, so a fourth fails CI.
+   Found by reading the void set, not by suspecting it: the first two scored
+   PASS 3/3 on a cluster that never had their fixture, answering that the
+   workload does not exist.
 
-   The criterion there is **every** expectation group being echoable, not any
-   of them, because requiring the answer to name its subject is legitimate
-   beside a group the question does not contain. Under the accurate rule
-   `image_pull_failure` was never an offender.
+   **Replayed through `run_eval.grade()` over every recorded answer the five
+   cases have -- 179 across sixteen sets -- eight verdicts change and every
+   one is a wrong answer that had been passing.** Six are the "does not exist"
+   answers. One, in `after-n2`, described `missing-configmap-key` and
+   `missing-secret-key` instead of the pod it was asked about. One, in
+   `think-OFF-16cases-n3`, concluded `crasher-svc` "does not have any
+   associated pods" -- false, they exist and are not ready -- after calling
+   `get_service_endpoints` and `list_pods` and never reaching the crash.
+
+   Set scores: **`baseline-n10-2` unchanged at 99/100**, so the README table
+   stands; **`widened-n3` unchanged at 47/48**, so the thinking-ON comparator
+   stands; `think-OFF-16cases-n3` 46/48 -> 45/48; `after-n2` 31/32 -> 30/32.
+
+   Two rules worth keeping. Bare `healthy` cannot be a verdict term in a
+   question containing `unhealthy` -- it is a substring, so it would be
+   satisfied by the opposite answer. And the criterion is **every**
+   expectation group being echoable, not any: requiring the answer to name
+   its subject is legitimate beside a group the question does not contain,
+   which is how `unhealthy_question_about_a_healthy_pod` keeps the pod name.
+   `tests/test_eval_graders.py` now requires the offender list to be empty.
 
 4. **Controller and noise evidence is two rounds old.** Both passed when last
    measured (3s detect, 52.5s RCA; 10 failing pods -> 1 finding).
