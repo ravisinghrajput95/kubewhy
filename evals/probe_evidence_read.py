@@ -156,9 +156,19 @@ def main():
                 agent.ask = original
 
             if finding is None or not captured:
-                print(f"VOID   {workload:<14} no diagnosis "
-                      f"({'pod gone' if finding is None else 'ask never ran'})",
-                      flush=True)
+                why = "pod gone" if finding is None else "ask never ran"
+                # Recorded, not only printed. Without a row the set cannot say
+                # how many attempts it made, and a workload the CronJob race
+                # ate every time would read as a workload nobody ran -- which
+                # is the same reasoning that put `nudges` on the eval record.
+                records.append({
+                    "workload": workload, "run": index,
+                    "pod": pod.metadata.name, "status": status,
+                    "context": context, "model": model,
+                    "void": True, "attempted": True, "no_diagnosis": why,
+                    "at": dt.datetime.now().isoformat(timespec="seconds"),
+                })
+                print(f"VOID   {workload:<14} no diagnosis ({why})", flush=True)
                 continue
 
             result = captured[-1]
@@ -219,7 +229,7 @@ def report(records):
         if not rows:
             continue
         void = [r for r in rows if r["void"]]
-        live = [r for r in rows if not r["void"]]
+        live = [r for r in rows if not r["void"] and "draft" in r]
         if not live:
             print(f"{workload:<14} 0 measurable runs of {len(rows)}")
             continue

@@ -511,3 +511,95 @@ class TestFixturesArePresentBeforeAnyModelTime:
 
         monkeypatch.setattr(agent_eval.k8s, "list_pods", refuse)
         assert agent_eval.fixtures_present([{"name": "plain"}]) == {}
+
+
+def _echoable(case):
+    """
+    Expectation groups a bare echo of the question would already satisfy.
+
+    `expect_any` passes on one term, and each `expect_all` group passes on one
+    term, so a single echoed term is enough to carry the whole group.
+    """
+    question = case["question"].lower()
+    weak = []
+    for group in case.get("expect_all") or []:
+        if any(term.lower() in question for term in group):
+            weak.append(tuple(group))
+    if case.get("expect_any") and any(
+        term.lower() in case["question"].lower() for term in case["expect_any"]
+    ):
+        weak.append(tuple(case["expect_any"]))
+    return weak
+
+
+class TestExpectationsThatTheQuestionAlreadySatisfies:
+    """
+    An expectation term that appears in the case's own question tests nothing.
+
+    Found 2026-08-22 by reading a void set rather than by suspecting it. Two
+    cases scored PASS 3/3 while answering that the workload does not exist:
+
+      healthy_workload_with_no_logs           "The workload \\"quiet-and-fine\\"
+                                              does not exist in the
+                                              \\"adversarial\\" namespace."
+      unhealthy_question_about_a_healthy_pod  "The pod or workload named
+                                              \\"correctly-configured\\" ... does
+                                              not exist in the cluster."
+
+    The first matched on `fine`, inside the workload's own name. The second's
+    only expectation IS the workload's name. Both are satisfied by repeating
+    the subject back, so neither can distinguish a correct verdict from a
+    cluster that is missing the fixture entirely.
+
+    Pinned rather than repaired: rewriting an expectation changes what the
+    case measures and breaks comparison with every published set, which is the
+    owner's call. What this stops is the list growing without anyone noticing.
+    """
+
+    KNOWN = {
+        # expect_any ['yes','healthy','working',...] against a question naming
+        # `healthy-web`: `healthy` is in the workload's name.
+        "healthy_not_reported_broken",
+        "healthy_workload_not_substituted",
+        # `fine` inside `quiet-and-fine`. Verified passing on "does not exist".
+        "healthy_workload_with_no_logs",
+        # The whole expectation is the pod's name. Verified the same way.
+        "unhealthy_question_about_a_healthy_pod",
+        # One term of one expect_all group; the case's other groups still bite.
+        "image_pull_failure",
+        "service_unreachable_chain",
+    }
+
+    def test_no_case_gains_a_question_satisfiable_expectation(self):
+        from evals.cases import CASES
+
+        found = {case["name"] for case in CASES if _echoable(case)}
+        assert found == self.KNOWN, (
+            "cases whose expectations the question already satisfies changed; "
+            f"added={found - self.KNOWN} removed={self.KNOWN - found}"
+        )
+
+    def test_the_two_verified_ones_pass_on_a_does_not_exist_answer(self):
+        # Production's grader, the recorded answer, no cluster. This is the
+        # assertion that would have to flip if the expectations are repaired.
+        from evals.cases import CASES
+
+        recorded = {
+            "healthy_workload_with_no_logs":
+                'The workload "quiet-and-fine" does not exist in the '
+                '"adversarial" namespace.',
+            "unhealthy_question_about_a_healthy_pod":
+                'The pod or workload named "correctly-configured" in the '
+                'namespace "config-faults" does not exist in the cluster.',
+        }
+        for case in CASES:
+            if case["name"] not in recorded:
+                continue
+            result = {
+                "answer": recorded[case["name"]],
+                "tool_calls": [{"name": "scan_cluster", "arguments": {}}],
+                "confidence": "grounded",
+                "unverified": [],
+            }
+            passed, reasons, _ = grade_answer(case, result)
+            assert passed, f"{case['name']} no longer passes: {reasons}"
