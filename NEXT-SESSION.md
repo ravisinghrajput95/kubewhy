@@ -162,21 +162,52 @@ Read README.md and CONTRIBUTING.md first.
    same summary differently every run, so a fix aimed at one phrasing does not
    generalise; the other two defects were found only by reading why each
    individual flag fired.
-3. **The loop verifies evidence was gathered, never that it was read.** A
-   controller run on `crasher` produced a 52-character `ungrounded` diagnosis
-   after one wrong tool call, with `FATAL: could not connect to db:5432`
-   already in its prompt from `capture_evidence()`. `LOGS_POLICY` was
-   satisfied because prefetched logs count as called -- correctly, they were
-   gathered -- and nothing downstream asks whether the answer engaged with
-   them. **The rate is unknown and two attempts to measure it failed.** Token
-   overlap between log and answer is the wrong instrument: punctuation
-   boundaries (`db:5432:` against `db:5432`), a JSON-escaped `\n` glued onto
-   `FATAL`, and then a "fix" that stripped punctuation before testing for it.
-   The model paraphrases -- `db:5432` becomes `db-service:5432`, `upstream
-   returned 503` becomes "the 503 error" -- so any real probe needs
-   per-workload ground-truth phrases with accepted paraphrases. Only `crasher`
-   and `nightly-sync` qualify: `memory-hog`'s log is stress output and its
-   cause is in the status, so ignoring that log is correct.
+3. ~~**The loop verifies evidence was gathered, never that it was read.**~~
+   **Measured 2026-08-22: 0 of 20 runs ignored the log, 95% CI [0-16].** The
+   instrument is `evals/evidence_read.py` and the probe is
+   `evals/probe_evidence_read.py`; the set is `results/evidence-read-n10.json`.
+   Ten controller runs each on `crasher` and `nightly-sync` -- the only two
+   fixtures whose cause is in the log and nowhere else -- through
+   `capture_evidence()` -> `diagnose()`, scored against `draft`:
+   **read 20/20, Wilson 95% [84-100], complete 13/20, status-only 0, void 0.**
+
+   **The 52-character ungrounded diagnosis did not reproduce.** No run came
+   back `ungrounded`, the shortest draft was 428 characters, and the incident
+   followed one wrong tool call where these runs made two to four each. So it
+   is rarer than n=20 can see, or conditional on something this arm does not
+   reproduce. The rule-of-three bound is 15%; another 20 runs would halve it.
+
+   The residual is partial rather than absent: `crasher` names the database
+   10/10, the port 8/10 and the refusal 7/10; `nightly-sync` names the
+   upstream 10/10 and the 503 itself 7/10. A diagnosis that engaged with the
+   log and dropped one specific is a different defect from one that ignored
+   it, and only the second is what this item was opened about.
+
+   **What made the earlier two instruments wrong is written into the module.**
+   Token overlap cannot match `db:5432` against the log's `db:5432:`, and the
+   JSON escape `capture_pod_logs` leaves in front of `FATAL` makes `\nfatal` a
+   token no answer contains; stripping punctuation first turns `db:5432` into
+   `db5432`, in neither text. The replacement keeps punctuation and decides
+   boundaries at match time, and enumerates paraphrases per workload
+   (`db-service:5432`, "the 503 error", `postgres` inferred from the port).
+   `memory-hog` is excluded in code with the reason attached: its log is
+   `stress` output and its cause is in the status, so ignoring it is correct.
+
+   Two guards worth keeping. A run whose capture came back empty is **void**,
+   not failed -- `capture_pod_logs` returns `[]` on a 404 -- and scoring
+   "never mentioned 5432" against a run never shown it measures the harness;
+   this set had zero voids, so the CronJob race ate nothing. And decoys
+   (`CrashLoopBackOff`, exit code 1, restarts) are recorded alongside, so a
+   run that read nothing can be told from a fluent restatement of the status.
+
+   `draft` and `answer` carried identical facts on all 20 runs, so `verify()`
+   and `annotate()` moved nothing this instrument reads -- recorded rather
+   than assumed, since it is the reason the probe scores `draft`.
+
+   Conditions: kind + qwen3, thinking on, `low_power_mode` true on every run,
+   on battery. The 38-135s latencies here are throttled and are not a timing
+   measurement.
+
 4. **Latency is unresolved, and thinking-off is NOT settled.** ~67s median,
    99.88% model generation. Three cases at n=5 per arm: thinking on 13/15,
    thinking off 15/15, **Fisher exact p=0.483**, median 43.7s against 8.0s.
