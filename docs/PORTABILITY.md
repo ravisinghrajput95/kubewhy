@@ -1,6 +1,7 @@
 # Managed Kubernetes portability
 
-**Status: static audit complete, GKE live validation NOT started.**
+**Status: static audit complete. GKE live validation PARTIAL — stopped by
+request at 31 of 48 agentic runs; sections 13-16 not started.**
 Last updated 2026-08-22.
 
 The question is not "does kubewhy run on GKE?" but "does kubewhy rely on
@@ -138,29 +139,99 @@ UI surface on this node size.
 `658 passed` on `main` before any GKE work. This must stay green, and no test
 may be changed to accommodate GKE.
 
-## 5. Portability matrix
+## 5. What GKE actually measured
 
-**Every GKE cell is unvalidated.** The audit says the code should work; that
-is a different claim from evidence that it does, and this table records only
-the second kind.
+Cluster: `kubewhy-gke-test`, GKE `1.35.6-gke.1641000` (control plane and node),
+Container-Optimized OS, kernel `6.12.85+`, amd64, `containerd://2.1.7`, two
+`e2-medium` nodes in `asia-south1-a`, Standard mode. Deleted after the run.
+
+**Ground truth first, with kubectl, before any model call.** All ten scenarios
+reproduced with the same Kubernetes semantics as kind: `OOMKilled` in
+`lastState.terminated` with exit 137, `CrashLoopBackOff` in `waiting.reason`,
+`ImagePullBackOff` with a `NotFound` pull event, `FailedMount` carrying the
+identical `MountVolume.SetUp failed for volume "conf" : configmap "nginx-conf"
+not found` message, readiness distinguishable from liveness by restart count,
+and both service cases resolving through EndpointSlices -- `typo-svc` one slice
+with zero addresses, `crasher-svc` one slice with one address and zero ready.
+**GKE creates an EndpointSlice for a service whose selector matches nothing**,
+which is what the reachability diagnosis depends on.
+
+**Tools: 10 of 10 work.** One returned a wrong result and is fixed; see below.
+
+| Tool | GKE works | Correct result | Provider-specific dependency |
+| --- | --- | --- | --- |
+| `list_pods` | yes | yes | none |
+| `list_pods(only_unhealthy)` | yes | yes | none |
+| `describe_pod` | yes | yes | none |
+| `get_pod_logs` | yes | yes | none |
+| `get_pod_events` | yes | yes | none |
+| `list_deployments` | yes | yes | none |
+| `get_service_endpoints` | yes | yes | EndpointSlice only |
+| `list_nodes` | yes | **no, until fixed** | **node conditions** |
+| `scan_cluster` | yes | yes | none |
+
+**Agentic RCA: 31/31, 95% CI [89-100], 24/31 fully grounded**, over 31 of a
+planned 48 runs (stopped by request in round 3). Round 1 completed 16/16, so
+every case has passed on GKE at least once.
+
+**The network is not the cost.** Median `tool_ms` 331 against median
+`model_ms` 66,768 -- Kubernetes API calls across the internet to
+`asia-south1` are 0.5% of runtime. Median run 70.3s over the 30 sleep-free
+runs; one run recorded `slept_ms` 285s **despite `caffeinate -is`** and is
+held out rather than averaged in.
+
+### The one defect GKE found
+
+`list_nodes` reported every node condition that was `True` and not `Ready`
+under the key `pressure`. A GKE Container-Optimized OS node carries **26**
+conditions against kind's five; all three real pressure conditions are `False`
+and `SysctlChanged` is `True` by design. **Every healthy GKE node came back
+under pressure, 2 of 2, on every call** -- a fabricated node fault handed to a
+model with no way to check it.
+
+**Classified: Kubernetes portability bug**, not a GKE difference. The code
+assumed node conditions are a closed set, which Kubernetes does not guarantee;
+GKE was merely the first platform to expose it, and any cluster running
+node-problem-detector would have done the same. Fixed: `pressure` is an
+explicit allowlist, and other `True` conditions are kept under `conditions` as
+optional context so a real `KernelDeadlock` still reaches the diagnosis.
+
+### Environment problems, recorded as such
+
+The node was first sized for `demo` + `adversarial` + `config-faults` and then
+`tricky-pods.yaml` was applied as well, taking CPU requests to **99%** and
+leaving pods `Pending` with `Insufficient cpu` -- including
+`correctly-configured`, the healthy pod entity scoping asks about. Pending pods
+read as scheduling faults and would have polluted `scan_cluster` and every
+multi-incident scenario. **GKE system pods take ~760m of an `e2-medium`'s
+~940m allocatable CPU (81%)**, which is far heavier than kind and needs
+budgeting for on any managed platform. Resolved by dropping `shop` and adding
+a second node. Classified test/environment problem.
+
+## 5a. Portability matrix
 
 | Capability | kind | AKS | GKE | EKS |
 | --- | --- | --- | --- | --- |
-| Pod diagnostics | validated | validated | **not yet tested** | not tested |
-| Logs | validated | validated | **not yet tested** | not tested |
-| Events | validated | validated | **not yet tested** | not tested |
-| Deployments | validated | validated | **not yet tested** | not tested |
-| Services | validated | validated | **not yet tested** | not tested |
-| EndpointSlices | validated | validated | **not yet tested** | not tested |
-| Nodes | validated | validated | **not yet tested** | not tested |
-| RBAC | validated | validated | **not yet tested** | not tested |
-| Agentic RCA | validated | validated | **not yet tested** | not tested |
-| Controller | validated | validated | **not yet tested** | not tested |
-| Noise reduction | validated | validated | **not yet tested** | not tested |
+| Pod diagnostics | validated | validated | **validated** | not tested |
+| Logs | validated | validated | **validated** | not tested |
+| Events | validated | validated | **validated** | not tested |
+| Deployments | validated | validated | **validated** | not tested |
+| Services | validated | validated | **validated** | not tested |
+| EndpointSlices | validated | validated | **validated** | not tested |
+| Nodes | validated | validated | **validated after fix** | not tested |
+| RBAC | validated | validated | **not tested** | not tested |
+| Agentic RCA | validated | validated | **validated, 31/31** | not tested |
+| Controller | validated | validated | **not tested** | not tested |
+| Noise reduction | validated | validated | **not tested** | not tested |
 
-EKS is *not validated due to cost* and no EKS cluster should be created to
-fill the table. The audit found no EKS-specific dependency, which is a
-statement about the source and not about EKS.
+EKS is *not validated due to cost*. The audit found no EKS-specific
+dependency, which is a statement about the source and not about EKS.
+
+**Not measured and not claimable:** kubewhy deployed in-cluster from the Helm
+chart with Ollama served inside the cluster. The model ran on the workstation
+throughout, deliberately, so the platform was the only variable -- which
+leaves the chart's own deployment topology untested on GKE. `qwen3` is 5.2GB
+and an `e2-medium` cannot hold it; that needs a much larger node or a GPU pool.
 
 ## 6. Portability level
 
@@ -169,21 +240,40 @@ statement about the source and not about EKS.
 - **Level 3** — multiple managed platforms on standard Kubernetes APIs
 - **Level 4** — cloud-neutral core with optional provider extensions
 
-**Assessed today: Level 2, with the code audited as Level 3/4-shaped.**
+**Assessed: Level 3, with one caveat.** AKS was validated previously; GKE is
+now validated for pod diagnostics, logs, events, deployments, services,
+EndpointSlices, nodes and agentic RCA, on standard Kubernetes APIs, with one
+portability bug found and fixed. RBAC, controller and noise reduction remain
+untested on GKE, so Level 3 is claimed for the diagnostic engine rather than
+for every mode the project ships.
 
-AKS is validated; GKE is not yet. The audit found a cloud-neutral core with no
-provider extensions at all, which is the *shape* of Level 4, but a level is a
-claim about evidence and the evidence for a second managed platform does not
-exist yet. It becomes Level 3 when the GKE sections below are measured.
+The core is Level 4 in shape -- there is no provider adapter, no
+`if provider ==`, and the one provider-specific thing encountered (extra node
+conditions) is now handled as optional context exactly as the contract
+requires -- but Level 4 names an architecture with optional provider
+extensions, and there are none to point at.
 
-## 7. What remains, and why it has not been done
+## 7. What remains
 
-The live validation — scenarios, tool compatibility, the agentic loop, entity
-scoping, events, EndpointSlices, RBAC with a real ServiceAccount, prompt
-injection, the controller and noise reduction — needs a GKE cluster **and**
-several hours of local Ollama inference, since the model runs on the
-workstation and only the cluster is remote.
+Untested on GKE, in the order it should be picked up:
 
-It has not been started because the workstation was at 15% battery on battery
-power when the audit finished. Beginning it there would risk a billable
-cluster outliving the machine driving it.
+1. **RBAC with a real ServiceAccount** (section 13). `kubectl auth can-i` is
+   useless on GKE -- with `--as` it answered `no` for every permission a
+   ServiceAccount demonstrably had, warning `webhook authorizer does not
+   support user rule resolution`. The only trustworthy check is minting a
+   token and making real requests. Watch for two false negatives when
+   scripting it: macOS has no `timeout` binary, and
+   `kubectl --watch --request-timeout=5s` exits non-zero on success.
+2. **The autonomous controller** (section 15) -- detection latency, RCA
+   latency, entity correctness, duplicate suppression, against GKE events.
+3. **Noise reduction** (section 16) -- ten failing replicas collapsing to one
+   finding, plus one unrelated failure staying visible.
+4. **The remaining 17 agentic runs** to finish rounds 2 and 3, and the
+   top-up repeats sections 9 and 14 ask for (n=5 scoping, n=3 injection --
+   n=3 and n=2 respectively are already in hand).
+5. **In-cluster deployment from the Helm chart**, with Ollama served inside
+   the cluster. Needs a node that can hold a 5.2GB model.
+
+Cost note: the whole GKE session above -- create, two nodes for part of it,
+31 agentic runs, delete -- ran inside the ~₹255 budget with room to spare,
+using a zonal cluster. Regional would have tripled the node count.
