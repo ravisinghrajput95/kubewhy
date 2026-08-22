@@ -474,14 +474,28 @@ class TestFixturesArePresentBeforeAnyModelTime:
             {"name": "adversarial", "needs": "demo/adversarial.yaml"},
         ]
 
+    # The real return shape, and it is the whole point of these three. The
+    # first version of this check asked `not isinstance(pods, dict)` and was
+    # green, because the test fed it a list: list_pods() returns a dict keyed
+    # by pod name, so the check called every populated namespace empty and the
+    # eval refused to start.
+    POPULATED = {"log-injector-85c5c67578-qb26b": {"status": "Error",
+                                                   "ready": "0/1",
+                                                   "restarts": 5}}
+
+    def test_the_shape_list_pods_actually_returns_counts_as_populated(self):
+        assert agent_eval.populated(self.POPULATED)
+        assert not agent_eval.populated({})
+        assert not agent_eval.populated({"error": "namespace not found"})
+
     def test_an_unapplied_fixture_is_reported_by_namespace(self, monkeypatch):
-        monkeypatch.setattr(agent_eval.k8s, "list_pods", lambda namespace: [])
+        monkeypatch.setattr(agent_eval.k8s, "list_pods", lambda namespace: {})
         absent = agent_eval.fixtures_present(self._cases())
         assert absent == {"demo/adversarial.yaml": ["adversarial", "adversarial-b"]}
 
     def test_a_populated_cluster_reports_nothing_missing(self, monkeypatch):
         monkeypatch.setattr(agent_eval.k8s, "list_pods",
-                            lambda namespace: [{"name": "x"}])
+                            lambda namespace: self.POPULATED)
         assert agent_eval.fixtures_present(self._cases()) == {}
 
     def test_an_error_from_the_api_counts_as_absent(self, monkeypatch):

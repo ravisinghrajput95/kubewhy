@@ -130,6 +130,21 @@ def grade(case, result):
     return not failures, failures, notes
 
 
+def populated(pods):
+    """
+    Whether list_pods() came back with pods in it.
+
+    Its shape is a dict keyed by pod name -- {"crasher-abc": {...}} -- and an
+    error is the same dict type carrying an "error" key. The first version of
+    the caller tested `not isinstance(pods, dict)`, which reads every real
+    answer as an empty cluster, and its test passed because the test handed it
+    a list. Shared with preflight() so the two cannot drift apart again.
+    """
+    if isinstance(pods, dict) and pods.get("error"):
+        return False
+    return bool(pods)
+
+
 def fixtures_present(cases):
     """
     Cases whose fixture file has not been applied to this cluster.
@@ -169,10 +184,7 @@ def fixtures_present(cases):
             (doc.get("metadata") or {}).get("namespace") for doc in docs
         } - {None}:
             if namespace not in checked:
-                pods = k8s.list_pods(namespace=namespace)
-                checked[namespace] = (
-                    not isinstance(pods, dict) and bool(pods)
-                )
+                checked[namespace] = populated(k8s.list_pods(namespace=namespace))
             if not checked[namespace]:
                 missing.setdefault(needs, set()).add(namespace)
 
