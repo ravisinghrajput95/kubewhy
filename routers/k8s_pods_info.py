@@ -1171,6 +1171,14 @@ def get_pod_logs(
     return result
 
 
+# The node conditions Kubernetes itself defines as pressure, and the only ones
+# this projection is willing to call pressure. NetworkUnavailable is included
+# because a node that cannot reach the network is unusable in the same way,
+# and it is core Kubernetes rather than a provider addition.
+_PRESSURE_CONDITIONS = ("MemoryPressure", "DiskPressure", "PIDPressure",
+                        "NetworkUnavailable")
+
+
 def list_nodes():
     """
     Returns cluster nodes with their ready state, any active pressure
@@ -1192,16 +1200,35 @@ def list_nodes():
 
         # Ready is "True" when healthy; the pressure conditions invert, so
         # only surface the ones that are actually firing.
+        #
+        # Named explicitly rather than "everything True that is not Ready".
+        # Node conditions are an open set: node-problem-detector and managed
+        # platforms add their own, and they do not all mean trouble. Measured
+        # on GKE 1.35 (2026-08-22): a healthy Container-Optimized OS node
+        # carries 26 conditions, of which MemoryPressure, DiskPressure and
+        # PIDPressure are all False and `SysctlChanged` is True by design.
+        # The old rule reported every healthy GKE node as under pressure --
+        # 2 of 2 nodes, every call -- which is a fabricated node fault handed
+        # to a model that has no way to check it.
         pressures = [
-            name
-            for name, status in conditions.items()
-            if name != "Ready" and status == "True"
+            name for name in _PRESSURE_CONDITIONS if conditions.get(name) == "True"
         ]
+
+        # The rest, kept as context rather than dropped. KernelDeadlock and
+        # FrequentKubeletRestart are real problems when they fire, and a
+        # diagnosis should be able to see them -- it just must not read them
+        # as resource pressure. Anything the platform reports True and this
+        # code has no opinion about lands here.
+        other = sorted(
+            name for name, status in conditions.items()
+            if status == "True" and name != "Ready" and name not in _PRESSURE_CONDITIONS
+        )
 
         allocatable = node.status.allocatable or {}
         result[node.metadata.name] = {
             "ready": conditions.get("Ready") == "True",
             "pressure": pressures or None,
+            "conditions": other or None,
             "allocatable_cpu": allocatable.get("cpu"),
             "allocatable_memory": allocatable.get("memory"),
             "unschedulable": bool(node.spec.unschedulable),

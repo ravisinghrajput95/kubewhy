@@ -1044,6 +1044,71 @@ class TestNodes:
         api.list_node.return_value = client.V1NodeList(items=[node])
         assert k8s.list_nodes()["node-1"]["pressure"] is None
 
+    def test_a_healthy_gke_node_is_not_under_pressure(self, api):
+        """
+        Node conditions are an open set and most of them are not pressure.
+
+        These are the real conditions read off a GKE 1.35 Container-Optimized
+        OS node on 2026-08-22, trimmed to the interesting ones. A healthy node
+        carries 26 of them; MemoryPressure, DiskPressure and PIDPressure are
+        all False, and `SysctlChanged` is True by design because GKE changes
+        sysctls from the kernel defaults.
+
+        The projection used to report everything True that was not Ready, so
+        every healthy GKE node came back under pressure -- 2 of 2 nodes, on
+        every call. That is a fabricated node fault handed to a model with no
+        way to check it.
+        """
+        node = client.V1Node(
+            metadata=client.V1ObjectMeta(name="gke-node-1"),
+            spec=client.V1NodeSpec(),
+            status=client.V1NodeStatus(
+                conditions=[
+                    client.V1NodeCondition(type="SysctlChanged", status="True"),
+                    client.V1NodeCondition(type="KernelDeadlock", status="False"),
+                    client.V1NodeCondition(type="FrequentKubeletRestart", status="False"),
+                    client.V1NodeCondition(type="CorruptDockerOverlay2", status="False"),
+                    client.V1NodeCondition(type="ReadOnlyRootFileSystem", status="False"),
+                    client.V1NodeCondition(type="NetworkUnavailable", status="False"),
+                    client.V1NodeCondition(type="MemoryPressure", status="False"),
+                    client.V1NodeCondition(type="DiskPressure", status="False"),
+                    client.V1NodeCondition(type="PIDPressure", status="False"),
+                    client.V1NodeCondition(type="Ready", status="True"),
+                ],
+                allocatable={"cpu": "940m", "memory": "2866856Ki"},
+            ),
+        )
+        api.list_node.return_value = client.V1NodeList(items=[node])
+
+        result = k8s.list_nodes()["gke-node-1"]
+        assert result["ready"] is True
+        assert result["pressure"] is None
+        # Kept, not dropped: a provider condition is context a diagnosis may
+        # use, it just must not be read as resource pressure.
+        assert result["conditions"] == ["SysctlChanged"]
+
+    def test_a_provider_condition_that_is_a_real_problem_still_surfaces(self, api):
+        # The other half. KernelDeadlock firing is a genuine node fault and
+        # must not be filtered away with the informational ones -- it is
+        # reported as context rather than silently dropped.
+        node = client.V1Node(
+            metadata=client.V1ObjectMeta(name="gke-node-2"),
+            spec=client.V1NodeSpec(),
+            status=client.V1NodeStatus(
+                conditions=[
+                    client.V1NodeCondition(type="KernelDeadlock", status="True"),
+                    client.V1NodeCondition(type="MemoryPressure", status="True"),
+                    client.V1NodeCondition(type="Ready", status="True"),
+                ],
+                allocatable={},
+            ),
+        )
+        api.list_node.return_value = client.V1NodeList(items=[node])
+
+        result = k8s.list_nodes()["gke-node-2"]
+        assert result["pressure"] == ["MemoryPressure"]
+        assert result["conditions"] == ["KernelDeadlock"]
+
 
 class TestDeployments:
     def _deployment(self, desired, ready):
