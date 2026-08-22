@@ -1,0 +1,54 @@
+# Noise-reduction fixture: many pods, one fault, plus one unrelated fault.
+#
+# The claim under test is that a workload failing on every replica produces ONE
+# finding rather than one per pod, and that collapsing them does not hide an
+# unrelated incident that happens at the same time. Ten replicas is the number
+# the earlier round used, so results stay comparable.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: noise-test
+---
+# Ten replicas, one cause. Every pod exits the same way for the same reason,
+# which is what a real bad rollout looks like.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flapping-api
+  namespace: noise-test
+spec:
+  replicas: 10
+  selector:
+    matchLabels: {app: flapping-api}
+  template:
+    metadata:
+      labels: {app: flapping-api}
+    spec:
+      containers:
+        - name: api
+          image: busybox:1.36
+          command: ["sh", "-c", "echo 'FATAL: config key API_TOKEN missing' >&2; exit 1"]
+          resources:
+            requests: {cpu: "1m", memory: "8Mi"}
+---
+# The unrelated incident. Different workload, different fault class -- if
+# collapsing the ten above also swallows this, the noise reduction is hiding
+# incidents rather than grouping them, which is the failure worth catching.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lonely-worker
+  namespace: noise-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: lonely-worker}
+  template:
+    metadata:
+      labels: {app: lonely-worker}
+    spec:
+      containers:
+        - name: worker
+          image: busybox:this-tag-does-not-exist
+          resources:
+            requests: {cpu: "1m", memory: "8Mi"}
