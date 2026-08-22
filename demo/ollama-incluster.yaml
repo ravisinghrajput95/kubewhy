@@ -1,0 +1,72 @@
+# Ollama served from inside the cluster, for the in-cluster topology test.
+#
+# The portability run drove GKE's API from a laptop with the model on that
+# laptop, which validates the diagnostic engine and says nothing about the
+# deployment mode the Helm chart actually assumes -- deploy/chart/values.yaml
+# defaults model.ollamaHost to http://ollama.ollama.svc.cluster.local:11434
+# and notes that the controller does not run a model itself.
+#
+# This is that service. It is a test fixture, not a production manifest: no
+# PVC, so the model is re-pulled if the pod moves, and no authentication,
+# because it is only reachable inside a disposable cluster.
+#
+# Sizing is the whole difficulty. llama3.2 is ~2GB and runs on CPU; qwen3 is
+# 5.2GB and would need far more node than this validation can justify. Using a
+# different model means RCA quality here is NOT comparable to the qwen3
+# numbers -- this section tests whether the topology works, not whether the
+# answers match.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ollama
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: ollama
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: ollama}
+  template:
+    metadata:
+      labels: {app: ollama}
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+          env:
+            # Bind to every interface: the default is loopback, which a
+            # Service cannot reach and which fails as a connection refused
+            # that looks like the pod being unready.
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+          resources:
+            requests: {cpu: "1", memory: "3Gi"}
+            limits: {cpu: "3500m", memory: "10Gi"}
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          readinessProbe:
+            httpGet: {path: /, port: 11434}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: models
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: ollama
+spec:
+  selector: {app: ollama}
+  ports:
+    - port: 11434
+      targetPort: 11434
