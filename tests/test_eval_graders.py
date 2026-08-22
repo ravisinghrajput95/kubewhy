@@ -552,34 +552,16 @@ class TestExpectationsThatTheQuestionAlreadySatisfies:
     question does not already contain.
     """
 
-    # Still echo-satisfiable, pinned so the list cannot grow unnoticed. These
-    # were not part of the 2026-08-22 repair, which covered the two cases with
-    # recorded PASSes on a missing fixture. Each has the same mechanism:
-    #
-    #   healthy_not_reported_broken       `healthy` and `working`, from
-    #                                     `healthy-web` and "working correctly"
-    #   healthy_workload_not_substituted  `healthy`, from `healthy-web`
-    #   service_unreachable_chain         `crash`, inside `crasher-svc`
-    #
-    # The first two are harder than the pair already fixed: the question asks
-    # whether a workload named `healthy-web` is healthy, so the word cannot
-    # simply be dropped without removing the answer's natural phrasing too.
-    # Repairing them changes what the case measures and needs its own
-    # before/after, which is why they are recorded here rather than edited.
-    STILL_ECHOABLE = [
-        "healthy_not_reported_broken",
-        "healthy_workload_not_substituted",
-        "service_unreachable_chain",
-    ]
-
-    def test_the_echo_satisfiable_list_does_not_grow(self):
+    def test_no_case_can_be_passed_by_repeating_the_question(self):
+        # All five are repaired as of 2026-08-22. The list is empty and has to
+        # stay empty: a new case whose expectations its own question satisfies
+        # fails here rather than quietly scoring a pass on an echo.
         from evals.cases import CASES
 
         offenders = sorted(c["name"] for c in CASES if _echo_satisfiable(c))
-        assert offenders == sorted(self.STILL_ECHOABLE), (
-            "cases passable by repeating the question changed: "
-            f"added={set(offenders) - set(self.STILL_ECHOABLE)} "
-            f"fixed={set(self.STILL_ECHOABLE) - set(offenders)}"
+        assert offenders == [], (
+            "these cases pass on an answer that only repeats the question: "
+            f"{offenders}"
         )
 
     def test_the_two_repaired_cases_reject_a_does_not_exist_answer(self, ):

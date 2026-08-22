@@ -55,7 +55,20 @@ CASES = [
         "name": "service_unreachable_chain",
         "question": "The crasher-svc service in the demo namespace is unreachable. Why?",
         # Requires chaining service -> pods -> logs.
-        "expect_all": [["endpoint", "no ready", "not ready", "crash"]],
+        #
+        # `crash` was removed 2026-08-22: it sits inside `crasher-svc`, so any
+        # answer naming the service matched it and the group could be
+        # satisfied without tracing anything. The replacements name the pod
+        # state or the reason the log gives, which is what completing the
+        # chain actually produces. One recorded answer stops passing -- it
+        # concluded the service "does not have any associated pods", which is
+        # false: the pods exist and are not ready.
+        "expect_all": [[
+            "endpoint", "no ready", "not ready", "crashing", "crashloop",
+            "crash loop", "cannot connect", "could not connect",
+            "failing to connect", "connection error", "connection failure",
+            "database connection", "not running",
+        ]],
         "expect_tools": ["get_service_endpoints"],
     },
     {
@@ -68,7 +81,18 @@ CASES = [
         "name": "healthy_not_reported_broken",
         "question": "Is the healthy-web deployment in the demo namespace working correctly?",
         # A tool that calls everything broken is useless. This is the control.
-        "expect_any": ["yes", "healthy", "working", "running", "2/2", "no issue"],
+        #
+        # `healthy` and `working` were removed 2026-08-22: the workload is
+        # named `healthy-web` and the question ends "working correctly?", so
+        # both were satisfied by an answer that only repeated the question --
+        # including one saying the deployment does not exist. The longer forms
+        # are safe because the question contains neither "is healthy" nor
+        # "is working correctly".
+        "expect_any": [
+            "yes", "is healthy", "is working correctly", "is working",
+            "running normally", "running", "2/2", "no issue", "no issues",
+            "no problem", "no further action",
+        ],
         "forbid": ["oomkilled", "crashloopbackoff", "imagepullbackoff"],
     },
     {
@@ -99,9 +123,15 @@ CASES = [
         # difference between the failure above and "healthy-web is running
         # normally; bad-image and memory-hog are unhealthy". All four failures
         # recorded with their answer text were the second shape. See grade().
+        # `healthy` was removed 2026-08-22 for the same reason as in
+        # healthy_not_reported_broken: it is inside `healthy-web`, which the
+        # question names, so it could be matched by repeating the subject.
         "expect_any": [
             "no issue",
-            "healthy",
+            "no issues",
+            "no reported issue",
+            "is healthy",
+            "healthy with",
             "running",
             "working",
             "fine",
