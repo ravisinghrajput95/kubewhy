@@ -261,22 +261,37 @@ Read README.md and CONTRIBUTING.md first.
    anywhere in the text, the same grading defect already found here once.
    Measured and deliberately not fixed: separating "repeated the injection
    while flagging it" from "obeyed it" is a design decision, not a typo.
-5. **Two eval cases pass by repeating the question back, and four more could.**
-   Found 2026-08-22 by reading the void set. Both cases that scored PASS 3/3
-   on a cluster missing their fixtures did it on an answer saying the workload
-   does not exist: `healthy_workload_with_no_logs` matched `fine`, inside
-   `quiet-and-fine`, and `unhealthy_question_about_a_healthy_pod`'s only
-   expectation IS the pod's name. One echoed term carries a whole group --
-   `expect_any` passes on one, and each `expect_all` group passes on one -- so
-   `healthy_not_reported_broken`, `healthy_workload_not_substituted`,
-   `image_pull_failure` and `service_unreachable_chain` are affected too.
+5. ~~**Two eval cases pass by repeating the question back.**~~ **Repaired
+   2026-08-22, verified by replay.** `healthy_workload_with_no_logs` now asks
+   for an asserted verdict instead of `fine` (which matched inside
+   `quiet-and-fine`), and `unhealthy_question_about_a_healthy_pod` keeps the
+   pod's name as one group and adds the verdict as another. Bare `healthy` is
+   deliberately not one of the second's verdict terms: it is a substring of
+   `unhealthy` and would be satisfied by the opposite answer.
 
-   **Pinned, not repaired**, in `tests/test_eval_graders.py`: the offender
-   list is asserted exactly so the next one fails CI, and a second test drives
-   the real grader with the two recorded answers. Repairing an expectation
-   changes what the case measures and breaks comparison with every published
-   set, including the README table -- that is a decision, not a fix. If it is
-   taken, the assertion that those two answers pass is what flips.
+   Every recorded answer either case has -- 40 across nine sets -- re-graded
+   through `run_eval.grade()`: **7 flip, all in the right direction.** Six are
+   the void-set answers saying the workload does not exist. The seventh, in
+   `after-n2`, described `missing-configmap-key` and `missing-secret-key`
+   instead of the pod it was asked about, which is the exact failure that case
+   was written for. No legitimate answer changes verdict, so `widened-n3`
+   stays 47/48, `think-OFF-16cases-n3` stays 46/48, and the README table is
+   untouched (`baseline-n10-2` predates both cases). `after-n2` would now read
+   30/32.
+
+   **Three cases are still echo-satisfiable and are pinned, not repaired:**
+   `healthy_not_reported_broken` and `healthy_workload_not_substituted`
+   (`healthy`, from `healthy-web`) and `service_unreachable_chain` (`crash`,
+   inside `crasher-svc`). These are harder than the pair above -- the question
+   asks whether a workload named `healthy-web` is healthy, so the word cannot
+   be dropped without removing the answer's natural phrasing -- and repairing
+   them needs its own before/after replay. `tests/test_eval_graders.py`
+   asserts that list exactly, so a fourth fails CI.
+
+   The criterion there is **every** expectation group being echoable, not any
+   of them, because requiring the answer to name its subject is legitimate
+   beside a group the question does not contain. Under the accurate rule
+   `image_pull_failure` was never an offender.
 
 4. **Controller and noise evidence is two rounds old.** Both passed when last
    measured (3s detect, 52.5s RCA; 10 failing pods -> 1 finding).
