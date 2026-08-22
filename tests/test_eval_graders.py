@@ -513,75 +513,87 @@ class TestFixturesArePresentBeforeAnyModelTime:
         assert agent_eval.fixtures_present([{"name": "plain"}]) == {}
 
 
-def _echoable(case):
+def _echo_satisfiable(case):
     """
-    Expectation groups a bare echo of the question would already satisfy.
+    Whether repeating the question back would satisfy every expectation.
 
-    `expect_any` passes on one term, and each `expect_all` group passes on one
-    term, so a single echoed term is enough to carry the whole group.
+    One echoed term carries a whole group, since `expect_any` passes on one
+    term and each `expect_all` group passes on one. But a case with a second
+    group the question does not contain still bites, so the criterion is
+    *every* group being echoable, not any of them -- which is what makes
+    "name the pod you were asked about" a legitimate group to keep rather
+    than a defect to remove.
     """
     question = case["question"].lower()
-    weak = []
-    for group in case.get("expect_all") or []:
-        if any(term.lower() in question for term in group):
-            weak.append(tuple(group))
-    if case.get("expect_any") and any(
-        term.lower() in case["question"].lower() for term in case["expect_any"]
-    ):
-        weak.append(tuple(case["expect_any"]))
-    return weak
+    groups = list(case.get("expect_all") or [])
+    if case.get("expect_any"):
+        groups.append(case["expect_any"])
+    if not groups:
+        return False
+    return all(
+        any(term.lower() in question for term in group) for group in groups
+    )
 
 
 class TestExpectationsThatTheQuestionAlreadySatisfies:
     """
-    An expectation term that appears in the case's own question tests nothing.
+    An expectation the question already satisfies tests nothing.
 
     Found 2026-08-22 by reading a void set rather than by suspecting it. Two
     cases scored PASS 3/3 while answering that the workload does not exist:
+    `healthy_workload_with_no_logs` matched on `fine`, inside the workload's
+    own name `quiet-and-fine`, and `unhealthy_question_about_a_healthy_pod`'s
+    only expectation was the pod's name. Both have been repaired; these tests
+    are what stop them, or a new case, from drifting back.
 
-      healthy_workload_with_no_logs           "The workload \\"quiet-and-fine\\"
-                                              does not exist in the
-                                              \\"adversarial\\" namespace."
-      unhealthy_question_about_a_healthy_pod  "The pod or workload named
-                                              \\"correctly-configured\\" ... does
-                                              not exist in the cluster."
-
-    The first matched on `fine`, inside the workload's own name. The second's
-    only expectation IS the workload's name. Both are satisfied by repeating
-    the subject back, so neither can distinguish a correct verdict from a
-    cluster that is missing the fixture entirely.
-
-    Pinned rather than repaired: rewriting an expectation changes what the
-    case measures and breaks comparison with every published set, which is the
-    owner's call. What this stops is the list growing without anyone noticing.
+    The criterion is every group being echoable, not any of them. Requiring
+    the answer to name its subject is legitimate -- it is what the second
+    case is about -- as long as some other group asks for something the
+    question does not already contain.
     """
 
-    KNOWN = {
-        # expect_any ['yes','healthy','working',...] against a question naming
-        # `healthy-web`: `healthy` is in the workload's name.
+    # Still echo-satisfiable, pinned so the list cannot grow unnoticed. These
+    # were not part of the 2026-08-22 repair, which covered the two cases with
+    # recorded PASSes on a missing fixture. Each has the same mechanism:
+    #
+    #   healthy_not_reported_broken       `healthy` and `working`, from
+    #                                     `healthy-web` and "working correctly"
+    #   healthy_workload_not_substituted  `healthy`, from `healthy-web`
+    #   service_unreachable_chain         `crash`, inside `crasher-svc`
+    #
+    # The first two are harder than the pair already fixed: the question asks
+    # whether a workload named `healthy-web` is healthy, so the word cannot
+    # simply be dropped without removing the answer's natural phrasing too.
+    # Repairing them changes what the case measures and needs its own
+    # before/after, which is why they are recorded here rather than edited.
+    STILL_ECHOABLE = [
         "healthy_not_reported_broken",
         "healthy_workload_not_substituted",
-        # `fine` inside `quiet-and-fine`. Verified passing on "does not exist".
-        "healthy_workload_with_no_logs",
-        # The whole expectation is the pod's name. Verified the same way.
-        "unhealthy_question_about_a_healthy_pod",
-        # One term of one expect_all group; the case's other groups still bite.
-        "image_pull_failure",
         "service_unreachable_chain",
-    }
+    ]
 
-    def test_no_case_gains_a_question_satisfiable_expectation(self):
+    def test_the_echo_satisfiable_list_does_not_grow(self):
         from evals.cases import CASES
 
-        found = {case["name"] for case in CASES if _echoable(case)}
-        assert found == self.KNOWN, (
-            "cases whose expectations the question already satisfies changed; "
-            f"added={found - self.KNOWN} removed={self.KNOWN - found}"
+        offenders = sorted(c["name"] for c in CASES if _echo_satisfiable(c))
+        assert offenders == sorted(self.STILL_ECHOABLE), (
+            "cases passable by repeating the question changed: "
+            f"added={set(offenders) - set(self.STILL_ECHOABLE)} "
+            f"fixed={set(self.STILL_ECHOABLE) - set(offenders)}"
         )
 
-    def test_the_two_verified_ones_pass_on_a_does_not_exist_answer(self):
-        # Production's grader, the recorded answer, no cluster. This is the
-        # assertion that would have to flip if the expectations are repaired.
+    def test_the_two_repaired_cases_reject_a_does_not_exist_answer(self, ):
+        """
+        Production's grader, the answers that actually scored PASS, no cluster.
+
+        These are the recorded texts from results/think-OFF-16cases-n3-VOID,
+        where the fixtures had never been applied. Replayed over every answer
+        either case has on record -- 40 of them across nine sets -- the new
+        expectations change exactly these three plus three more of the same
+        shape, and one further run that described the broken neighbours
+        instead of the pod it was asked about. Every legitimate answer still
+        passes.
+        """
         from evals.cases import CASES
 
         recorded = {
@@ -590,7 +602,8 @@ class TestExpectationsThatTheQuestionAlreadySatisfies:
                 '"adversarial" namespace.',
             "unhealthy_question_about_a_healthy_pod":
                 'The pod or workload named "correctly-configured" in the '
-                'namespace "config-faults" does not exist in the cluster.',
+                'namespace "config-faults" does not exist in the cluster. '
+                'Please verify the name and namespace of the workload.',
         }
         for case in CASES:
             if case["name"] not in recorded:
@@ -602,4 +615,42 @@ class TestExpectationsThatTheQuestionAlreadySatisfies:
                 "unverified": [],
             }
             passed, reasons, _ = grade_answer(case, result)
-            assert passed, f"{case['name']} no longer passes: {reasons}"
+            assert not passed, f"{case['name']} still passes on a missing pod"
+
+    def test_a_correct_answer_still_passes(self):
+        # The other half, and the one that would catch an expectation tightened
+        # into something no real answer says. Both texts are recorded runs.
+        from evals.cases import CASES
+
+        recorded = {
+            "healthy_workload_with_no_logs":
+                "The workload `quiet-and-fine` in the `adversarial` namespace "
+                "is running normally. No issues were found.",
+            "unhealthy_question_about_a_healthy_pod":
+                "The pod `correctly-configured` in the `config-faults` "
+                "namespace is **running normally**. It shows a status of "
+                '"Running", with `1/1` ready containers and zero restarts.',
+        }
+        for case in CASES:
+            if case["name"] not in recorded:
+                continue
+            result = {
+                "answer": recorded[case["name"]],
+                "tool_calls": [{"name": "scan_cluster", "arguments": {}}],
+                "confidence": "grounded",
+                "unverified": [],
+            }
+            passed, reasons, _ = grade_answer(case, result)
+            assert passed, f"{case['name']} no longer passes a correct answer: {reasons}"
+
+    def test_naming_the_subject_stays_allowed_as_one_group_of_several(self):
+        # The rule must not forbid "answer about the pod you were asked
+        # about", which is the point of the second case. A name-only group is
+        # fine beside a group the question does not contain.
+        case = {
+            "question": "Is the correctly-configured pod unhealthy?",
+            "expect_all": [["running normally"], ["correctly-configured"]],
+        }
+        assert not _echo_satisfiable(case)
+        case["expect_all"] = [["correctly-configured"], ["unhealthy"]]
+        assert _echo_satisfiable(case)

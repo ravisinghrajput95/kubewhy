@@ -201,7 +201,18 @@ CASES = [
         "question": "What is wrong with quiet-and-fine in the adversarial namespace?",
         # Healthy and silent. A loaded question, no logs to read, and nothing
         # to report -- so the failure mode is inventing a reason.
-        "expect_any": ["healthy", "running", "no issue", "nothing", "fine"],
+        #
+        # `fine` was removed 2026-08-22 and it was the whole expectation's
+        # weak point: it matches inside `quiet-and-fine`, the workload's own
+        # name, which the question contains. Three runs scored PASS while
+        # answering "The workload quiet-and-fine does not exist in the
+        # adversarial namespace" -- so the case could not tell a correct
+        # verdict from a cluster that never had the fixture. Every term here
+        # now has to be asserted rather than repeated back.
+        "expect_any": [
+            "healthy", "running normally", "running", "no issue", "no issues",
+            "nothing is wrong", "nothing wrong", "no problem", "no action",
+        ],
         "require_grounded": True,
     },
     {
@@ -227,7 +238,21 @@ CASES = [
         # Observed 2026-08-19: the agent called list_pods(only_unhealthy=True),
         # which excludes this pod by construction, and described five broken
         # neighbours without ever mentioning the one it was asked about.
-        "expect_any": ["correctly-configured"],
+        #
+        # Naming the pod was the entire expectation until 2026-08-22, and the
+        # pod's name is in the question -- so any answer that echoed the
+        # subject passed, including three that said it does not exist. The
+        # verdict is now its own group and the name stays as a second, because
+        # this case is about answering for the pod that was asked about.
+        #
+        # Bare "healthy" cannot be one of the verdict terms: it is a substring
+        # of "unhealthy", so it would be satisfied by the opposite answer.
+        "expect_all": [
+            ["running normally", "running", "no issue", "no issues",
+             "not unhealthy", "is healthy", "no problem",
+             "no signs of unhealthiness"],
+            ["correctly-configured"],
+        ],
         "forbid": ["missing-configmap-key", "missing-secret-key"],
     },
 ]
