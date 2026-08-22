@@ -1,0 +1,463 @@
+{
+  "context": "gke_project-0c628a24-2e5e-4878-861_asia-south1-a_kubewhy-gke-test",
+  "version": "{\n  \"clientVersion\": {\n    \"major\": \"1\",\n    \"minor\": \"36\",\n    \"gitVersion\": \"v1.36.2\",\n    \"gitCommit\": \"24e2b02af5543d7910c2bb074c7264df5a8f0467\",\n    \"gitTreeState\": \"clean\",\n    \"buildDate\": \"2026-06-11T18:09:07Z\",\n    \"goVersion\": \"go1.26.4\",\n    \"compiler\": \"gc\",\n    \"platform\": \"darwin/arm64\"\n  },\n  \"kustomizeVersion\": \"v5.8.1\",\n  \"serverVersion\": {\n    \"major\": \"1\",\n    \"minor\": \"35\",\n    \"emulationMajor\": \"1\",\n    \"emulationMinor\": \"35\",\n    \"minCompatibilityMajor\": \"1\",\n    \"minCompatibilityMinor\": \"34\",\n    \"gitVersion\": \"v1.35.6-gke.1641000\",\n    \"gitCommit\": \"d71a1f2ba71e60d8670eeabc234e25946e6e6c06\",\n    \"gitTreeState\": \"clean\",\n    \"buildDate\": \"2026-06-24T16:31:56Z\",\n    \"goVersion\": \"go1.25.11 X:boringcrypto\",\n    \"compiler\": \"gc\",\n    \"platform\": \"linux/amd64\"\n  }\n}",
+  "nodes": "gke-kubewhy-gke-test-default-pool-a8efc314-1pq6|v1.35.6-gke.1641000|Container-Optimized OS from Google|amd64|containerd://2.1.7\ngke-kubewhy-gke-test-default-pool-a8efc314-vthx|v1.35.6-gke.1641000|Container-Optimized OS from Google|amd64|containerd://2.1.7",
+  "scenarios": {
+    "oomkilled": {
+      "namespace": "demo",
+      "selector": "app=memory-hog",
+      "expected": "status.terminated.reason == OOMKilled",
+      "pods": [
+        {
+          "name": "memory-hog-845bb5bcff-qjkf6",
+          "phase": "Running",
+          "containers": [
+            {
+              "container": "hog",
+              "ready": false,
+              "restarts": 6,
+              "waiting": "CrashLoopBackOff",
+              "terminated": null,
+              "exit_code": null,
+              "last_terminated": "OOMKilled",
+              "last_exit_code": 137
+            }
+          ],
+          "events": [
+            [
+              "Scheduled",
+              "Successfully assigned demo/memory-hog-845bb5bcff-qjkf6 to gke-kubewhy-gke-test-default-pool-a8efc314-vthx"
+            ],
+            [
+              "Pulling",
+              "Pulling image \"polinux/stress\""
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"polinux/stress\" in 8.516s (9.472s including waiting). Image size: 4041495 bytes."
+            ],
+            [
+              "Created",
+              "Container created"
+            ],
+            [
+              "Started",
+              "Container started"
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"polinux/stress\" in 324ms (324ms including waiting). Image size: 4041495 bytes."
+            ],
+            [
+              "BackOff",
+              "Back-off restarting failed container hog in pod memory-hog-845bb5bcff-qjkf6_demo(bf802cab-b22b-4027-994e-8f01a1487f02)"
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"polinux/stress\" in 373ms (374ms including waiting). Image size: 4041495 bytes."
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"polinux/stress\" in 342ms (342ms including waiting). Image size: 4041495 bytes."
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"polinux/stress\" in 290ms (290ms including waiting). Image size: 4041495 bytes."
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"polinux/stress\" in 443ms (443ms including waiting). Image size: 4041495 bytes."
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"polinux/stress\" in 311ms (311ms including waiting). Image size: 4041495 bytes."
+            ]
+          ]
+        }
+      ],
+      "reproduced": true
+    },
+    "crashloopbackoff": {
+      "namespace": "demo",
+      "selector": "app=crasher",
+      "expected": "status.waiting.reason == CrashLoopBackOff",
+      "pods": [
+        {
+          "name": "crasher-85cd6cb9d7-vr99p",
+          "phase": "Running",
+          "containers": [
+            {
+              "container": "crasher",
+              "ready": false,
+              "restarts": 6,
+              "waiting": "CrashLoopBackOff",
+              "terminated": null,
+              "exit_code": null,
+              "last_terminated": "Error",
+              "last_exit_code": 1
+            }
+          ],
+          "events": [
+            [
+              "Scheduled",
+              "Successfully assigned demo/crasher-85cd6cb9d7-vr99p to gke-kubewhy-gke-test-default-pool-a8efc314-vthx"
+            ],
+            [
+              "Pulling",
+              "Pulling image \"busybox:1.36\""
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"busybox:1.36\" in 2.197s (2.198s including waiting). Image size: 2217006 bytes."
+            ],
+            [
+              "Created",
+              "Container created"
+            ],
+            [
+              "Started",
+              "Container started"
+            ],
+            [
+              "Pulled",
+              "Container image \"busybox:1.36\" already present on machine and can be accessed by the pod"
+            ],
+            [
+              "BackOff",
+              "Back-off restarting failed container crasher in pod crasher-85cd6cb9d7-vr99p_demo(2270f4ef-8c2c-484e-951f-197073b715b9)"
+            ]
+          ]
+        }
+      ],
+      "reproduced": true
+    },
+    "imagepullbackoff": {
+      "namespace": "demo",
+      "selector": "app=bad-image",
+      "expected": "status.waiting.reason in ImagePullBackOff/ErrImagePull",
+      "pods": [
+        {
+          "name": "bad-image-5f47659fcb-wvgxh",
+          "phase": "Pending",
+          "containers": [
+            {
+              "container": "bad-image",
+              "ready": false,
+              "restarts": 0,
+              "waiting": "ImagePullBackOff",
+              "terminated": null,
+              "exit_code": null,
+              "last_terminated": null,
+              "last_exit_code": null
+            }
+          ],
+          "events": [
+            [
+              "Scheduled",
+              "Successfully assigned demo/bad-image-5f47659fcb-wvgxh to gke-kubewhy-gke-test-default-pool-a8efc314-vthx"
+            ],
+            [
+              "Pulling",
+              "Pulling image \"nginx:this-tag-does-not-exist\""
+            ],
+            [
+              "Failed",
+              "Failed to pull image \"nginx:this-tag-does-not-exist\": rpc error: code = NotFound desc = failed to pull and unpack image \"docker.io/library/nginx:this-tag-does-not-exist\": failed to resolve reference \"docker.io/library/nginx:this-tag-does-not-exist\": docker.io/library/nginx:this-tag-does-not-exist: not found"
+            ],
+            [
+              "Failed",
+              "Error: ErrImagePull"
+            ],
+            [
+              "BackOff",
+              "Back-off pulling image \"nginx:this-tag-does-not-exist\""
+            ],
+            [
+              "Failed",
+              "Error: ImagePullBackOff"
+            ]
+          ]
+        }
+      ],
+      "reproduced": true
+    },
+    "failedmount": {
+      "namespace": "config-faults",
+      "selector": "pod/missing-configmap-volume",
+      "expected": "event reason FailedMount",
+      "pods": [
+        {
+          "name": "missing-configmap-volume",
+          "phase": "Pending",
+          "containers": [
+            {
+              "container": "app",
+              "ready": false,
+              "restarts": 0,
+              "waiting": "ContainerCreating",
+              "terminated": null,
+              "exit_code": null,
+              "last_terminated": null,
+              "last_exit_code": null
+            }
+          ],
+          "events": [
+            [
+              "Scheduled",
+              "Successfully assigned config-faults/missing-configmap-volume to gke-kubewhy-gke-test-default-pool-a8efc314-vthx"
+            ],
+            [
+              "FailedMount",
+              "MountVolume.SetUp failed for volume \"conf\" : configmap \"nginx-conf\" not found"
+            ]
+          ]
+        }
+      ],
+      "reproduced": true
+    },
+    "readiness_failure": {
+      "namespace": "demo",
+      "selector": "app=never-ready",
+      "expected": "ready 0/1 while phase Running",
+      "pods": [
+        {
+          "name": "never-ready-7d64894956-ktfcc",
+          "phase": "Running",
+          "containers": [
+            {
+              "container": "web",
+              "ready": false,
+              "restarts": 0,
+              "waiting": null,
+              "terminated": null,
+              "exit_code": null,
+              "last_terminated": null,
+              "last_exit_code": null
+            }
+          ],
+          "events": [
+            [
+              "Scheduled",
+              "Successfully assigned demo/never-ready-7d64894956-ktfcc to gke-kubewhy-gke-test-default-pool-a8efc314-vthx"
+            ],
+            [
+              "Pulled",
+              "Container image \"busybox:1.36\" already present on machine and can be accessed by the pod"
+            ],
+            [
+              "Created",
+              "Container created"
+            ],
+            [
+              "Started",
+              "Container started"
+            ],
+            [
+              "Unhealthy",
+              "Readiness probe failed: Get \"http://10.0.0.21:8080/healthz\": dial tcp 10.0.0.21:8080: connect: connection refused"
+            ]
+          ]
+        }
+      ],
+      "reproduced": true
+    },
+    "liveness_failure": {
+      "namespace": "demo",
+      "selector": "app=slow-starter",
+      "expected": "restarts > 0 with probe kill",
+      "pods": [
+        {
+          "name": "slow-starter-79b466ff78-d95hh",
+          "phase": "Running",
+          "containers": [
+            {
+              "container": "web",
+              "ready": true,
+              "restarts": 7,
+              "waiting": null,
+              "terminated": null,
+              "exit_code": null,
+              "last_terminated": "Error",
+              "last_exit_code": 137
+            }
+          ],
+          "events": [
+            [
+              "Scheduled",
+              "Successfully assigned demo/slow-starter-79b466ff78-d95hh to gke-kubewhy-gke-test-default-pool-a8efc314-vthx"
+            ],
+            [
+              "Pulled",
+              "Container image \"busybox:1.36\" already present on machine and can be accessed by the pod"
+            ],
+            [
+              "Created",
+              "Container created"
+            ],
+            [
+              "Started",
+              "Container started"
+            ],
+            [
+              "Unhealthy",
+              "Liveness probe failed: dial tcp 10.0.0.22:8080: connect: connection refused"
+            ],
+            [
+              "Killing",
+              "Container web failed liveness probe, will be restarted"
+            ],
+            [
+              "BackOff",
+              "Back-off restarting failed container web in pod slow-starter-79b466ff78-d95hh_demo(996d241c-7700-4d1c-9bac-319a80e128b3)"
+            ]
+          ]
+        }
+      ],
+      "reproduced": true
+    },
+    "healthy": {
+      "namespace": "demo",
+      "selector": "app=healthy-web",
+      "expected": "all containers ready, no restarts",
+      "pods": [
+        {
+          "name": "healthy-web-6d966f94cf-rfx4w",
+          "phase": "Running",
+          "containers": [
+            {
+              "container": "web",
+              "ready": true,
+              "restarts": 0,
+              "waiting": null,
+              "terminated": null,
+              "exit_code": null,
+              "last_terminated": null,
+              "last_exit_code": null
+            }
+          ],
+          "events": [
+            [
+              "Scheduled",
+              "Successfully assigned demo/healthy-web-6d966f94cf-rfx4w to gke-kubewhy-gke-test-default-pool-a8efc314-vthx"
+            ],
+            [
+              "Pulling",
+              "Pulling image \"nginx:1.27-alpine\""
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"nginx:1.27-alpine\" in 7.292s (10.147s including waiting). Image size: 20984244 bytes."
+            ],
+            [
+              "Created",
+              "Container created"
+            ],
+            [
+              "Started",
+              "Container started"
+            ]
+          ]
+        },
+        {
+          "name": "healthy-web-6d966f94cf-vkcxm",
+          "phase": "Running",
+          "containers": [
+            {
+              "container": "web",
+              "ready": true,
+              "restarts": 0,
+              "waiting": null,
+              "terminated": null,
+              "exit_code": null,
+              "last_terminated": null,
+              "last_exit_code": null
+            }
+          ],
+          "events": [
+            [
+              "Scheduled",
+              "Successfully assigned demo/healthy-web-6d966f94cf-vkcxm to gke-kubewhy-gke-test-default-pool-a8efc314-vthx"
+            ],
+            [
+              "Pulling",
+              "Pulling image \"nginx:1.27-alpine\""
+            ],
+            [
+              "Pulled",
+              "Successfully pulled image \"nginx:1.27-alpine\" in 911ms (9.924s including waiting). Image size: 20984244 bytes."
+            ],
+            [
+              "Created",
+              "Container created"
+            ],
+            [
+              "Started",
+              "Container started"
+            ]
+          ]
+        }
+      ],
+      "reproduced": true
+    },
+    "healthy_quiet": {
+      "namespace": "adversarial",
+      "selector": "app=quiet-and-fine",
+      "expected": "all containers ready, no restarts",
+      "pods": [
+        {
+          "name": "quiet-and-fine-7849d5c6d7-2v8gm",
+          "phase": "Running",
+          "containers": [
+            {
+              "container": "app",
+              "ready": true,
+              "restarts": 0,
+              "waiting": null,
+              "terminated": null,
+              "exit_code": null,
+              "last_terminated": null,
+              "last_exit_code": null
+            }
+          ],
+          "events": [
+            [
+              "Scheduled",
+              "Successfully assigned adversarial/quiet-and-fine-7849d5c6d7-2v8gm to gke-kubewhy-gke-test-default-pool-a8efc314-vthx"
+            ],
+            [
+              "Pulled",
+              "Container image \"busybox:1.36\" already present on machine and can be accessed by the pod"
+            ],
+            [
+              "Created",
+              "Container created"
+            ],
+            [
+              "Started",
+              "Container started"
+            ]
+          ]
+        }
+      ],
+      "reproduced": true
+    },
+    "service_no_endpoints": {
+      "namespace": "demo",
+      "service": "typo-svc",
+      "expected": "selector matches no pods",
+      "endpointslices": 1,
+      "addresses": 0,
+      "ready": 0,
+      "reproduced": true
+    },
+    "service_unready_backends": {
+      "namespace": "demo",
+      "service": "crasher-svc",
+      "expected": "backends exist but none ready",
+      "endpointslices": 1,
+      "addresses": 1,
+      "ready": 0,
+      "reproduced": true
+    }
+  }
+}
