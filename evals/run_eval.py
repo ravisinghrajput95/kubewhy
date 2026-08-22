@@ -189,7 +189,8 @@ def main():
 
     print(
         f"model={args.model}  cases={len(cases)}  repeat={args.repeat}  "
-        f"context={context}  demo pods={pods}\n"
+        f"context={context}  demo pods={pods}  "
+        f"think={'on' if agent.THINK else 'off'}\n"
     )
 
     total_passes = total_runs = 0
@@ -265,6 +266,13 @@ def main():
                 # the record is the unit anyone reads a year later, and it is
                 # a cached lookup.
                 "context": k8s.active_context(),
+                # Which arm this is. TRIAGE_THINK is ambient state read at
+                # import time, exactly like current-context was before the
+                # 2026-08-17 mix-up, and a set that does not record it cannot
+                # say afterwards which arm it measured. The thinking-off
+                # comparison has one set of three cases per arm and rests
+                # entirely on remembering which shell exported what.
+                "think": agent.THINK,
                 "passed": bool(ok),
                 "seconds": round(time.time() - started, 1),
                 "confidence": result.get("confidence"),
