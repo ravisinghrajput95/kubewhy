@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import agent
+import backends
 import grounding
 
 
@@ -40,16 +41,31 @@ def reply(content=None, calls=None):
 @contextlib.contextmanager
 def mock_chat(**kwargs):
     """
-    Patch the ollama client and yield its .chat mock.
+    Patch the model client and yield its .chat mock.
 
     The agent builds a Client per call so it can set a timeout, so patching
     ollama.chat directly would silently miss and hit a real model -- which is
     exactly the failure this indirection prevents.
+
+    The target moved to `backends.ollama.Client` on 2026-08-22 when the
+    provider went behind a seam. `patch` raises on a missing attribute, so the
+    move failed loudly rather than quietly un-mocking the suite -- but a
+    future move might not, if some other `ollama` name happens to exist. Hence
+    the assertion below: a context that yields without the client ever being
+    built has not mocked anything, and every test in this file would then be
+    asserting against a real model or an error from trying to reach one.
     """
     client = MagicMock()
     client.chat = MagicMock(**kwargs)
-    with patch("agent.ollama.Client", return_value=client):
+    with patch("backends.ollama.Client", return_value=client) as constructor:
+        # Reset the cached backend: a previous test may have resolved one
+        # against a different patch, and the loop holds it for the process.
+        agent._BACKEND = None
         yield client.chat
+        assert constructor.called, (
+            "the model client was never constructed -- mock_chat patched "
+            "something the agent does not call, so this test proved nothing"
+        )
 
 
 class TestToolRegistry:
@@ -236,7 +252,7 @@ class TestKeepAlive:
     """
 
     def test_forwards_the_configured_keep_alive(self):
-        with patch.object(agent, "KEEP_ALIVE", "24h"):
+        with patch.object(backends, "KEEP_ALIVE", "24h"):
             with mock_chat(return_value=reply(content="x")) as chat:
                 agent.ask("q")
 
@@ -244,7 +260,7 @@ class TestKeepAlive:
 
     def test_unset_sends_none_so_the_server_default_still_applies(self):
         """None is dropped from the body, so this is not a behaviour change."""
-        with patch.object(agent, "KEEP_ALIVE", None):
+        with patch.object(backends, "KEEP_ALIVE", None):
             with mock_chat(return_value=reply(content="x")) as chat:
                 agent.ask("q")
 
@@ -255,7 +271,7 @@ class TestKeepAlive:
         import ollama as ollama_mod
 
         error = ollama_mod.ResponseError("llama3.2 does not support thinking")
-        with patch.object(agent, "KEEP_ALIVE", "24h"):
+        with patch.object(backends, "KEEP_ALIVE", "24h"):
             with mock_chat(side_effect=[error, reply(content="ok")]) as chat:
                 agent.ask("q", model="llama3.2")
 

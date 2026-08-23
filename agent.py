@@ -17,7 +17,7 @@ import re
 import sys
 import time
 
-import ollama
+import backends
 
 import grounding
 import observability
@@ -44,27 +44,13 @@ from routers.k8s_pods_info import (
 # point back at the host, e.g. http://host.docker.internal:11434
 MODEL = os.getenv("TRIAGE_MODEL", "qwen3")
 
-# A hung model would otherwise block the loop forever, with the caller holding
-# an HTTP request open. Generous, because a cold model load plus a deep chain
-# is legitimately slow.
-TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))
-
-# How long Ollama holds the weights in memory after a request. This is a
-# SERVER-side setting, and the client library never reads it -- so the command
-# CONTRIBUTING has documented for two months,
-#
-#     OLLAMA_KEEP_ALIVE=24h python evals/run_eval.py
-#
-# set a variable that nothing on the path read. Measured: unload the model,
-# run one chat through this client with that variable exported, and the model
-# comes back with an expiry five minutes out, the server default. Every
-# latency figure this project has published was taken under a five-minute
-# unload window by a person who believed they had disabled unloading.
-#
-# Forwarding it here makes the documented command true without requiring a
-# restart of somebody's Ollama.app. None is excluded from the request body, so
-# leaving it unset is byte-identical to not sending the field at all.
-KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE") or None
+# TIMEOUT and KEEP_ALIVE moved to backends.py on 2026-08-22, with the provider
+# they belong to -- both are named for Ollama and neither means anything to a
+# hosted API. They are deliberately NOT re-exported here: a module attribute
+# that no longer reaches the request is worse than a missing one, because
+# patching it in a test goes green while controlling nothing. That is exactly
+# how it surfaced -- two keep-alive tests kept patching agent.KEEP_ALIVE and
+# started asserting against a value the request never saw.
 
 # Thinking mode, on by default. Exposed so a benchmark can measure the
 # trade-off rather than argue about it: qwen3's reasoning tokens are where
@@ -154,27 +140,34 @@ say it plainly; if you are reasoning past what the tools showed, mark it --
 measurement is the one thing a reader cannot recover from."""
 
 
+_BACKEND = None
+
+
+def _backend():
+    """The configured backend, resolved once."""
+    global _BACKEND
+    if _BACKEND is None:
+        _BACKEND = backends.get()
+    return _BACKEND
+
+
 def _chat(model, messages, think):
     """
-    One model call, degrading gracefully when the model has no thinking mode.
+    One model call, through whichever backend is configured.
 
-    Only some models support it -- llama3.2 rejects the request outright with
-    a 400 -- so rather than making thinking a hard requirement, fall back and
-    let the caller decide whether the answers are good enough.
+    The provider lives in backends.py: it makes the call, normalises the reply
+    and owns the wire shape of messages, because providers disagree there in
+    ways this loop must not care about. Ollama remains the default, and
+    changing that default would change what this project claims about your
+    data -- see the module docstring there.
+
+    Returns (reply, think_actually_used). The second value is what the
+    provider did rather than what was asked for: a model with no thinking mode
+    answers without one, and a run that records the request instead of the
+    outcome cannot say which arm it measured.
     """
-    client = ollama.Client(timeout=TIMEOUT)
-    try:
-        return client.chat(
-            model=model, messages=messages, tools=list(TOOLS.values()), think=think,
-            keep_alive=KEEP_ALIVE,
-        ), think
-    except ollama.ResponseError as exc:
-        if think and "does not support thinking" in str(exc):
-            return client.chat(
-                model=model, messages=messages, tools=list(TOOLS.values()), think=False,
-                keep_alive=KEEP_ALIVE,
-            ), False
-        raise
+    reply = _backend().chat(model, messages, _backend().tools(TOOLS), think)
+    return reply, reply.think_used
 
 
 # Argument values that are a model describing an argument rather than supplying
@@ -836,17 +829,18 @@ def stream(question, model=MODEL, think=None, prefetched=None):
 
     for round_index in range(MAX_ROUNDS):
         began = time.perf_counter()
-        response, think = _chat(model, messages, think)
+        reply, think = _chat(model, messages, think)
         this_round = (time.perf_counter() - began) * 1000
         model_ms += this_round
         round_ms.append(round(this_round, 1))
 
-        message = response.message
-        messages.append(message)
+        # The provider's own assistant object where it has one: rebuilding it
+        # as a dict drops fields the server round-trips.
+        messages.append(_backend().assistant_message(reply))
 
-        calls = message.tool_calls
+        calls = reply.tool_calls
         if not calls:
-            answer = (message.content or "").strip()
+            answer = (reply.content or "").strip()
 
             # A run that ends by naming a tool it never called has stopped one
             # step short of the thing it was asked for. Send it back once,
@@ -1005,8 +999,8 @@ def stream(question, model=MODEL, think=None, prefetched=None):
             return
 
         for call in calls:
-            name = call.function.name
-            arguments = dict(call.function.arguments or {})
+            name = call.name
+            arguments = dict(call.arguments)
 
             # Hold the call to the target before it runs. A call that can carry
             # the scope is rewritten; one that names a different entity
@@ -1051,9 +1045,9 @@ def stream(question, model=MODEL, think=None, prefetched=None):
                     "result_chars": len(output),
                 },
             )
-            messages.append(
-                {"role": "tool", "tool_name": name, "content": output}
-            )
+            # Shaped by the backend: Ollama matches a result to its call by
+            # tool name, OpenAI by tool_call_id. The loop must not know.
+            messages.append(_backend().tool_message(call, output))
 
             yield {
                 "type": "tool_result",
