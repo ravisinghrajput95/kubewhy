@@ -51,8 +51,12 @@ one.
 import ipaddress
 import logging
 import os
+import re
+import socket
 import time
 import urllib.parse
+
+import httpx
 
 import backends
 import redaction
@@ -112,6 +116,13 @@ _LOCAL_HOSTS = frozenset({
 INTERNAL_SUFFIXES = (".svc", ".svc.cluster.local", ".cluster.local", ".local",
                      ".internal", ".localdomain")
 
+# A syntactically valid DNS label, which is what a single-label host has to be
+# before it may be read as a Service name. Without this, any unparseable
+# garbage with no dot in it -- "not a url", a lone NUL byte -- took the
+# single-label branch and was classified internal, which is the opposite of
+# what this module documents and of what is safe.
+_DNS_LABEL = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
 
 def destination(endpoint):
     """
@@ -142,15 +153,44 @@ def destination(endpoint):
             address.is_private or address.is_loopback or address.is_link_local
         ) else "external"
 
+    # An integer-form IPv4, which the resolver accepts and a human does not
+    # read as an address at all. inet_aton takes "0x08080808" and "134744072"
+    # -- both of which are 8.8.8.8 -- and the shorthand "127.1". Before this
+    # check the first two took the single-label branch below and were
+    # classified internal while getaddrinfo returned a public address.
+    # Measured 2026-08-23; see the test of the same name.
+    numeric = _numeric_address(host)
+    if numeric is not None:
+        return "internal" if (
+            numeric.is_private or numeric.is_loopback or numeric.is_link_local
+        ) else "external"
+
     if "." not in host:
-        # A single label cannot be a public name. In a cluster it is a Service
-        # in this namespace; in compose it is a service alias.
-        return "internal"
+        # A single label cannot be a public name: in a cluster it is a Service
+        # in this namespace, in compose a service alias. Only when it is
+        # actually a label, though -- anything else reaching here is a string
+        # this could not parse, and those are refused rather than trusted.
+        return "internal" if _DNS_LABEL.match(host) else "external"
 
     if any(host.endswith(suffix) for suffix in INTERNAL_SUFFIXES):
         return "internal"
 
     return "external"
+
+
+def _numeric_address(host):
+    """
+    The address an integer-form host denotes, or None if it is not one.
+
+    `inet_aton` is what the C resolver ultimately uses, and it accepts forms
+    that contain no dot and look nothing like an address: hexadecimal,
+    decimal, and dotted shorthand. A classifier that only understands the
+    presentation format sees a name; the resolver sees 8.8.8.8.
+    """
+    try:
+        return ipaddress.ip_address(socket.inet_ntoa(socket.inet_aton(host)))
+    except (OSError, ValueError):
+        return None
 
 
 def _host(endpoint):
@@ -169,9 +209,36 @@ def _host(endpoint):
         text = "//" + text
     try:
         parsed = urllib.parse.urlsplit(text)
-        return (parsed.hostname or "").strip("[]").rstrip(".").lower()
+        host = (parsed.hostname or "").strip("[]").rstrip(".").lower()
     except ValueError:
         return ""
+    if not host:
+        return ""
+
+    # An IP literal is already canonical: IDNA does not apply to one, and
+    # handing a bracket-stripped IPv6 literal to the normaliser below rejects
+    # it outright -- which classified ::1, fd00::1 and fe80::1 as external the
+    # first time this fix was written.
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        pass
+
+    # Normalise through the same parser the HTTP clients use, so the classifier
+    # and the request agree *by construction* rather than by coincidence. Both
+    # backends reach the network through httpx, and httpx applies IDNA -- which
+    # maps U+3002, U+FF0E and U+FF61 onto "." . Before this, `evil<U+3002>com`
+    # contained no ASCII dot, took the single-label branch, was classified
+    # internal, and was then dialled by httpx as `evil.com`. Measured
+    # 2026-08-23 with a captured request carrying pod-log secrets.
+    try:
+        host = str(httpx.URL(f"http://{host}").host)
+    except Exception:
+        # A host httpx will not accept is one no request can be made to, and
+        # refusing is the safe direction. See the module docstring.
+        return ""
+    return host.strip("[]").rstrip(".").lower()
 
 
 class Target:

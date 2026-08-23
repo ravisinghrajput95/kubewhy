@@ -146,6 +146,92 @@ class TestDestination:
         """
         assert inference.destination(endpoint) == "external"
 
+    @pytest.mark.parametrize("endpoint,resolves_to", [
+        ("http://0x08080808", "8.8.8.8"),
+        ("http://134744072", "8.8.8.8"),
+    ])
+    def test_an_integer_form_address_is_classified_by_what_it_denotes(
+            self, endpoint, resolves_to):
+        """
+        inet_aton -- which is what the C resolver ultimately uses -- accepts
+        hexadecimal and decimal forms containing no dot at all. Both of these
+        are 8.8.8.8. Before 2026-08-23 they took the single-label branch, were
+        classified `internal`, and getaddrinfo returned a public address.
+
+        The classifier must read a host the way the resolver will, not the way
+        it is written.
+        """
+        import socket
+
+        assert socket.getaddrinfo(
+            inference._host(endpoint), 80)[0][4][0] == resolves_to
+        assert inference.destination(endpoint) == "external"
+
+    def test_a_loopback_integer_form_is_still_internal(self):
+        # The same rule in the other direction: 0x7f000001 is 127.0.0.1, and
+        # refusing it would be wrong for the same reason accepting 0x08080808
+        # was.
+        assert inference.destination("http://0x7f000001") == "internal"
+
+    def test_the_dotted_shorthand_the_resolver_accepts_is_internal(self):
+        # `127.1` is 127.0.0.1 to inet_aton. It used to classify external --
+        # harmless, but it refused a genuinely local address.
+        assert inference.destination("http://127.1:11434") == "internal"
+
+    @pytest.mark.parametrize("separator", ["\u3002", "\uff0e", "\uff61"])
+    def test_a_unicode_full_stop_cannot_disguise_a_public_host(self, separator):
+        """
+        The bypass this pair of tests exists for, and it was exploitable end to
+        end. httpx applies IDNA, which maps these three code points onto ".".
+        The classifier compared ASCII dots, saw a single label, said
+        `internal`, and httpx then dialled the public domain -- with the
+        conversation, pod logs included, in the request body. No
+        PermissionError, no egress-denied metric, and the boundary redaction
+        pass never ran, because the destination was believed to be internal.
+
+        Fixed by normalising the host through the same parser the clients use,
+        so the two agree by construction rather than by coincidence.
+        """
+        host = "evil" + separator + "com"
+
+        assert inference._host(f"http://{host}") == "evil.com"
+        assert inference.destination(f"http://{host}") == "external"
+
+    def test_the_classifier_and_the_client_agree_on_the_host(self):
+        """
+        The invariant underneath all of the above. Any endpoint where these two
+        disagree is a policy bypass waiting to be found, whatever the
+        particular trick.
+        """
+        import httpx
+
+        for endpoint in ("http://localhost:11434",
+                         "http://ollama.svc.cluster.local:11434",
+                         "https://api.openai.com/v1",
+                         "http://ollama.svc@api.openai.com/v1",
+                         "http://evil" + "\u3002" + "com",
+                         "http://[fd00::1]:11434"):
+            classified = inference._host(endpoint)
+            dialled = str(httpx.URL(endpoint).host).lower().strip("[]").rstrip(".")
+            assert classified == dialled, (
+                f"{endpoint}: policy sees {classified!r}, client dials "
+                f"{dialled!r} -- that gap is the bypass"
+            )
+
+    def test_an_unparseable_single_label_is_refused_not_trusted(self):
+        """
+        The module docstring promises that anything unparseable reads as
+        external. The single-label branch broke that promise for every string
+        with no dot in it.
+        """
+        for endpoint in ("not a url", "\x00", "a b c", "-bad-", "x" * 300):
+            assert inference.destination(endpoint) == "external", endpoint
+
+    def test_a_real_service_name_is_still_internal(self):
+        # The behaviour the check above must not cost: a bare Service name.
+        for endpoint in ("ollama", "kubewhy-ollama", "vllm0", "ollama:11434"):
+            assert inference.destination(endpoint) == "internal", endpoint
+
     def test_a_trailing_dot_is_the_same_host(self):
         # `svc.cluster.local.` is the fully-qualified spelling and resolvers
         # emit it. Reading it as a different host would refuse a correct
