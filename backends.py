@@ -84,6 +84,38 @@ class MalformedResponse(Exception):
     """
 
 
+def _model_check(wanted, names):
+    """
+    Whether `wanted` is among the models a provider says it serves.
+
+    Three values, and the third is what keeps this honest:
+
+        confirmed    the provider listed it
+        absent       the provider listed models and this was not among them
+        unsupported  no usable listing -- nothing can be concluded
+
+    `unsupported` exists because an empty answer is not the same as a negative
+    one. A provider that does not enumerate itself, or a gateway that returns
+    an empty array, must not be reported NotReady on that basis: that would be
+    inventing a false guarantee, which is worse than the missing one.
+
+    Ollama's tags carry `:latest` implicitly, so a configured `qwen3` matches a
+    served `qwen3:latest`. A configured name that states its own tag is matched
+    exactly -- asking for `qwen3:0.5b` and getting `qwen3:latest` is a
+    different model.
+    """
+    if not wanted or not names:
+        return "unsupported"
+    wanted = str(wanted).strip()
+    if wanted in names:
+        return "confirmed"
+    if ":" not in wanted:
+        stems = {n.split(":", 1)[0] for n in names}
+        if wanted in stems:
+            return "confirmed"
+    return "absent"
+
+
 class ToolCall:
     """One tool the model asked for, in provider-neutral form."""
 
@@ -208,20 +240,37 @@ class OllamaBackend:
         # called "wrapper".
         return list(registry.values())
 
-    def probe(self, timeout=5):
+    def probe(self, model=None, timeout=5):
         """
-        Whether this provider is reachable, for a readiness check.
+        Whether this provider is reachable, and whether it holds `model`.
 
         Cheap and read-only on purpose: listing models touches no weights and
         cannot load one. A readiness probe that ran a completion would take
         the model's load time on every kubelet check and report NotReady for
         the minutes a 5GB pull takes to become servable.
 
+        **Ollama's listing is authoritative.** It reports what has actually
+        been pulled onto this server, and a model absent from it cannot be
+        served -- the request comes back `model not found (status code: 404)`.
+        That is the strongest of the three backends' readiness semantics, and
+        it is exactly the failure this project shipped once already: a pod
+        reporting 1/1 Ready with an empty model directory, answering every
+        diagnosis with a 404.
+
         Raises whatever the client raises. The caller decides what an outage
-        means -- and readiness and liveness decide differently, which is why
-        this does not decide for them.
+        means -- readiness and liveness decide differently, which is why this
+        does not decide for them.
         """
-        ollama.Client(host=self.endpoint, timeout=timeout).list()
+        listed = ollama.Client(host=self.endpoint, timeout=timeout).list()
+        names = []
+        for entry in getattr(listed, "models", None) or listed.get("models", []):
+            name = getattr(entry, "model", None) or (
+                entry.get("model") or entry.get("name") if isinstance(entry, dict)
+                else None)
+            if name:
+                names.append(str(name))
+        return {"models_listed": len(names),
+                "model_check": _model_check(model, names)}
 
 
 class OpenAICompatBackend:
@@ -357,7 +406,7 @@ class OpenAICompatBackend:
     def tools(registry):
         return tool_schema.schemas_for(registry)
 
-    def probe(self, timeout=5):
+    def probe(self, model=None, timeout=5):
         """
         GET /models, which every server speaking this protocol implements.
 
@@ -365,10 +414,33 @@ class OpenAICompatBackend:
         allowed to propagate as such rather than being flattened into
         "unreachable": those need different fixes and a readiness check that
         conflates them sends an operator to the wrong place.
+
+        **The listing means different things on the two providers that share
+        this protocol, and neither meaning is a guarantee.**
+
+        vLLM serves exactly one model -- the one it was started with -- and
+        returns it here, so membership is precise. The hosted OpenAI API
+        returns what the account may call; verified 2026-08-23 against the
+        live service, `gpt-4o-mini` is listed and a nonexistent id is not, so
+        absence predicts the 404 a request would get.
+
+        A gateway in front of either may implement `/models` poorly, or not at
+        all. An empty or unreadable listing therefore yields `unsupported`
+        rather than `absent`: declaring NotReady on a provider that simply
+        declined to enumerate itself would invent a failure. See
+        `_model_check`.
         """
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        httpx.get(f"{self.base_url}/models", headers=headers,
-                  timeout=timeout).raise_for_status()
+        response = httpx.get(f"{self.base_url}/models", headers=headers,
+                             timeout=timeout)
+        response.raise_for_status()
+        try:
+            listed = response.json().get("data") or []
+            names = [str(m.get("id")) for m in listed if m.get("id")]
+        except (ValueError, AttributeError, TypeError):
+            names = []
+        return {"models_listed": len(names),
+                "model_check": _model_check(model, names)}
 
 
 class VLLMBackend(OpenAICompatBackend):

@@ -849,6 +849,105 @@ class TestNothingSecretIsEverLogged:
         assert "api.example.com" not in rendered
 
 
+class TestReadinessValidatesTheConfiguredTarget:
+    """
+    F-04. `probe()` used to list models and never check the configured one was
+    among them, so a typo produced a pod that passed readiness, took traffic,
+    and 404'd every request -- the same shape as the pullModelOnStart defect,
+    where a Ready pod answered `model not found`.
+    """
+
+    class Listing(Recorder):
+        name = "listing"
+        served = ["served-model", "other-model"]
+
+        def probe(self, model=None, timeout=5):
+            return {"models_listed": len(self.served),
+                    "model_check": backends._model_check(model, self.served)}
+
+    class Silent(Recorder):
+        """A provider that answers but enumerates nothing."""
+
+        name = "silent"
+
+        def probe(self, model=None, timeout=5):
+            return {"models_listed": 0,
+                    "model_check": backends._model_check(model, [])}
+
+    @pytest.fixture(autouse=True)
+    def _register(self):
+        for stub in (self.Listing, self.Silent):
+            backends.register(stub.name, stub)
+        yield
+        for stub in (self.Listing, self.Silent):
+            backends._BACKENDS.pop(stub.name, None)
+
+    def test_a_served_model_is_ready(self):
+        report = gateway(target(provider="listing", model="served-model")).probe()
+
+        assert report["ready"] is True
+        assert report["primary"]["model_check"] == "confirmed"
+
+    def test_a_model_the_provider_does_not_serve_is_not_ready(self):
+        report = gateway(target(provider="listing", model="typo-model")).probe()
+
+        assert report["ready"] is False
+        assert report["primary"]["ready"] is False
+        assert report["primary"]["model_check"] == "absent"
+        assert report["primary"]["error"] == "model_not_served"
+
+    def test_a_provider_that_enumerates_nothing_is_not_declared_broken(self):
+        """
+        The honesty requirement. An empty listing is not a negative answer, and
+        reporting NotReady on that basis would invent a guarantee the provider
+        never offered. `unsupported` says exactly what is known.
+        """
+        report = gateway(target(provider="silent", model="anything")).probe()
+
+        assert report["ready"] is True
+        assert report["primary"]["model_check"] == "unsupported"
+
+    def test_the_readiness_body_carries_no_endpoint_and_no_key(self):
+        report = gateway(target(
+            provider="listing", model="typo-model",
+            endpoint="http://user:hunter2ssss@ollama:11434",
+            api_key="sk-live-do-not-log")).probe()
+
+        blob = json.dumps(report)
+        assert "hunter2ssss" not in blob and "sk-live" not in blob
+        assert "11434" not in blob
+
+    def test_a_fallback_serving_the_model_keeps_the_agent_ready(self):
+        gate = gateway(target(provider="listing", model="typo-model"),
+                       target(provider="listing", model="served-model"),
+                       fallback_enabled=True)
+        report = gate.probe()
+
+        assert report["ready"] is True
+        assert report["primary"]["ready"] is False
+        assert report["fallback"]["ready"] is True
+
+    @pytest.mark.parametrize("wanted,served,expected", [
+        ("qwen3", ["qwen3:latest"], "confirmed"),
+        ("qwen3:latest", ["qwen3:latest"], "confirmed"),
+        ("qwen3:0.5b", ["qwen3:latest"], "absent"),
+        ("gpt-4o-mini", ["gpt-4o-mini", "gpt-4"], "confirmed"),
+        ("typo", ["a", "b"], "absent"),
+        ("anything", [], "unsupported"),
+        (None, ["a"], "unsupported"),
+    ])
+    def test_model_matching_handles_the_implicit_tag(self, wanted, served,
+                                                     expected):
+        """
+        Ollama carries `:latest` implicitly, so a configured `qwen3` is served
+        by `qwen3:latest`. A name that states its own tag is matched exactly --
+        asking for qwen3:0.5b and being given qwen3:latest is a different
+        model, and saying "ready" there would be the same false guarantee in a
+        smaller costume.
+        """
+        assert backends._model_check(wanted, served) == expected
+
+
 class TestTheLoopCannotTell:
     """
     The success criterion, stated as a test.

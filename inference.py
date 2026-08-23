@@ -669,15 +669,25 @@ class Gateway:
                 continue
             entry = dict(target.describe())
             try:
-                self._backend(target).probe()
+                probed = self._backend(target).probe(model=target.model) or {}
             except Exception as exc:
                 entry["ready"] = False
                 # The class, never the message: a provider's error text can
                 # quote the request, and the request is the evidence.
                 entry["error"] = type(exc).__name__
             else:
-                entry["ready"] = True
-                report["ready"] = True
+                # Reachable is not the same as able to answer. A provider that
+                # lists its models and does not list this one will 404 every
+                # request -- which this project shipped once, as a pod
+                # reporting 1/1 Ready with an empty model directory.
+                check = probed.get("model_check", "unsupported")
+                entry["model_check"] = check
+                entry["models_listed"] = probed.get("models_listed", 0)
+                entry["ready"] = check != "absent"
+                if check == "absent":
+                    entry["error"] = "model_not_served"
+                else:
+                    report["ready"] = True
             report[role] = entry
         return report
 
