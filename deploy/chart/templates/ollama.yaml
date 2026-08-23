@@ -14,11 +14,36 @@ ollama.ollama.svc.cluster.local:11434, answering a real diagnosis end to end.
 The model was resident in the cluster and absent from the workstation, so the
 inference provably happened here.
 */}}
+{{- $ns := .Values.ollama.namespace | default .Release.Namespace }}
+{{- if ne $ns .Release.Namespace }}
+{{- /*
+Create the namespace when it is not the release's own.
+
+Helm's --create-namespace only creates the namespace the release installs
+into, so a chart that renders objects somewhere else has to create that
+somewhere else itself. Found by installing rather than by templating:
+`ollama.enabled=true` with `ollama.namespace=ollama` failed the whole release
+with "namespaces \"ollama\" not found", and `helm template` had rendered it
+without complaint.
+
+Deliberately not helm.sh/hook: a hook-created namespace is not tracked by the
+release and would outlive `helm uninstall`, which is the leftover-resource
+problem this project has already paid for once today with an orphaned disk.
+*/}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+---
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ .Values.ollama.name }}
-  namespace: {{ .Values.ollama.namespace | default .Release.Namespace }}
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/name: {{ .Values.ollama.name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -36,7 +61,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Values.ollama.name }}
-  namespace: {{ .Values.ollama.namespace | default .Release.Namespace }}
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/name: {{ .Values.ollama.name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -130,7 +155,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ .Values.ollama.name }}-models
-  namespace: {{ .Values.ollama.namespace | default .Release.Namespace }}
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/name: {{ .Values.ollama.name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
