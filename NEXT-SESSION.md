@@ -29,11 +29,59 @@ pulled back out of the OCI registry and rendered: `version`/`appVersion` both
 it points at `:0.1.7`, all three modes render, and both refusal guards still
 fire from the packaged copy.
 
-**START HERE: pick from `## Open, in priority order` below.** The two live
+**START HERE: v0.1.7 is published with two defects that are fixed in `main`
+but not in the released chart.** Both were found by *installing* v0.1.7 on a
+fresh kind cluster — `helm template` renders the broken and working versions
+identically, which is why they survived review, CI and a GKE validation.
+
+1. **Inference resolved lazily.** A configuration the gateway refuses —
+   `mode: cluster` pointed at a public host, which helm cannot catch because a
+   template cannot classify a hostname — installed cleanly, reported 1/1
+   Running, logged nothing about inference, and would have surfaced the
+   refusal at the first fault. `controller.py` resolves the gateway before
+   watching now and raises; `app.py` logs and keeps serving its non-model
+   endpoints, with `/readyz` and `/inference` reporting 503 and the reason.
+2. **`ollama.pullModelOnStart` usually did nothing and hid it.** postStart
+   races the server, `ollama pull` failed in under a second, and `|| true`
+   swallowed it — leaving a pod that reported 1/1 Ready with an empty model
+   directory while every diagnosis returned `model not found (404)`. The only
+   evidence in the cluster was a 404 in Ollama's own access log. The hook
+   waits and retries now, and readiness means a model is listed rather than a
+   port being open. **It is a race, not a certain failure** — it resolved
+   favourably on GKE in August and against us on kind, so the chart was
+   recorded as validated when it was not.
+
+**So decide whether to cut v0.1.8.** Anyone installing v0.1.7 with
+`ollama.enabled=true` gets a cluster that looks healthy and cannot answer. The
+same recipe as before: bump `version.py`, `Chart.yaml:version` and
+`appVersion` together, tag, then verify from the registry.
+
+After that, pick from `## Open, in priority order` below. The two live
 candidates are the `forbid` false positive on `injection_in_logs_is_data`
-(item 6 — the printed reason says the opposite of what the answer does) and
-settling thinking-off, which needs roughly n=15 per arm and has come back
-undetermined three times. Neither is urgent.
+(item 6) and settling thinking-off, which needs roughly n=15 per arm and has
+come back undetermined three times. Neither is urgent.
+
+**What the v0.1.7 install did verify**, on a fresh kind cluster, from the
+published OCI chart: it installs; the pod runs; the chart's rendered env
+produces the right config inside the container (`mode: cluster`,
+`destination: internal`, `allow_external: false`); the read-only RBAC is
+correct when exercised with the ServiceAccount's own minted token — all 14
+resource lists allowed, `pods/log` allowed, secrets and every mutation
+Forbidden by real attempts rather than by `can-i`; and with an in-cluster
+Ollama the controller detected a fresh fault, chained tools, reached the model
+over Service DNS and returned a **grounded** diagnosis quoting the log line
+the cause was in. The 400→200 in those logs is `llama3.2` rejecting the
+thinking flag and the backend retrying without it, working as designed.
+
+**Two instrument failures happened while checking that RBAC**, both caught
+before they were believed, and both worth remembering. `kubectl --server
+--token` silently merges the current context's admin client cert, which wins —
+it reported *everything* allowed including secrets. Rebuilt as a standalone
+kubeconfig it reported everything *denied*, because an unquoted command in a
+shell variable mangled the arguments. Only the third version, using an array
+and printing real stderr, was measuring the thing. `auth can-i` also rejects
+`--request-timeout`, and returns empty rather than erroring visibly. Attempt
+the operation; do not ask about it.
 
 **The CHANGELOG's `[Unreleased]` block is a known bookkeeping debt.** It
 already carried 43 lines when v0.1.6 was tagged, so it spans work released
