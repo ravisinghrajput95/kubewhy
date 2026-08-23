@@ -2,7 +2,11 @@
 
 Five entry points share one set of tools. The tools are plain Python functions
 returning JSON-able dicts, which is what lets them serve as REST handlers,
-Ollama tools, MCP tools and UI panels with no adapter in between.
+model tools, MCP tools and UI panels with no adapter in between.
+
+They also share one inference gateway. Where the model runs -- a workstation,
+this cluster, or a vendor -- is configuration rather than code, and the loop
+below cannot tell which it has. See [INFERENCE.md](INFERENCE.md).
 
 ```mermaid
 flowchart TB
@@ -25,7 +29,12 @@ flowchart TB
         RED["redaction.redact()"]
     end
 
-    OLL["Ollama<br/>local model"]
+    subgraph inf [Inference]
+        GW["inference.py<br/>mode · egress policy · fallback"]
+        BE["backends.py<br/>ollama · openai · vllm"]
+    end
+
+    MODEL["Model<br/>local, in-cluster<br/>or hosted"]
     CLUSTER[("Kubernetes<br/>API server")]
 
     CLI --> ASK
@@ -37,7 +46,9 @@ flowchart TB
     UI -.direct, no model.-> tools
     MCP ==>|"tools exposed<br/>to any MCP client"| tools
 
-    ASK <-->|"tool_calls / results"| OLL
+    ASK <-->|"tool_calls / results"| GW
+    GW --> BE
+    BE <--> MODEL
     ASK --> tools
     ASK --> GRD
 
@@ -46,7 +57,7 @@ flowchart TB
     K8S -->|"read-only<br/>15s timeout"| CLUSTER
 
     classDef sec fill:#7f1d1d,stroke:#ef4444,color:#fff
-    class RED sec
+    class RED,GW sec
 ```
 
 The MCP path deliberately bypasses the loop: an MCP client brings its own
@@ -139,25 +150,37 @@ in `demo/`, which is a sample of convenience, not a survey.
 
 ```mermaid
 flowchart LR
-    subgraph machine [Your machine]
+    subgraph network [Your network]
         direction TB
         AGENT[agent + tools]
-        OLLAMA[Ollama]
+        GW["inference gateway"]
+        MODEL["Ollama or vLLM<br/>local or in-cluster"]
     end
 
     CLUSTER[("Cluster<br/>API server")]
-    CLOUD(["Third-party<br/>LLM APIs"])
+    CLOUD(["Hosted<br/>LLM APIs"])
 
     CLUSTER -->|"reads: pods, logs,<br/>events, nodes"| AGENT
-    AGENT <-->|"prompts + tool results"| OLLAMA
-    AGENT -.->|"never"| CLOUD
+    AGENT --> GW
+    GW <-->|"prompts + tool results"| MODEL
+    GW -.->|"mode: api only,<br/>and only with<br/>allow_external"| CLOUD
 
-    classDef never stroke-dasharray:5 5,fill:#374151,color:#9ca3af
-    class CLOUD never
+    classDef gated stroke-dasharray:5 5,fill:#7f1d1d,stroke:#ef4444,color:#fff
+    class CLOUD gated
 ```
 
-Inference is local, so prompts and cluster data never reach a third party.
-That is the guarantee. What it is *not*: pod logs still enter this process,
-this terminal and this machine's memory. `redaction.py` strips common secret
-shapes first, and `deploy/rbac.yaml` limits what the agent can read at all,
-but "local" is not the same as "safe to point at prod".
+**By default nothing crosses that line, and the default is enforced rather
+than documented.** `inference.py` refuses an endpoint off your network unless
+`TRIAGE_ALLOW_EXTERNAL_INFERENCE` is set, refuses a mode whose label claims
+on-network while its endpoint is not, and refuses to treat a fallback as a way
+around either. `networkPolicy.enabled=true` makes the same claim where a bug
+in that code cannot undo it.
+
+Choosing `mode: api` moves the boundary deliberately: the conversation, which
+includes projected pod logs, goes to a vendor. Outbound messages get a second
+redaction pass at the boundary on top of the one the collectors already did.
+
+What none of this is: pod logs still enter this process, this terminal and this
+machine's memory whatever the mode. `redaction.py` strips common secret shapes
+and `deploy/rbac.yaml` limits what the agent can read at all, but "local" is
+not the same as "safe to point at prod".

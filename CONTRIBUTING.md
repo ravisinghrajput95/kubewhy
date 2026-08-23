@@ -33,6 +33,20 @@ tokens; fifty of them exceed the model's entire context. Return the fields a
 diagnosis depends on and drop everything else. If you cannot justify a field
 against a failure mode, leave it out.
 
+## Adding a model provider
+
+`backends.py` owns the protocol, `inference.py` owns where inference happens
+and whether evidence may go there, and `agent.py` knows neither. The full
+recipe -- including the two things that are not obvious, the wire shape of
+messages and the `wire` label that decides whether a mid-run failover is
+possible -- is in [docs/INFERENCE.md](docs/INFERENCE.md#adding-a-provider).
+
+The rule worth repeating here: **a backend is not done when it runs.** The
+suite in `evals/` is the only check on a model change, and a backend merged
+without those numbers is unverified whatever its unit tests say. `grounding.py`
+in particular is calibrated to how qwen3 writes, so a different model keeps
+producing verdicts -- just less accurate ones.
+
 ## Testing expectations
 
 - Kubernetes fixtures use real `V1*` client models, not bare `MagicMock`, so

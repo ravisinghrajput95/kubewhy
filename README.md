@@ -608,6 +608,17 @@ headers from pod logs before they reach the model or your terminal. It is
 pattern matching and it will miss novel formats. If your logs must never be
 read by a model, drop the `pods/log` rule from the ClusterRole.
 
+**Nothing leaves your network unless you say so.** The default modes -- a model
+on your workstation or in your cluster -- keep every prompt and every projected
+tool result inside it. `TRIAGE_INFERENCE_MODE=api` moves that boundary
+deliberately, and requires `TRIAGE_ALLOW_EXTERNAL_INFERENCE` on top: an
+external endpoint without it refuses to start, and a request to one is a 403
+rather than a 500, because a 500 reads as a bug and gets retried while a 403
+reads as a decision. A fallback is not a way around it. Outbound messages get
+a second redaction pass at the boundary. And `networkPolicy.enabled=true` in
+the chart makes the claim a property the dataplane enforces rather than one
+this process promises. See [docs/INFERENCE.md](docs/INFERENCE.md).
+
 ## Does it actually work?
 
 Unit tests prove the code is right; they say nothing about whether the agent
@@ -743,7 +754,9 @@ Kubernetes endpoints take `?namespace=` (default `default`).
 | Endpoint | Returns |
 | --- | --- |
 | `GET /healthz` | Liveness. No dependencies. |
-| `GET /readyz` | Readiness. Checks the model backend. |
+| `GET /readyz` | Readiness. Probes inference through the gateway, and names which target answered — "ready on the fallback" and "ready on the primary" are different states of the world. |
+| `GET /inference` | The configured inference mode, provider, model, destination and external-data policy. No endpoint, no key. |
+| `GET /metrics` | Prometheus exposition: inference requests, duration, tokens, fallbacks, egress denials, tool calls, investigations. |
 | `GET /scan` | Failing workloads across every namespace, grouped. `?only_unhealthy=` `?limit=` `?namespaces=` `?workload=` |
 | `GET /references` | References that do not resolve in one namespace — Service selectors, Ingress backends, HPA targets, PVC storage classes, PDBs. `?namespace=` |
 | `GET /pods` | Status, ready, restarts, node. `?only_unhealthy=true` |
@@ -904,9 +917,21 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
 
 ## Configuration
 
+Where the model runs is configuration, not code -- see
+[docs/INFERENCE.md](docs/INFERENCE.md) for the three modes, the external-data
+policy and the fallback rules.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `TRIAGE_MODEL` | `qwen3` | Ollama model |
+| `TRIAGE_INFERENCE_MODE` | `local` | `local` \| `cluster` \| `api`. Checked against the endpoint: a mode claiming inference stays on your network refuses to start when it does not |
+| `TRIAGE_INFERENCE_PROVIDER` | per mode | `ollama` \| `vllm` \| `openai` |
+| `TRIAGE_INFERENCE_ENDPOINT` | per mode | Base URL. Falls back to `OLLAMA_HOST` for the ollama provider |
+| `TRIAGE_ALLOW_EXTERNAL_INFERENCE` | `false` | Permits cluster evidence, pod logs included, to leave your network |
+| `TRIAGE_REDACT_ON_EGRESS` | `true` | A second redaction pass at the network boundary, on outbound requests only |
+| `TRIAGE_FALLBACK_ENABLED` | `false` | With `TRIAGE_FALLBACK_MODE`, `_PROVIDER`, `_ENDPOINT`, `_MODEL` |
+| `TRIAGE_PRIMARY_RETRY_SECONDS` | `60` | How long a failed primary is skipped before being tried again |
+| `OPENAI_API_KEY` | *unset* | Credential for an OpenAI-protocol provider |
+| `TRIAGE_MODEL` | `qwen3` | Model name the provider serves |
 | `OLLAMA_HOST` | `http://localhost:11434` | Where Ollama listens |
 | `OLLAMA_TIMEOUT` | `300` | Seconds before a model call is abandoned |
 | `OLLAMA_KEEP_ALIVE` | *unset* | How long Ollama holds the weights after a request, e.g. `24h`. Forwarded on every call, because the client library does not read it. Unset means the server's own default (5m) |
