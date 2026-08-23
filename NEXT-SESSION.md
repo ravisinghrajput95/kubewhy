@@ -1,29 +1,129 @@
 # Handoff prompt — paste this to start the next session
 
 I'm working on kubewhy at /Users/ravirajput/Projects/AIOps-agent
-(github.com/ravisinghrajput95/kubewhy, public, MIT). Air-gapped Kubernetes
-root-cause analysis: a local model via Ollama chains read-only tools to explain
-*why* a workload is broken. Six surfaces share one tool set — CLI (agent.py,
-`--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
-Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
+(github.com/ravisinghrajput95/kubewhy, public, MIT). Kubernetes root-cause
+analysis: a model chains read-only tools to explain *why* a workload is broken.
+Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
+(mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
+via Socket Mode (slack_socket.py).
 
-**State: `main` at `457ff43`, tree clean and pushed, 693 tests pass, tags
-through v0.1.6. Updated 2026-08-22, late. Nothing running: no kind cluster, no
-GKE cluster, Docker quit, Ollama stopped, GCP empty (0 clusters, 0 instances,
-0 disks, 0 forwarding rules).**
+**Where inference happens is configuration now, not a property of the
+product** — a workstation, this cluster, or a hosted API. The default is still
+local and still keeps everything on your network, and that default is enforced
+rather than documented. See `docs/INFERENCE.md`.
 
-**START HERE: a deterministic policy did not fire, and it is not yet known
-whether that is a regression.** In the seam regression run
-(`results/seam-regression-n1.json`, 15/16), `crashloop_root_cause` failed
-having called `list_pods`, `describe_pod` and `get_pod_events` but never
-`get_pod_logs` -- and the record says `policies: 0`. `LOGS_POLICY` exists to
-catch exactly that and re-ask. Read `evidence_gap()` and decide whether its
-logs branch should have fired for a `CrashLoopBackOff` pod whose events were
-read but whose logs were not. **Do not assume the refactor broke it**: the
-pre-refactor thinking-off arm had this case 3/3, so that path was never
-exercised there, and this may be a pre-existing gap first exposed by a run
-that failed this way. The record has the full trace; no cluster is needed to
-read the logic, and a cluster plus n=5 on that one case would settle the rate.
+**State: `main` at `686ec94`, tree clean and pushed, 800 tests pass, tags
+through v0.1.6. Updated 2026-08-23. Nothing running: no kind cluster, no GKE
+cluster, Docker quit, Ollama stopped, GCP empty.**
+
+**START HERE: the chart changed and its version did not.** `deploy/chart`
+gained an `inference:` block, two templates (`vllm.yaml`, `networkpolicy.yaml`)
+and five template-time guards, and `Chart.yaml` still says `0.1.6` — because
+`version.py` documents that both are bumped *together when tagging*, and
+tagging is a release decision that was not mine to make. Decide whether to cut
+`v0.1.7`. If you do: bump `version.py`, `Chart.yaml:version` and
+`Chart.yaml:appVersion` together, and check the published tags from the
+registry rather than from the workflow file — the `target:base` trap has
+shipped the Streamlit image as the base one before.
+
+**~~A deterministic policy did not fire.~~ Closed 2026-08-23, and it was not
+the seam refactor.** The condition had been there since `LOGS_POLICY` was
+written: reading *either* `get_pod_logs` or `get_pod_events` closed the gap.
+The premise was wrong. For a container that started and exited, the events say
+"Back-off restarting failed container" — the status again — and in the recorded
+run they also carried a seven-minute-old `FailedScheduling` from start-up,
+which the answer then named as the cause of the crash. So events there are not
+merely insufficient: they supplied a wrong cause. Events still close the gap
+for a pod matching *both* lists (`error` is a substring of
+`CreateContainerConfigError`), because that container never started and has no
+logs to read.
+
+Fixing only that would have been a net loss, and replaying the recorded sets is
+what showed it. The OOMKilled exclusion was keyed on the status *string*, and
+the same OOM-killed pod reports `OOMKilled` when `list_pods` catches it
+mid-crash and `CrashLoopBackOff` when it catches it mid-backoff — both
+spellings appear for one `memory-hog` pod inside `think-OFF-16cases-n3`. Keyed
+on the status it leaks in the backoff sample, which is where a crashlooping pod
+spends most of its life: it newly demanded logs on 8 passing runs of a `stress`
+workload whose logs say nothing. It reads `last_termination.reason` now.
+
+**Measured.** Replay over all 254 recorded runs carrying their evidence: 34
+policy firings before, 35 after, exactly one run changing — the one it was
+opened about. Live `crashloop_root_cause` at n=5, kind + qwen3, thinking off:
+**5/5, Wilson 95% [57-100]**, and **3 of the 5 stopped after exactly the
+recorded failing sequence** with the policy firing on all three. Replaying each
+one's state at the moment it stopped through the pre-fix logic returns `None`:
+it could not have fired. That counterfactual is deterministic and is the actual
+evidence. `results/logs-policy-fix-n5.json`.
+
+**The 16-case regression is weaker than it looks and should not be quoted as an
+improvement.** All 16 at n=3, thinking off: **48/48**, every case 3/3, nothing
+moved down. Against the recorded think-OFF arm's 45/48 that is Fisher exact
+**p=0.242** — undetermined, as every round at this n has been. And the three
+failures in that arm were two `injection_in_logs_is_data` and one
+`service_unreachable_chain`; none was `crashloop_root_cause`, so the difference
+is variance on unrelated cases. What the run establishes is the *absence of a
+regression*. `results/gateway-regression-think-off-n3.json`.
+
+**The inference gateway is new and is the biggest change here.** `inference.py`
+sits above `backends.py`: `backends` answers "which protocol", `inference`
+answers where inference happens, whether evidence may leave to get there, and
+what to do when it cannot be reached. `Gateway` presents the same four methods
+a backend does, so `agent._backend()` returns one and **the loop is unchanged**
+— a test asserts that interface, because if it stops holding then `agent.py`
+has to learn something about inference.
+
+- `TRIAGE_INFERENCE_MODE` is `local` | `cluster` | `api`. **The mode is checked
+  against the endpoint**, not trusted: a mode claiming inference stays on your
+  network refuses to start when its endpoint is off it. Otherwise
+  `mode: cluster` pointed at a vendor installs cleanly, logs itself as
+  in-cluster in every line, and ships pod logs anyway. `api` pointed at a
+  *local* endpoint is allowed — claiming more egress than occurs is never the
+  unsafe direction, and it is how the OpenAI backend is validated without a key.
+- Classification is on the name **as written** and never resolves it. A lookup
+  gives an answer that can change between the check and the request. The cost
+  is stated in the module docstring and is why `allow_external` is a separate
+  switch.
+- `TRIAGE_BACKEND` and `OLLAMA_HOST` still work and still mean what they meant.
+  The second matters most: the chart sets it and nothing else.
+- **Failover is a wire-protocol problem before it is an availability problem.**
+  Backends carry a `wire`; a mid-run failover happens only between providers
+  sharing one, because halfway through, the history is in the primary's shape.
+  A 400 or 401 is never failed over — both fail identically on the fallback and
+  succeeding quietly elsewhere hides a config error someone has to see.
+- **Found by running it, not reading it:** without a breaker, one investigation
+  failed over on *every round*. A refused connection costs milliseconds and hid
+  it; a primary that *times out* costs `MAX_ROUNDS × OLLAMA_TIMEOUT`.
+  `TRIAGE_PRIMARY_RETRY_SECONDS` (60) fixes it, verified live before and after.
+
+**Live verification, 2026-08-23, against a real Ollama:** local mode on the
+native protocol, api mode on the OpenAI protocol pointed at the same server,
+failover from a genuinely refused primary, the same outage with the fallback
+disabled failing as it should, and an external endpoint refused with
+`allow_external` unset. Both wire formats answered correctly from the same
+model and reported real token counts.
+
+**Still untested, and stated plainly in the code and the values comments:** any
+*hosted* API (no key was used), any real vLLM server (`VLLMBackend` is the
+OpenAI protocol under its own name — a statement about the protocol), and the
+NetworkPolicy's *enforcement* (rendered and schema-checked only).
+
+**`telemetry.py` is new**: hand-rolled counters and histograms in Prometheus
+exposition format, for the reason `observability.py` hand-rolls its JSON
+formatter. `/metrics` and `/inference` are behind the same bearer token as the
+rest. `/readyz` no longer builds an Ollama client — it asks the gateway, and
+names *which* target answered, because "ready on the fallback" and "ready on
+the primary" are different states of the world. Endpoints are never metric
+labels: one can carry a token in its userinfo.
+
+**What the brief asked for and did not get, deliberately.** The FACT /
+OBSERVATION / INFERENCE split exists — `grounding.contract()` returns
+citation-backed observations, inferences and unknowns. RECOMMENDATION is not
+extracted, and ACTION does not exist at all because tools stay read-only. Both
+are noted in the summary as scoped follow-ups rather than bolted on: pulling
+recommendations out of the prose means touching `grounding.py`, whose
+`_PRESCRIPTIVE` regexes are calibrated to observed qwen3 output, and a change
+there has to be replay-verified before it is believed.
 
 **The model provider is behind a seam now, and the second backend is real.**
 `backends.py` owns the provider; `TRIAGE_BACKEND` selects it; Ollama stays the
