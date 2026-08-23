@@ -1,4 +1,5 @@
 {{- $name := default (printf "%s" .Release.Name) .Values.serviceAccount.name -}}
+{{- include "kubewhy.inference.validate" . -}}
 {{- if and .Values.persistence.enabled .Values.podSecurityContext.runAsNonRoot (not .Values.podSecurityContext.fsGroup) }}
   {{- fail "\n\npersistence.enabled=true needs podSecurityContext.fsGroup set.\n\nA provisioned volume is owned by root and this pod is not root, so the\ncontroller would install cleanly, bind the PVC, and then crashloop with\nsqlite3.OperationalError: unable to open database file. That is a runtime\nfailure for a mistake that is visible here, so it fails here instead.\n\nSet podSecurityContext.fsGroup to podSecurityContext.runAsUser's group (the\nchart default is 1000 for both), or run as root if that is genuinely what you\nwant.\n" }}
 {{- end }}
@@ -38,12 +39,7 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
-            - name: OLLAMA_HOST
-              value: {{ .Values.model.ollamaHost | quote }}
-            - name: TRIAGE_MODEL
-              value: {{ .Values.model.name | quote }}
-            - name: OLLAMA_TIMEOUT
-              value: {{ .Values.model.timeoutSeconds | quote }}
+            {{- include "kubewhy.inference.env" . | nindent 12 }}
             - name: TRIAGE_NAMESPACES
               value: {{ join "," .Values.watch.namespaces | quote }}
             - name: TRIAGE_COOLDOWN

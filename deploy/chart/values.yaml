@@ -26,10 +26,83 @@ sink:
     botTokenKey: bot-token
     channel: ""
 
+# Where inference happens, and whether cluster evidence may leave to get there.
+#
+# The mode is not a label. inference.py checks it against the endpoint and
+# refuses to start when the two disagree -- so `mode: cluster` pointed at a
+# vendor fails the pod rather than installing cleanly and shipping pod logs
+# while every log line says the inference was in-cluster. The chart makes the
+# same check at template time, because a `helm install` that fails with an
+# explanation is better than one that succeeds into a CrashLoopBackOff.
+inference:
+  # local   -- a model outside the cluster, typically a workstation. Set
+  #            endpoint to something the pod can actually reach; a container's
+  #            localhost is its own.
+  # cluster -- a model inside the cluster, reached by Service DNS. The default,
+  #            because that is what deploying this chart means.
+  # api     -- a hosted API. Requires allowExternal below, and means cluster
+  #            evidence leaves your network.
+  mode: cluster
+
+  # ollama | vllm | openai. Empty picks the default for the mode: ollama for
+  # local and cluster, openai for api.
+  provider: ""
+
+  # Empty uses model.ollamaHost below for the ollama provider, and the
+  # provider's own default otherwise. Set this directly to point a vLLM or an
+  # OpenAI-compatible gateway somewhere specific.
+  endpoint: ""
+
+  # Empty uses model.name.
+  model: ""
+
+  # The switch that lets cluster evidence leave your network. Nothing else
+  # turns it on: an api-mode install without this fails at template time, and
+  # would fail again at startup if it somehow got past.
+  #
+  # Pod logs are the input this agent depends on and the payload it holds.
+  # Sending them to a vendor is a decision, so it is made here and nowhere
+  # implicit.
+  allowExternal: false
+
+  # A second redaction pass at the network boundary, on top of the one the
+  # collectors already do. Only ever runs on a request that is leaving.
+  redactOnEgress: true
+
+  # Credentials for a hosted provider. Prefer existingSecret: `value` puts the
+  # key in your values file, your shell history and your release history.
+  apiKey:
+    existingSecret: ""
+    key: api-key
+    value: ""
+
+  # Optional fallback, used only when the primary cannot be reached -- never
+  # when it refuses. A 400 or a 401 fails identically elsewhere, and quietly
+  # succeeding on the fallback would hide a configuration error.
+  #
+  # A fallback that leaves your network needs allowExternal above, exactly as
+  # the primary does. The fallback is not a way around the policy.
+  fallback:
+    enabled: false
+    mode: api
+    provider: ""
+    endpoint: ""
+    # Required when enabled: a different provider serves a different
+    # catalogue, and inheriting "qwen3" is a 404 at the moment the primary is
+    # already down.
+    model: ""
+    apiKey:
+      existingSecret: ""
+      key: fallback-api-key
+      value: ""
+
 model:
   # The controller does not run a model. Point this at an Ollama reachable
   # from the cluster: a node with a GPU, a sidecar, or a host address --
   # or set ollama.enabled below and let this chart run one.
+  #
+  # Still the endpoint for the ollama provider when inference.endpoint is
+  # empty, so an existing values file keeps working unchanged.
   ollamaHost: http://ollama.ollama.svc.cluster.local:11434
   name: qwen3
   timeoutSeconds: 300
@@ -80,6 +153,66 @@ ollama:
     storageClass: ""
   nodeSelector: {}
   tolerations: []
+
+# An in-cluster vLLM, off by default.
+#
+# vLLM serves the OpenAI chat-completions protocol, which is why it needs no
+# backend of its own -- `provider: vllm` is that protocol under a name that
+# tells the telemetry the truth about where the request went.
+#
+# **Untested.** Nothing in this project has run against a real vLLM server.
+# The manifest renders and validates; that is a statement about the manifest.
+# The GPU path in particular is unverified, because the account this was built
+# on cannot provision an accelerator at all.
+vllm:
+  enabled: false
+  name: vllm
+  namespace: ""
+  port: 8000
+  image:
+    repository: vllm/vllm-openai
+    tag: latest
+    pullPolicy: IfNotPresent
+  # The served model name. This is what inference.model must be set to: vLLM
+  # answers to the name it was started with, and a mismatch is a 404 on every
+  # request.
+  model: Qwen/Qwen2.5-7B-Instruct
+  extraArgs: []
+  # GPU is optional here and the chart does not assume one. Leave gpuCount at 0
+  # and vLLM runs on CPU, which is slow enough to be a demo rather than a
+  # deployment -- measured on Ollama, an eight-core CPU node needed ~128s per
+  # diagnosis with thinking off and timed out entirely with it on.
+  gpuCount: 0
+  gpuResource: nvidia.com/gpu
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    limits:
+      memory: 24Gi
+  persistence:
+    enabled: true
+    size: 40Gi
+    storageClass: ""
+  nodeSelector: {}
+  tolerations: []
+
+# Egress restriction, enforced by the cluster rather than promised by the code.
+#
+# Off by default for two honest reasons: it requires a CNI that actually
+# enforces NetworkPolicy (many managed clusters ship one that does not, unless
+# a dataplane option was chosen at creation), and this chart's version has been
+# rendered and schema-checked but never enforcement-tested on a live cluster.
+#
+# When on, it permits DNS and traffic to private address space, and denies the
+# public internet -- which makes "evidence does not leave your network" a
+# property the dataplane enforces. It is refused outright with api mode, since
+# the two say opposite things.
+networkPolicy:
+  enabled: false
+  # Additional CIDRs to permit, for an inference endpoint that is off-cluster
+  # but on your network in a range not covered by RFC1918.
+  extraAllowedCIDRs: []
 
 watch:
   # Empty means all namespaces. Narrow this in a large cluster: every pod

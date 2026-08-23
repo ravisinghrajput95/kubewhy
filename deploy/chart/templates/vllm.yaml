@@ -1,0 +1,191 @@
+{{- if .Values.vllm.enabled }}
+{{- /*
+Optional in-cluster vLLM.
+
+vLLM serves the OpenAI chat-completions protocol, which is why there is no
+vLLM-specific code anywhere in this project -- `inference.provider: vllm` is
+that protocol under a name that tells the telemetry the truth about where the
+request went. See backends.VLLMBackend for why the name is a subclass rather
+than a dict alias.
+
+**Untested against a real server.** This manifest renders and validates
+against the Kubernetes schema; nothing here has served a token. The GPU path
+is doubly unverified, because the account this was developed on cannot
+provision a non-TPU accelerator at all -- that is a billing limitation, not a
+quota one. Treat it as a starting point you will adjust, not as a validated
+deployment.
+
+GPU is optional and off. With gpuCount at 0 this runs on ordinary nodes, which
+is slow enough to be a demo rather than a deployment: measured on Ollama, an
+eight-core CPU node needed ~128s per diagnosis with thinking off, and exceeded
+a 300s timeout without a first token with it on.
+*/}}
+{{- $ns := .Values.vllm.namespace | default .Release.Namespace }}
+{{- if ne $ns .Release.Namespace }}
+{{- /*
+Create the namespace when it is not the release's own. Helm's
+--create-namespace only creates the one the release installs into, so a chart
+rendering objects elsewhere has to create that elsewhere itself -- found by
+installing rather than templating, when the Ollama template failed a whole
+release with "namespaces \"ollama\" not found".
+*/}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+---
+{{- end }}
+{{- if .Values.vllm.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.vllm.name }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: vllm
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.vllm.persistence.size }}
+  {{- with .Values.vllm.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.vllm.name }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: vllm
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate. A second replica would claim the same
+    # ReadWriteOnce volume and sit Pending forever while the first one is
+    # already being torn down.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: vllm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: vllm
+    spec:
+      containers:
+        - name: vllm
+          image: "{{ .Values.vllm.image.repository }}:{{ .Values.vllm.image.tag }}"
+          imagePullPolicy: {{ .Values.vllm.image.pullPolicy }}
+          args:
+            - --model
+            - {{ .Values.vllm.model | quote }}
+            - --port
+            - {{ .Values.vllm.port | quote }}
+            {{- with .Values.vllm.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.vllm.port }}
+          env:
+            # Weights land here, on the volume below when one exists. Without
+            # it every pod move re-downloads the model, which for a 7B is tens
+            # of gigabytes over someone's egress bill.
+            - name: HF_HOME
+              value: /cache
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            # A first start downloads the weights. Ten minutes of failures at
+            # 15s intervals is deliberately generous; a readiness probe that
+            # gives up during a model pull reports NotReady forever and reads
+            # as a broken image.
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 40
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            # Later than readiness by design. A liveness probe that fires
+            # during the same download kills the container mid-pull, and the
+            # next attempt starts the download again -- a loop that looks like
+            # a crash and is actually the probe.
+            initialDelaySeconds: 900
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              {{- toYaml .Values.vllm.resources.requests | nindent 14 }}
+              {{- if gt (int .Values.vllm.gpuCount) 0 }}
+              {{ .Values.vllm.gpuResource }}: {{ .Values.vllm.gpuCount }}
+              {{- end }}
+            limits:
+              {{- toYaml .Values.vllm.resources.limits | nindent 14 }}
+              {{- if gt (int .Values.vllm.gpuCount) 0 }}
+              # An accelerator has to appear in both requests and limits with
+              # the same value; the scheduler rejects anything else.
+              {{ .Values.vllm.gpuResource }}: {{ .Values.vllm.gpuCount }}
+              {{- end }}
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+            # vLLM uses shared memory for tensor parallelism, and the default
+            # 64MB /dev/shm is not enough. The failure is a hang rather than an
+            # error, which is the worst kind to debug from outside.
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: cache
+        {{- if .Values.vllm.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.vllm.name }}
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+      {{- with .Values.vllm.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vllm.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.vllm.name }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: vllm
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: vllm
+  ports:
+    - name: http
+      port: {{ .Values.vllm.port }}
+      targetPort: http
+{{- end }}

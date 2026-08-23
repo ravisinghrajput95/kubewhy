@@ -1,0 +1,71 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+Egress restriction, enforced by the dataplane rather than promised by the code.
+
+inference.py refuses to send evidence off-network unless allowExternal is set.
+This is the same claim made where a bug in that code cannot undo it -- the same
+argument rbac.yaml makes about the tools being read-only: better a property the
+platform enforces than a promise the process keeps.
+
+**Two honest caveats, and they are why this is off by default.**
+
+It needs a CNI that actually enforces NetworkPolicy. Several managed offerings
+ship one that silently ignores these objects unless a dataplane option was
+chosen when the cluster was created, and a policy that is quietly not enforced
+is worse than none: it is a control someone will point at in a review.
+
+And this template has been rendered and schema-checked, never enforcement-
+tested on a live cluster. Verify it does what you think before you rely on it:
+exec into the pod and try to reach something public.
+
+**What it permits.** DNS, so Service names resolve. Private address space, so
+the API server, an in-cluster model and an on-network one are all reachable.
+Nothing else -- which is the point.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: ["Egress"]
+  egress:
+    # DNS first, and to anywhere rather than to a labelled kube-dns pod. The
+    # label differs between distributions -- k8s-app=kube-dns on most,
+    # something else on others -- and a policy that names the wrong one breaks
+    # every lookup the agent makes, which presents as the API server being
+    # unreachable rather than as a DNS problem.
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        # RFC1918 and the link-local range. The API server, in-cluster
+        # Services, pod IPs and an on-network model all live here; the public
+        # internet does not.
+        - ipBlock:
+            cidr: 10.0.0.0/8
+        - ipBlock:
+            cidr: 172.16.0.0/12
+        - ipBlock:
+            cidr: 192.168.0.0/16
+        - ipBlock:
+            # 169.254.0.0/16 covers the metadata endpoint every managed
+            # platform serves at 169.254.169.254. It is in because a
+            # ServiceAccount token projection needs no network at all, but the
+            # cloud SDKs a base image carries will try this address and hang
+            # for their full timeout if it blackholes rather than refuses.
+            cidr: 169.254.0.0/16
+      {{- range .Values.networkPolicy.extraAllowedCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+      {{- end }}
+{{- end }}
