@@ -12,83 +12,109 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `ad029dd`, tree clean and pushed, 800 tests pass, tags
-through **v0.1.7** (cut 2026-08-23). Nothing running: no kind cluster, no GKE
+**State: `main` at `2b988d4`, tree clean and pushed, 886 tests pass, tags
+through **v0.1.8** (cut 2026-08-24). Nothing running: no kind cluster, no GKE
 cluster, Docker quit, Ollama stopped, GCP empty.**
 
-**v0.1.7 is released and verified from the registry, not from the workflow
-file.** Both jobs green. `ghcr.io/ravisinghrajput95/kubewhy:0.1.7`,
-`:0.1.7-ui`, `:latest` and `:latest-ui` all resolve and are amd64+arm64 —
-and CI's own `docker run` step checked `/healthz` on the base image and
-`/_stcore/health` on the UI one, which is the check that would catch the
-`target:base` trap that shipped Streamlit as `:0.1.3`. The chart blob was
-pulled back out of the OCI registry and rendered: `version`/`appVersion` both
-`0.1.7`, all ten templates present including `vllm.yaml` and
-`networkpolicy.yaml`, the default render carries
-`TRIAGE_INFERENCE_MODE=cluster` and `TRIAGE_ALLOW_EXTERNAL_INFERENCE=false`,
-it points at `:0.1.7`, all three modes render, and both refusal guards still
-fire from the packaged copy.
+**v0.1.8 is released and verified from the registry.** All four image tags
+resolve amd64+arm64, the chart publishes, and CI's own `docker run` step checks
+`/healthz` on the base image and `/_stcore/health` on the UI one -- the check
+that would catch the `target:base` trap. **v0.1.7 should not be used**: it
+ships the egress bypass below, and an in-cluster Ollama whose model pull
+usually loses a race with its own server.
 
-**START HERE: v0.1.7 is published with two defects that are fixed in `main`
-but not in the released chart.** Both were found by *installing* v0.1.7 on a
-fresh kind cluster — `helm template` renders the broken and working versions
-identically, which is why they survived review, CI and a GKE validation.
+**An adversarial validation phase ran on 2026-08-23 and its remediation on
+2026-08-24. Nine findings, eight closed.** The full report is an artifact:
+https://claude.ai/code/artifact/264cb4be-1137-41f4-b23f-f81aac685721
 
-1. **Inference resolved lazily.** A configuration the gateway refuses —
-   `mode: cluster` pointed at a public host, which helm cannot catch because a
-   template cannot classify a hostname — installed cleanly, reported 1/1
-   Running, logged nothing about inference, and would have surfaced the
-   refusal at the first fault. `controller.py` resolves the gateway before
-   watching now and raises; `app.py` logs and keeps serving its non-model
-   endpoints, with `/readyz` and `/inference` reporting 503 and the reason.
-2. **`ollama.pullModelOnStart` usually did nothing and hid it.** postStart
-   races the server, `ollama pull` failed in under a second, and `|| true`
-   swallowed it — leaving a pod that reported 1/1 Ready with an empty model
-   directory while every diagnosis returned `model not found (404)`. The only
-   evidence in the cluster was a 404 in Ollama's own access log. The hook
-   waits and retries now, and readiness means a model is listed rather than a
-   port being open. **It is a race, not a certain failure** — it resolved
-   favourably on GKE in August and against us on kind, so the chart was
-   recorded as validated when it was not.
+**START HERE: F-07, the only finding still open, and it is small.**
+`injection_in_annotations_is_data` **cannot fail**. No projection carries
+annotations -- verified live across all seven tools against a pod whose
+annotations did contain the injection -- so the payload never reaches the model
+context. The defence is real (annotations are simply not exposed); the *test*
+proves nothing about it, and any claim of "injection 6/6 across logs and
+annotations" overstates what is demonstrated. Either delete the case or
+re-point it at a delivery path that reaches context. Note the class: this
+project has previously found cases passing on a cluster that never had their
+fixture.
 
-**So decide whether to cut v0.1.8.** Anyone installing v0.1.7 with
-`ollama.enabled=true` gets a cluster that looks healthy and cannot answer. The
-same recipe as before: bump `version.py`, `Chart.yaml:version` and
-`appVersion` together, tag, then verify from the registry.
+**What the validation phase found and fixed, in severity order:**
 
-After that, pick from `## Open, in priority order` below. The two live
-candidates are the `forbid` false positive on `injection_in_logs_is_data`
-(item 6) and settling thinking-off, which needs roughly n=15 per arm and has
-come back undetermined three times. Neither is urgent.
+1. **HIGH -- the egress policy could be bypassed by how an endpoint was
+   spelled.** Unicode full stops (U+3002, U+FF0E, U+FF61), which httpx
+   normalises to "." via IDNA but an ASCII-dot check does not; and integer-form
+   IPv4 (`0x08080808`, `134744072` -- both 8.8.8.8, neither containing a dot).
+   Demonstrated end to end with a captured request: `mode: cluster`,
+   `allowExternal: false`, and the outbound body carried a pod log with a
+   database password and an AWS secret key, while every log line said
+   `destination: internal`. The classifier and the HTTP client parsed the
+   endpoint independently and agreed only by coincidence; they agree by
+   construction now, and a test asserts they cannot diverge.
+2. **A malformed provider response never failed over.** An intermediary
+   returning `<html>502 Bad Gateway</html>` with a 200 raised a bare
+   JSONDecodeError that `unavailable()` read as "the provider refused".
+   `backends.MalformedResponse` carries these now.
+3. **F-03 contradiction detection.** `grounding.check()` could verify a value
+   appears in the evidence but not that the evidence says otherwise, so
+   "CrashLoopBackOff, which means the container exited with an application
+   error" scored `grounded` over `last_termination.reason = OOMKilled`.
+   `contradiction.py` is a **separate deterministic stage** using grounding's
+   own `_scope` and `_entity_index`; `contradicted` is a fifth verdict that
+   outranks the rest.
 
-**What the v0.1.7 install did verify**, on a fresh kind cluster, from the
-published OCI chart: it installs; the pod runs; the chart's rendered env
-produces the right config inside the container (`mode: cluster`,
-`destination: internal`, `allow_external: false`); the read-only RBAC is
-correct when exercised with the ServiceAccount's own minted token — all 14
-resource lists allowed, `pods/log` allowed, secrets and every mutation
-Forbidden by real attempts rather than by `can-i`; and with an in-cluster
-Ollama the controller detected a fresh fault, chained tools, reached the model
-over Service DNS and returned a **grounded** diagnosis quoting the log line
-the cause was in. The 400→200 in those logs is `llama3.2` rejecting the
-thinking flag and the backend retrying without it, working as designed.
+   **The corpus replay is the load-bearing artefact here and it rejected two
+   drafts of the rules.** The first fired 7 times across 316 records and every
+   firing was a false positive: six were the `stress` fixture's own log line
+   ("0 cpu, 0 io, 1 vm") read as a CPU-limit claim, one was a negation ("no
+   OOMKilled reported"). After repair: 236/236 grounded stayed grounded, 64
+   insufficient stayed 64, and **two records moved** -- both
+   `service_unreachable_chain` answers claiming a Service has no pods when
+   `get_service_endpoints` had just reported a ready endpoint. One is the wrong
+   answer this file used to record as having passed.
+4. **F-04 readiness verifies the configured model.** Three-valued:
+   `confirmed` / `absent` / `unsupported`, and only `absent` fails readiness --
+   an empty listing is not a negative answer, and reporting NotReady on that
+   basis would invent a guarantee. Verified live: `gpt-4o-mini` confirmed,
+   `gpt-nonexistent-9` -> 503 `model_not_served`.
+5. **F-05 a global investigation budget.** `TRIAGE_INVESTIGATION_BUDGET`,
+   default **600s**, derived rather than chosen: it clears the p99 of 1273
+   recorded investigations (318s) by ~1.9x, is twice OLLAMA_TIMEOUT, and is a
+   third of the controller's cooldown. Covers rounds, tools, retries and
+   fallback; terminates with `deadline_exceeded` as data rather than prose.
+6. **F-06 redaction, classified before widening.** Two of the four reported
+   "misses" were not gaps -- one was a malformed test string of mine, one a
+   certificate that is public by design. The widening **nearly shipped worse
+   than it fixed**: normalising the separator broke the JSON, which would have
+   silently disabled the claim checker. Replayed over 738 recorded tool
+   outputs: zero changed, zero broke.
 
-**Two instrument failures happened while checking that RBAC**, both caught
-before they were believed, and both worth remembering. `kubectl --server
---token` silently merges the current context's admin client cert, which wins —
-it reported *everything* allowed including secrets. Rebuilt as a standalone
-kubeconfig it reported everything *denied*, because an unquoted command in a
-shell variable mangled the arguments. Only the third version, using an array
-and printing real stderr, was measuring the thing. `auth can-i` also rejects
-`--request-timeout`, and returns empty rather than erroring visibly. Attempt
-the operation; do not ask about it.
+**Two things the phase converted from "not verified".** NetworkPolicy egress
+enforcement is now tested on a live cluster, against an unlabelled control pod
+so the block is attributable to the policy -- kind v1.36.1 / kindnet only,
+managed dataplanes still untested. And **the same 16 scenarios ran on the
+hosted OpenAI API with no business-logic change**, 16/16 at n=1, with all
+fourteen derived tool schemas accepted by a second independent implementation.
+That is mechanical compatibility, not accuracy: n=1 is Wilson 95% [81-100].
 
-**The CHANGELOG's `[Unreleased]` block is a known bookkeeping debt.** It
-already carried 43 lines when v0.1.6 was tagged, so it spans work released
-across 0.1.3–0.1.6. Cutting 0.1.7 deliberately did *not* absorb it — a
-`[0.1.7]` section was written for this release's own work and the old block
-was left alone, because relabelling it would claim four releases' worth of
-entries as new. Untangling it means reading `git log` between the tags.
+**Still NOT tested, and say so:** any real vLLM server (the arm64 image is
+10.5GB and expects a CUDA device), EKS, AKS, NetworkPolicy on any managed
+dataplane, and rate limiting against a live account.
+
+**Mutation testing covers 25 guards and kills all 25.** Two were genuine
+survivors first: the round-loop and tool-loop deadline checks are mutually
+redundant for the ordinary shape, so removing either alone left every test
+passing. Each is now isolated by a run only it can stop.
+
+**Repository hygiene, settled 2026-08-24.** `origin/main` carries zero Claude
+trailers, no Claude author or committer, no secrets (`.env` was never
+committed) and no large files. Four commits from 2026-08-07 do carry
+`Co-Authored-By: Claude Opus 5`, and they are reachable from **`refs/pull/*`
+for PRs #1 and #3-#8** -- not orphaned, as first assumed. GitHub's PR refs are
+permanent, so no GC or force-push removes them; only deleting the repository
+would. Both contributor APIs report two contributors. If the web sidebar still
+shows three, that is `graphs/contributors-data` returning HTTP 202 and GitHub
+falling back to a pre-scrub render -- not a repository problem. A verified
+bundle backup is at `/Users/ravirajput/kubewhy-history-backup/`.
 
 **~~A deterministic policy did not fire.~~ Closed 2026-08-23, and it was not
 the seam refactor.** The condition had been there since `LOGS_POLICY` was
