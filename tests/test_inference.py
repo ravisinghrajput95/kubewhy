@@ -466,6 +466,73 @@ class TestFailover:
         gate.chat("m", [{"role": "user", "content": "q"}], [], False)
         assert gate.name == "otherwire"
 
+    def test_a_dead_primary_is_not_probed_again_every_round(self):
+        """
+        Found live on 2026-08-23, not by reading the code. With a dead primary
+        and a working fallback, one investigation failed over on every round --
+        nothing remembered the primary had just refused. A refused connection
+        costs milliseconds and hid it; a primary that times out costs
+        OLLAMA_TIMEOUT, and MAX_ROUNDS is 8.
+        """
+        gate = gateway(target(provider="broken"), target(provider="recorder"),
+                       fallback_enabled=True)
+
+        for _ in range(4):
+            gate.chat("m", [], [], False)
+
+        # One failover, not four: the rounds after the first went straight to
+        # the fallback.
+        assert sum(telemetry.FALLBACKS.values.values()) == 1
+        assert len(Recorder.calls) == 4
+
+    def test_the_primary_is_tried_again_once_the_window_elapses(self):
+        """
+        A breaker that never closes is an outage that needs a restart to
+        recover from.
+        """
+        gate = gateway(target(provider="broken"), target(provider="recorder"),
+                       fallback_enabled=True)
+        gate.chat("m", [], [], False)
+        assert gate._primary_down_until > 0
+
+        gate._primary_down_until = 0.0
+        gate.chat("m", [], [], False)
+
+        assert sum(telemetry.FALLBACKS.values.values()) == 2
+
+    def test_a_recovered_primary_closes_the_breaker(self):
+        gate = gateway(target(provider="recorder"), target(provider="recorder",
+                                                           model="second"),
+                       fallback_enabled=True)
+        gate._primary_down_until = float("inf")
+
+        gate.chat("m", [], [], False)          # goes to the fallback
+        gate._primary_down_until = 0.0
+        gate.chat("m", [], [], False)          # primary answers
+
+        assert gate._primary_down_until == 0.0
+
+    def test_a_run_already_on_the_fallback_does_not_go_back_across_a_wire(self):
+        """
+        The mirror of the mid-run rule. Once the fallback has shaped this
+        conversation, returning to a primary speaking the other protocol is
+        the same 400, arrived at from the other side.
+        """
+        gate = gateway(target(provider="broken"),
+                       target(mode="api", provider="otherwire",
+                              endpoint="http://localhost:8000/v1",
+                              model="other"),
+                       fallback_enabled=True)
+        gate.chat("m", [{"role": "user", "content": "q"}], [], False)
+        assert gate.active is gate.fallback
+
+        gate._primary_down_until = 0.0
+        started = [{"role": "assistant", "content": ""},
+                   {"role": "tool", "tool_call_id": "1", "content": "{}"}]
+
+        assert gate.chat("m", started, [], False).content == "ok"
+        assert gate.active is gate.fallback
+
     def test_a_failed_attempt_does_not_become_the_active_provider(self):
         gate = gateway(target(provider="broken"))
 

@@ -81,6 +81,21 @@ DEFAULT_ENDPOINT = {
 # that leaves it contradicts the mode, and is refused rather than logged.
 ON_NETWORK_MODES = ("local", "cluster")
 
+# How long the gateway stops trying a primary that just failed, in seconds.
+#
+# Measured live on 2026-08-23 and this number exists because of it: with a dead
+# primary and a working fallback, a run failed over on *every round*, because
+# nothing remembered that the primary had just refused. A refused connection
+# costs milliseconds and made that invisible. A primary that times out instead
+# of refusing costs OLLAMA_TIMEOUT -- 300s by default -- and MAX_ROUNDS is 8,
+# so the same run would have spent forty minutes discovering eight times that
+# the model was still down.
+#
+# Sixty seconds: long enough that one investigation never pays the probe twice,
+# short enough that a primary coming back is picked up within a minute rather
+# than needing a restart.
+PRIMARY_RETRY_SECONDS = int(os.getenv("TRIAGE_PRIMARY_RETRY_SECONDS", "60"))
+
 # Hostnames that are this machine or this cluster, whatever DNS thinks.
 # host.docker.internal is here because it is the documented way a container in
 # this project's own docker-compose reaches the Ollama on the host, and reading
@@ -495,6 +510,9 @@ class Gateway:
         # next message in the wrong protocol -- which is a 400 from the
         # provider that just rescued it.
         self.active = config.primary
+        # Monotonic deadline before which the primary is not tried again. Zero
+        # means "try it". See PRIMARY_RETRY_SECONDS.
+        self._primary_down_until = 0.0
         log.info("inference_configured", extra=config.describe())
 
     # -- the backend interface ---------------------------------------------
@@ -522,12 +540,20 @@ class Gateway:
         serving a different catalogue, and calling it with the primary's model
         name is a 404 at the one moment the primary is already down.
         """
+        first = self._preferred(messages)
         try:
-            return self._attempt(self.primary, model or self.primary.model,
-                                 messages, tools, think)
+            return self._attempt(
+                first,
+                model or first.model if first is self.primary else first.model,
+                messages, tools, think)
         except Exception as exc:
-            if not self._may_fail_over(exc, messages):
+            # Already on the fallback: there is nowhere further to go, and
+            # trying the primary now would be a failover in the wrong
+            # direction into a conversation the fallback has been shaping.
+            if first is not self.primary or not self._may_fail_over(
+                    exc, messages):
                 raise
+            self._primary_down_until = time.monotonic() + PRIMARY_RETRY_SECONDS
             telemetry.FALLBACKS.inc(
                 from_provider=self.primary.provider,
                 to_provider=self.fallback.provider,
@@ -627,7 +653,32 @@ class Gateway:
         # gateway shaping its next message in the protocol of a provider that
         # did not answer.
         self.active = target
+        if target is self.primary:
+            self._primary_down_until = 0.0
         return reply
+
+    def _preferred(self, messages):
+        """
+        Which target to try first this round.
+
+        Two reasons to skip the primary. It failed recently and the retry
+        window has not elapsed -- see PRIMARY_RETRY_SECONDS, which exists
+        because a run without it failed over on every round. Or the fallback
+        has already shaped this conversation and speaks a different wire, in
+        which case going back to the primary is the same 400 that
+        _may_fail_over declines in the other direction.
+        """
+        if self.fallback is None:
+            return self.primary
+
+        if (self.active is self.fallback and _started(messages)
+                and self._wire(self.primary) != self._wire(self.fallback)):
+            return self.fallback
+
+        if time.monotonic() < self._primary_down_until:
+            return self.fallback
+
+        return self.primary
 
     def _may_fail_over(self, exc, messages):
         if self.fallback is None:
