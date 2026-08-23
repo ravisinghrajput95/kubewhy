@@ -39,9 +39,13 @@ only check on a model change: 16 cases, the controller, and grounding. A
 backend added without those numbers is unverified, whatever its tests say.
 """
 
+import json
 import os
 
+import httpx
 import ollama
+
+import tool_schema
 
 # Where the seam is chosen. Ollama by default: a different default would make
 # the README's "nothing leaves your network" false for anyone who upgraded
@@ -49,6 +53,12 @@ import ollama
 BACKEND = os.getenv("TRIAGE_BACKEND", "ollama")
 
 TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+
+# For the OpenAI-protocol backend. The default is the hosted service, but
+# pointing this at http://localhost:11434/v1 runs the same protocol against a
+# local Ollama -- which is how the seam is validated without a key.
+BASE_URL = os.getenv("TRIAGE_OPENAI_BASE_URL", "https://api.openai.com/v1")
+API_KEY = os.getenv("OPENAI_API_KEY", "")
 KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE") or None
 
 
@@ -148,7 +158,115 @@ class OllamaBackend:
         return list(registry.values())
 
 
-_BACKENDS = {"ollama": OllamaBackend}
+class OpenAICompatBackend:
+    """
+    Anything speaking the OpenAI chat-completions protocol.
+
+    Including Ollama itself, which serves `/v1/chat/completions` alongside its
+    native API -- and that is how this gets validated without an API key or a
+    bill. Same model, same cluster, two wire formats: any difference between
+    the arms is the seam rather than the model.
+
+    Written with httpx rather than the openai SDK on purpose. The protocol
+    surface used here is one POST, and taking the SDK would add a dependency
+    to a project whose default path never speaks to a hosted service at all.
+
+    **Three differences from the native protocol, and the first is the one a
+    naive port gets wrong:**
+
+    - Arguments arrive as a JSON *string*, not a dict. Ollama's native API
+      returns them parsed. Passing the string on would have every tool receive
+      one positional blob and fail in a way that looks like the model calling
+      tools wrongly.
+    - Tool results are matched by `tool_call_id`, not by tool name. Omitting it
+      is a 400 from the API, not a degraded answer.
+    - Assistant messages go back as plain dicts. There is no provider object
+      to hand back, so the raw dict is what gets appended.
+    """
+
+    name = "openai"
+
+    def __init__(self, base_url=None, api_key=None, timeout=None):
+        self.base_url = (base_url or BASE_URL).rstrip("/")
+        # Ollama needs no key at all; a hosted API requires one. The header is
+        # omitted entirely when there is none, because "Bearer " with an empty
+        # value is an illegal HTTP header value and httpx refuses to send it --
+        # failing locally with LocalProtocolError rather than reaching the
+        # provider. Measured against a local Ollama on 2026-08-22, which is
+        # precisely the keyless case this backend has to support.
+        self.api_key = api_key if api_key is not None else API_KEY
+        self.timeout = timeout or TIMEOUT
+
+    def chat(self, model, messages, tools, think):
+        payload = {"model": model, "messages": messages}
+        if tools:
+            payload["tools"] = tools
+
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        response = httpx.post(
+            f"{self.base_url}/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        message = response.json()["choices"][0]["message"]
+
+        calls = []
+        for call in message.get("tool_calls") or []:
+            function = call.get("function", {})
+            calls.append(ToolCall(
+                function.get("name"),
+                self._arguments(function.get("arguments")),
+                id=call.get("id"),
+                raw=call,
+            ))
+
+        # think is not portable: it is Ollama's flag, reasoning models express
+        # it differently and most models not at all. Reported as False rather
+        # than echoed, so a set records what happened rather than what was
+        # asked for.
+        return Reply(message.get("content"), calls, False, message)
+
+    @staticmethod
+    def _arguments(raw):
+        """
+        Arguments, whatever shape they arrived in.
+
+        The protocol says JSON string. Ollama's /v1 endpoint has been seen
+        returning a dict already parsed, so accept both -- and treat
+        unparseable JSON as empty rather than raising, because a malformed
+        argument blob is the model's mistake and the loop is built to survive
+        those as data.
+        """
+        if isinstance(raw, dict):
+            return raw
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def assistant_message(reply):
+        return reply.raw
+
+    @staticmethod
+    def tool_message(call, output):
+        # tool_call_id, not tool name. Omitting it is a 400.
+        return {"role": "tool", "tool_call_id": call.id, "content": output}
+
+    @staticmethod
+    def tools(registry):
+        return tool_schema.schemas_for(registry)
+
+
+_BACKENDS = {"ollama": OllamaBackend, "openai": OpenAICompatBackend}
 
 
 def get(name=None):

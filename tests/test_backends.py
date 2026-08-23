@@ -158,3 +158,115 @@ class TestTheBackendOwnsTheWireShape:
         registry = {"a": lambda: None, "b": lambda: None}
         passed = backends.get().tools(registry)
         assert passed == list(registry.values())
+
+
+def openai_reply(content=None, calls=()):
+    """A response shaped the way an OpenAI-protocol endpoint returns one."""
+    return {
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {"id": id, "type": "function",
+                     "function": {"name": name, "arguments": arguments}}
+                    for id, name, arguments in calls
+                ] or None,
+            }
+        }]
+    }
+
+
+class TestOpenAIProtocol:
+    """
+    The second protocol, validated against a local Ollama /v1 endpoint.
+
+    Ollama serves chat-completions alongside its native API, which is how this
+    backend gets exercised against a real tool-calling model with no API key
+    and no bill. These unit tests pin the translation; the live check is in
+    the commit that added it.
+    """
+
+    def backend(self):
+        return backends.get("openai")
+
+    def post(self, payload):
+        response = MagicMock()
+        response.json.return_value = payload
+        response.raise_for_status = MagicMock()
+        return patch("backends.httpx.post", return_value=response)
+
+    def test_arguments_arrive_as_a_json_string_and_are_parsed(self):
+        # The difference a naive port gets wrong. Ollama's native API returns
+        # arguments already parsed; this protocol sends a string. Passing it
+        # on would hand every tool one positional blob, failing in a way that
+        # looks like the model calling tools wrongly.
+        payload = openai_reply(calls=[
+            ("call_1", "get_pod_logs", '{"name": "crasher", "tail": 5}')
+        ])
+        with self.post(payload):
+            reply = self.backend().chat("qwen3", [], [], think=False)
+
+        assert reply.tool_calls[0].arguments == {"name": "crasher", "tail": 5}
+        assert reply.tool_calls[0].id == "call_1"
+
+    def test_arguments_already_parsed_are_accepted_too(self):
+        # Ollama's /v1 endpoint has been seen returning a dict.
+        payload = openai_reply(calls=[("call_1", "list_pods", {"namespace": "demo"})])
+        with self.post(payload):
+            reply = self.backend().chat("qwen3", [], [], think=False)
+        assert reply.tool_calls[0].arguments == {"namespace": "demo"}
+
+    def test_unparseable_arguments_become_empty_rather_than_raising(self):
+        # A malformed blob is the model's mistake, and this loop is built to
+        # survive those as data rather than as an exception three frames away.
+        payload = openai_reply(calls=[("call_1", "list_pods", "{not json")])
+        with self.post(payload):
+            reply = self.backend().chat("qwen3", [], [], think=False)
+        assert reply.tool_calls[0].arguments == {}
+
+    def test_tool_results_are_matched_by_id_not_name(self):
+        # Omitting tool_call_id is a 400 from a hosted API, not a worse answer.
+        call = backends.ToolCall("get_pod_logs", {}, id="call_9")
+        assert self.backend().tool_message(call, "{}") == {
+            "role": "tool", "tool_call_id": "call_9", "content": "{}",
+        }
+
+    def test_no_api_key_sends_no_authorization_header(self):
+        """
+        The keyless case, which is the local-Ollama case.
+
+        "Bearer " with an empty value is an illegal HTTP header value: httpx
+        refuses to send it and fails with LocalProtocolError before reaching
+        the provider. Found on 2026-08-22 by pointing this backend at a local
+        Ollama -- a mocked client would never have shown it.
+        """
+        with self.post(openai_reply(content="ok")) as post:
+            backends.OpenAICompatBackend(api_key="").chat("qwen3", [], [], False)
+        assert "Authorization" not in post.call_args.kwargs["headers"]
+
+    def test_a_key_is_sent_when_present(self):
+        with self.post(openai_reply(content="ok")) as post:
+            backends.OpenAICompatBackend(api_key="sk-test").chat("qwen3", [], [], False)
+        assert post.call_args.kwargs["headers"]["Authorization"] == "Bearer sk-test"
+
+    def test_think_is_reported_false_because_it_does_not_port(self):
+        # think is Ollama's flag. Echoing the request would let a set record an
+        # arm it never ran.
+        with self.post(openai_reply(content="ok")):
+            reply = self.backend().chat("qwen3", [], [], think=True)
+        assert reply.think_used is False
+
+    def test_tools_are_sent_as_json_schema(self):
+        import agent
+
+        schemas = self.backend().tools(agent.TOOLS)
+        assert len(schemas) == len(agent.TOOLS)
+        assert schemas[0]["type"] == "function"
+        assert "parameters" in schemas[0]["function"]
+
+    def test_no_tools_means_no_tools_key(self):
+        # Some endpoints reject an empty tools array.
+        with self.post(openai_reply(content="ok")) as post:
+            self.backend().chat("qwen3", [], [], think=False)
+        assert "tools" not in post.call_args.kwargs["json"]
