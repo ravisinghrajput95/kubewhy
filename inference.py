@@ -605,9 +605,13 @@ class Gateway:
     def tool_message(self, call, output):
         return self._backend(self.active).tool_message(call, output)
 
-    def chat(self, model, messages, tools, think):
+    def chat(self, model, messages, tools, think, timeout=None):
         """
         One model call, on the primary if it can answer and the fallback if not.
+
+        `timeout` is the caller's remaining budget, not a replacement for the
+        provider's own. The effective limit is the smaller of the two, so a
+        deadline can only shorten a call and never lengthen one.
 
         The caller's `model` overrides the primary's configured one -- the CLI
         can ask for a different model and the eval harness does -- but it is
@@ -620,7 +624,7 @@ class Gateway:
             return self._attempt(
                 first,
                 model or first.model if first is self.primary else first.model,
-                messages, tools, think)
+                messages, tools, think, timeout)
         except Exception as exc:
             # Already on the fallback: there is nowhere further to go, and
             # trying the primary now would be a failover in the wrong
@@ -648,7 +652,7 @@ class Gateway:
                 },
             )
             return self._attempt(self.fallback, self.fallback.model,
-                                 messages, tools, think)
+                                 messages, tools, think, timeout)
 
     def probe(self):
         """
@@ -693,7 +697,7 @@ class Gateway:
 
     # -- internals ----------------------------------------------------------
 
-    def _attempt(self, target, model, messages, tools, think):
+    def _attempt(self, target, model, messages, tools, think, timeout=None):
         outbound = messages
         if target.external:
             # Refused here as well as at construction. The construction check
@@ -711,7 +715,7 @@ class Gateway:
             if self.config.policy.redact_on_egress:
                 outbound = _redacted(messages)
 
-        backend = self._backend(target)
+        backend = self._backend(target, timeout)
         labels = {"mode": target.mode, "provider": target.provider,
                   "model": model}
 
@@ -791,13 +795,30 @@ class Gateway:
     def _wire(self, target):
         return getattr(self._backend(target), "wire", target.provider)
 
-    def _backend(self, target):
-        # Cached per target: building an Ollama client is cheap, but the
-        # gateway holds two of these for the life of the process and there is
-        # no reason to rebuild either per round.
-        key = (target.provider, target.endpoint)
+    def _backend(self, target, timeout=None):
+        # Cached per target and per effective timeout: building an Ollama
+        # client is cheap, but the gateway holds these for the life of the
+        # process and there is no reason to rebuild one per round.
+        #
+        # The timeout is part of the key because an investigation deadline
+        # shortens it as the budget runs down, and a cache keyed without it
+        # would hand back a client still carrying the full 300s.
+        effective = target.timeout
+        if timeout is not None:
+            # Only ever shorter. A caller's remaining budget must not extend a
+            # provider timeout that was set deliberately.
+            # Not int(): truncating 2.99s to 2s makes the clamp fire a second
+            # early, which is indistinguishable from the provider failing and
+            # cost this fix two attempts to diagnose. httpx and the ollama
+            # client both take a float.
+            effective = min(float(timeout), float(target.timeout
+                                                  or backends.TIMEOUT))
+            effective = max(effective, 0.1)
+        key = (target.provider, target.endpoint, effective)
         if key not in self._backends:
-            self._backends[key] = target.build()
+            self._backends[key] = backends.get(
+                target.provider, endpoint=target.endpoint,
+                api_key=target.api_key or None, timeout=effective)
         return self._backends[key]
 
 

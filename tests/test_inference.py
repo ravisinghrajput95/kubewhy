@@ -948,6 +948,83 @@ class TestReadinessValidatesTheConfiguredTarget:
         assert backends._model_check(wanted, served) == expected
 
 
+class TestTheDeadlineClamp:
+    """
+    F-05's gateway half: a caller's remaining budget may shorten a provider
+    timeout and must never lengthen one.
+    """
+
+    class Timed(Recorder):
+        name = "timed"
+        seen = []
+
+        def __init__(self, endpoint=None, api_key=None, timeout=None):
+            super().__init__(endpoint, api_key, timeout)
+            Recorder.calls = Recorder.calls
+
+        def chat(self, model, messages, tools, think):
+            TestTheDeadlineClamp.Timed.seen.append(self.timeout)
+            return backends.Reply("ok", [], think, {"role": "assistant"}, None)
+
+    @pytest.fixture(autouse=True)
+    def _register(self):
+        self.Timed.seen = []
+        backends.register("timed", self.Timed)
+        yield
+        backends._BACKENDS.pop("timed", None)
+
+    def test_a_shorter_budget_shortens_the_call(self):
+        gate = gateway(target(provider="timed", timeout=300))
+
+        gate.chat("m", [], [], False, timeout=5)
+
+        assert self.Timed.seen == [5.0]
+
+    def test_a_longer_budget_does_not_lengthen_the_call(self):
+        """
+        The asymmetry that matters. A provider timeout was set deliberately;
+        an investigation with plenty of budget left must not be allowed to
+        extend it.
+        """
+        gate = gateway(target(provider="timed", timeout=30))
+
+        gate.chat("m", [], [], False, timeout=6000)
+
+        assert self.Timed.seen == [30.0]
+
+    def test_no_budget_leaves_the_provider_timeout_alone(self):
+        gate = gateway(target(provider="timed", timeout=42))
+
+        gate.chat("m", [], [], False)
+
+        assert self.Timed.seen == [42]
+
+    def test_the_budget_is_not_truncated_to_a_whole_second(self):
+        """
+        int(2.99) is 2, which fires the clamp a second early -- and a clamp
+        that fires early is indistinguishable from the provider failing. That
+        cost this fix two attempts to diagnose.
+        """
+        gate = gateway(target(provider="timed", timeout=300))
+
+        gate.chat("m", [], [], False, timeout=2.99)
+
+        assert self.Timed.seen == [2.99]
+
+    def test_a_clamped_backend_is_cached_separately(self):
+        """
+        The backend cache is keyed by effective timeout. Without that, the
+        first round's client -- built with the full 300s -- would be handed
+        back for every later round no matter how little budget was left.
+        """
+        gate = gateway(target(provider="timed", timeout=300))
+
+        gate.chat("m", [], [], False, timeout=10)
+        gate.chat("m", [], [], False, timeout=3)
+
+        assert self.Timed.seen == [10.0, 3.0]
+
+
 class TestTheLoopCannotTell:
     """
     The success criterion, stated as a test.

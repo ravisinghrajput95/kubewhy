@@ -66,6 +66,28 @@ log = logging.getLogger("triage.agent")
 # keeps calling tools without ever settling on an answer.
 MAX_ROUNDS = 8
 
+# Wall-clock ceiling on one whole investigation, in seconds: every round, every
+# tool call, every retry and any fallback.
+#
+# MAX_ROUNDS bounds the number of model calls and OLLAMA_TIMEOUT bounds each
+# one, but their product is 8 x 300s = 40 minutes and nothing was enforcing
+# anything smaller. Measured 2026-08-23 with a provider answering just under
+# its timeout every round: the loop ran all eight, terminating but occupying
+# the controller for the whole of it.
+#
+# **600s is derived, not chosen.** Across 1273 recorded investigations the
+# median is 54.6s, p95 is 182.2s and p99 is 318.0s; 600s clears p99 with
+# roughly 1.9x headroom. Sixteen runs exceeded 300s and five exceeded 600s,
+# and those five are the runs this project has already attributed to the host
+# suspending mid-run rather than to the model -- see `slept_ms`. It is also
+# twice OLLAMA_TIMEOUT, so a run survives one complete provider timeout and a
+# fallback attempt, and a third of the controller's 1800s per-workload
+# cooldown, so a finding can never outlive the window that dedups it.
+#
+# Raise it for a CPU-only cluster: a GKE node with no accelerator needed ~128s
+# per diagnosis with thinking off and exceeded 300s with it on.
+INVESTIGATION_BUDGET = int(os.getenv("TRIAGE_INVESTIGATION_BUDGET", "600"))
+
 # How many times a run may be sent back for naming a tool it did not call.
 # One: the point is to catch the model that stopped one step short, not to
 # argue with a model that has decided it is finished.
@@ -165,7 +187,7 @@ def _backend():
     return _BACKEND
 
 
-def _chat(model, messages, think):
+def _chat(model, messages, think, timeout=None):
     """
     One model call, through whichever backend is configured.
 
@@ -180,7 +202,8 @@ def _chat(model, messages, think):
     answers without one, and a run that records the request instead of the
     outcome cannot say which arm it measured.
     """
-    reply = _backend().chat(model, messages, _backend().tools(TOOLS), think)
+    reply = _backend().chat(model, messages, _backend().tools(TOOLS), think,
+                            timeout=timeout)
     return reply, reply.think_used
 
 
@@ -928,14 +951,111 @@ def stream(question, model=MODEL, think=None, prefetched=None):
     began_wall = time.time()
     began_mono = time.perf_counter()
 
+    def remaining():
+        """
+        Seconds of budget left, on the monotonic clock.
+
+        Monotonic deliberately: a host that suspends mid-investigation did not
+        spend that time working, and killing a run for a nap the wall clock
+        recorded would be this project's oldest measurement mistake wired into
+        a control path.
+        """
+        return INVESTIGATION_BUDGET - (time.perf_counter() - began_mono)
+
     def elapsed():
         wall_ms = (time.time() - began_wall) * 1000
         mono_ms = (time.perf_counter() - began_mono) * 1000
         return wall_ms, max(wall_ms - mono_ms, 0.0)
 
+    def terminated(reason, text):
+        """
+        The terminal event for a run that stopped without the model answering.
+
+        One builder for both non-answer exits so they carry the same shape: a
+        consumer that special-cases the fields present on one of them is a
+        consumer that breaks when the other fires.
+        """
+        telemetry.INVESTIGATIONS.inc(outcome=reason)
+        wall_ms, slept_ms = elapsed()
+        telemetry.INVESTIGATION_DURATION.observe(
+            max(wall_ms - slept_ms, 0.0) / 1000)
+        log.warning("investigation_terminated", extra={
+            "reason": reason,
+            "rounds": len(round_ms),
+            "budget_s": INVESTIGATION_BUDGET,
+            "elapsed_s": round((time.perf_counter() - began_mono), 1),
+            "tool_calls": len(trace),
+        })
+        return {
+            "type": "answer",
+            "answer": text,
+            # Why this run stopped, as data rather than as prose a caller has
+            # to pattern-match. `deadline_exceeded` and `max_rounds` are
+            # different operational problems and only one of them is about the
+            # model being indecisive.
+            "termination": reason,
+            "budget_s": INVESTIGATION_BUDGET,
+            "tool_calls": trace,
+            "evidence": evidence,
+            "draft": None,
+            "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
+            "nudges": nudges,
+            "policies": policies,
+            "coverage": coverage,
+            "confidence": "ungrounded",
+            "unverified": [],
+        }
+
     for round_index in range(MAX_ROUNDS):
+        if remaining() <= 0:
+            yield terminated(
+                "deadline_exceeded",
+                f"Gave up after {INVESTIGATION_BUDGET}s: the investigation "
+                f"budget was exhausted before an answer was reached."
+            )
+            return
+
         began = time.perf_counter()
-        reply, think = _chat(model, messages, think)
+        # The model call is capped by whatever is left, so the deadline cannot
+        # be overrun by a provider timeout that outlives it.
+        #
+        # And the cap has to be caught. Clamping the provider timeout to the
+        # remaining budget means the budget expiring *during* a call surfaces
+        # as that provider's timeout exception -- so without this the deadline
+        # ended runs by raising ReadTimeout out of the generator instead of
+        # terminating them with a reason, which is a worse outcome than the one
+        # it was added to prevent. Found by measuring the fix rather than by
+        # writing it.
+        #
+        # Only when the budget is actually gone. A provider that times out with
+        # budget still on the clock is a provider failure and still propagates,
+        # exactly as it did before.
+        budget_at_call = remaining()
+        try:
+            reply, think = _chat(model, messages, think, timeout=budget_at_call)
+        except Exception:
+            # Did this call run out the clock it was given, or did the provider
+            # break inside it? The call's ceiling is min(remaining, provider
+            # timeout), so a failure after roughly that long is the deadline
+            # arriving and anything sooner is a real provider failure, which
+            # still propagates exactly as before.
+            #
+            # Compared against the budget rather than against remaining() > 0,
+            # because those two race at precisely this boundary: measured
+            # 2026-08-23, the clamped timeout fired and remaining() came back
+            # a thousandth of a second positive, so the run re-raised
+            # ReadTimeout instead of terminating with a reason.
+            spent = time.perf_counter() - began
+            if spent < budget_at_call - 0.5:
+                raise
+            model_ms += (time.perf_counter() - began) * 1000
+            round_ms.append(round((time.perf_counter() - began) * 1000, 1))
+            yield terminated(
+                "deadline_exceeded",
+                f"Gave up after {INVESTIGATION_BUDGET}s: the investigation "
+                f"budget was exhausted waiting for the model."
+            )
+            return
         this_round = (time.perf_counter() - began) * 1000
         model_ms += this_round
         round_ms.append(round(this_round, 1))
@@ -1114,6 +1234,17 @@ def stream(question, model=MODEL, think=None, prefetched=None):
             return
 
         for call in calls:
+            if remaining() <= 0:
+                # Mid-round. A model that asked for eight tools can spend
+                # 8 x K8S_TIMEOUT here without the round ever returning, so
+                # the check belongs inside the loop and not only above it.
+                yield terminated(
+                    "deadline_exceeded",
+                    f"Gave up after {INVESTIGATION_BUDGET}s: the investigation "
+                    f"budget was exhausted while collecting evidence."
+                )
+                return
+
             name = call.name
             arguments = dict(call.arguments)
 
@@ -1172,23 +1303,8 @@ def stream(question, model=MODEL, think=None, prefetched=None):
                 "duration_ms": duration_ms,
             }
 
-    telemetry.INVESTIGATIONS.inc(outcome="gave_up")
-    yield {
-        "type": "answer",
-        "answer": f"Gave up after {MAX_ROUNDS} rounds of tool calls.",
-        "tool_calls": trace,
-        "evidence": evidence,
-        # No model answer was ever checked here, so there is no draft to keep
-        # apart from the text above. Present for shape, so a consumer does not
-        # have to special-case the one event that lacks the field.
-        "draft": None,
-        "timing": _timing(model_ms, tool_ms, round_ms, *elapsed()),
-        "nudges": nudges,
-        "policies": policies,
-        "coverage": coverage,
-        "confidence": "ungrounded",
-        "unverified": [],
-    }
+    yield terminated("max_rounds",
+                     f"Gave up after {MAX_ROUNDS} rounds of tool calls.")
 
 
 def ask(question, model=MODEL, verbose=False, think=None, prefetched=None,

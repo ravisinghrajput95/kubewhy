@@ -744,6 +744,112 @@ class TestSuspendedHost:
         assert result["timing"]["slept_ms"] == 0.0
 
 
+class TestTheInvestigationBudget:
+    """
+    F-05. MAX_ROUNDS bounds the number of model calls and OLLAMA_TIMEOUT bounds
+    each one, but nothing bounded their product -- 8 x 300s is forty minutes of
+    a controller occupied by one workload, under a budget of twelve findings an
+    hour.
+    """
+
+    @contextlib.contextmanager
+    def budget(self, seconds):
+        original = agent.INVESTIGATION_BUDGET
+        agent.INVESTIGATION_BUDGET = seconds
+        try:
+            yield
+        finally:
+            agent.INVESTIGATION_BUDGET = original
+
+    def test_a_slow_run_stops_at_the_budget(self):
+        def slow(*a, **k):
+            time.sleep(0.35)
+            return reply(calls=[tool_call("get_platform_info", {})])
+
+        with self.budget(1):
+            began = time.perf_counter()
+            with mock_chat(side_effect=slow):
+                result = agent.ask("why is this slow?", think=False)
+            elapsed = time.perf_counter() - began
+
+        assert result["termination"] == "deadline_exceeded"
+        assert elapsed < 2.0, f"ran {elapsed:.2f}s against a 1s budget"
+        # Fewer than MAX_ROUNDS: the point is that it stopped early.
+        assert result["timing"]["rounds"] < agent.MAX_ROUNDS
+
+    def test_the_termination_is_structured_not_prose(self):
+        """
+        A consumer must not have to pattern-match an English sentence to learn
+        why a run stopped. `deadline_exceeded` and `max_rounds` are different
+        operational problems and only one is about an indecisive model.
+        """
+        def slow(*a, **k):
+            time.sleep(0.35)
+            return reply(calls=[tool_call("get_platform_info", {})])
+
+        with self.budget(1):
+            with mock_chat(side_effect=slow):
+                result = agent.ask("q", think=False)
+
+        assert result["termination"] == "deadline_exceeded"
+        assert result["budget_s"] == 1
+        assert result["confidence"] == "ungrounded"
+        # The tool chain is still reported: a run that stopped is still worth
+        # reading, and the reader needs to see how far it got.
+        assert "tool_calls" in result
+
+    def test_running_out_of_rounds_is_labelled_differently(self):
+        with self.budget(600):
+            with mock_chat(return_value=reply(
+                    calls=[tool_call("get_platform_info", {})])):
+                result = agent.ask("q", think=False)
+
+        assert result["termination"] == "max_rounds"
+        assert result["timing"]["rounds"] == agent.MAX_ROUNDS
+
+    def test_a_normal_run_is_untouched_by_the_budget(self):
+        """
+        The budget must not become a second failure mode. 600s clears the p99
+        of 1273 recorded investigations by roughly 1.9x.
+        """
+        with self.budget(600):
+            with mock_chat(return_value=reply(content="It is a laptop.")):
+                result = agent.ask("what is this machine?", think=False)
+
+        assert result.get("termination") is None
+        assert "laptop" in result["answer"]
+
+    def test_the_budget_is_configurable(self):
+        import importlib
+        import os
+
+        os.environ["TRIAGE_INVESTIGATION_BUDGET"] = "42"
+        try:
+            importlib.reload(agent)
+            assert agent.INVESTIGATION_BUDGET == 42
+        finally:
+            os.environ.pop("TRIAGE_INVESTIGATION_BUDGET", None)
+            importlib.reload(agent)
+        assert agent.INVESTIGATION_BUDGET == 600
+
+    def test_the_deadline_is_measured_on_the_monotonic_clock(self):
+        """
+        A host that suspends mid-investigation did not spend that time working.
+        Killing a run for a nap the wall clock recorded would wire this
+        project's oldest measurement mistake into a control path.
+        """
+        wall = clock(1_000.0, 100_000.0)          # a 27-hour apparent jump
+        mono = clock(0.0, 0.0, 0.2, 0.2)
+
+        with self.budget(60):
+            with mock_chat(return_value=reply(content="fine")):
+                with patch("agent.time.time", wall), \
+                     patch("agent.time.perf_counter", mono):
+                    result = agent.ask("q", think=False)
+
+        assert result.get("termination") is None
+
+
 class TestNamedButNotCalled:
     """
     The plan-instead-of-a-diagnosis failure, at the loop level.
