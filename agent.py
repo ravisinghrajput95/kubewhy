@@ -17,11 +17,13 @@ import re
 import sys
 import time
 
-import backends
+import backends  # noqa: F401  -- re-exported for callers that name a backend
 
 import grounding
+import inference
 import observability
 import targeting
+import telemetry
 from routers.platform_info import get_platform_info
 from routers.system_info import get_system_info
 from routers.process_info import get_processes
@@ -144,10 +146,22 @@ _BACKEND = None
 
 
 def _backend():
-    """The configured backend, resolved once."""
+    """
+    The inference gateway, resolved once.
+
+    Not a raw backend since 2026-08-23. `inference.Gateway` presents the same
+    four methods a backend does, so nothing in this loop changed -- but behind
+    them sit the three decisions a backend has no business making: where
+    inference happens, whether cluster evidence may leave the network to get
+    there, and what to do when it cannot be reached. See inference.py.
+
+    The name is kept. Every call site here asks "which provider shapes this
+    message", and the gateway answers that question for whichever provider
+    actually replied.
+    """
     global _BACKEND
     if _BACKEND is None:
-        _BACKEND = backends.get()
+        _BACKEND = inference.gateway()
     return _BACKEND
 
 

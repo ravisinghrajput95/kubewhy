@@ -677,6 +677,29 @@ class TestPrefetchedEvidence:
         assert chat.call_args.kwargs["messages"][1]["content"] == "plain question"
 
 
+def clock(*readings):
+    """
+    A fake clock that holds its last reading instead of running out.
+
+    `patch("agent.time.perf_counter", ...)` patches the shared `time` module,
+    so it replaces the clock for every module in the process, not just the
+    agent. A strict iterator therefore pins how many times *anything* under
+    the call reads the clock -- and when inference.py started timing its own
+    model calls on 2026-08-23, two extra reads turned a passing test into
+    "generator raised StopIteration", nowhere near the thing that changed.
+
+    The readings that matter are the first and the last: the interval between
+    them is what these tests assert about. How many reads happen in between is
+    an implementation detail and should not be able to fail a clock test.
+    """
+    values = list(readings)
+
+    def read():
+        return values.pop(0) if len(values) > 1 else values[0]
+
+    return read
+
+
 class TestSuspendedHost:
     """
     Telling "the model hung" apart from "the laptop went to sleep".
@@ -691,11 +714,11 @@ class TestSuspendedHost:
     def test_a_suspended_host_is_reported_not_hidden(self):
         # A wall clock that has advanced further than the monotonic one is
         # only possible if the host was suspended in between.
-        wall = iter([1_000.0, 1_600.0])
-        mono = iter([0.0, 0.0, 10.0, 10.0])
+        wall = clock(1_000.0, 1_600.0)
+        mono = clock(0.0, 0.0, 10.0, 10.0)
         with mock_chat(return_value=reply(content="x")):
-            with patch("agent.time.time", lambda: next(wall)), \
-                 patch("agent.time.perf_counter", lambda: next(mono)):
+            with patch("agent.time.time", wall), \
+                 patch("agent.time.perf_counter", mono):
                 result = agent.ask("q")
 
         assert result["timing"]["slept_ms"] == pytest.approx(590_000, rel=0.01)
@@ -711,11 +734,11 @@ class TestSuspendedHost:
 
     def test_the_clocks_are_not_allowed_to_report_negative_sleep(self):
         """Clock resolution must not produce a negative nap."""
-        wall = iter([1_000.0, 1_000.0])
-        mono = iter([0.0, 0.0, 0.5, 0.5])
+        wall = clock(1_000.0, 1_000.0)
+        mono = clock(0.0, 0.0, 0.5, 0.5)
         with mock_chat(return_value=reply(content="x")):
-            with patch("agent.time.time", lambda: next(wall)), \
-                 patch("agent.time.perf_counter", lambda: next(mono)):
+            with patch("agent.time.time", wall), \
+                 patch("agent.time.perf_counter", mono):
                 result = agent.ask("q")
 
         assert result["timing"]["slept_ms"] == 0.0

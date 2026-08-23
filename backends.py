@@ -80,9 +80,9 @@ class ToolCall:
 class Reply:
     """One model turn: what it said, what it wants to call, and what it was."""
 
-    __slots__ = ("content", "tool_calls", "think_used", "raw")
+    __slots__ = ("content", "tool_calls", "think_used", "raw", "usage")
 
-    def __init__(self, content, tool_calls, think_used, raw):
+    def __init__(self, content, tool_calls, think_used, raw, usage=None):
         self.content = content or ""
         self.tool_calls = list(tool_calls or [])
         # What the provider actually did, not what was requested -- a model
@@ -93,12 +93,32 @@ class Reply:
         # The provider's own object, kept so a backend can hand it straight
         # back in assistant_message() without a lossy round trip.
         self.raw = raw
+        # {"prompt": n, "completion": n}, normalised, and empty rather than
+        # zeroed when the provider reports nothing. A zero would read as "this
+        # call used no tokens", which is a different claim from "this provider
+        # does not say" -- and the second is the true one for a provider that
+        # omits the field.
+        self.usage = dict(usage or {})
 
 
 class OllamaBackend:
     """The default, and the only one whose numbers this project has measured."""
 
     name = "ollama"
+    # The message protocol, which is not the same thing as the provider. Two
+    # providers sharing a wire can hand each other a half-finished
+    # conversation; two that do not, cannot. inference.py reads this to decide
+    # whether a mid-run failover is possible at all.
+    wire = "ollama"
+
+    def __init__(self, endpoint=None, timeout=None):
+        # None means "whatever OLLAMA_HOST says", which is how this worked
+        # before an endpoint could be passed and is still how the CLI reaches
+        # a laptop's Ollama. An explicit endpoint is what lets one process
+        # hold two of these at once -- the in-cluster primary and a fallback
+        # -- which env alone cannot express.
+        self.endpoint = endpoint
+        self.timeout = timeout or TIMEOUT
 
     def chat(self, model, messages, tools, think):
         """
@@ -111,7 +131,7 @@ class OllamaBackend:
         A Client is built per call so the timeout applies; module-level
         ollama.chat() ignores it.
         """
-        client = ollama.Client(timeout=TIMEOUT)
+        client = ollama.Client(host=self.endpoint, timeout=self.timeout)
         try:
             response = client.chat(
                 model=model, messages=messages, tools=tools, think=think,
@@ -134,7 +154,16 @@ class OllamaBackend:
             ToolCall(call.function.name, call.function.arguments, raw=call)
             for call in (message.tool_calls or [])
         ]
-        return Reply(message.content, calls, think_used, message)
+        # Ollama counts in eval units and names them differently from every
+        # OpenAI-protocol server, so the normalising happens here rather than
+        # in the caller. Omitted keys stay omitted -- see Reply.usage.
+        usage = {}
+        for key, attribute in (("prompt", "prompt_eval_count"),
+                               ("completion", "eval_count")):
+            value = getattr(response, attribute, None)
+            if isinstance(value, int):
+                usage[key] = value
+        return Reply(message.content, calls, think_used, message, usage)
 
     @staticmethod
     def assistant_message(reply):
@@ -185,9 +214,15 @@ class OpenAICompatBackend:
     """
 
     name = "openai"
+    wire = "openai"
 
-    def __init__(self, base_url=None, api_key=None, timeout=None):
-        self.base_url = (base_url or BASE_URL).rstrip("/")
+    def __init__(self, endpoint=None, api_key=None, timeout=None,
+                 base_url=None):
+        # Two names for one thing, and the older one still works. `base_url`
+        # is what this protocol calls it and what the existing callers pass;
+        # `endpoint` is what every backend here is asked for by inference.py,
+        # which must not know which protocol it is configuring.
+        self.base_url = (endpoint or base_url or BASE_URL).rstrip("/")
         # Ollama needs no key at all; a hosted API requires one. The header is
         # omitted entirely when there is none, because "Bearer " with an empty
         # value is an illegal HTTP header value and httpx refuses to send it --
@@ -213,7 +248,8 @@ class OpenAICompatBackend:
             timeout=self.timeout,
         )
         response.raise_for_status()
-        message = response.json()["choices"][0]["message"]
+        body = response.json()
+        message = body["choices"][0]["message"]
 
         calls = []
         for call in message.get("tool_calls") or []:
@@ -229,7 +265,14 @@ class OpenAICompatBackend:
         # it differently and most models not at all. Reported as False rather
         # than echoed, so a set records what happened rather than what was
         # asked for.
-        return Reply(message.get("content"), calls, False, message)
+        reported = body.get("usage") or {}
+        usage = {
+            key: reported[field]
+            for key, field in (("prompt", "prompt_tokens"),
+                               ("completion", "completion_tokens"))
+            if isinstance(reported.get(field), int)
+        }
+        return Reply(message.get("content"), calls, False, message, usage)
 
     @staticmethod
     def _arguments(raw):
@@ -266,26 +309,64 @@ class OpenAICompatBackend:
         return tool_schema.schemas_for(registry)
 
 
-_BACKENDS = {"ollama": OllamaBackend, "openai": OpenAICompatBackend}
-
-
-def get(name=None):
+class VLLMBackend(OpenAICompatBackend):
     """
-    The configured backend.
+    vLLM, which serves the OpenAI chat-completions protocol.
+
+    A subclass rather than a dict alias, and only for the name. "Which
+    provider answered this?" is a question the telemetry has to answer
+    truthfully, and an alias would make every in-cluster vLLM run report
+    itself as `openai` -- the one word that, in this project, means the
+    evidence left the network. A label that inverts the fact it is there to
+    record is worse than no label.
+
+    Untested against a real vLLM server. It is the same wire protocol, and
+    that is a statement about the protocol rather than about vLLM.
+    """
+
+    name = "vllm"
+
+
+_BACKENDS = {
+    "ollama": OllamaBackend,
+    "openai": OpenAICompatBackend,
+    "vllm": VLLMBackend,
+}
+
+
+def get(name=None, endpoint=None, api_key=None, timeout=None):
+    """
+    A backend, by name, optionally pointed somewhere specific.
 
     Unknown names fail loudly at startup rather than falling back to the
     default: a typo in TRIAGE_BACKEND that silently ran Ollama would produce a
     set of results labelled as something else, and this project has already
     published one set of numbers that measured the wrong thing.
+
+    The keyword arguments are only forwarded when given, so a factory added
+    through register() that takes none keeps working. That is not politeness:
+    inference.py builds two backends in one process for failover, and the
+    endpoint has to be an argument for that to be possible at all -- but
+    nothing that worked when the endpoint came from the environment should
+    stop working now that it can also come from here.
     """
     chosen = name or BACKEND
     try:
-        return _BACKENDS[chosen]()
+        factory = _BACKENDS[chosen]
     except KeyError:
         raise ValueError(
             f"unknown TRIAGE_BACKEND {chosen!r}; available: "
             f"{', '.join(sorted(_BACKENDS))}"
         ) from None
+
+    kwargs = {}
+    if endpoint is not None:
+        kwargs["endpoint"] = endpoint
+    if api_key is not None:
+        kwargs["api_key"] = api_key
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    return factory(**kwargs)
 
 
 def register(name, factory):
