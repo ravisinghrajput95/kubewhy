@@ -273,6 +273,23 @@ def _run_tool(name, arguments):
     return json.dumps(result, default=str)
 
 
+def _outcome(output):
+    """
+    Whether a tool result is an error, for the metric.
+
+    Rule 3 says errors come back as {"error": ...} data rather than raised, so
+    "did that tool fail" is a question about the document, not about an
+    exception that never happened. A run where every list_pods returns an
+    error is a broken RBAC grant and looks, from the outside, exactly like a
+    run where the model simply chose badly -- which is what this label is for.
+    """
+    try:
+        parsed = json.loads(output)
+    except (TypeError, ValueError):
+        return "ok"
+    return "error" if isinstance(parsed, dict) and "error" in parsed else "ok"
+
+
 def scoped_question(question, workload, namespace, pod=None):
     """
     Bind a question to one workload, for every surface that has a selection.
@@ -1024,6 +1041,15 @@ def stream(question, model=MODEL, think=None, prefetched=None):
                 )
 
             verdict = grounding.check(answer, evidence)
+            wall_ms, slept_ms = elapsed()
+            telemetry.INVESTIGATIONS.inc(
+                outcome=verdict.get("confidence", "unknown"))
+            # Wall clock minus the nap, which is the only honest duration on a
+            # laptop that suspends: this project has recorded a 725s run with
+            # 548s of sleep inside it, and a histogram that counts the nap as
+            # model latency reports a p95 that never happened.
+            telemetry.INVESTIGATION_DURATION.observe(
+                max(wall_ms - slept_ms, 0.0) / 1000)
             # Verify, then rewrite. Auditing alone left "the pod has a 512Mi
             # memory limit" standing in the prose with a correction printed
             # underneath it, and a reader skimming for the number found the
@@ -1124,6 +1150,7 @@ def stream(question, model=MODEL, think=None, prefetched=None):
             )
             duration_ms = round((time.perf_counter() - started) * 1000, 1)
             tool_ms += duration_ms
+            telemetry.TOOL_CALLS.inc(tool=name, outcome=_outcome(output))
 
             log.info(
                 "tool_call",
@@ -1145,6 +1172,7 @@ def stream(question, model=MODEL, think=None, prefetched=None):
                 "duration_ms": duration_ms,
             }
 
+    telemetry.INVESTIGATIONS.inc(outcome="gave_up")
     yield {
         "type": "answer",
         "answer": f"Gave up after {MAX_ROUNDS} rounds of tool calls.",

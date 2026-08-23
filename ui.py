@@ -19,6 +19,7 @@ is one the MCP server already exposes to untrusted clients; this surface adds
 no capability, only a way to look at it.
 """
 
+import html
 import datetime as dt
 import time
 
@@ -490,7 +491,19 @@ if submitted and question:
             "ask about the cluster as a whole."
         )
         with st.expander("what was actually sent to the model"):
-            st.code(question, language="text")
+            # st.code renders one long line with horizontal overflow, so the
+            # scoping directive scrolled off the right edge -- including the
+            # sentence that matters most, "Do not report on any other
+            # workload". A disclosure panel that hides the disclosure is
+            # worse than no panel, because it looks like the whole prompt.
+            # Reported from a real GKE session on 2026-08-22: the user could
+            # see "Answer only about the workload adversarial/annotation-inj"
+            # and nothing after it.
+            st.markdown(
+                f"<pre style='white-space:pre-wrap;word-break:break-word;"
+                f"font-size:0.85em;margin:0'>{html.escape(question)}</pre>",
+                unsafe_allow_html=True,
+            )
     # A new diagnosis invalidates the last one, and it has to be dropped
     # *before* the model is called rather than when the new answer arrives.
     # Otherwise the previous workload's answer stays on screen for the minute

@@ -17,11 +17,13 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
+import inference
 import observability
 import store
+import telemetry
 from agent import ask, scoped_question, stream
 from routers.platform_info import get_platform_info
 from routers.system_info import get_system_info
@@ -119,35 +121,82 @@ async def model_unreachable(_request: Request, exc: ConnectionError):
     """
     A dead model backend is a 503, not a 500.
 
-    /ask raises straight through the Ollama client when nothing is listening,
+    /ask raises straight through the model client when nothing is listening,
     and FastAPI turned that into a bare "Internal Server Error" with no body --
-    so a caller could not tell "Ollama is down" from "kubewhy is broken", and
-    the one endpoint whose whole job is diagnosis gave a worse error message
-    than the things it diagnoses.
+    so a caller could not tell "the model is down" from "kubewhy is broken",
+    and the one endpoint whose whole job is diagnosis gave a worse error
+    message than the things it diagnoses.
 
-    503 and the reason, matching /readyz, which has always reported this
-    correctly. /ask/stream needs no handler: its status line is long gone by
-    the time the model is called, so it emits an `error` event instead.
+    503 and the reason, matching /readyz. /ask/stream needs no handler: its
+    status line is long gone by the time the model is called, so it emits an
+    `error` event instead.
     """
     log.warning("model_unreachable", extra={"error": str(exc)})
     return JSONResponse(
         status_code=503,
-        content={"detail": f"ollama unreachable: {type(exc).__name__}"},
+        content={"detail": f"inference unreachable: {type(exc).__name__}"},
     )
+
+
+@app.exception_handler(PermissionError)
+async def egress_refused(_request: Request, exc: PermissionError):
+    """
+    Policy refused to send evidence off-network. That is a 403, not a 500.
+
+    The distinction is the whole point of having the policy: a 500 reads as a
+    bug and gets retried, while a 403 reads as a decision and gets read. The
+    message names no endpoint -- see inference.Target.describe.
+    """
+    log.warning("inference_egress_refused", extra={"error": str(exc)})
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
 
 
 @app.get("/readyz", tags=["health"])
 def readyz():
-    """Readiness: the model backend is reachable, so /ask can succeed."""
-    import ollama
+    """
+    Readiness: inference is reachable, so /ask can succeed.
 
-    try:
-        ollama.Client(timeout=5).list()
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503, detail=f"ollama unreachable: {type(exc).__name__}"
-        )
-    return {"status": "ready"}
+    Asks the gateway rather than a provider. This endpoint used to build an
+    Ollama client directly, which meant the API server held provider-specific
+    knowledge -- and would have reported an in-cluster vLLM deployment as
+    permanently NotReady while it served requests perfectly well.
+
+    Ready when *either* the primary or an enabled fallback answers, and the
+    body says which. Those are different states of the world, and rendering
+    them identically hides an ongoing outage behind a green check.
+    """
+    report = inference.gateway().probe()
+    if not report["ready"]:
+        raise HTTPException(status_code=503, detail=report)
+    return {"status": "ready", **report}
+
+
+@app.get("/inference", dependencies=[Depends(require_token)], tags=["health"])
+def inference_config():
+    """
+    Where inference happens and whether evidence may leave, as configured.
+
+    Exists because "which mode is this actually running in?" was answerable
+    only by reading the pod's environment, and the answer changes what the
+    deployment is claiming about your data. Safe fields only: no endpoint and
+    no key, for the reason inference.Target.describe gives.
+    """
+    return inference.gateway().config.describe()
+
+
+@app.get("/metrics", dependencies=[Depends(require_token)], tags=["health"])
+def metrics():
+    """
+    Prometheus exposition.
+
+    Behind the same bearer token as everything else rather than open. One rule
+    is easier to reason about than two, and while these series carry no
+    cluster state, they do carry which models you run and how often each tool
+    is failing. Prometheus sends a bearer token with `authorization` in the
+    scrape config.
+    """
+    return Response(content=telemetry.render(),
+                    media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 # --- host -------------------------------------------------------------------

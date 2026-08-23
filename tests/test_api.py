@@ -34,13 +34,68 @@ class TestHealth:
         # A probe that needs a credential is a probe that fails on rotation.
         assert secured_client.get("/healthz").status_code == 200
 
-    def test_readyz_reports_unavailable_when_model_is_down(self, open_client):
+    def test_readyz_reports_unavailable_when_the_model_is_down(self, open_client):
         with patch("ollama.Client") as client:
             client.return_value.list.side_effect = ConnectionError("refused")
             response = open_client.get("/readyz")
 
         assert response.status_code == 503
-        assert "ollama unreachable" in response.json()["detail"]
+        detail = response.json()["detail"]
+        assert detail["ready"] is False
+        assert detail["primary"]["error"] == "ConnectionError"
+
+    def test_readyz_says_which_provider_answered(self, open_client):
+        """
+        Not just a boolean. "Ready on the fallback" and "ready on the primary"
+        are different states of the world, and an endpoint that renders them
+        identically hides an ongoing outage behind a green check.
+        """
+        with patch("ollama.Client"):
+            body = open_client.get("/readyz").json()
+
+        assert body["status"] == "ready"
+        assert body["primary"]["ready"] is True
+        assert body["primary"]["provider"] == "ollama"
+        assert body["primary"]["mode"] == "local"
+
+    def test_readyz_never_names_the_endpoint_it_probed(self, open_client):
+        # An endpoint can carry a token in its userinfo or query string, and
+        # /readyz is unauthenticated.
+        with patch("ollama.Client") as client:
+            client.return_value.list.side_effect = ConnectionError("refused")
+            body = open_client.get("/readyz").text
+
+        assert "11434" not in body and "http" not in body
+
+
+class TestInferenceReporting:
+    def test_the_configured_mode_is_reportable(self, open_client):
+        """
+        "Which mode is this actually running in?" used to be answerable only
+        by reading the pod's environment -- and the answer changes what the
+        deployment claims about your data.
+        """
+        body = open_client.get("/inference").json()
+
+        assert body["primary"]["mode"] in ("local", "cluster", "api")
+        assert body["allow_external"] is False
+
+    def test_no_secret_reaches_the_report(self, open_client):
+        assert "api_key" not in open_client.get("/inference").text
+        assert "endpoint" not in open_client.get("/inference").text
+
+    def test_metrics_render_in_prometheus_format(self, open_client):
+        response = open_client.get("/metrics")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/plain")
+        assert "# TYPE kubewhy_inference_requests_total counter" in response.text
+
+    def test_metrics_are_behind_the_same_token_as_everything_else(
+            self, secured_client):
+        # These series carry no cluster state, but they do carry which models
+        # you run and how often each tool is failing. One rule, not two.
+        assert secured_client.get("/metrics").status_code == 401
 
 
 class TestAuth:

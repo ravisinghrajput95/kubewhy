@@ -549,6 +549,37 @@ class Gateway:
             return self._attempt(self.fallback, self.fallback.model,
                                  messages, tools, think)
 
+    def probe(self):
+        """
+        Whether inference is available, and where from.
+
+        Reports the primary and the fallback separately rather than reducing
+        them to one boolean. "Ready, on the fallback" and "ready, on the
+        primary" are different states of the world, and a readiness endpoint
+        that renders them identically hides an ongoing outage behind a green
+        check -- which is how a primary stays down for a week.
+
+        Never raises. A probe is a question, and the answer "no" is data.
+        """
+        report = {"ready": False, "primary": None, "fallback": None}
+        for role, target in (("primary", self.primary),
+                             ("fallback", self.fallback)):
+            if target is None:
+                continue
+            entry = dict(target.describe())
+            try:
+                self._backend(target).probe()
+            except Exception as exc:
+                entry["ready"] = False
+                # The class, never the message: a provider's error text can
+                # quote the request, and the request is the evidence.
+                entry["error"] = type(exc).__name__
+            else:
+                entry["ready"] = True
+                report["ready"] = True
+            report[role] = entry
+        return report
+
     # -- internals ----------------------------------------------------------
 
     def _attempt(self, target, model, messages, tools, think):

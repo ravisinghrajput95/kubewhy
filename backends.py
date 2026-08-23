@@ -186,6 +186,21 @@ class OllamaBackend:
         # called "wrapper".
         return list(registry.values())
 
+    def probe(self, timeout=5):
+        """
+        Whether this provider is reachable, for a readiness check.
+
+        Cheap and read-only on purpose: listing models touches no weights and
+        cannot load one. A readiness probe that ran a completion would take
+        the model's load time on every kubelet check and report NotReady for
+        the minutes a 5GB pull takes to become servable.
+
+        Raises whatever the client raises. The caller decides what an outage
+        means -- and readiness and liveness decide differently, which is why
+        this does not decide for them.
+        """
+        ollama.Client(host=self.endpoint, timeout=timeout).list()
+
 
 class OpenAICompatBackend:
     """
@@ -307,6 +322,19 @@ class OpenAICompatBackend:
     @staticmethod
     def tools(registry):
         return tool_schema.schemas_for(registry)
+
+    def probe(self, timeout=5):
+        """
+        GET /models, which every server speaking this protocol implements.
+
+        A 401 here is a live server with a bad key, and it is deliberately
+        allowed to propagate as such rather than being flattened into
+        "unreachable": those need different fixes and a readiness check that
+        conflates them sends an operator to the wrong place.
+        """
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        httpx.get(f"{self.base_url}/models", headers=headers,
+                  timeout=timeout).raise_for_status()
 
 
 class VLLMBackend(OpenAICompatBackend):
