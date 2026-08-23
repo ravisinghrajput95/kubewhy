@@ -14,9 +14,15 @@ ship one that silently ignores these objects unless a dataplane option was
 chosen when the cluster was created, and a policy that is quietly not enforced
 is worse than none: it is a control someone will point at in a review.
 
-And this template has been rendered and schema-checked, never enforcement-
-tested on a live cluster. Verify it does what you think before you rely on it:
-exec into the pod and try to reach something public.
+**Enforcement verified 2026-08-23 on kind v1.36.1 with the default kindnet
+CNI**, against a control pod so that the block is attributable to the policy
+rather than to the environment: a pod carrying the selector labels could not
+open TCP to 1.1.1.1:443 or 8.8.8.8:443, an unlabelled pod in the same namespace
+reached both, and the labelled pod still reached an in-cluster Service, the API
+server ClusterIP and DNS. That is one CNI. GKE, EKS and AKS dataplanes are
+NOT tested, and each is a different implementation -- verify it does what you
+think before you rely on it: exec into the pod and try to reach something
+public, with an unlabelled pod alongside as the control.
 
 **What it permits.** DNS, so Service names resolve. Private address space, so
 the API server, an in-cluster model and an on-network one are all reachable.
