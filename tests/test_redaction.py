@@ -6,6 +6,8 @@ tool reads them into a model context and prints them to a terminal. These
 cases are the shapes that actually leak.
 """
 
+import json
+import pytest
 import redaction
 
 
@@ -84,3 +86,92 @@ class TestIntegration:
 
         assert "supersecret123" not in result["logs"]
         assert "REDACTED" in result["logs"]
+
+
+class TestFormatsClassifiedInValidation:
+    """
+    F-06. The adversarial report caught 9 of 13 planted formats. Each miss was
+    classified before anything was changed, and only the realistic
+    high-value ones were added -- a redactor that fires on ordinary text is
+    worse than one with gaps, because a pass that corrupts a pod name defeats
+    the checker that reads it.
+    """
+
+    @pytest.mark.parametrize("label,sample", [
+        ("Authorization: Basic", "Authorization: Basic dXNlcjpwYXNzd29yZA=="),
+        ("Proxy-Authorization", "Proxy-Authorization: Basic dXNlcjpwYXNz"),
+        ("Google API key", "AIzaSyD-1234567890abcdefghijklmnopqrstu"),
+        ("Azure storage key", "AccountKey=abcd1234efgh5678=="),
+        ("dockerconfigjson", '{"auths":{"r.io":{"auth":"dXNlcjpwYXNz"}}}'),
+        ("Secret data.password", '{"data":{"password":"c3VwZXJzZWNyZXQ="}}'),
+    ])
+    def test_realistic_kubernetes_and_cloud_credentials_are_caught(
+            self, label, sample):
+        """
+        Basic sat in the same header as Bearer, which was already caught -- an
+        inconsistency rather than a novel format. The two JSON shapes are how
+        a Kubernetes credential is most often actually written down, and the
+        pattern was stopping at the quote between the key and its colon.
+        """
+        assert redaction.redact(sample) != sample, label
+
+    @pytest.mark.parametrize("label,sample", [
+        ("a certificate is public by design",
+         "-----BEGIN CERTIFICATE-----\nMIIabc\n-----END CERTIFICATE-----"),
+        ("bare base64 carries no marker at all",
+         "Y3JlZGVudGlhbDpzdXBlcnNlY3JldA=="),
+        ("private_key_id is an identifier, not the key",
+         '"private_key_id": "abc123def456"'),
+    ])
+    def test_formats_deliberately_left_alone(self, label, sample):
+        """
+        Classified as out of scope rather than missed. Redacting every base64
+        string would destroy image digests, checksums and encoded config --
+        most of what a projection contains.
+        """
+        assert redaction.redact(sample) == sample, label
+
+    @pytest.mark.parametrize("text", [
+        '{"pod":"crasher-5964d99948-9g8vg","status":"CrashLoopBackOff"}',
+        '{"data":{"password":"c3VwZXJzZWNyZXQ="},"status":"Running"}',
+        '{"auths":{"reg.io":{"auth":"dXNlcjpwYXNz"}}}',
+        '{"env":{"API_KEY":"sk-abcdefghijklmnop"},"restarts":4}',
+    ])
+    def test_redacted_tool_output_still_parses_as_json(self, text):
+        """
+        The hazard this nearly shipped. Rewriting `"password": "x"` into
+        `password=[REDACTED]` deletes the quote and the colon, leaving a
+        document that no longer parses -- so grounding.check() could not read
+        the evidence at all, and a pass meant to protect a credential would
+        silently disable the claim checker.
+        """
+        json.loads(redaction.redact(text))
+
+    def test_ordinary_prose_and_object_names_survive(self):
+        """
+        The false-positive floor. Replayed over 738 recorded tool outputs, the
+        widened patterns changed nothing and broke no JSON.
+        """
+        for text in ("The pod crasher-5964d99948-9g8vg is in CrashLoopBackOff",
+                     "authentication failed for the readiness probe",
+                     "no such host: ollama.ollama.svc.cluster.local",
+                     "restarts: 14, exit code 137, limit 64Mi"):
+            assert redaction.redact(text) == text, text
+
+
+class TestBothBoundariesUseOneFilter:
+    def test_the_egress_pass_is_the_same_function(self):
+        """
+        One filter, not two. A boundary pass with its own pattern list would
+        drift from the collection pass, and the shapes it stopped catching
+        would be exactly the ones nobody was watching.
+        """
+        import inference
+
+        leak = "Authorization: Basic dXNlcjpwYXNzd29yZA=="
+
+        collected = redaction.redact(leak)
+        at_boundary = inference._redacted([{"content": leak}])[0]["content"]
+
+        assert at_boundary == collected
+        assert "dXNlcjpwYXNzd29yZA" not in at_boundary
