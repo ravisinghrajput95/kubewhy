@@ -7,144 +7,75 @@ root-cause analysis: a local model via Ollama chains read-only tools to explain
 `--scan`), REST (app.py), MCP (mcp_server.py), watch controller (controller.py),
 Streamlit UI (ui.py), Slack via Socket Mode (slack_socket.py).
 
-**State: `main` at the head of 2026-08-22, tree clean and pushed, 654 tests
-pass, tags through v0.1.6. No clusters running anywhere; Docker is stopped and
-the model is unloaded.**
+**State: `main` at `457ff43`, tree clean and pushed, 693 tests pass, tags
+through v0.1.6. Updated 2026-08-22, late. Nothing running: no kind cluster, no
+GKE cluster, Docker quit, Ollama stopped, GCP empty (0 clusters, 0 instances,
+0 disks, 0 forwarding rules).**
 
-**Two items moved today. The evidence-read gap is measured and closed at
-0/20 ignored, 95% [0-16] (open item 3), and the thinking-off arm now exists
-over all sixteen cases at 46/48 against 47/48, Fisher p=1.000 -- still
-undetermined, still do not flip the default (open item 4).**
+**START HERE: a deterministic policy did not fire, and it is not yet known
+whether that is a regression.** In the seam regression run
+(`results/seam-regression-n1.json`, 15/16), `crashloop_root_cause` failed
+having called `list_pods`, `describe_pod` and `get_pod_events` but never
+`get_pod_logs` -- and the record says `policies: 0`. `LOGS_POLICY` exists to
+catch exactly that and re-ask. Read `evidence_gap()` and decide whether its
+logs branch should have fired for a `CrashLoopBackOff` pod whose events were
+read but whose logs were not. **Do not assume the refactor broke it**: the
+pre-refactor thinking-off arm had this case 3/3, so that path was never
+exercised there, and this may be a pre-existing gap first exposed by a run
+that failed this way. The record has the full trace; no cluster is needed to
+read the logic, and a cluster plus n=5 on that one case would settle the rate.
 
-**Two harness defects were caught, one of them mine and both the same shape.**
-A sixteen-case set reported 36/48 on a cluster carrying only
-`demo/broken-pods.yaml`: six cases were unreachable, four failing for want of
-a workload and **two passing without one**, because "is this healthy?" is
-satisfied by an answer about a pod that is not there. Cases have declared
-`needs` for weeks and nothing read it; `run_eval.py` now refuses to start,
-before any model time, naming the `kubectl apply` line. Then that check
-shipped broken -- it asked `not isinstance(pods, dict)` where `list_pods`
-returns a dict keyed by pod name, so every populated namespace read as empty
--- and **its test was green because the test handed it a list**. That is the
-sixth instance in this repo of a test whose input does not have production's
-shape. It failed safe, refusing to run rather than reporting a number, which
-is the only reason it cost a restart instead of a result.
+**The model provider is behind a seam now, and the second backend is real.**
+`backends.py` owns the provider; `TRIAGE_BACKEND` selects it; Ollama stays the
+default because changing it would change what this project claims about your
+data. `tool_schema.py` derives JSON Schema for all fourteen tools from the
+same docstrings Ollama introspects, and refuses rather than guesses -- an
+unannotated parameter raises instead of defaulting to "string", which would
+not fail, it would just quietly degrade tool selection.
 
-**The summary drop is fixed and the cause was list length.** Holding workload
-identity and order constant by permuting and varying only entry count:
-8/8 complete summaries at five entries, 0/8 at ten, 0/8 at twenty, Fisher
-exact p=0.000155. Drops spread evenly over fault class and position, so the
-two suspects that survived the earlier rounds both die once count is the
-variable being held rather than the one drifting. Latency was flat across the
-arms (145s/144s/169s) and entries-named did not cap at a constant, so it is
-proportional loss and not a timeout or a ceiling -- which is why no wording
-change would have touched it.
+**The OpenAI-protocol backend was validated against a local Ollama `/v1`**,
+which serves chat-completions alongside the native API: same model, same
+tools, no key, no bill. Live through the whole loop -- schemas accepted, a
+`call_` id returned, arguments decoded from the JSON string, the tool run, the
+result matched back by `tool_call_id`, and a grounded answer. It found a real
+defect on first contact: with no key, `Authorization: Bearer ` is an illegal
+header value and httpx refuses to send it, failing locally rather than at the
+provider. **OpenAI's hosted service is still untested, and so is any
+comparison of answer quality between models.**
 
-The fix is a third deterministic policy (`uncovered_workloads()` plus a
-re-ask, same budget as the tool nudge and the evidence policy) with a
-deterministic appendix behind it, because at twenty entries a run named as
-few as 7 and re-asking can trade one omission for another. **0/8 -> 8/8
-complete, 47/160 -> 0/159 entries dropped, and 5/5 on the graded eval case at
-n=5.** Six of the eight got there on the re-ask alone; two needed the
-appendix, so both layers earn their place. **The cost is +43% latency on the
-slowest case in the suite** (169s -> 242s median) and that is a real cost.
+**What would break with a hosted backend, in priority order** (measured
+reasoning, not speculation): `grounding.py` is calibrated to how qwen3 writes
+-- `KNOWN_STATUSES`, `_TOOL_SPELLINGS`, `KNOWN_CAUSES` and the `_PRESCRIPTIVE`
+regexes all exist because of observed output, and a different model would keep
+producing verdicts, just less accurate ones. Then the policy budgets
+(`MAX_ROUNDS`, `MAX_NUDGES`) which were tuned for qwen3's tool-calling rhythm.
+Then argument shapes, which already bit once. Re-score with
+`grounding.check(record["draft"], record["evidence"])` and read why each flag
+fired, rather than comparing pass rates.
 
-**Controller at n=5: 25/26 (96%).** `never-ready`'s earlier failure was noise
-(5/5 here). The one failure is `crasher`, and it is the lead below.
+**GKE is validated and the cluster is deleted.** See `docs/PORTABILITY.md`.
+RBAC 21/21 with a minted ServiceAccount token and no cloud IAM; controller
+15/16 with `nightly-sync` 3/3 grounded through the CronJob race; noise 3/3
+(eleven pods to two findings, unrelated incident still visible); entity
+scoping 5/5 all grounded; injection 6/6 across logs and annotations; agentic
+RCA 31/31; tools 10/10. **One portability bug found and fixed**, predicted by
+the static audit before the cluster existed: `list_nodes` reported every
+healthy GKE node as under `pressure`, because a Container-Optimized OS node
+carries 26 conditions and `SysctlChanged` is True by design. Pressure is an
+allowlist now.
 
-**The agent-loop target invariant is built and now regression-tested.**
-`targeting.py` fixes the entity-scoping defect that had
-`unhealthy_question_about_a_healthy_pod` at 1/3 -- the model called
-`list_pods(only_unhealthy=True)` without a workload, which excludes a healthy
-pod by construction, and described the neighbours. The target is now extracted
-once and every tool call is held to it: rewritten where the arguments can carry
-the scope, refused where they name a different entity. Measured 5/5 on that
-case, 32/32 on the suite at n=2, 0 entity violations across 5 multi-incident
-runs.
+**`helm install` of kubewhy on GKE works end to end**, and the chart can now
+deploy Ollama too (`ollama.enabled`, off by default). Two chart defects were
+found by installing rather than templating: the template rendered into a
+namespace it never created, and the PVC lacked the label its siblings carry.
+**A GKE cluster deletion does not reclaim a dynamically provisioned PD** -- the
+Ollama PVC left a 20GB disk billing after the cluster was gone.
 
-Then it was widened, and **the widening is now verified.** An unlabelled name
-("Why is crasher-svc unreachable?") is confirmed against the cluster before it
-becomes a target -- one read-only lookup, and a name the cluster does not have
-leaves the target unset. `results/widened-n3.json`: all 16 cases at n=3, 47/48,
-95% CI [89-100], on a cluster rebuilt from scratch so nothing had drifted into
-the namespaces `cluster_wide_scan` reads.
-
-**The three cases the stopped run never reached all pass 3/3 and ground 3/3**
--- `healthy_workload_with_no_logs`, `stuck_volume_needs_events` (calling
-`get_pod_events`, which the volume-reference ground truth requires) and
-`unhealthy_question_about_a_healthy_pod`, the case that read 1/3 before the
-invariant existed. Nothing over-scoped, which was the specific risk.
-
-The one failure is `cluster_wide_scan` dropping `memory-hog` from its summary:
-the known summary-drop defect, not a targeting regression.
-
-**Correction to the previous handoff: `widened-n1` was 9/13 grounded, not
-11/13.** The 11 counted `insufficient_evidence` as grounded, which
-`grounding.py` rejects in as many words. There are four verdicts; never sum
-two of them.
-
-**The README benchmark table has not been re-taken since `scan_cluster` began
-labelling a Running-but-unready workload `fault: not-ready`.** It is still
-`results/baseline-n10-2.json` and the README says so. Reachability was checked
-against the tool traces rather than assumed: of the ten cases, only
-`cluster_wide_scan` calls `scan_cluster` on the whole cluster — six use
-`list_pods`, which is unchanged, `host_not_cluster` asks about the host, and
-both `healthy-*` cases call `scan_cluster(workload='healthy-web')`, which
-returns one workload that is Running and ready, so the changed line cannot
-fire. A 100-run set would spend two hours re-measuring nine cases that cannot
-reach the change. Re-take it when the machine is idle and charged, for
-provenance rather than verification.
-
-**`nightly-sync` is fixed — 3/3, from 0/3.** The fix was already written and
-the eval was not exercising it. See below before assuming any other "known
-cause, fix outstanding" item is really outstanding.
-
-**`cluster_wide_scan` is measured and its cause was the tool, not the model.**
-An entry in an unhealthy-only list that stated no fault — a Running pod with a
-failing readiness probe — was the entry the model dropped. `scan_cluster`
-labels it `fault: not-ready` now: 7/18 dropped before, 2/37 after, p=0.0036,
-with every other entry unmoved. Five other hypotheses died on the way, one of
-them after its control group turned out to be contaminated. See open defects.
-
-**The wrong-workload substitution was not the agent.** It was the grader
-matching a forbidden name anywhere in the answer, so "healthy-web is running
-normally; bad-image and memory-hog are unhealthy" scored as a substitution.
-Measured before touching anything, which is the only reason the projection
-was not rewritten to fix a defect that did not exist. Details below.
-
-**Start here: an eval record now keeps the checker's inputs, and every set
-recorded before 2026-08-21 evening cannot be re-scored.** `run_eval.py`
-records `evidence` (what the tools returned, in `grounding.records()` shape)
-and `draft` (the answer as `check()` read it). Re-scoring a recorded run
-offline is
-
-```python
-grounding.check(record["draft"], record["evidence"])
-```
-
-**Re-check `draft`, never `answer`.** `answer` is the published text, after
-`verify()` rewrote its unsupported values and `annotate()` appended the
-markers and the audit footer -- and the footer's own digits read back as
-fresh claims. Measured: 3 of 5 live runs re-scored correctly against
-`answer`, 3 of 3 against `draft`.
-
-This was built because a question could not be answered this session. The
-grounding checker changed, and the obvious check -- re-score every existing
-set under both versions -- was impossible, because no set held the tool
-output. The comparison had to fall back on `probe_scan_summary.py`, which
-covers one case of sixteen. It costs ~2.6 KB per run.
-
-**The first version of that field shipped broken and its test passed.** The
-test drained a mocked run whose answer was "cpu is low" -- nothing checkable,
-so the verdict was empty, `annotate()` left the string alone, and draft and
-answer were identical. **That is the fourth time in this repo a green test or
-a clean eval has been measuring a code path production does not take.** The
-others: `nightly-sync` (the eval called `diagnose()` directly and skipped the
-prefetch), the wrong-workload substitution (the grader, not the agent), and
-the un-`functools.wraps`'d tool wrapper that handed the model a tool named
-`wrapper`. Before diagnosing a model, check the harness is exercising the
-thing you think it is -- and write the test with an input that makes the
-code under test actually do something.
+**qwen3 will not run on CPU-only nodes with thinking on.** On an
+`e2-standard-8` it exceeded the 300s timeout without producing a first token;
+with thinking off it works at ~128s per diagnosis. GPU is blocked on this
+account -- not by quota, but because a free-tier billing account cannot
+provision non-TPU accelerators at all.
 
 Read README.md and CONTRIBUTING.md first.
 
