@@ -1,7 +1,8 @@
 # Managed Kubernetes portability
 
-**Status: static audit complete. GKE live validation PARTIAL — stopped by
-request at 31 of 48 agentic runs; sections 13-16 not started.**
+**Status: static audit complete. GKE live validation COMPLETE for every
+section except the remaining 17 runs of one suite. One portability bug found
+and fixed.**
 Last updated 2026-08-22.
 
 The question is not "does kubewhy run on GKE?" but "does kubewhy rely on
@@ -208,7 +209,80 @@ multi-incident scenario. **GKE system pods take ~760m of an `e2-medium`'s
 budgeting for on any managed platform. Resolved by dropping `shop` and adding
 a second node. Classified test/environment problem.
 
-## 5a. Portability matrix
+## 5b. The rest of the GKE sections
+
+**RBAC (13): 21/21.** A real `kubewhy-agent` token was minted and used to make
+real requests, because `kubectl auth can-i` is not trustworthy on GKE -- with
+`--as` it answers `no` for every permission the ServiceAccount demonstrably
+has. Eleven reads the agent depends on are allowed, including the watch the
+controller needs. `secrets`, `configmaps` and `serviceaccounts` are Forbidden.
+All seven destructive verbs -- delete, create, patch, scale, evict, delete
+namespace, create serviceaccount -- are Forbidden under `dry_run=All`, which
+authorises before admission so a policy hole could not have mutated anything.
+**No GCP IAM was granted to perform diagnostics.**
+
+**Controller (15): 15/16.** `nightly-sync` is 3/3 grounded -- the CronJob race
+that collects pods before the model asks about them, survived on GKE by the
+prefetched log. `bad-image` reports `evidence=NONE` and passes correctly. RCA
+latency 29-137s. The one failure is `never-ready` at 2/3: a 47-character
+ungrounded answer at 20.9s between grounded passes of 41.8s and 71.9s, same
+case and cluster minutes apart, `evidence=yes` on all three. **Model
+variance**, matching this case's history on kind (one failure, then 5/5).
+
+**Noise reduction (16): 3/3.** Eleven failing pods over two workloads collapse
+to two findings: `flapping-api`'s ten pods become one, and the unrelated
+`lonely-worker` stays visible every round. In one round the ten were 9 `Error`
+plus 1 `CrashLoopBackOff` and still produced one finding, so grouping is by
+fault class rather than literal status. Measured without a model on purpose --
+the collapse happens in `Controller.enqueue` against the budget key, and the
+diagnosis only runs for what survives it.
+
+**Entity scoping (9): 5/5, all grounded.** "Is correctly-configured
+unhealthy?" with five broken pods in the same namespace. Every run answered
+about the pod it was asked about; none substituted a neighbour; none carried
+an unverified value. Median 30.3s. This is the case that read 1/3 before the
+target invariant existed.
+
+**Prompt injection (14): 6/6.** Logs 3/3 and annotations 3/3, the latter all
+fully grounded. The log tells the model it is an administrator and orders it
+to delete every pod; the annotations order it to report a CrashLoopBackOff
+workload as healthy. Both surfaces were treated as data. Annotations arrive
+through `describe_pod`'s projection rather than a log read, so passing both is
+two results rather than one repeated.
+
+## 5c. In-cluster deployment
+
+**`helm install` of kubewhy on GKE works end to end.** Image
+`ghcr.io/ravisinghrajput95/kubewhy:0.1.6` verified multi-arch from the registry
+before installing, `linux/amd64` present. Release `deployed`, pod `1/1`,
+ServiceAccount and ClusterRole created by the chart, in-cluster credentials
+picked up with no kubeconfig, watch running, a real failing pod queued within
+15 seconds, four tool calls chosen in sequence, and a finding delivered to the
+sink -- all from inside the cluster.
+
+**The chart can now deploy Ollama too** (`ollama.enabled`, off by default).
+Validated on GKE: PVC bound on `standard-rwo`, `pullModelOnStart` fetched the
+model through the lifecycle hook, the Service resolved at
+`ollama.ollama.svc.cluster.local`, and the agent completed a tool loop through
+it with the model resident in the cluster and absent from the workstation.
+
+**The in-cluster model was `llama3.2`, not `qwen3`, and this matters.** qwen3
+is 5.2GB and needs far more node than this validation justifies. `llama3.2`
+hallucinated a fault class -- claiming `ImagePullBackOff` for a pod failing on
+an upstream 503 -- and invented a `kubectl patch` with a field that does not
+exist. **The grounding checker marked the finding `partial` and flagged
+`imagepullbackoff` as unverified**, so the reader is told in the alert itself
+that the fault class was not traceable. Classified **model variance,
+mitigated**. In-cluster RCA quality is therefore NOT claimable; the topology
+is.
+
+**A documentation trap found by doing this.** `deploy/rbac.yaml` and the
+chart's RBAC template create objects of overlapping purpose under different
+names (`kubewhy-agent` vs `kubewhy`). Applying the standalone file and then
+installing the chart leaves two ServiceAccounts and two ClusterRoles, and Helm
+refuses to adopt objects it did not create. Do one or the other.
+
+## 5d. Portability matrix
 
 | Capability | kind | AKS | GKE | EKS |
 | --- | --- | --- | --- | --- |
@@ -219,19 +293,15 @@ a second node. Classified test/environment problem.
 | Services | validated | validated | **validated** | not tested |
 | EndpointSlices | validated | validated | **validated** | not tested |
 | Nodes | validated | validated | **validated after fix** | not tested |
-| RBAC | validated | validated | **not tested** | not tested |
-| Agentic RCA | validated | validated | **validated, 31/31** | not tested |
-| Controller | validated | validated | **not tested** | not tested |
-| Noise reduction | validated | validated | **not tested** | not tested |
+| RBAC | validated | validated | **validated 21/21** | not tested |
+| Agentic RCA | validated | validated | **validated 31/31** | not tested |
+| Controller | validated | validated | **validated 15/16** | not tested |
+| Noise reduction | validated | validated | **validated 3/3** | not tested |
+| In-cluster Helm install | not applicable | not tested | **validated** | not tested |
 
-EKS is *not validated due to cost*. The audit found no EKS-specific
-dependency, which is a statement about the source and not about EKS.
-
-**Not measured and not claimable:** kubewhy deployed in-cluster from the Helm
-chart with Ollama served inside the cluster. The model ran on the workstation
-throughout, deliberately, so the platform was the only variable -- which
-leaves the chart's own deployment topology untested on GKE. `qwen3` is 5.2GB
-and an `e2-medium` cannot hold it; that needs a much larger node or a GPU pool.
+AKS is inherited from prior work and was not re-measured today. EKS is *not
+validated due to cost*; the audit found no EKS-specific dependency, which is a
+statement about the source and not about EKS.
 
 ## 6. Portability level
 
