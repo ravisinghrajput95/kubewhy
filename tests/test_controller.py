@@ -724,6 +724,51 @@ class TestControllerRunPath:
         assert "controller_started" in caplog.text
         assert state.claim_lease("someone-else/1", at=store.now()) is False
 
+    def test_run_resolves_inference_before_watching_anything(self, tmp_path):
+        """
+        Found by installing the published chart, not by templating it. The
+        gateway is built lazily on the first diagnosis, so a controller whose
+        inference configuration the gateway would refuse installed cleanly,
+        reported 1/1 Running, logged nothing about inference, and would have
+        surfaced the refusal at the first fault -- during an incident.
+        """
+        import agent
+
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = self._controller(state)
+        agent._BACKEND = None
+        try:
+            with patch("agent.inference.gateway") as gateway:
+                self._run(controller)
+            gateway.assert_called_once()
+        finally:
+            agent._BACKEND = None
+
+    def test_a_refused_inference_configuration_stops_the_controller(
+            self, tmp_path):
+        """
+        Raising is right here. A controller exists only to diagnose, so one
+        that can never diagnose is not degraded, it is broken -- and a
+        CrashLoopBackOff carrying the reason is how Kubernetes says so. The
+        API makes the opposite call, and for a stated reason: see app.py.
+        """
+        import agent
+
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = self._controller(state)
+        watched = MagicMock()
+        controller.watch_once = watched
+        agent._BACKEND = None
+        try:
+            with patch("agent.inference.gateway",
+                       side_effect=ValueError("endpoint is off your network")):
+                with pytest.raises(ValueError):
+                    self._run(controller)
+        finally:
+            agent._BACKEND = None
+
+        watched.assert_not_called()
+
     def test_run_renews_the_lease_each_cycle(self, tmp_path):
         """
         A held-forever claim would never expire for the next controller; a

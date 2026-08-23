@@ -72,6 +72,22 @@ async def lifespan(_app):
             "cluster state, pod logs and the host process table. Bind to "
             "localhost only."
         )
+
+    # Resolve inference at startup so the configuration is in the log before
+    # anyone asks a question, and so a configuration the gateway refuses is
+    # discovered now rather than during an incident. See the same call in
+    # controller.py for what installing the chart revealed.
+    #
+    # Unlike the controller this does NOT abort. The controller exists only to
+    # diagnose, so a controller that cannot is broken. This API also serves
+    # /scan, /pods, /nodes and the rest, none of which touch a model -- killing
+    # all of that because inference is misconfigured would remove working
+    # functionality to punish a setting they do not use. It is logged loudly
+    # and /readyz reports it, which is the pair of things an operator needs.
+    try:
+        inference.gateway()
+    except ValueError as exc:
+        log.error("inference_misconfigured", extra={"error": str(exc)})
     yield
 
 
@@ -165,7 +181,18 @@ def readyz():
     body says which. Those are different states of the world, and rendering
     them identically hides an ongoing outage behind a green check.
     """
-    report = inference.gateway().probe()
+    try:
+        report = inference.gateway().probe()
+    except ValueError as exc:
+        # A configuration the gateway refuses is a readiness failure with a
+        # cause, not a 500. The distinction matters to whoever is reading this
+        # at 3am: a 500 says kubewhy is broken, a 503 with the reason says the
+        # values file is.
+        raise HTTPException(
+            status_code=503,
+            detail={"ready": False, "error": "inference_misconfigured",
+                    "reason": str(exc)},
+        )
     if not report["ready"]:
         raise HTTPException(status_code=503, detail=report)
     return {"status": "ready", **report}
@@ -181,7 +208,15 @@ def inference_config():
     deployment is claiming about your data. Safe fields only: no endpoint and
     no key, for the reason inference.Target.describe gives.
     """
-    return inference.gateway().config.describe()
+    try:
+        return inference.gateway().config.describe()
+    except ValueError as exc:
+        # The one endpoint whose entire job is saying what inference is
+        # configured to do must answer when the answer is "something illegal".
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "inference_misconfigured", "reason": str(exc)},
+        )
 
 
 @app.get("/metrics", dependencies=[Depends(require_token)], tags=["health"])

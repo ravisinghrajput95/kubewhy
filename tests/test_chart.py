@@ -222,6 +222,85 @@ class TestTheChartRefusesWhatTheCodeWouldRefuse:
             inference.from_env({"TRIAGE_INFERENCE_MODE": "onprem"})
 
 
+class TestTheInClusterModelIsActuallyUsable:
+    """
+    Both of these were found by installing the chart on a fresh kind cluster,
+    not by templating it. `helm template` renders the broken version and the
+    working one identically, which is precisely why they survived.
+    """
+
+    def _ollama_container(self, manifests):
+        import yaml
+
+        for document in yaml.safe_load_all(manifests):
+            if not document or document.get("kind") != "Deployment":
+                continue
+            labels = document["spec"]["template"]["metadata"]["labels"]
+            if labels.get("app.kubernetes.io/name") == "ollama":
+                return document["spec"]["template"]["spec"]["containers"][0]
+        raise AssertionError("ollama.enabled rendered no Deployment")
+
+    def test_the_pull_waits_for_the_server_before_trying(self):
+        """
+        postStart runs concurrently with the container's main process, so
+        `ollama pull` reached a server that was not listening yet, failed in
+        under a second, and `|| true` swallowed it. Measured on kind
+        2026-08-23: the pod ran with an empty model directory and answered
+        every diagnosis with `model not found (status code: 404)`.
+
+        A race rather than a certain failure, which is worse -- it resolved in
+        this project's favour on GKE and against it on kind.
+        """
+        container = self._ollama_container(render("ollama.enabled=true"))
+        hook = container["lifecycle"]["postStart"]["exec"]["command"][-1]
+
+        assert "ollama list" in hook, "the hook does not wait for the server"
+        assert "sleep" in hook, "the hook does not retry"
+        assert hook.count("ollama pull") >= 1
+
+    def test_readiness_means_the_model_is_there_not_that_a_port_is_open(self):
+        """
+        With an HTTP readiness probe this pod reported 1/1 Ready holding no
+        model at all. Nothing in `kubectl get pods`, `describe` or the events
+        said so -- the only evidence in the cluster was a 404 in Ollama's own
+        access log.
+        """
+        container = self._ollama_container(
+            render("ollama.enabled=true", "model.name=llama3.2"))
+        probe = container["readinessProbe"]
+
+        assert "httpGet" not in probe
+        assert "llama3.2" in probe["exec"]["command"][-1]
+        # The first window has to cover a model download; a pod still pulling
+        # is correctly NotReady for all of it.
+        assert probe["periodSeconds"] * probe["failureThreshold"] >= 300
+
+    def test_the_port_check_returns_when_nothing_is_being_pulled(self):
+        """
+        With pullModelOnStart off, the chart is not responsible for the model
+        and cannot require one -- an operator baking weights into an image or
+        pulling them out of band would get a pod that is never Ready.
+        """
+        container = self._ollama_container(
+            render("ollama.enabled=true", "ollama.pullModelOnStart=false"))
+
+        assert "httpGet" in container["readinessProbe"]
+        assert "lifecycle" not in container
+
+    def test_the_endpoint_points_at_the_service_the_chart_creates(self):
+        import yaml
+
+        manifests = render("ollama.enabled=true", "ollama.namespace=kubewhy",
+                           "model.ollamaHost=http://ollama.kubewhy.svc.cluster.local:11434")
+        names = {d["metadata"]["name"] for d in yaml.safe_load_all(manifests)
+                 if d and d.get("kind") == "Service"}
+        config = inference.from_env(container_env(manifests))
+
+        assert "ollama" in names
+        assert "ollama.kubewhy" in config.primary.endpoint
+        assert config.primary.destination == "internal"
+
+
 class TestSecretsStayInSecrets:
     def test_an_api_key_is_never_a_plain_env_value(self):
         manifests = render("inference.mode=api", "inference.allowExternal=true",

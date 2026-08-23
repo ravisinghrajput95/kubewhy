@@ -113,12 +113,42 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.ollama.resources | nindent 12 }}
+          {{- if .Values.ollama.pullModelOnStart }}
+          {{- /*
+          Ready means "can answer", not "is listening".
+
+          Measured on a fresh kind cluster 2026-08-23: with an HTTP readiness
+          probe this pod reported 1/1 Ready holding no model at all, and every
+          diagnosis came back `model not found (status code: 404)`. Nothing in
+          `kubectl get pods`, `kubectl describe` or the events said so -- the
+          only evidence anywhere in the cluster was a 404 line in Ollama's own
+          access log.
+
+          A model listed is the weakest check that distinguishes those two
+          states. It costs a process exec every 15s, which is nothing next to
+          a deployment that looks healthy and cannot answer.
+          */}}
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - ollama list | grep -q '^{{ .Values.model.name }}'
+            {{- /* The first window has to cover a model download: 2GB for a
+                   small model, 5GB+ for a useful one, over whatever link the
+                   node has. 40 x 15s is ten minutes, and a pod still pulling
+                   is correctly NotReady for all of it. */}}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 40
+          {{- else }}
           readinessProbe:
             httpGet:
               path: /
               port: {{ .Values.ollama.port }}
             initialDelaySeconds: 10
             periodSeconds: 5
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /
@@ -133,10 +163,42 @@ spec:
             - name: models
               mountPath: /root/.ollama
           {{- if .Values.ollama.pullModelOnStart }}
+          {{- /*
+          Wait for the server, then pull, and keep trying.
+
+          The previous version was `ollama pull <model> || true`, and postStart
+          runs concurrently with the container's main process -- so the CLI
+          reached a server that was not listening yet, failed in under a
+          second, and `|| true` swallowed it. The pod then ran forever with no
+          model. Found by installing this chart on a fresh cluster; `helm
+          template` renders the broken version and the working one identically.
+
+          It is a race rather than a certain failure, which is worse: it
+          resolved in this project's favour on GKE in August and against it on
+          kind, so the chart was recorded as validated.
+
+          `|| true` stays at the end on purpose. A postStart hook that exits
+          non-zero has the kubelet kill the container, so a transient registry
+          blip would become a CrashLoopBackOff. The retry loop is what makes
+          the failure rare; the readiness probe above is what makes it visible
+          when it happens anyway, which is the half that was missing.
+          */}}
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/sh", "-c", "ollama pull {{ .Values.model.name }} || true"]
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    for i in $(seq 1 60); do
+                      ollama list >/dev/null 2>&1 && break
+                      sleep 2
+                    done
+                    for i in $(seq 1 5); do
+                      ollama pull {{ .Values.model.name }} && exit 0
+                      sleep 5
+                    done
+                    true
           {{- end }}
       volumes:
         - name: models

@@ -509,6 +509,26 @@ class Controller:
             )
             return
 
+        # Resolve inference before watching anything. Found by installing the
+        # published chart on 2026-08-23 rather than by templating it: the
+        # gateway is built lazily on the first diagnosis, so a controller whose
+        # inference configuration the gateway would *refuse* installed cleanly,
+        # reported 1/1 Running, logged nothing about inference at all, and
+        # would have surfaced the refusal at the first fault -- which is during
+        # an incident, and is the worst moment available.
+        #
+        # `mode: cluster` pointed at api.openai.com is the case that proves it.
+        # Helm cannot classify a hostname in a template, so its guards do not
+        # catch that one; the gateway does, and it has to be asked. Raising
+        # here is right: a controller that can never diagnose is not degraded,
+        # it is broken, and a CrashLoopBackOff carrying the reason is how
+        # Kubernetes says so.
+        #
+        # It also puts the configuration in the log at startup, so an operator
+        # can confirm what this deployment claims about their data without
+        # waiting for a workload to break.
+        agent._backend()
+
         thread = threading.Thread(target=self.worker, daemon=True)
         thread.start()
 

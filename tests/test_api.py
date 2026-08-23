@@ -91,6 +91,34 @@ class TestInferenceReporting:
         assert response.headers["content-type"].startswith("text/plain")
         assert "# TYPE kubewhy_inference_requests_total counter" in response.text
 
+    def test_a_refused_configuration_is_a_503_with_the_reason(self, open_client):
+        """
+        Not a 500. The distinction matters to whoever reads this at 3am: a 500
+        says kubewhy is broken, a 503 with the reason says the values file is.
+        """
+        with patch("app.inference.gateway",
+                   side_effect=ValueError("endpoint is off your network")):
+            ready = open_client.get("/readyz")
+            reported = open_client.get("/inference")
+
+        assert ready.status_code == 503
+        assert ready.json()["detail"]["error"] == "inference_misconfigured"
+        assert "off your network" in ready.json()["detail"]["reason"]
+        assert reported.status_code == 503
+
+    def test_a_refused_configuration_does_not_kill_the_tool_endpoints(
+            self, open_client):
+        """
+        The opposite call from the controller's, and deliberately. This API
+        also serves /scan, /pods and /nodes, none of which touch a model --
+        refusing to start all of that because inference is misconfigured would
+        remove working functionality to punish a setting they do not use.
+        """
+        with patch("app.inference.gateway",
+                   side_effect=ValueError("endpoint is off your network")):
+            assert open_client.get("/healthz").status_code == 200
+            assert open_client.get("/platform").status_code == 200
+
     def test_metrics_are_behind_the_same_token_as_everything_else(
             self, secured_client):
         # These series carry no cluster state, but they do carry which models
