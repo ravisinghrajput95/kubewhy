@@ -13,10 +13,13 @@ to send one is the behaviour this module exists for, and the only way to know
 it declines for the right reason is to check the reason.
 """
 
+import json
+
 import pytest
 
 import backends
 import inference
+import observability
 import redaction
 import telemetry
 
@@ -596,6 +599,125 @@ class TestTelemetry:
 
         assert "hunter2" not in telemetry.render()
         assert "ollama:11434" not in telemetry.render()
+
+
+class TestNothingSecretIsEverLogged:
+    """
+    The whole inference path, run with a credential in every place one can
+    hide, with the log captured.
+
+    Written as one sweep rather than per-call-site because that is how this
+    kind of leak happens: not from the line someone reviewed, but from the
+    exception message a provider returned, quoting the request that carried
+    the key.
+    """
+
+    SECRETS = ("sk-live-do-not-log", "hunter2ssss", "tok-in-the-query")
+    ENDPOINT = ("https://user:hunter2ssss@api.example.com/v1"
+                "?api-key=tok-in-the-query")
+
+    @staticmethod
+    def _emitted(caplog):
+        """
+        What the process would actually write, not caplog.text.
+
+        This distinction is the test. `caplog.text` renders only the formatted
+        message; everything passed through `extra=` is invisible in it -- and
+        `extra=` is precisely where structured logging puts the fields, so a
+        secret in one would pass an assertion against caplog.text while being
+        written to stdout in production. Rendering each record through the
+        formatter that ships is the only version of this check that means
+        anything.
+        """
+        formatter = observability.JsonFormatter()
+        return "\n".join(formatter.format(record) for record in caplog.records)
+
+    def _leaks(self, caplog):
+        emitted = self._emitted(caplog)
+        return [s for s in self.SECRETS if s in emitted]
+
+    def test_configuring_a_gateway_logs_no_credential(self, caplog):
+        with caplog.at_level("DEBUG"):
+            gateway(target(mode="api", provider="recorder",
+                           endpoint=self.ENDPOINT, api_key="sk-live-do-not-log"),
+                    allow_external=True)
+
+        assert self._leaks(caplog) == []
+        # And the line that IS logged still says the useful things.
+        emitted = self._emitted(caplog)
+        assert "inference_configured" in emitted
+        assert '"mode": "api"' in emitted and '"provider": "recorder"' in emitted
+
+    def test_a_refused_egress_logs_no_credential(self, caplog):
+        gate = gateway(target(mode="api", provider="recorder",
+                              endpoint=self.ENDPOINT,
+                              api_key="sk-live-do-not-log"),
+                       allow_external=True)
+        gate.config.policy.allow_external = False
+
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(PermissionError) as caught:
+                gate.chat("m", [], [], False)
+
+        assert self._leaks(caplog) == []
+        # The exception reaches an HTTP response body, so it counts as a log.
+        assert not [s for s in self.SECRETS if s in str(caught.value)]
+
+    def test_a_failover_logs_the_error_class_and_not_its_message(self, caplog):
+        """
+        A provider's error text can quote the request, and the request is the
+        evidence. So the class is logged and the message is not -- which also
+        means a 401 from a hosted API cannot echo the key back into your logs.
+        """
+        Broken.raises = ConnectionError(
+            "POST https://api.example.com/v1 failed: key sk-live-do-not-log")
+        try:
+            gate = gateway(
+                target(mode="api", provider="broken", endpoint=self.ENDPOINT,
+                       api_key="sk-live-do-not-log"),
+                target(provider="recorder"),
+                allow_external=True, fallback_enabled=True)
+            with caplog.at_level("DEBUG"):
+                gate.chat("m", [], [], False)
+        finally:
+            Broken.raises = ConnectionError("connection refused")
+
+        assert self._leaks(caplog) == []
+        emitted = self._emitted(caplog)
+        assert "inference_fallback" in emitted
+        assert '"reason": "ConnectionError"' in emitted
+        # The class, and none of the message that carried it.
+        assert "api.example.com" not in emitted
+
+    def test_a_failed_probe_reports_the_class_and_not_its_message(self):
+        """
+        probe() feeds /readyz, which is unauthenticated. Anything it returns
+        is public to whoever can reach the Service.
+        """
+        Broken.raises = ConnectionError("bad key sk-live-do-not-log")
+        try:
+            gate = gateway(target(mode="api", provider="broken",
+                                  endpoint=self.ENDPOINT,
+                                  api_key="sk-live-do-not-log"),
+                           allow_external=True)
+            report = gate.probe()
+        finally:
+            Broken.raises = ConnectionError("connection refused")
+
+        rendered = json.dumps(report)
+        assert not [s for s in self.SECRETS if s in rendered]
+        assert "api.example.com" not in rendered
+
+    def test_metrics_carry_no_credential_after_a_full_exercise(self):
+        gate = gateway(target(mode="api", provider="recorder",
+                              endpoint=self.ENDPOINT,
+                              api_key="sk-live-do-not-log"),
+                       allow_external=True)
+        gate.chat("m", [{"role": "user", "content": "q"}], [], False)
+
+        rendered = telemetry.render()
+        assert not [s for s in self.SECRETS if s in rendered]
+        assert "api.example.com" not in rendered
 
 
 class TestTheLoopCannotTell:
