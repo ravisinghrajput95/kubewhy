@@ -832,6 +832,60 @@ class TestTheInvestigationBudget:
             importlib.reload(agent)
         assert agent.INVESTIGATION_BUDGET == 600
 
+    def test_the_round_check_fires_when_the_tools_burn_the_budget(self):
+        """
+        The two deadline checks are mutually redundant for the common shape, so
+        mutating either alone survived -- found by mutation testing, not by
+        reading. This isolates the one at the top of the round loop: a tool
+        round that overruns the budget, then a model that answers. The second
+        round never reaches its tool loop, so the check at the top of the round
+        is the only thing that can stop it.
+        """
+        def slow_tool(name, arguments):
+            time.sleep(1.2)
+            return json.dumps({"result": "ok"})
+
+        responses = [reply(calls=[tool_call("get_platform_info", {})]),
+                     reply(content="The host is a laptop.")]
+
+        with self.budget(1):
+            with mock_chat(side_effect=responses):
+                with patch("agent._run_tool", side_effect=slow_tool):
+                    began = time.perf_counter()
+                    result = agent.ask("q", think=False)
+                    elapsed = time.perf_counter() - began
+
+        assert result["termination"] == "deadline_exceeded"
+        assert "laptop" not in result["answer"]
+        assert elapsed < 3.0
+
+    def test_the_tool_check_fires_between_calls_in_one_round(self):
+        """
+        And this isolates the other one. A model that asks for several tools in
+        a single round can spend N x K8S_TIMEOUT inside it without the round
+        ever returning, so the check belongs inside the tool loop as well as
+        above it.
+        """
+        def slow_tool(name, arguments):
+            time.sleep(0.4)
+            return json.dumps({"result": "ok"})
+
+        many = [tool_call("get_platform_info", {}),
+                tool_call("get_system_info", {}),
+                tool_call("get_top_cpu_processes", {}),
+                tool_call("get_top_memory_processes", {})]
+
+        with self.budget(1):
+            with mock_chat(return_value=reply(calls=many)):
+                with patch("agent._run_tool", side_effect=slow_tool):
+                    began = time.perf_counter()
+                    result = agent.ask("q", think=False)
+                    elapsed = time.perf_counter() - began
+
+        assert result["termination"] == "deadline_exceeded"
+        assert elapsed < 2.0
+        assert len(result["tool_calls"]) < len(many)
+
     def test_the_deadline_is_measured_on_the_monotonic_clock(self):
         """
         A host that suspends mid-investigation did not spend that time working.
