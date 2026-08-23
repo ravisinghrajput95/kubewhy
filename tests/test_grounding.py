@@ -661,7 +661,19 @@ class TestObservedFailuresFrom20260818:
         })
         answer = "liveness-flapper-5bd4f768c5-jq5k7 was OOMKilled after exit 137."
 
-        assert grounding.check(answer, [pod])["confidence"] == "partial"
+        verdict = grounding.check(answer, [pod])
+
+        # Was `partial` until 2026-08-23, which was the strongest thing the
+        # checker could say: `oomkilled` traced to nothing, so it was flagged
+        # as unsupported. It is worse than unsupported -- the evidence names a
+        # different termination reason -- and contradiction.py can now say so.
+        # The assertion is strengthened, not relaxed: this misattribution is
+        # still caught, and now with the reason it is wrong attached.
+        assert verdict["confidence"] == grounding.CONTRADICTED
+        assert verdict["contradictions"][0]["rule"] == \
+            "termination_reason_vs_memory_cause"
+        assert verdict["contradictions"][0]["measured"] == \
+            "last_termination.reason = error"
 
 
 class TestEvidenceAudit:

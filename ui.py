@@ -20,6 +20,7 @@ no capability, only a way to look at it.
 """
 
 import html
+import grounding
 import datetime as dt
 import time
 
@@ -593,11 +594,24 @@ if answer:
         st.info("nothing to verify — this answer makes no measurable claim")
     elif confidence == "grounded":
         st.success("grounded — every figure traced to a tool result")
+    elif confidence == grounding.CONTRADICTED:
+        # Ahead of partial in the branch order for the same reason it is ahead
+        # in check(): "the tools did not say" and "the tools said otherwise"
+        # are different, and only the second means the answer is wrong.
+        st.error(
+            "contradicted — the evidence says otherwise:\n\n"
+            + "\n".join(
+                f"- claimed *{c['claim']}*, but {c['measured']}"
+                for c in answer.get("contradictions", [])
+            )
+        )
     elif confidence == "partial":
         st.warning(
             "partial — not found in any tool result: "
             + ", ".join(answer["unverified"])
         )
+    elif confidence == grounding.INSUFFICIENT:
+        st.info("insufficient evidence — nothing here could be checked")
     else:
         st.error("ungrounded — the model answered having called no tools")
 

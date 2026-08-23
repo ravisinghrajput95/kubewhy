@@ -43,6 +43,8 @@ a `partial` one. `partial` reliably means something was not measured;
 import json
 import re
 
+import contradiction
+
 # The answer states nothing that can be traced to a measurement. Distinct from
 # `partial`, which means something was traced and failed, and from `grounded`,
 # which now requires at least one claim that succeeded.
@@ -53,7 +55,15 @@ INSUFFICIENT = "insufficient_evidence"
 # did: evals/run_controller_eval.py listed three of these and failed any
 # finding carrying the fourth, reporting a correct diagnosis of crasher and
 # bad-image as "no usable confidence". Read this rather than retyping it.
-VERDICTS = frozenset({"grounded", "partial", "ungrounded", INSUFFICIENT})
+# An answer that disagrees with a measurement, as opposed to one the
+# measurements cannot support. Strictly worse than `partial`, and separate from
+# it because the distinction is the whole point: a reader who cannot tell
+# "the tools did not say" from "the tools said otherwise" is back where
+# grounding started.
+CONTRADICTED = "contradicted"
+
+VERDICTS = frozenset({"grounded", "partial", "ungrounded", INSUFFICIENT,
+                      CONTRADICTED})
 
 # Status words worth checking. A model that reports OOMKilled when no tool
 # said so is making exactly the mistake this module exists to catch.
@@ -94,6 +104,19 @@ KNOWN_STATUSES = {
 _TOOL_SPELLINGS = {
     "notready": ("not-ready", "not_ready"),
 }
+
+# Words that mark a clause as reasoning rather than reporting. The system
+# prompt asks for exactly this labelling -- "likely", "probably", "worth
+# checking" -- so a clause carrying one is held to a different standard: its
+# claims are recorded as inferences rather than flagged as unsupported.
+#
+# A module constant because contradiction.py needs the identical list. Two
+# copies would drift, and the shapes each stopped recognising would be exactly
+# the ones nobody was watching -- the same argument the egress redaction pass
+# makes for reusing redaction.redact() rather than growing its own patterns.
+HEDGES = ("likely", "possibl", "probabl", "may ", "might", "could",
+          "suspect", "perhaps", "appears", "seems", "worth checking")
+
 
 # Named causes: diagnoses that assert a mechanism rather than report a status.
 # A status is what the cluster said; these are claims about WHY, and the tools
@@ -571,9 +594,7 @@ def check(answer, tool_outputs):
         # a memory leak" would punish the labelling this project asks for.
         # It is still recorded, as an inference, so the claim stays auditable
         # rather than disappearing from the record for having been hedged.
-        hedged = any(word in lowered for word in
-                     ("likely", "possibl", "probabl", "may ", "might", "could",
-                      "suspect", "perhaps", "appears", "seems", "worth checking"))
+        hedged = any(word in lowered for word in HEDGES)
         for cause in KNOWN_CAUSES:
             if cause in lowered:
                 supported = cause in scope_lower
@@ -630,7 +651,28 @@ def check(answer, tool_outputs):
                     "evidence": cite(present) if supported else [],
                 })
 
-    if not checked:
+    # The second stage, deliberately after the first and deliberately not
+    # inside it. check() asks whether a value appears in the evidence;
+    # contradiction.check() asks whether the evidence says something else.
+    # Both questions are worth asking and only one of them was being asked.
+    # See contradiction.py for why it is a separate module.
+    contradictions = contradiction.check(answer, evidence)
+    for finding in contradictions:
+        claims.append({
+            "value": finding["claim"],
+            "kind": "contradiction",
+            "status": CONTRADICTED,
+            "measured": finding["measured"],
+            "rule": finding["rule"],
+            "evidence": finding["evidence"],
+        })
+
+    if contradictions:
+        # Ahead of every other outcome. A contradicted answer may also have
+        # traced ten values correctly, and reporting it as grounded because
+        # of them is exactly the failure this stage exists to remove.
+        confidence = CONTRADICTED
+    elif not checked:
         # Tools ran and the answer asserts nothing this can trace. Not a
         # failure and not a confirmation: the honest word for it is that there
         # is no evidence either way, and a caller badging this as grounded is
@@ -646,6 +688,10 @@ def check(answer, tool_outputs):
         "unverified": unverified,
         "checked": checked,
         "claims": claims,
+        # What the evidence says otherwise, with the rule that decided so and
+        # the measured value it was decided against. Separate from
+        # `unverified`, which is what the evidence merely fails to support.
+        "contradictions": contradictions,
     }
 
 
@@ -857,6 +903,15 @@ def contract(verdict, edits=()):
     return {
         "observations": observations,
         "inferences": inferences,
+        # Claims the evidence positively disagrees with. A reader scanning the
+        # contract for what went wrong has to find these before the
+        # observations, which is why they are not folded into `unknowns`.
+        "contradictions": [
+            {"claim": c["value"], "measured": c.get("measured"),
+             "rule": c.get("rule"), "evidence": c.get("evidence", [])}
+            for c in verdict.get("claims", [])
+            if c["status"] == CONTRADICTED
+        ],
         # What the run could not establish: every value it stated and could
         # not support, after rewriting.
         "unknowns": [e["claim"] for e in edits if e["action"] == "marked"],
