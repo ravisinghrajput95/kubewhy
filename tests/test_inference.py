@@ -15,6 +15,8 @@ it declines for the right reason is to check the reason.
 
 import json
 
+from unittest.mock import patch
+
 import pytest
 
 import backends
@@ -483,6 +485,47 @@ class TestFailover:
             assert Recorder.calls == []
         finally:
             Broken.raises = ConnectionError("connection refused")
+
+    @pytest.mark.parametrize("body,why", [
+        ("{not json", "a truncated body"),
+        ("<html>502 Bad Gateway</html>", "an intermediary's error page"),
+    ])
+    def test_a_body_that_is_not_the_protocol_fails_over(self, body, why):
+        """
+        Measured 2026-08-23 against a synthetic provider. These used to raise a
+        bare JSONDecodeError, which `unavailable()` read as "the provider
+        refused" -- so a gateway melting down in front of the model, which is
+        precisely the availability failure a fallback exists for, never
+        triggered one.
+        """
+        import httpx
+
+        response = httpx.Response(
+            200, text=body, headers={"content-type": "text/html"},
+            request=httpx.Request("POST", "http://x/v1/chat/completions"))
+        backend = backends.OpenAICompatBackend(endpoint="http://x/v1")
+
+        with patch("backends.httpx.post", return_value=response):
+            with pytest.raises(backends.MalformedResponse) as caught:
+                backend.chat("m", [], [], False)
+
+        assert inference.unavailable(caught.value) is True
+        # Shape, not content: a provider echoing the request back is how a
+        # malformed response happens, and the request is the evidence.
+        assert body not in str(caught.value)
+
+    def test_an_empty_choices_array_is_malformed_not_an_indexerror(self):
+        """`{"choices": []}` is what content filtering returns."""
+        import httpx
+
+        response = httpx.Response(
+            200, json={"choices": []},
+            request=httpx.Request("POST", "http://x/v1/chat/completions"))
+        backend = backends.OpenAICompatBackend(endpoint="http://x/v1")
+
+        with patch("backends.httpx.post", return_value=response):
+            with pytest.raises(backends.MalformedResponse):
+                backend.chat("m", [], [], False)
 
     def test_a_policy_refusal_is_never_failed_over(self):
         """A fallback is not a way around the external-data policy."""

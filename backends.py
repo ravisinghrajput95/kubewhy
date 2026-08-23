@@ -62,6 +62,28 @@ API_KEY = os.getenv("OPENAI_API_KEY", "")
 KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE") or None
 
 
+class MalformedResponse(Exception):
+    """
+    A provider answered, and what it said was not this protocol.
+
+    Its own class because the alternatives are all worse. Left as the raw
+    JSONDecodeError, KeyError or IndexError, a malformed body reaches the
+    caller as an exception naming a Python operation rather than a provider
+    fault -- and, more importantly, `inference.unavailable()` reads those as
+    "the provider refused" and refuses to fail over.
+
+    That is the wrong call for the commonest real instance of this. Measured
+    2026-08-23 against a synthetic provider: an intermediary returning
+    `<html>502 Bad Gateway</html>` with a 200, a truncated body, or
+    `{"choices": []}` all landed here. A gateway melting down in front of the
+    model is precisely the availability failure a fallback exists for, and
+    every one of them was being treated as unrecoverable.
+
+    The message never quotes the body. A provider echoing the request back is
+    exactly how a malformed response happens, and the request is the evidence.
+    """
+
+
 class ToolCall:
     """One tool the model asked for, in provider-neutral form."""
 
@@ -263,8 +285,20 @@ class OpenAICompatBackend:
             timeout=self.timeout,
         )
         response.raise_for_status()
-        body = response.json()
-        message = body["choices"][0]["message"]
+        try:
+            body = response.json()
+            message = body["choices"][0]["message"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            # Shape, not content: the content-type and length say enough to
+            # tell an HTML error page from a truncated body, and neither can
+            # carry evidence back into a log line.
+            raise MalformedResponse(
+                f"{self.name} returned {response.status_code} with a body this "
+                f"protocol does not describe "
+                f"({type(exc).__name__}; content-type "
+                f"{response.headers.get('content-type', 'unset')!r}, "
+                f"{len(response.content)} bytes)"
+            ) from exc
 
         calls = []
         for call in message.get("tool_calls") or []:

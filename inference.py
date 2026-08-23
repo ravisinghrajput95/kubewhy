@@ -488,6 +488,14 @@ def unavailable(exc):
     import httpx
     import ollama
 
+    if isinstance(exc, backends.MalformedResponse):
+        # A body that is not this protocol is nearly always an intermediary
+        # rather than the model: an HTML error page from a proxy, a truncated
+        # response, an empty `choices` array. That is an availability failure,
+        # which is what a fallback is for -- and before 2026-08-23 every one of
+        # them raised a bare JSONDecodeError or IndexError that read as "the
+        # provider refused" and never failed over.
+        return True
     if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError,
                         httpx.NetworkError, httpx.RemoteProtocolError)):
         return True
