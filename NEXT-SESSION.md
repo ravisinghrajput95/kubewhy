@@ -12,19 +12,35 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `686ec94`, tree clean and pushed, 800 tests pass, tags
-through v0.1.6. Updated 2026-08-23. Nothing running: no kind cluster, no GKE
+**State: `main` at `ad029dd`, tree clean and pushed, 800 tests pass, tags
+through **v0.1.7** (cut 2026-08-23). Nothing running: no kind cluster, no GKE
 cluster, Docker quit, Ollama stopped, GCP empty.**
 
-**START HERE: the chart changed and its version did not.** `deploy/chart`
-gained an `inference:` block, two templates (`vllm.yaml`, `networkpolicy.yaml`)
-and five template-time guards, and `Chart.yaml` still says `0.1.6` — because
-`version.py` documents that both are bumped *together when tagging*, and
-tagging is a release decision that was not mine to make. Decide whether to cut
-`v0.1.7`. If you do: bump `version.py`, `Chart.yaml:version` and
-`Chart.yaml:appVersion` together, and check the published tags from the
-registry rather than from the workflow file — the `target:base` trap has
-shipped the Streamlit image as the base one before.
+**v0.1.7 is released and verified from the registry, not from the workflow
+file.** Both jobs green. `ghcr.io/ravisinghrajput95/kubewhy:0.1.7`,
+`:0.1.7-ui`, `:latest` and `:latest-ui` all resolve and are amd64+arm64 —
+and CI's own `docker run` step checked `/healthz` on the base image and
+`/_stcore/health` on the UI one, which is the check that would catch the
+`target:base` trap that shipped Streamlit as `:0.1.3`. The chart blob was
+pulled back out of the OCI registry and rendered: `version`/`appVersion` both
+`0.1.7`, all ten templates present including `vllm.yaml` and
+`networkpolicy.yaml`, the default render carries
+`TRIAGE_INFERENCE_MODE=cluster` and `TRIAGE_ALLOW_EXTERNAL_INFERENCE=false`,
+it points at `:0.1.7`, all three modes render, and both refusal guards still
+fire from the packaged copy.
+
+**START HERE: pick from `## Open, in priority order` below.** The two live
+candidates are the `forbid` false positive on `injection_in_logs_is_data`
+(item 6 — the printed reason says the opposite of what the answer does) and
+settling thinking-off, which needs roughly n=15 per arm and has come back
+undetermined three times. Neither is urgent.
+
+**The CHANGELOG's `[Unreleased]` block is a known bookkeeping debt.** It
+already carried 43 lines when v0.1.6 was tagged, so it spans work released
+across 0.1.3–0.1.6. Cutting 0.1.7 deliberately did *not* absorb it — a
+`[0.1.7]` section was written for this release's own work and the old block
+was left alone, because relabelling it would claim four releases' worth of
+entries as new. Untangling it means reading `git log` between the tags.
 
 **~~A deterministic policy did not fire.~~ Closed 2026-08-23, and it was not
 the seam refactor.** The condition had been there since `LOGS_POLICY` was
