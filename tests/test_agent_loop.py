@@ -1102,12 +1102,93 @@ class TestEvidencePolicy:
 
         assert agent.evidence_gap([], [pod])[0] == "logs"
 
-    @pytest.mark.parametrize("tool", ["get_pod_logs", "get_pod_events"])
-    def test_reading_either_closes_the_logs_gap(self, tool):
+    def test_reading_the_logs_closes_the_logs_gap(self):
         pod = json.dumps({"pod": "c", "namespace": "demo", "status": "CrashLoopBackOff"})
-        trace = [{"name": tool, "arguments": {"name": "c", "namespace": "demo"}}]
+        trace = [{"name": "get_pod_logs",
+                  "arguments": {"name": "c", "namespace": "demo"}}]
 
         assert agent.evidence_gap(trace, [pod]) is None
+
+    def test_reading_the_events_does_not_close_the_logs_gap(self):
+        """
+        Measured, not argued. In results/seam-regression-n1.json the
+        `crashloop_root_cause` run called list_pods, describe_pod and
+        get_pod_events, never get_pod_logs, and recorded `policies: 0` --
+        because events had been read. What those events contained was
+        "Back-off restarting failed container", which is the status again, and
+        a seven-minute-old FailedScheduling from start-up. The answer named an
+        "untolerated taint" as the cause of the crash.
+
+        Events and logs are not interchangeable evidence. For a container that
+        started and exited, only one of them holds the reason.
+        """
+        pod = json.dumps({"pod": "c", "namespace": "demo", "status": "CrashLoopBackOff"})
+        trace = [{"name": "get_pod_events",
+                  "arguments": {"name": "c", "namespace": "demo"}}]
+
+        assert agent.evidence_gap(trace, [pod]) == (
+            "logs", "c", "demo", "CrashLoopBackOff",
+        )
+
+    def test_an_oomkill_sampled_in_backoff_still_does_not_demand_logs(self):
+        """
+        The exclusion above cannot be a status check, and this is why. The same
+        OOM-killed pod reports `OOMKilled` when list_pods catches it mid-crash
+        and `CrashLoopBackOff` when it catches it mid-backoff -- both spellings
+        appear for one memory-hog pod inside think-OFF-16cases-n3. Keyed on the
+        status, the OOMKilled exclusion leaks in the backoff sample, which is
+        where a crashlooping pod spends most of its life: replaying the
+        recorded sets, the status-keyed version demanded logs on 8 runs of a
+        `stress` workload whose logs say nothing and which were all passing.
+
+        describe_pod carries last_termination.reason in both samples, so that
+        is what the exclusion reads.
+        """
+        listing = json.dumps({"memory-hog-x": {"status": "CrashLoopBackOff",
+                                               "restarts": 14}})
+        described = json.dumps({
+            "pod": "memory-hog-x", "namespace": "demo",
+            "status": "CrashLoopBackOff",
+            "containers": {"hog": {"restarts": 14,
+                                   "last_termination": {"reason": "OOMKilled",
+                                                        "exit_code": 137}}},
+        })
+        trace = [{"name": "list_pods", "arguments": {"namespace": "demo"}},
+                 {"name": "describe_pod",
+                  "arguments": {"name": "memory-hog-x", "namespace": "demo"}}]
+
+        assert agent.evidence_gap(trace, [listing, described]) is None
+
+    def test_an_ordinary_crash_is_still_a_gap_once_described(self):
+        """
+        The counterpart: `Error` with exit code 1 is not self-explanatory. The
+        reason that container exited is in what it printed, and describe_pod
+        having been read changes nothing about that.
+        """
+        described = json.dumps({
+            "pod": "crasher-x", "namespace": "demo", "status": "CrashLoopBackOff",
+            "containers": {"crasher": {
+                "last_termination": {"reason": "Error", "exit_code": 1}}},
+        })
+        trace = [{"name": "describe_pod",
+                  "arguments": {"name": "crasher-x", "namespace": "demo"}}]
+
+        assert agent.evidence_gap(trace, [described])[0] == "logs"
+
+    def test_events_still_close_the_gap_for_a_pod_that_wants_both(self):
+        """
+        The exception, and it is a live one rather than a hypothetical:
+        "error" is a substring of CreateContainerConfigError, so such a pod
+        matches EVIDENCE_IN_LOGS as well as EVIDENCE_IN_EVENTS. Its container
+        never started, so there are no logs to read -- sending the run for
+        them would spend its one policy on an empty result.
+        """
+        both = json.dumps({"pod": "v", "namespace": "cf",
+                           "status": "CreateContainerConfigError"})
+        trace = [{"name": "get_pod_events",
+                  "arguments": {"name": "v", "namespace": "cf"}}]
+
+        assert agent.evidence_gap(trace, [both]) is None
 
     def test_events_win_when_a_pod_wants_both(self):
         """

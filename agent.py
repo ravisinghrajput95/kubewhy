@@ -451,9 +451,10 @@ EVIDENCE_IN_EVENTS = (
 
 # A crashing pod reports the symptom in its status and the cause in its logs.
 # "Do not stop at the status name" is in the system prompt and mostly works;
-# this is the floor under it. Narrow on purpose: it fires only when NOTHING
-# was read for that pod beyond its status, so the ordinary
-# describe_pod -> get_pod_logs chain never sees it.
+# this is the floor under it. Narrow on purpose: it fires only when the logs
+# themselves were not read for that pod, so the ordinary
+# describe_pod -> get_pod_logs chain never sees it. Reading Events instead is
+# not enough and used to be treated as though it were -- see evidence_gap.
 # OOMKilled is deliberately absent. The kernel killed the container for
 # exceeding a limit describe_pod already reports, so the status IS the cause
 # and the logs usually end mid-sentence. Requiring them there would spend a
@@ -631,15 +632,66 @@ def _reported_pods(trace, outputs):
     return seen
 
 
+# Termination reasons that ARE the cause, so a run holding one needs no logs.
+# The kernel killed the container for exceeding a limit describe_pod reports
+# in the same document, and the container's last line is whatever it happened
+# to be printing when it died -- for the memory-hog fixture, `stress` output.
+# Sending that run for logs spends its one policy to learn nothing.
+SELF_EXPLANATORY_TERMINATION = ("oomkilled",)
+
+
+def _terminated_for(outputs, pod):
+    """
+    The last termination reasons any result recorded for this pod, lowercased.
+
+    Read from the evidence rather than from the status string, because the two
+    disagree and the status is the one that lies. The same OOM-killed pod
+    reports `OOMKilled` when list_pods catches it mid-crash and
+    `CrashLoopBackOff` when it catches it mid-backoff -- a timing artefact of
+    which phase the kubelet was in, and both spellings are recorded for the
+    same memory-hog pod inside one eval set (think-OFF-16cases-n3, 2026-08-22).
+    describe_pod carries last_termination.reason in both, and that is the
+    stable fact.
+
+    This is why the OOMKilled exclusion could not stay a status check. It was
+    written as one, it reads correctly, and it leaks whenever the pod is
+    sampled in backoff -- which is most of the time, because backoff is where
+    a crashlooping pod spends most of its life.
+    """
+    found = set()
+    for output in outputs:
+        try:
+            data = json.loads(output)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict) or data.get("pod") != pod:
+            continue
+        for container in (data.get("containers") or {}).values():
+            if not isinstance(container, dict):
+                continue
+            reason = (container.get("last_termination") or {}).get("reason")
+            if reason:
+                found.add(str(reason).lower())
+    return found
+
+
 def evidence_gap(trace, outputs, question=""):
     """
-    A pod whose cause lives in Events, that this run never asked Events about.
+    A pod whose cause is provably not in its status block, that this run never
+    went and read.
 
-    Returns (pod, namespace, status) or None. Deterministic, and deliberately
-    narrow: it fires on the statuses whose cause is provably not in the status
-    block, and only when get_pod_events was not called for that pod. The model
-    still chooses its own path -- this catches the one gap where stopping early
-    is guaranteed to produce a guess.
+    Returns ("events"|"logs", pod, namespace, status) or None. Deterministic,
+    and deliberately narrow: it fires on the statuses whose cause is provably
+    elsewhere, and only when the tool holding that cause was not called for
+    that pod. The model still chooses its own path -- this catches the one gap
+    where stopping early is guaranteed to produce a guess.
+
+    Which tool closes which gap is the whole design, and getting it wrong in
+    either direction costs a round or a diagnosis. Events hold the cause for a
+    container that never started; logs hold it for one that started and
+    exited. They are not interchangeable, and treating them as though they
+    were is what let a CrashLoopBackOff run answer from a stale
+    FailedScheduling event.
     """
     def called(tool):
         return {
@@ -691,11 +743,34 @@ def evidence_gap(trace, outputs, question=""):
             continue
         return "events", pod, namespace, status
 
+    # Logs second -- and reading Events does NOT close this one. That is the
+    # correction, and it is measured rather than reasoned: in
+    # results/seam-regression-n1.json (2026-08-23) `crashloop_root_cause`
+    # called list_pods, describe_pod and get_pod_events, never get_pod_logs,
+    # and recorded `policies: 0`. The events it read were "Back-off restarting
+    # failed container" -- the status restated -- and a seven-minute-old
+    # FailedScheduling left over from start-up. The answer came back naming an
+    # "untolerated taint" as the cause of the crash. So for a container that
+    # started and exited, Events are not merely insufficient evidence: on that
+    # run they supplied a wrong cause, which is the failure this policy exists
+    # to prevent.
+    #
+    # The exception is a pod that qualifies for BOTH lists, which is not
+    # hypothetical: "error" is a substring of CreateContainerConfigError. There
+    # the container never started, its reason is in the Event and there are no
+    # logs to read, so events reading closes the gap and sending the run for
+    # logs would spend its one policy on an empty result. That is the case the
+    # original `or ... in asked` was protecting, and it keeps its protection.
     for pod, namespace, status in reported:
         lowered = status.lower()
         if not any(marker in lowered for marker in EVIDENCE_IN_LOGS):
             continue
-        if (pod, namespace) in read or (pod, namespace) in asked:
+        if (pod, namespace) in read:
+            continue
+        if (pod, namespace) in asked and any(
+                marker in lowered for marker in EVIDENCE_IN_EVENTS):
+            continue
+        if _terminated_for(outputs, pod) & set(SELF_EXPLANATORY_TERMINATION):
             continue
         return "logs", pod, namespace, status
 
