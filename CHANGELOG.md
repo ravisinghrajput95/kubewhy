@@ -147,6 +147,108 @@ signatures and response shapes may still change.
 - **`scan_references` was missing from the README entirely**, along with `GET
   /references`, and the tool count still said 13 of 14.
 
+## [0.1.8] — 2026-08-23
+
+**Supersedes 0.1.7, which should not be used.** An adversarial validation phase
+found that the external-data policy -- the control the whole "nothing leaves
+your network" claim rests on -- could be bypassed by how an endpoint was
+spelled. 0.1.7 also ships an in-cluster Ollama that usually never pulls its
+model.
+
+### Security
+
+- **The egress policy could be bypassed by an endpoint string (HIGH).** Two
+  classes of endpoint classified as `internal` while the resolver returned a
+  public address: Unicode full stops (U+3002, U+FF0E, U+FF61), which httpx
+  normalises to "." via IDNA but an ASCII-dot comparison does not; and
+  integer-form IPv4 such as `0x08080808` or `134744072`, both of which are
+  8.8.8.8 and contain no dot at all.
+
+  Demonstrated end to end with a captured request: `mode: cluster`,
+  `allowExternal: false`, endpoint `http://evil<U+3002>com/v1`. The
+  configuration was accepted, `destination` was reported as `internal` in the
+  startup log and every metric label, and the outbound body carried a pod log
+  verbatim -- a database password and an AWS secret key included. No
+  PermissionError, no egress-denied counter, and the boundary redaction pass
+  never ran, because the destination was believed to be internal. Nothing was
+  transmitted during the test.
+
+  The root cause was that the classifier and the HTTP client parsed the
+  endpoint independently and agreed only by coincidence. They agree by
+  construction now: the host is normalised through the same parser both
+  backends reach the network through, and a test asserts the two cannot
+  diverge for any endpoint.
+
+- **Redaction covers the realistic formats it was missing.**
+  `Authorization: Basic` and `Proxy-Authorization` -- siblings of the already
+  covered `Bearer` -- plus JSON-quoted secret keys, Google API keys and Azure
+  `AccountKey`. The JSON case is the important one: `{"auth": "..."}` in a
+  dockerconfigjson and `{"data": {"password": ...}}` in every Kubernetes Secret
+  both put a quote between the key and its colon, and the pattern stopped
+  matching at precisely the two places a Kubernetes credential is most often
+  written down. Certificates, bare base64 and `private_key_id` are deliberately
+  still not redacted, and the reasons are recorded in the module.
+
+### Fixed
+
+- **A pod could report Ready holding no model at all.**
+  `ollama.pullModelOnStart` ran `ollama pull` in a postStart hook that raced
+  the container's own server, failed in under a second, and swallowed the
+  error -- leaving a pod that reported 1/1 Ready with an empty model directory
+  while every diagnosis returned `model not found (404)`. The hook waits and
+  retries now, and readiness means a model is listed rather than a port being
+  open. It was a race, not a certain failure: it resolved favourably on GKE and
+  against us on kind.
+- **Readiness now verifies the configured model**, where the provider's
+  semantics allow it. A typo in `inference.model` previously produced a pod
+  that passed readiness, took traffic and 404'd every request. Three-valued:
+  `confirmed`, `absent`, or `unsupported` when a provider offers no usable
+  listing -- only `absent` fails readiness, because an empty answer is not a
+  negative one.
+- **A malformed provider response is an availability failure, not a refusal.**
+  An intermediary returning `<html>502 Bad Gateway</html>` with a 200, a
+  truncated body, or `{"choices": []}` raised a bare JSONDecodeError or
+  IndexError that read as "the provider refused", so no fallback ever fired for
+  the commonest real outage a fallback exists for.
+- **Inference is resolved at startup**, so a configuration the gateway would
+  reject fails the pod immediately with the reason in `kubectl logs` rather
+  than surfacing at the first incident. The configuration is logged at startup
+  too, so an operator can confirm what a deployment claims about their data
+  without waiting for a workload to break.
+
+### Added
+
+- **Contradiction detection.** The claim checker could verify that a value
+  appears in the evidence but not that the evidence says something else, so
+  "CrashLoopBackOff, which means the container exited with an application
+  error" scored `grounded` over `last_termination.reason = OOMKilled`. A
+  separate deterministic stage adds a fifth verdict, `contradicted`, which
+  outranks every other outcome. Rules are structured rather than linguistic and
+  hedged reasoning is exempt.
+- **A global investigation budget**, `TRIAGE_INVESTIGATION_BUDGET`, default
+  600s. MAX_ROUNDS bounded the number of model calls and OLLAMA_TIMEOUT bounded
+  each one, but nothing bounded their product -- 8 x 300s is forty minutes of a
+  controller occupied by one workload under a budget of twelve findings an
+  hour. The budget covers rounds, tool calls, retries and fallback, and
+  terminates with a structured reason. 600s clears the p99 of 1273 recorded
+  investigations with roughly 1.9x headroom.
+
+### Verified
+
+The same sixteen investigation scenarios ran on a local Ollama and on the
+hosted OpenAI API with no business-logic change, 16/16 at n=1, with all
+fourteen derived tool schemas accepted by the hosted service. NetworkPolicy
+egress enforcement was tested on a live cluster for the first time, against a
+control pod, on kind's kindnet CNI. Twenty-five security guards were
+mutation-tested and all are killed by a named test. The contradiction stage was
+replayed over 316 recorded runs: 236 grounded stayed grounded, and the only two
+records that moved are answers already known to be wrong.
+
+**Still not tested:** any real vLLM server, EKS, AKS, and NetworkPolicy on any
+managed dataplane. Diagnostic accuracy remains measured at sample sizes whose
+intervals are wide; the security and reliability properties are better
+evidenced than the answers are.
+
 ## [0.1.7] — 2026-08-23
 
 Where inference happens becomes configuration. The default is unchanged and
