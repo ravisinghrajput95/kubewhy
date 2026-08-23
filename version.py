@@ -17,4 +17,4 @@ Bump this and `Chart.yaml` (both `version` and `appVersion`) together when
 tagging a release; the tag is what publishes the image and chart to GHCR.
 """
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"

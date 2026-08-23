@@ -147,6 +147,93 @@ signatures and response shapes may still change.
 - **`scan_references` was missing from the README entirely**, along with `GET
   /references`, and the tool count still said 13 of 14.
 
+## [0.1.7] — 2026-08-23
+
+Where inference happens becomes configuration. The default is unchanged and
+still keeps everything on your network — and that default is now enforced
+rather than documented.
+
+### Added
+
+- **An inference gateway (`inference.py`).** `TRIAGE_INFERENCE_MODE` is
+  `local` | `cluster` | `api`, selecting a model on a workstation, inside the
+  cluster, or at a hosted API. `backends.py` still answers "which protocol";
+  this answers where inference happens, whether cluster evidence may leave the
+  network to get there, and what to do when the model cannot be reached. The
+  agent loop is unchanged — `Gateway` presents the same four methods a backend
+  does, and a test asserts it.
+- **An external-data policy.** `TRIAGE_ALLOW_EXTERNAL_INFERENCE` gates every
+  request to an off-network endpoint, defaulting to off. A mode claiming
+  inference stays on your network refuses to start when its endpoint is off
+  it — otherwise `mode: cluster` pointed at a vendor installs cleanly, reports
+  itself as in-cluster in every log line, and ships pod logs anyway. Outbound
+  messages get a second redaction pass at the boundary, using the same filter
+  the collectors use. A refused request is a 403, not a 500.
+- **Optional failover.** Off by default. An unavailable primary falls back
+  once; a primary that *refuses* — a 400, a 401 — does not, because both fail
+  identically on the fallback and succeeding quietly elsewhere hides a
+  configuration error someone has to see. A fallback needs its own model name
+  and is subject to the same egress policy. Backends carry a `wire`, and a
+  mid-run failover happens only between providers sharing one: halfway through
+  a run the message history is in the primary's shape.
+- **A vLLM provider**, serving the OpenAI protocol under its own name so the
+  telemetry can say truthfully which provider answered. Untested against a
+  real vLLM server.
+- **`telemetry.py` and `GET /metrics`.** Prometheus exposition for inference
+  requests, duration, token usage, fallbacks, egress denials, tool calls and
+  investigations. Endpoints are never labels: one can carry a token in its
+  userinfo. Behind the same bearer token as the rest of the API.
+- **`GET /inference`**, reporting the configured mode, provider, model,
+  destination and policy — previously answerable only by reading the pod's
+  environment, and the answer changes what a deployment claims about your data.
+- **Chart support for all three modes**, an `inference:` values block, an
+  optional in-cluster vLLM (`vllm.enabled`, GPU optional and off), an optional
+  egress `NetworkPolicy`, and five template-time guards so an impossible
+  configuration fails `helm install` with an explanation rather than a
+  CrashLoopBackOff twenty minutes later.
+- **`docs/INFERENCE.md`**, covering the modes, providers, configuration,
+  fallback rules, deployment shapes, troubleshooting, and how to add a
+  provider or a cloud adapter.
+
+### Changed
+
+- **`GET /readyz` no longer builds an Ollama client.** It probes through the
+  gateway, so an in-cluster vLLM is no longer reported as permanently
+  NotReady, and it names *which* target answered — "ready on the fallback" and
+  "ready on the primary" are different states of the world.
+- `TRIAGE_BACKEND` and `OLLAMA_HOST` still work and still mean what they
+  meant. An existing values file installs unchanged.
+
+### Fixed
+
+- **The crashloop evidence policy could not fire.** Reading *either*
+  `get_pod_logs` or `get_pod_events` closed the gap, and for a container that
+  started and exited the events say "Back-off restarting failed container" —
+  the status again. In one recorded run they also carried a seven-minute-old
+  `FailedScheduling` from start-up, which the answer then named as the cause
+  of the crash. Events still close the gap for a pod whose container never
+  started and has no logs to read.
+- **The OOMKilled exclusion leaked whenever the pod was sampled in backoff.**
+  It was keyed on the status string, and the same OOM-killed pod reports
+  `OOMKilled` mid-crash and `CrashLoopBackOff` mid-backoff. It reads
+  `last_termination.reason` now.
+- **A failed primary is no longer re-probed every round.** Without
+  `TRIAGE_PRIMARY_RETRY_SECONDS` a single investigation failed over on each of
+  its rounds — invisible for a refused connection, `MAX_ROUNDS × OLLAMA_TIMEOUT`
+  for one that times out.
+
+### Verified
+
+Live against Ollama: both wire protocols, a real failover, the same outage
+with the fallback disabled failing as it should, and an external endpoint
+refused by policy. `crashloop_root_cause` at n=5 on kind: 5/5, with 3 of 5
+taking the exact path that previously failed. All 16 eval cases at n=3:
+48/48, nothing moved down — which establishes the absence of a regression, not
+an improvement (Fisher p=0.242 against the recorded arm). 800 unit tests.
+
+**Untested:** any hosted API, any real vLLM server, and the NetworkPolicy's
+enforcement.
+
 ## [0.1.2] — 2026-08-07
 
 The rename release. Republishes the image and chart under the new name — v0.1.1
