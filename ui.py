@@ -309,7 +309,11 @@ def next_step(answer):
     if not trace or not outputs:
         return None
     try:
-        gap = agent.evidence_gap(trace, outputs, answer.get("question", ""))
+        # The prompt rather than the typed question: evidence_gap prefers the
+        # pod the question names, and the scoped prompt names it even when the
+        # operator typed "why is this broken?".
+        gap = agent.evidence_gap(
+            trace, outputs, answer.get("prompt") or answer.get("question", ""))
     except Exception:
         return None
     if not gap:
@@ -348,6 +352,31 @@ def render_investigation(answer):
         "<div class='kw-strip'>" + "".join(strip) + "</div>",
         unsafe_allow_html=True,
     )
+
+    # --- what was actually asked --------------------------------------------
+    #
+    # Rendered from the answer rather than at submit time, so it survives every
+    # rerun the page does afterwards. It used to be drawn only in the pass that
+    # submitted the form, which meant moving a slider silently removed the
+    # disclosure while leaving on screen the answer it explained.
+    prompt = answer.get("prompt")
+    if prompt and prompt != (answer.get("question") or ""):
+        st.caption(
+            "Scoped to the selected workload — untick the box above to ask "
+            "about the cluster as a whole."
+        )
+        with st.expander("what was actually sent to the model"):
+            # st.code renders one long line with horizontal overflow, so the
+            # scoping directive scrolled off the right edge -- including the
+            # sentence that matters most, "Do not report on any other
+            # workload". A disclosure panel that hides the disclosure is worse
+            # than no panel, because it looks like the whole prompt. Reported
+            # from a real GKE session on 2026-08-22.
+            st.markdown(
+                f"<pre style='white-space:pre-wrap;word-break:break-word;"
+                f"font-size:0.85em;margin:0'>{html.escape(prompt)}</pre>",
+                unsafe_allow_html=True,
+            )
 
     # --- root cause ---------------------------------------------------------
     st.markdown("#### Root cause")
@@ -851,6 +880,21 @@ with st.form("ask", clear_on_submit=False):
     )
     submitted = st.form_submit_button("Diagnose", type="primary")
 
+if submitted and not question and subject:
+    # The placeholder is a well-formed question about the selected workload,
+    # rendered in grey inside the box -- which is what a filled-in field looks
+    # like. Clicking Diagnose then did nothing at all: no run, no message, the
+    # `and question` guard failing in silence. Reported as "the button seems not
+    # responding", and that is exactly what it was.
+    #
+    # Asking the question the box is already showing is the least surprising
+    # thing this can do, and the caption below says which question ran.
+    question = (f"why is {subject['workload']} failing?")
+
+if submitted and not question:
+    st.warning("Type a question — the grey text is a placeholder, and there is "
+               "no workload selected to ask about.")
+
 if submitted and question:
     asked = question
     if scoped:
@@ -866,24 +910,8 @@ if submitted and question:
         # their own sentence next to an answer that ignores it. Every other
         # panel here names the tool behind it; this one was rewriting the input
         # and not showing it.
-        st.caption(
-            f"Scoped to **{subject['workload']}** — untick the box above to "
-            "ask about the cluster as a whole."
-        )
-        with st.expander("what was actually sent to the model"):
-            # st.code renders one long line with horizontal overflow, so the
-            # scoping directive scrolled off the right edge -- including the
-            # sentence that matters most, "Do not report on any other
-            # workload". A disclosure panel that hides the disclosure is
-            # worse than no panel, because it looks like the whole prompt.
-            # Reported from a real GKE session on 2026-08-22: the user could
-            # see "Answer only about the workload adversarial/annotation-inj"
-            # and nothing after it.
-            st.markdown(
-                f"<pre style='white-space:pre-wrap;word-break:break-word;"
-                f"font-size:0.85em;margin:0'>{html.escape(question)}</pre>",
-                unsafe_allow_html=True,
-            )
+        # Disclosed by render_investigation() below, from the recorded
+        # prompt, so that it is still there on the next rerun.
     # A new diagnosis invalidates the last one, and it has to be dropped
     # *before* the model is called rather than when the new answer arrives.
     # Otherwise the previous workload's answer stays on screen for the minute
@@ -931,9 +959,15 @@ if submitted and question:
             elif event["type"] == "answer":
                 # Held in session_state so that moving a slider afterwards
                 # re-renders the answer instead of re-running the model.
-                event["question"] = question
+                # Two different strings, and conflating them put the
+                # scoping directive in the history list where the operator's
+                # own sentence belonged. `question` is what the model was
+                # handed; `asked` is what a person typed and what they will
+                # scan the sidebar for.
+                event["question"] = asked
+                event["prompt"] = question
                 st.session_state["answer"] = event
-                _remember(question, event)
+                _remember(asked, event)
                 result = event
         # This run's answer, not whatever is in session_state: reading it back
         # out meant a run that produced nothing was labelled with the previous
@@ -953,6 +987,19 @@ if submitted and question:
         # failures, so anything reaching here is the model backend.
         steps.update(label="Failed", state="error")
         st.error(f"{type(exc).__name__}: {exc}")
+
+    # The sidebar's history list is built near the top of the script, which is
+    # to say before this run existed. Without a rerun, the investigation you
+    # just finished is missing from "Investigations" until something else
+    # happens to redraw the page -- which looked like history was not being
+    # kept at all. Outside the try: RerunException is a control-flow signal,
+    # and catching it here would turn a rerun into a red error box.
+    #
+    # The model is not called again -- `submitted` is False on the rerun and
+    # the answer is already in session_state. The live tool log is replaced by
+    # the panel's own timeline, which holds the same chain.
+    if result is not None:
+        st.rerun()
 
 answer = st.session_state.get("answer")
 if answer:

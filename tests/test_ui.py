@@ -551,3 +551,156 @@ class TestTheHeaderNamesWhatThisDeploymentIsDoing:
         # Where inference happens decides what leaves the network, so it is on
         # screen rather than in a settings page nobody opens.
         assert "evidence" in header[0]
+
+
+# --- submitting the form -----------------------------------------------------
+
+def run_form(seen, question=None, scoped=True, scan=None):
+    """
+    Drive the Ask form for real, with the agent loop stubbed.
+
+    `seen` collects the question string the agent was actually handed, which is
+    the only way to tell "the button did nothing" apart from "the button ran
+    something else".
+    """
+    import streamlit as st
+    import agent as agent_mod
+
+    st.cache_data.clear()
+
+    def fake_stream(asked, *args, **kwargs):
+        seen.append(asked)
+        yield {"type": "answer", **ANSWER}
+
+    with patch.object(k8s, "scan_cluster",
+                      return_value=scan or {"demo/memory-hog": {
+                          "status": "OOMKilled", "pods": 1,
+                          "example": "memory-hog-bc76968c6-s24kn",
+                          "fault": "crash"}}), \
+         patch.object(k8s, "list_nodes", return_value={}), \
+         patch.object(k8s, "describe_pod",
+                      return_value={"pod": "x", "containers": {}}), \
+         patch.object(k8s, "get_pod_events",
+                      return_value={"pod": "x", "events": []}), \
+         patch.object(k8s, "get_pod_logs",
+                      return_value={"pod": "x", "source": "current", "logs": "b"}), \
+         patch.object(agent_mod, "stream", fake_stream):
+        app = AppTest.from_file(UI, default_timeout=60)
+        app.run()
+        if question is not None:
+            app.text_input[0].set_value(question)
+        if not scoped:
+            app.checkbox[0].set_value(False)
+        app.button[0].click().run()
+    return app
+
+
+class TestTheDiagnoseButtonAlwaysDoesSomething:
+    def test_an_empty_box_asks_the_question_the_box_is_showing(self):
+        """
+        The placeholder is grey text *inside* the field, which is what a
+        filled-in field looks like. Clicking Diagnose used to do nothing at
+        all -- no run, no message, an `and question` guard failing in silence.
+        Reported as "the Diagnose button seems not responding", and that is
+        precisely what it was.
+        """
+        seen = []
+        run_form(seen, question=None)
+
+        assert seen, "Diagnose with an empty box did nothing at all"
+        assert "demo/memory-hog" in seen[0]
+
+    def test_a_typed_question_is_still_the_one_asked(self):
+        seen = []
+        run_form(seen, question="why does it restart?")
+
+        assert seen and "why does it restart?" in seen[0]
+
+    def test_with_nothing_selected_it_says_so_rather_than_going_quiet(self):
+        seen = []
+        app = run_form(seen, question=None, scan={"result": "no unhealthy workloads"})
+
+        assert not seen
+        assert any("placeholder" in w.value for w in app.warning), \
+            "a click that cannot run must say why"
+
+
+class TestTheHistoryRecordsWhatAPersonTyped:
+    def test_the_sidebar_shows_the_question_not_the_scoping_directive(self):
+        """
+        `question` is rebound to agent.scoped_question() before the run, and
+        recording that put "Answer only about the workload demo/memory-hog..."
+        in the sidebar where the operator's own sentence belonged. A history
+        list is for finding the question you asked.
+        """
+        seen = []
+        app = run_form(seen, question="why does it restart?", scoped=True)
+
+        # The scoped prompt is what reached the model...
+        assert "Answer only about" in seen[0]
+        # ...and the typed question is what the sidebar offers back.
+        labels = [b.label for b in app.button]
+        assert any("why does it restart?" in label for label in labels)
+        assert not any("Answer only about" in label for label in labels)
+
+    def test_a_finished_investigation_appears_without_a_reload(self):
+        """
+        The sidebar is built near the top of the script, so before this fix the
+        run you just finished was missing from it until something else redrew
+        the page -- which read as history not being kept at all.
+
+        Asserted as a *change* across the click, with a marker no other test
+        can have written. The first version of this test looked for the "no
+        investigations yet" caption being gone, and passed on the broken code:
+        the store is a cache_resource shared for the whole process, so an
+        earlier test had already put a row in it.
+        """
+        import streamlit as st
+        import agent as agent_mod
+
+        st.cache_data.clear()
+        marker = "why did zzz-marker-9137 restart?"
+
+        def fake_stream(asked, *args, **kwargs):
+            yield {"type": "answer", **ANSWER}
+
+        with patch.object(k8s, "scan_cluster",
+                          return_value={"demo/memory-hog": {
+                              "status": "OOMKilled", "pods": 1,
+                              "example": "memory-hog-bc76968c6-s24kn",
+                              "fault": "crash"}}), \
+             patch.object(k8s, "list_nodes", return_value={}), \
+             patch.object(k8s, "describe_pod",
+                          return_value={"pod": "x", "containers": {}}), \
+             patch.object(k8s, "get_pod_events",
+                          return_value={"pod": "x", "events": []}), \
+             patch.object(k8s, "get_pod_logs",
+                          return_value={"pod": "x", "source": "c", "logs": "b"}), \
+             patch.object(agent_mod, "stream", fake_stream):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.run()
+            before = [b.label for b in app.button]
+            app.text_input[0].set_value(marker)
+            app.button[0].click().run()
+            after = [b.label for b in app.button]
+
+        assert not any(marker in label for label in before)
+        assert any(marker in label for label in after), \
+            "the finished investigation is not in the sidebar until a reload"
+
+
+class TestTheRewriteStaysDisclosed:
+    def test_the_prompt_actually_sent_is_shown_with_the_answer(self):
+        app = render_answer({**ANSWER,
+                             "question": "why does it restart?",
+                             "prompt": "Answer only about the workload "
+                                       "demo/memory-hog. why does it restart?"})
+
+        assert any("what was actually sent" in (e.label or "")
+                   for e in app.expander)
+
+    def test_an_unscoped_question_gets_no_disclosure_panel(self):
+        app = render_answer(ANSWER)
+
+        assert not any("what was actually sent" in (e.label or "")
+                       for e in app.expander)
