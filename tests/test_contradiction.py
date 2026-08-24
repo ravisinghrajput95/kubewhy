@@ -152,6 +152,58 @@ class TestWhatMustNotBeCalledAContradiction:
 
         assert grounding.check(answer, ev(empty))["contradictions"] == []
 
+    def test_an_absence_claim_attaches_to_the_nearest_named_thing(self):
+        """
+        A live false positive, from the first 432 real runs this stage ever
+        saw. The clause is the *correct* answer to the stuck-volume case: the
+        ConfigMap does not exist, the pod very much does. `ConfigMap` is not
+        one of the entity kinds the pattern knows, so the rule paired "does
+        not exist" with the only labelled entity it could find -- the pod.
+        """
+        pod = ("describe_pod", {
+            "pod": "missing-configmap-volume", "namespace": "config-faults",
+            "status": "ContainerCreating"})
+        answer = ("The pod `missing-configmap-volume` is stuck in "
+                  "**ContainerCreating** because the ConfigMap `nginx-conf` "
+                  "referenced in its volume configuration does not exist in "
+                  "the `config-faults` namespace.")
+
+        assert grounding.check(answer, ev(pod))["contradictions"] == []
+
+    def test_a_bare_absence_claim_about_the_entity_still_fires(self):
+        """The behaviour the fix must not cost."""
+        pod = ("describe_pod", {"pod": "crasher-abc123", "namespace": "demo",
+                                "status": "CrashLoopBackOff"})
+        answer = "The pod `crasher-abc123` does not exist in the demo namespace."
+
+        found = grounding.check(answer, ev(pod))["contradictions"]
+
+        assert found and found[0]["rule"] == "claimed_absent_but_measured_present"
+
+    def test_advice_about_avoiding_a_thing_is_not_a_claim_it_happened(self):
+        """
+        The second live false positive. Forward-looking advice, read as an
+        assertion that the container had been OOM-killed. The negation window
+        did not treat "avoid" as attenuating, and no recorded answer in the
+        corpus had ever phrased it this way -- which is why only running live
+        found it.
+        """
+        answer = ("- While not directly related to the exit code 1, ensure the "
+                  "pod has sufficient resources (CPU/memory) to avoid "
+                  "OOMKilled, though this is secondary to the connectivity "
+                  "issue.")
+
+        assert grounding.check(answer, ev(ERROR_POD))["contradictions"] == []
+
+    @pytest.mark.parametrize("framing", [
+        "ensure it has headroom to avoid OOMKilled",
+        "raise the limit to prevent OOMKilled",
+        "there is a risk of OOMKilled if traffic grows",
+        "guard against OOMKilled by raising the limit",
+    ])
+    def test_prospective_framing_generally(self, framing):
+        assert grounding.check(framing, ev(ERROR_POD))["contradictions"] == []
+
     def test_silence_in_the_evidence_produces_no_finding(self):
         """
         A fact that is absent is absent. "The tools did not say" is what

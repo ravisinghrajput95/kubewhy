@@ -139,6 +139,16 @@ _NEGATORS = re.compile(
     r"\b(no|not|never|without|isn't|aren't|wasn't|weren't|none|nothing|"
     r"neither|nor|lacks|lacking|absent)\b|n't\b")
 
+# Advice about a thing that has NOT happened is not a claim that it has.
+# Found live on 2026-08-24 in the first 432 real runs this stage ever saw:
+# "ensure the pod has sufficient resources (CPU/memory) to avoid OOMKilled"
+# is a recommendation, and it was read as an assertion that the container was
+# OOM-killed. The corpus replay could not have caught this -- no recorded
+# answer had phrased it that way.
+_PROSPECTIVE = re.compile(
+    r"\b(avoid|avoiding|prevent|preventing|risk of|guard against|"
+    r"protect against|in case of|so it does not|to stop|reduce the chance)\b")
+
 # How far back to look. A negator further away than this is usually governing
 # a different part of the sentence.
 _NEGATION_WINDOW = 40
@@ -156,7 +166,40 @@ def _asserted(lowered, phrase):
     if start < 0:
         return False
     window = lowered[max(0, start - _NEGATION_WINDOW):start]
-    return not _NEGATORS.search(window)
+    if _NEGATORS.search(window) or _PROSPECTIVE.search(window):
+        return False
+    return True
+
+
+def _absence_is_about(clause, phrase, name):
+    """
+    Whether `name` is the thing the absence phrase is talking about.
+
+    Found live on 2026-08-24. This clause is the correct answer to the
+    stuck-volume case:
+
+        The pod `missing-configmap-volume` is stuck in ContainerCreating
+        because the ConfigMap `nginx-conf` referenced in its volume
+        configuration does not exist in the `config-faults` namespace.
+
+    The pod is the only *labelled* entity -- `ConfigMap` is not one of the
+    kinds the pattern knows -- so the rule paired "does not exist" with the
+    pod, which very much does exist, and called a correct answer a
+    contradiction.
+
+    An absence claim attaches to the nearest named thing before it. If some
+    other quoted identifier sits between the entity and the phrase, that
+    identifier is the subject and this entity is not.
+    """
+    low = clause.lower()
+    at = low.find(phrase)
+    if at < 0:
+        return False
+    start = low.rfind(name, 0, at)
+    if start < 0:
+        return False
+    between = clause[start + len(name):at]
+    return not re.search(r"[`\"'][^`\"']{2,}[`\"']", between)
 
 
 def _walk(node, seen):
@@ -394,6 +437,8 @@ def check(answer, tool_outputs):
                 if not name or name in grounding._ENTITY_KINDS:
                     continue
                 if not any(ch.isdigit() or ch == "-" for ch in name):
+                    continue
+                if not _absence_is_about(clause, hit, name):
                     continue
                 if _entity_present(entries, name):
                     findings.append(_finding(
