@@ -357,3 +357,197 @@ class TestSearchCoversTheClusterNotJustThePage:
         app = self._search(self.scanner(), "nosuchthing")
 
         assert any("scan_cluster(workload='nosuchthing')" in c.value for c in app.caption)
+
+
+# --- the investigation panel -------------------------------------------------
+#
+# The investigation is the primary object on this page, so what it renders is
+# pinned rather than eyeballed. Every field below comes from what agent.stream()
+# already returns; the panel is asserted to *display* the backend's verdict, not
+# to compute one of its own.
+
+ANSWER = {
+    "answer": "memory-hog was OOMKilled after exceeding its 64Mi limit.",
+    "question": "why is memory-hog restarting?",
+    "confidence": "grounded",
+    "checked": 3,
+    "unverified": [],
+    "contradictions": [],
+    "nudges": 0, "policies": 1, "coverage": 0,
+    "rewrites": [{"claim": "512Mi", "observed": "64Mi", "action": "corrected"}],
+    "tool_calls": [
+        {"name": "list_pods", "arguments": {"namespace": "demo"}},
+        {"name": "describe_pod", "arguments": {"name": "memory-hog-x",
+                                               "namespace": "demo"}},
+    ],
+    "evidence": [
+        {"id": "tool-1", "tool": "list_pods", "result": '{"memory-hog-x": {}}'},
+        {"id": "tool-2", "tool": "describe_pod",
+         "result": '{"pod": "memory-hog-x", "namespace": "demo",'
+                   '"containers": {"hog": {"last_termination":'
+                   '{"reason": "OOMKilled", "exit_code": 137}}}}'},
+    ],
+    "timing": {"wall_ms": 8400, "model_ms": 8000, "tool_ms": 400, "rounds": 3},
+    "rca": {
+        "observations": [{"claim": "oomkilled", "kind": "status",
+                          "evidence": [{"id": "tool-2", "tool": "describe_pod",
+                                        "field": "last_termination.reason"}]}],
+        "inferences": [{"claim": "memory leak", "kind": "cause"}],
+        "unknowns": ["512"],
+        "contradictions": [],
+        "corrections": [],
+    },
+}
+
+
+def render_answer(answer, scan_result=None):
+    """Run the app with a finished investigation already in session state."""
+    import streamlit as st
+
+    st.cache_data.clear()
+    with patch.object(k8s, "scan_cluster",
+                      return_value=scan_result or {"result": "no unhealthy workloads"}), \
+         patch.object(k8s, "list_nodes", return_value={}):
+        app = AppTest.from_file(UI, default_timeout=60)
+        app.session_state["answer"] = answer
+        app.run()
+    # A raised exception blanks the page from that point down, so it is caught
+    # here rather than in the one test that happens to assert past it. An
+    # invalid `icon=` argument crashed the whole console on every contradiction
+    # -- the single verdict most worth reading -- and only this caught it.
+    assert not app.exception, [str(e.value) for e in app.exception]
+    return app
+
+
+def _html(app, prefix):
+    return [m.value for m in app.markdown if str(m.value).startswith(prefix)]
+
+
+class TestTheInvestigationIsThePrimaryObject:
+    def test_every_section_of_the_workflow_is_on_screen(self):
+        """
+        Root cause, what the evidence says, and the timeline. An operator has
+        to be able to see what was collected and what it supports without
+        reading prose.
+        """
+        app = render_answer(ANSWER)
+        headings = [m.value for m in app.markdown
+                    if str(m.value).startswith("####")]
+
+        assert "#### Root cause" in headings
+        assert "#### What the evidence says" in headings
+        assert "#### Timeline" in headings
+
+    def test_the_status_strip_carries_verdict_calls_and_duration(self):
+        app = render_answer(ANSWER)
+        strip = _html(app, "<div class='kw-strip'>")
+
+        assert strip
+        assert "Grounded" in strip[0]
+        assert "2 tool calls" in strip[0]
+        assert "8.4s" in strip[0]
+
+    def test_observations_carry_the_tool_and_field_they_came_from(self):
+        """
+        "Traced to a tool result" is only a claim unless the trace is shown.
+        """
+        app = render_answer(ANSWER)
+        claims = _html(app, "<div class='kw-claim")
+
+        cited = [c for c in claims if "oomkilled" in c]
+        assert cited, "the observation was not rendered"
+        assert "describe_pod.last_termination.reason" in cited[0]
+
+    def test_inference_and_unknown_are_rendered_distinctly(self):
+        app = render_answer(ANSWER)
+        claims = _html(app, "<div class='kw-claim")
+
+        assert any("memory leak" in c and "kw-warn" in c for c in claims)
+        assert any("512" in c and "kw-bad" in c for c in claims)
+
+    def test_a_correction_says_what_was_changed_in_the_text(self):
+        """
+        verify() rewrites a fabricated value in place. Saying so is the
+        difference between a corrected answer and an edited one.
+        """
+        app = render_answer(ANSWER)
+        body = " ".join(str(m.value) for m in app.markdown)
+
+        assert "512Mi" in body and "64Mi" in body
+
+    def test_the_evidence_itself_is_available(self):
+        app = render_answer(ANSWER)
+
+        assert any("Evidence" in (e.label or "") for e in app.expander)
+
+
+class TestTheVerdictIsTheBackendsNotTheViews:
+    def test_a_contradiction_is_surfaced_as_an_error(self):
+        answer = {**ANSWER, "confidence": "contradicted",
+                  "contradictions": [{"claim": "application error",
+                                      "measured": "last_termination.reason = oomkilled",
+                                      "rule": "imposed_termination_vs_application_cause"}]}
+        app = render_answer(answer)
+
+        assert any("application error" in e.value and "oomkilled" in e.value
+                   for e in app.error)
+
+    def test_an_answer_with_no_tool_calls_is_flagged(self):
+        """
+        `grounded` with nothing measured is the failure grounding.py exists to
+        prevent, so the panel says so rather than showing a green badge.
+        """
+        app = render_answer({**ANSWER, "tool_calls": [], "checked": 0})
+
+        assert any("no tools were called" in w.value for w in app.warning)
+
+    def test_a_deadline_termination_is_visible_in_the_strip(self):
+        app = render_answer({**ANSWER, "termination": "deadline_exceeded"})
+        strip = _html(app, "<div class='kw-strip'>")
+
+        assert "deadline exceeded" in strip[0]
+
+
+class TestTheNextStepIsBorrowedNotInvented:
+    """
+    The recommendation comes from agent.evidence_gap() -- the same function the
+    loop uses to decide whether to send a run back. A console that wrote its own
+    suggestion would be inventing an AI capability this project does not ship.
+    """
+
+    def test_a_crashing_pod_whose_logs_are_unread_gets_a_next_step(self):
+        answer = {**ANSWER,
+                  "question": "why is crasher-x failing?",
+                  "tool_calls": [{"name": "describe_pod",
+                                  "arguments": {"name": "crasher-x",
+                                                "namespace": "demo"}}],
+                  "evidence": [{"id": "tool-1", "tool": "describe_pod",
+                                "result": '{"pod": "crasher-x", "namespace": "demo",'
+                                          '"status": "CrashLoopBackOff",'
+                                          '"containers": {"c": {"last_termination":'
+                                          '{"reason": "Error", "exit_code": 1}}}}'}]}
+        app = render_answer(answer)
+        blocks = _html(app, "<div class='kw-next'>")
+
+        assert blocks, "no next step offered for an unread crashing pod"
+        assert "get_pod_logs" in blocks[0]
+        assert "crasher-x" in blocks[0]
+
+    def test_a_complete_investigation_gets_no_invented_suggestion(self):
+        """The panel stays silent when the backend has nothing to insist on."""
+        app = render_answer(ANSWER)
+
+        assert not _html(app, "<div class='kw-next'>")
+
+
+class TestTheHeaderNamesWhatThisDeploymentIsDoing:
+    def test_it_names_the_cluster_the_backend_and_where_evidence_goes(self):
+        app = render_answer(ANSWER)
+        header = _html(app, "<div class='kw-hdr'>")
+
+        assert header, "no header strip"
+        assert "cluster" in header[0]
+        assert "inference" in header[0]
+        # Where inference happens decides what leaves the network, so it is on
+        # screen rather than in a settings page nobody opens.
+        assert "evidence" in header[0]

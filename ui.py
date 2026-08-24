@@ -27,6 +27,7 @@ import time
 import streamlit as st
 
 import agent
+import store
 from routers.k8s_pods_info import (
     active_context,
     list_contexts,
@@ -159,6 +160,310 @@ def _unwrap(result, tool):
 # reads as two different products in the same window.
 PAGE_ICON = "🩺"
 
+# --- the investigation, as an object -----------------------------------------
+#
+# The result is the primary thing on this page, not the conversation that
+# produced it. An operator arriving at a finished investigation has to be able
+# to answer, without reading prose: what was collected, what the evidence
+# actually says, what was inferred from it, what is still unknown, whether any
+# claim contradicts a measurement, how long it took, and which backend
+# answered.
+#
+# Everything below is rendered from what agent.stream() already returns and
+# grounding.contract() already computes. Nothing here re-derives a verdict; a
+# second implementation of the checker living in the view is exactly how a UI
+# comes to disagree with its own backend.
+
+@st.cache_resource
+def _history():
+    """
+    Where finished investigations are kept.
+
+    store.build() rather than session_state: session state dies with the
+    browser tab, and an operator who reloads after a fifteen-minute
+    investigation should still find it. With TRIAGE_STATE_DB set it also
+    survives a restart -- the same store the REST API's detached jobs use, so
+    there is one place investigations live rather than two.
+    """
+    return store.build()
+
+
+def _remember(question, answer):
+    """Record a finished investigation. Never fatal: this is a convenience."""
+    try:
+        history = _history()
+        job_id = store.new_job_id()
+        history.create_job(job_id, question, at=store.now())
+        history.update_job(job_id, "done", result=answer, at=store.now())
+    except Exception:
+        # A console that cannot write its own history is still a console.
+        pass
+
+
+def _recent(limit=12):
+    try:
+        return _history().list_jobs(limit=limit)
+    except Exception:
+        return []
+
+
+def _header_strip():
+    """
+    Cluster, inference and health, on one line above everything.
+
+    Read from the same places the API reports them -- inference.gateway() for
+    the mode and provider, and its probe() for health -- so the console cannot
+    disagree with /inference and /readyz about what this deployment is doing.
+    Where inference happens decides what leaves your network, so it belongs on
+    screen rather than in a settings page nobody opens.
+
+    Never raises: a header that takes the page down when the model is
+    unreachable is a header that hides the one fact worth showing.
+    """
+    # The bound context if the operator picked one, else whatever kubectl
+    # would use. Naming the cluster matters more here than anywhere else on the
+    # page: every finding below is about one cluster and there is no other
+    # indication of which.
+    try:
+        context = _ctx() or active_context() or "current-context"
+    except Exception:
+        context = _ctx() or "current-context"
+    cells = [f"<span><span class='kw-k'>cluster</span><b>"
+             f"{html.escape(context)}</b></span>"]
+    try:
+        import inference
+
+        described = inference.gateway().config.describe()
+        primary = described["primary"]
+        label = (f"{primary['mode']} · {primary['provider']} · "
+                 f"{primary['model']}")
+        st.session_state["backend_label"] = label
+        cells.append(f"<span><span class='kw-k'>inference</span><b>"
+                     f"{html.escape(label)}</b></span>")
+        egress = ("external" if primary["destination"] == "external"
+                  else "on-network")
+        tone = "kw-warn" if egress == "external" else "kw-ok"
+        cells.append(f"<span><span class='kw-k'>evidence</span>"
+                     f"<b class='{tone}'>{egress}</b></span>")
+    except Exception as exc:
+        cells.append(f"<span><span class='kw-k'>inference</span>"
+                     f"<b class='kw-bad'>{type(exc).__name__}</b></span>")
+
+    health = st.session_state.get("health")
+    if health is not None:
+        tone = "kw-ok" if health else "kw-bad"
+        word = "ready" if health else "not ready"
+        cells.append(f"<span><span class='kw-k'>health</span>"
+                     f"<b class='{tone}'>{word}</b></span>")
+    return "<div class='kw-hdr'>" + "".join(cells) + "</div>"
+
+
+VERDICT_STYLE = {
+    "grounded": ("Grounded", "ok",
+                 "every figure traced to a tool result"),
+    "partial": ("Partial", "warn",
+                "some claims were not found in any tool result"),
+    grounding.CONTRADICTED: ("Contradicted", "bad",
+                             "a claim disagrees with a measurement"),
+    grounding.INSUFFICIENT: ("Insufficient evidence", "muted",
+                             "nothing here could be checked"),
+    "ungrounded": ("Ungrounded", "bad",
+                   "claims were made with no tool result behind them"),
+}
+
+
+def _chip(label, tone, title=""):
+    return (
+        f"<span class='kw-chip kw-{tone}' title='{html.escape(title)}'>"
+        f"{html.escape(label)}</span>"
+    )
+
+
+def _cite(evidence):
+    """One claim's provenance, as tool and field rather than 'the transcript'."""
+    if not evidence:
+        return ""
+    bits = []
+    for item in evidence[:3]:
+        tool = item.get("tool") or "?"
+        field = item.get("field")
+        bits.append(f"{tool}.{field}" if field else tool)
+    return " · ".join(bits)
+
+
+def next_step(answer):
+    """
+    The next investigation step, or None.
+
+    Deterministic and borrowed, not invented: agent.evidence_gap() is the same
+    function the loop uses to decide whether to send a run back for evidence
+    the status block provably does not contain. Reusing it here means the
+    console recommends exactly what the agent would have insisted on, rather
+    than a second opinion written in the view.
+
+    A UI that invented its own suggestion would be the fake-AI-capability this
+    project does not ship.
+    """
+    trace = answer.get("tool_calls") or []
+    outputs = [item.get("result", "") for item in (answer.get("evidence") or [])]
+    if not trace or not outputs:
+        return None
+    try:
+        gap = agent.evidence_gap(trace, outputs, answer.get("question", ""))
+    except Exception:
+        return None
+    if not gap:
+        return None
+    kind, pod, namespace, status = gap
+    tool = "get_pod_logs" if kind == "logs" else "get_pod_events"
+    return (
+        f"`{tool}` on **{pod}** in `{namespace}` — it is {status}, and the "
+        f"cause of that is not in the status block."
+    )
+
+
+def render_investigation(answer):
+    """The whole investigation, top down: conclusion first, then its basis."""
+    confidence = answer.get("confidence", "ungrounded")
+    label, tone, why = VERDICT_STYLE.get(
+        confidence, (confidence, "muted", ""))
+    timing = answer.get("timing") or {}
+    trace = answer.get("tool_calls") or []
+    rca = answer.get("rca") or {}
+
+    # --- status strip: the four numbers an operator reads first -------------
+    strip = [
+        _chip(label, tone, why),
+        _chip(f"{len(trace)} tool calls", "muted", "evidence collected"),
+        _chip(f"{timing.get('wall_ms', 0) / 1000:.1f}s", "muted",
+              "wall clock for the whole investigation"),
+    ]
+    if answer.get("termination"):
+        strip.append(_chip(answer["termination"].replace("_", " "), "bad",
+                           "the investigation did not finish on its own terms"))
+    backend = st.session_state.get("backend_label")
+    if backend:
+        strip.append(_chip(backend, "muted", "inference backend that answered"))
+    st.markdown(
+        "<div class='kw-strip'>" + "".join(strip) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # --- root cause ---------------------------------------------------------
+    st.markdown("#### Root cause")
+    if not trace:
+        st.warning("no tools were called — nothing here was measured")
+    st.markdown(answer["answer"])
+
+    if confidence == grounding.CONTRADICTED:
+        # Ahead of everything else it could say. "The tools did not say" and
+        # "the tools said otherwise" are different, and only the second means
+        # the answer is wrong.
+        for item in answer.get("contradictions", []):
+            st.error(
+                f"**Contradicted** — claimed *{item['claim']}*, but "
+                f"{item['measured']}  \n"
+                f"<span class='kw-dim'>rule: {item.get('rule','')}</span>",
+                icon=":material/error:",
+            )
+    elif confidence == "grounded" and not answer.get("checked"):
+        st.info("nothing to verify — this answer makes no measurable claim")
+
+    step = next_step(answer)
+    if step:
+        st.markdown(
+            f"<div class='kw-next'><b>Recommended next step</b><br>{step}</div>",
+            unsafe_allow_html=True,
+        )
+
+    # --- what the evidence says --------------------------------------------
+    st.markdown("#### What the evidence says")
+    observations = rca.get("observations") or []
+    inferences = rca.get("inferences") or []
+    unknowns = rca.get("unknowns") or []
+    corrections = answer.get("rewrites") or []
+
+    cols = st.columns(3)
+    with cols[0]:
+        st.markdown(f"**Observed** · {len(observations)}")
+        st.caption("traced to a tool result")
+        for claim in observations[:12]:
+            st.markdown(
+                f"<div class='kw-claim kw-ok'>{html.escape(str(claim['claim']))}"
+                f"<span class='kw-dim'>{html.escape(_cite(claim.get('evidence')))}"
+                f"</span></div>", unsafe_allow_html=True)
+        if not observations:
+            st.caption("— none —")
+    with cols[1]:
+        st.markdown(f"**Inferred** · {len(inferences)}")
+        st.caption("reasoning the run marked as such")
+        for claim in inferences[:12]:
+            st.markdown(
+                f"<div class='kw-claim kw-warn'>"
+                f"{html.escape(str(claim['claim']))}</div>",
+                unsafe_allow_html=True)
+        if not inferences:
+            st.caption("— none —")
+    with cols[2]:
+        st.markdown(f"**Unknown** · {len(unknowns)}")
+        st.caption("stated, and not supported")
+        for claim in unknowns[:12]:
+            st.markdown(
+                f"<div class='kw-claim kw-bad'>{html.escape(str(claim))}</div>",
+                unsafe_allow_html=True)
+        if not unknowns:
+            st.caption("— none —")
+
+    if corrections:
+        # verify() rewrites a fabricated value at the point it appears, so the
+        # reader skimming for a number finds the measured one. Saying so is the
+        # difference between a corrected answer and an edited one.
+        st.markdown("**Corrected in the text above**")
+        for edit in corrections:
+            st.markdown(
+                f"- `{edit.get('claim')}` → `{edit.get('observed')}` "
+                f"({edit.get('action')})")
+
+    # --- timeline -----------------------------------------------------------
+    st.markdown("#### Timeline")
+    if trace:
+        rows = []
+        for i, call in enumerate(trace, 1):
+            args = call.get("arguments") or {}
+            rows.append({
+                "#": i,
+                "tool": call["name"],
+                "arguments": ", ".join(f"{k}={v}" for k, v in args.items()) or "—",
+                "prefetched": "yes" if call.get("prefetched") else "",
+                "scope": (call.get("scope") or {}).get("action", ""),
+            })
+        st.dataframe(rows, hide_index=True, width="stretch")
+    else:
+        st.caption("no tool calls")
+
+    rounds = timing.get("rounds")
+    if rounds:
+        st.caption(
+            f"{rounds} model rounds · model {timing.get('model_ms', 0)/1000:.1f}s"
+            f" · tools {timing.get('tool_ms', 0)/1000:.1f}s"
+            f" · re-asks: {answer.get('nudges', 0)} named-tool,"
+            f" {answer.get('policies', 0)} evidence,"
+            f" {answer.get('coverage', 0)} coverage"
+        )
+
+    # --- the evidence itself ------------------------------------------------
+    evidence = answer.get("evidence") or []
+    with st.expander(f"Evidence · {len(evidence)} tool results"):
+        if not evidence:
+            st.caption("evidence was not retained for this run")
+        for item in evidence:
+            st.markdown(
+                f"<span class='kw-dim'>{item.get('id')} · "
+                f"{html.escape(str(item.get('tool')))}</span>",
+                unsafe_allow_html=True)
+            st.code(item.get("result", ""), language="json")
+
+
 st.set_page_config(page_title="kubewhy", page_icon=PAGE_ICON, layout="wide")
 
 # Streamlit reserves about 6rem above the first element, which on a wide
@@ -185,6 +490,48 @@ st.markdown(
       [data-testid="stSidebarUserContent"] > div > div:first-child h3 {
         padding-top: 0;
       }
+
+      /* --- console chrome ---------------------------------------------------
+         Tokens rather than literals, and both themes defined, because
+         Streamlit renders in whichever the viewer chose and a colour that only
+         exists in one of them is invisible in the other. */
+      :root {
+        --kw-ok:#1a7f4b; --kw-warn:#8a6d0b; --kw-bad:#b3261e; --kw-muted:#5a6472;
+        --kw-line:#d5dce4; --kw-sunk:#f1f4f8; --kw-dim:#6b7683;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --kw-ok:#63bc85; --kw-warn:#d4b93f; --kw-bad:#f2705f; --kw-muted:#939eaa;
+          --kw-line:#2a323d; --kw-sunk:#171d26; --kw-dim:#818c99;
+        }
+      }
+      .kw-strip { display:flex; flex-wrap:wrap; gap:.4rem; margin:.1rem 0 1rem; }
+      .kw-chip {
+        font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
+        letter-spacing:.04em; padding:3px 9px; border:1px solid currentColor;
+        border-radius:2px; white-space:nowrap;
+      }
+      .kw-ok{color:var(--kw-ok)} .kw-warn{color:var(--kw-warn)}
+      .kw-bad{color:var(--kw-bad)} .kw-muted{color:var(--kw-muted)}
+      .kw-claim {
+        border-left:3px solid currentColor; padding:2px 0 2px 9px;
+        margin:3px 0; font-size:13.5px; display:flex; justify-content:space-between;
+        gap:.6rem; align-items:baseline;
+      }
+      .kw-dim { color:var(--kw-dim); font-size:11px;
+                font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+      .kw-next {
+        border-left:3px solid var(--kw-muted); background:var(--kw-sunk);
+        padding:.55rem .8rem; margin:.9rem 0; font-size:13.5px;
+      }
+      .kw-hdr {
+        display:flex; gap:1.6rem; flex-wrap:wrap; align-items:baseline;
+        border-bottom:1px solid var(--kw-line); padding-bottom:.5rem;
+        margin-bottom:.9rem; font-size:12px;
+      }
+      .kw-hdr b { font-weight:600; }
+      .kw-hdr .kw-k { color:var(--kw-dim); text-transform:uppercase;
+                      letter-spacing:.1em; font-size:10px; margin-right:.35rem; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -197,6 +544,36 @@ st.markdown(
 _bind(_ctx())
 
 with st.sidebar:
+    # Investigations first, cluster second. The investigation is the primary
+    # object on this page; the cluster browser is how you pick a subject for
+    # one.
+    st.subheader("Investigations")
+    if st.button("New investigation", width="stretch"):
+        # Only the result is cleared. The subject and the context stay, because
+        # "ask another question about this pod" is the common next action and
+        # making the operator re-select it would be the console forgetting what
+        # they were doing.
+        st.session_state.pop("answer", None)
+        st.rerun()
+
+    _rows = _recent()
+    if _rows:
+        for _job in _rows:
+            _q = (_job.get("question") or "").strip().replace("\n", " ")
+            _label = (_q[:46] + "…") if len(_q) > 46 else _q
+            _when = _job.get("created_at")
+            _stamp = (dt.datetime.fromtimestamp(_when).strftime("%H:%M")
+                      if _when else "")
+            if st.button(f"{_stamp}  {_label or 'investigation'}",
+                         key=f"hist-{_job['id']}", width="stretch"):
+                _stored = _history().get_job(_job["id"])
+                if _stored and _stored.get("result"):
+                    st.session_state["answer"] = _stored["result"]
+                    st.rerun()
+    else:
+        st.caption("no investigations yet")
+
+    st.divider()
     st.subheader("Cluster")
 
     current = active_context()
@@ -270,6 +647,8 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+st.markdown(_header_strip(), unsafe_allow_html=True)
 
 namespaces = ",".join(chosen_namespaces)
 findings = _unwrap(
@@ -552,7 +931,9 @@ if submitted and question:
             elif event["type"] == "answer":
                 # Held in session_state so that moving a slider afterwards
                 # re-renders the answer instead of re-running the model.
+                event["question"] = question
                 st.session_state["answer"] = event
+                _remember(question, event)
                 result = event
         # This run's answer, not whatever is in session_state: reading it back
         # out meant a run that produced nothing was labelled with the previous
@@ -575,45 +956,7 @@ if submitted and question:
 
 answer = st.session_state.get("answer")
 if answer:
-    st.markdown(answer["answer"])
-
-    # Confidence is not a footnote: an answer shown without it is the failure
-    # grounding.py exists to prevent.
-    confidence = answer["confidence"]
-    if not answer["tool_calls"]:
-        # "grounded" here means only that a reply with no figures contradicted
-        # nothing. Calling a clarifying question "grounded" implies it was
-        # checked against the cluster, and nothing was.
-        st.warning("no tools were called — nothing here was measured")
-    elif confidence == "grounded" and not answer.get("checked"):
-        # Tools ran, but the answer asserts nothing checkable -- "I could not
-        # identify any failing pods" has no figure and no status name in it, so
-        # the checker finds nothing to contradict and reports grounded. Green
-        # there says the cluster confirmed this, when what happened is that
-        # there was nothing to confirm.
-        st.info("nothing to verify — this answer makes no measurable claim")
-    elif confidence == "grounded":
-        st.success("grounded — every figure traced to a tool result")
-    elif confidence == grounding.CONTRADICTED:
-        # Ahead of partial in the branch order for the same reason it is ahead
-        # in check(): "the tools did not say" and "the tools said otherwise"
-        # are different, and only the second means the answer is wrong.
-        st.error(
-            "contradicted — the evidence says otherwise:\n\n"
-            + "\n".join(
-                f"- claimed *{c['claim']}*, but {c['measured']}"
-                for c in answer.get("contradictions", [])
-            )
-        )
-    elif confidence == "partial":
-        st.warning(
-            "partial — not found in any tool result: "
-            + ", ".join(answer["unverified"])
-        )
-    elif confidence == grounding.INSUFFICIENT:
-        st.info("insufficient evidence — nothing here could be checked")
-    else:
-        st.error("ungrounded — the model answered having called no tools")
+    render_investigation(answer)
 
 with st.expander("Nodes"):
     # Worth a click before blaming a workload: pods that are Pending or being
