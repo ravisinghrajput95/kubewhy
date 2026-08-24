@@ -12,7 +12,7 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `4621403`, tree clean and pushed, 891 tests pass, tags
+**State: `main` at `3af93c8`, tree clean and pushed, 928 tests pass, tags
 through **v0.1.8** (cut 2026-08-24). Nothing running: no kind cluster, no GKE
 cluster, Docker quit, Ollama stopped, GCP empty.**
 
@@ -310,6 +310,48 @@ account -- not by quota, but because a free-tier billing account cannot
 provision non-TPU accelerators at all.
 
 Read README.md and CONTRIBUTING.md first.
+
+## The console, built 2026-08-24
+
+`ui.py` was a question box with an answer under it. Everything the agent
+actually produces -- the verdict, the claims each traced to a tool result, the
+ones it could not support, the calls that got there -- was reachable only by
+unfolding a raw JSON expander. The conclusion was readable and uncheckable,
+which is backwards for a tool whose whole claim is that its answers can be
+checked.
+
+`render_investigation()` now lays the investigation out top down: status strip
+(verdict, tool calls, wall clock, backend, and any non-answer termination),
+root cause, contradictions ahead of everything else, Observed / Inferred /
+Unknown in three columns with each observation carrying `tool.field`, the
+timeline of calls, then the evidence.
+
+**The view computes no verdict.** Every field is read from what
+`agent.stream()` returns and `grounding.contract()` produced. The recommended
+next step is `agent.evidence_gap()` -- the same function the loop uses to
+decide whether to send a run back -- so the console recommends what the agent
+would have insisted on rather than a second opinion written in the view. A
+second copy of the checker living in the UI is how a console comes to disagree
+with its own backend, and there isn't one.
+
+`store.list_jobs(limit)` was added to both implementations to back the sidebar
+history. It drops `result` deliberately: a finished investigation carries its
+whole evidence set, and a listing that returns those is one nobody can afford
+to call.
+
+**One defect this found, and it is the reason the tests are written the way
+they are.** `st.error(icon="X")` is not a valid emoji, so Streamlit raised and
+blanked the page *on every contradiction* -- the one verdict most worth
+reading. Nothing before this pass had ever rendered one. The AppTest helper now
+asserts `app.exception` is empty on every panel test, so the next page-level
+crash fails a test rather than a demo.
+
+**Verified:** 30 AppTest tests (12 new) and 38 store tests (5 new); live on
+kind `ui-check` against the OpenAI API, header reading
+`cluster: kind-ui-check · inference: api · openai · gpt-4o-mini ·
+evidence: external`. **Not verified:** the console has never been driven by a
+human, never seen a wide viewport or a real dark-mode client, and its history
+sidebar has never held more than a handful of rows.
 
 ## Open, in priority order
 
