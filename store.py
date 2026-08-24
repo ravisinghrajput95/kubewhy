@@ -126,6 +126,24 @@ class MemoryStore:
             job = self._jobs.get(job_id)
             return dict(job) if job else None
 
+    def list_jobs(self, limit=25):
+        """
+        Recent investigations, newest first, without their result bodies.
+
+        Read-only and additive: the operator console needs a list of what has
+        been asked so someone can go back to a diagnosis, and every other
+        consumer of this store already had one job id in hand. Nothing about
+        how an investigation runs changes.
+
+        The result is omitted deliberately -- a listing is a list, and a deep
+        investigation's stored result is tens of kilobytes.
+        """
+        with self._lock:
+            rows = sorted(self._jobs.values(),
+                          key=lambda j: j.get("created_at") or 0, reverse=True)
+            return [{k: v for k, v in row.items() if k != "result"}
+                    for row in rows[:limit]]
+
     def purge_jobs(self, cutoff):
         with self._lock:
             for job_id in [
@@ -283,6 +301,15 @@ class SqliteStore:
         job = dict(row)
         job["result"] = json.loads(job["result"]) if job["result"] else None
         return job
+
+    def list_jobs(self, limit=25):
+        """Recent investigations, newest first. See the in-memory twin."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, state, question, created_at, finished_at FROM jobs "
+                "ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def purge_jobs(self, cutoff):
         with self._connect() as connection:

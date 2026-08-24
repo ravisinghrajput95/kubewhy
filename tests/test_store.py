@@ -250,3 +250,53 @@ class TestControllerLease:
     def test_in_memory_always_holds_the_lease(self):
         """There is no second process to exclude, and the CLI must not block."""
         assert store.MemoryStore().claim_lease("anything", at=0) is True
+
+
+class TestListingRecentInvestigations:
+    """
+    `list_jobs` exists for the operator console's Recent panel. Read-only and
+    additive: every other consumer already had one job id in hand.
+    """
+
+    def _both(self, tmp_path):
+        return [store.MemoryStore(), store.SqliteStore(str(tmp_path / "s.db"))]
+
+    def test_newest_first(self, tmp_path):
+        for s in self._both(tmp_path):
+            s.create_job("a", "why is web down?", at=100.0)
+            s.create_job("b", "what is broken?", at=300.0)
+            s.create_job("c", "check the nodes", at=200.0)
+
+            assert [j["id"] for j in s.list_jobs()] == ["b", "c", "a"]
+
+    def test_the_limit_is_honoured(self, tmp_path):
+        for s in self._both(tmp_path):
+            for i in range(30):
+                s.create_job(f"j{i}", f"q{i}", at=float(i))
+
+            assert len(s.list_jobs(limit=5)) == 5
+
+    def test_an_empty_store_lists_nothing(self, tmp_path):
+        for s in self._both(tmp_path):
+            assert s.list_jobs() == []
+
+    def test_state_and_question_are_carried(self, tmp_path):
+        for s in self._both(tmp_path):
+            s.create_job("a", "why is crasher failing?", at=1.0)
+            s.update_job("a", "done", result={"answer": "x"}, at=2.0)
+
+            job = s.list_jobs()[0]
+
+            assert job["question"] == "why is crasher failing?"
+            assert job["state"] == "done"
+
+    def test_a_listing_does_not_carry_result_bodies(self, tmp_path):
+        """
+        A listing is a list. The stored result of a deep investigation is tens
+        of kilobytes, and the sidebar needs a question and a state.
+        """
+        s = store.SqliteStore(str(tmp_path / "s.db"))
+        s.create_job("a", "q", at=1.0)
+        s.update_job("a", "done", result={"answer": "x" * 5000}, at=2.0)
+
+        assert "result" not in s.list_jobs()[0]
