@@ -12,9 +12,12 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `3af93c8`, tree clean and pushed, 928 tests pass, tags
+**State: `main` at `42a4b12`, tree clean and pushed, 935 tests pass, tags
 through **v0.1.8** (cut 2026-08-24). Nothing running: no kind cluster, no GKE
 cluster, Docker quit, Ollama stopped, GCP empty.**
+
+**The `OPENAI_API_KEY` in `.env` was revoked on 2026-08-24 and is dead.** Any
+api-mode run needs a new one. Local Ollama is the default and needs no key.
 
 **v0.1.8 is released and verified from the registry.** All four image tags
 resolve amd64+arm64, the chart publishes, and CI's own `docker run` step checks
@@ -352,6 +355,59 @@ kind `ui-check` against the OpenAI API, header reading
 evidence: external`. **Not verified:** the console has never been driven by a
 human, never seen a wide viewport or a real dark-mode client, and its history
 sidebar has never held more than a handful of rows.
+
+## What driving the console found, 2026-08-24
+
+The console shipped in the morning; running it by hand in the afternoon found
+three defects in it. All three are fixed, tested and pushed (`57e205c`).
+
+- **Diagnose did nothing with an empty box.** The placeholder is a well-formed
+  question in grey *inside* the field, which is what a filled-in field looks
+  like; `if submitted and question:` then failed in silence -- no run, no
+  message. An empty box now asks the question the box is showing. With nothing
+  selected it says so.
+- **The history recorded the scoping directive, not the question.** `question`
+  is rebound to `agent.scoped_question()` before the run, so the sidebar read
+  "Answer only about the workload demo/nightly-sy…". The strings are kept apart
+  now: `question` is what a person typed, `prompt` is what the model got.
+  `next_step()` uses `prompt`, which names the workload even when the typed
+  question does not.
+- **A finished investigation was missing from the sidebar until a reload,**
+  because the history list is built near the top of the script. It reruns once
+  after recording, *outside* the try -- `RerunException` is control flow, and
+  catching it would turn a rerun into a red error box.
+
+The prompt disclosure moved into `render_investigation()` and renders from the
+recorded answer, which also fixed a latent version of the same bug: it was
+drawn only in the pass that submitted the form, so moving a slider silently
+removed the disclosure while leaving the answer it explained on screen.
+
+**One test passed against the broken code and had to be rewritten.** The
+sidebar-freshness test looked for the "no investigations yet" caption being
+gone; the store is a `cache_resource` shared for the whole process, so an
+earlier test had already put a row in it. It asserts a change across the click
+now, with a marker no other test can write. Five of the seven new tests were
+confirmed red against the previous `ui.py` -- check that, do not assume it.
+
+## A browser suite, designed and not built
+
+`docs/E2E.md` specifies a Playwright suite: harness, selector contract, ~25
+cases. **None of it is implemented.** Playwright is not a dependency.
+
+Read the first table in it before writing any of it. Two of the three defects
+above were fixable in AppTest and were fixed there; a browser case that AppTest
+could hold is a browser case in the wrong file. The harness is the load-bearing
+part -- a scripted OpenAI-protocol server on `127.0.0.1`, because every state
+worth rendering (contradicted, ungrounded, deadline_exceeded, zero tool calls)
+comes from a model.
+
+**Case R-01 is a live defect, and should be written red.**
+`render_investigation()` passes `<span class='kw-dim'>` to `st.error`, which has
+no `unsafe_allow_html` parameter and runs its body through `clean_text` -- so
+the rule line very likely paints as literal angle brackets inside the red box
+that announces a contradiction. Confirmed from Streamlit's source; **not
+confirmed visually.** The AppTest test passes because `e.value` is the string
+submitted, not the text painted.
 
 ## Open, in priority order
 
