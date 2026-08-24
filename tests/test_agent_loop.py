@@ -886,6 +886,156 @@ class TestTheInvestigationBudget:
         assert elapsed < 2.0
         assert len(result["tool_calls"]) < len(many)
 
+    def test_an_llm_call_consuming_most_of_the_budget_is_bounded(self):
+        """
+        The LLM half of the lifecycle. A provider that answers slowly every
+        round must not be able to spend MAX_ROUNDS x provider_timeout.
+        """
+        def slow_model(*a, **k):
+            time.sleep(0.45)
+            return reply(calls=[tool_call("get_platform_info", {})])
+
+        with self.budget(1):
+            began = time.perf_counter()
+            with mock_chat(side_effect=slow_model):
+                result = agent.ask("q", think=False)
+            elapsed = time.perf_counter() - began
+
+        assert result["termination"] == "deadline_exceeded"
+        assert elapsed < 2.0
+
+    def test_no_further_round_begins_once_the_deadline_has_passed(self):
+        """
+        Counts provider calls rather than trusting the termination label: the
+        requirement is that no new work *starts*, not merely that the run
+        reports having stopped.
+        """
+        calls = {"n": 0}
+
+        def counting(*a, **k):
+            calls["n"] += 1
+            time.sleep(0.3)
+            return reply(calls=[tool_call("get_platform_info", {})])
+
+        with self.budget(1):
+            with mock_chat(side_effect=counting):
+                result = agent.ask("q", think=False)
+
+        assert result["termination"] == "deadline_exceeded"
+        # 1s of budget at 0.3s per round cannot reach MAX_ROUNDS.
+        assert calls["n"] < agent.MAX_ROUNDS
+        assert calls["n"] <= 4
+
+    def test_evidence_collected_before_the_deadline_is_preserved(self):
+        """
+        Requirement 10. A run that ran out of time still did work, and the
+        reader needs to see how far it got.
+        """
+        def one_then_slow(*a, **k):
+            time.sleep(0.35)
+            return reply(calls=[tool_call("get_platform_info", {})])
+
+        with self.budget(1):
+            with mock_chat(side_effect=one_then_slow):
+                result = agent.ask("q", think=False, evidence=True)
+
+        assert result["termination"] == "deadline_exceeded"
+        assert result["tool_calls"], "the chain was discarded"
+        assert result["evidence"], "collected evidence was discarded"
+
+    def test_the_deadline_does_not_fabricate_a_conclusion(self):
+        """
+        Requirement 9. The terminal text must not read as a diagnosis, and the
+        verdict must not read as a checked one.
+        """
+        def slow(*a, **k):
+            time.sleep(0.35)
+            return reply(calls=[tool_call("get_platform_info", {})])
+
+        with self.budget(1):
+            with mock_chat(side_effect=slow):
+                result = agent.ask("q", think=False, evidence=True)
+
+        assert result["confidence"] == "ungrounded"
+        assert result["unverified"] == []
+        assert "budget was exhausted" in result["answer"]
+        # No model answer was ever checked, so there is no draft to publish --
+        # the terminal text is a statement about the clock, not a diagnosis.
+        assert result["draft"] is None
+
+    def test_the_termination_carries_no_exception_body(self, caplog):
+        """
+        Requirement 11. A provider's error text can quote the request, and the
+        request is the evidence.
+        """
+        def boom(*a, **k):
+            time.sleep(0.4)
+            raise ConnectionError("POST http://x failed: key sk-live-secret")
+
+        with self.budget(0.35):
+            with caplog.at_level("WARNING"):
+                with mock_chat(side_effect=boom):
+                    result = agent.ask("q", think=False)
+
+        assert result["termination"] == "deadline_exceeded"
+        assert "sk-live-secret" not in result["answer"]
+        assert "sk-live-secret" not in caplog.text
+
+    def test_the_model_call_is_capped_by_the_remaining_budget(self):
+        """
+        The wiring, pinned. mock_chat replaces the client, so a mocked call
+        ignores its timeout and the between-rounds check catches the overrun
+        anyway -- which meant removing the cap entirely left every test
+        passing. Mutation testing found that.
+
+        This drives a real gateway with a stub provider that records the
+        timeout it was constructed with, so the cap itself is observed rather
+        than inferred.
+        """
+        import backends
+        import inference
+
+        seen = []
+
+        class Watching(backends.OllamaBackend):
+            name = "watching"
+            wire = "ollama"
+
+            def chat(self, model, messages, tools, think):
+                seen.append(self.timeout)
+                return backends.Reply("done", [], think, {"role": "assistant"})
+
+            def assistant_message(self, r):
+                return r.raw
+
+            def tool_message(self, c, o):
+                return {}
+
+            def tools(self, registry):
+                return []
+
+        backends.register("watching", Watching)
+        agent._BACKEND = None
+        inference.reset()
+        try:
+            inference.gateway(inference.Config(
+                inference.Target(mode="local", provider="watching",
+                                 endpoint="http://localhost:11434", model="m",
+                                 timeout=300),
+                None, inference.Policy()))
+            with self.budget(30):
+                agent.ask("q", think=False)
+        finally:
+            backends._BACKENDS.pop("watching", None)
+            agent._BACKEND = None
+            inference.reset()
+
+        assert seen, "the provider was never called"
+        # 30s of budget against a 300s provider timeout: the budget must win.
+        assert seen[0] <= 30.0, (
+            f"the model call was given {seen[0]}s against a 30s budget"
+        )
+
     def test_the_deadline_is_measured_on_the_monotonic_clock(self):
         """
         A host that suspends mid-investigation did not spend that time working.

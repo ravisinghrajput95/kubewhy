@@ -619,12 +619,25 @@ class Gateway:
         serving a different catalogue, and calling it with the primary's model
         name is a 404 at the one moment the primary is already down.
         """
+        # The budget is spent once, across both attempts. It becomes a
+        # deadline here rather than being passed down twice: handing the
+        # same number to the primary and then to the fallback gives the
+        # fallback a fresh ceiling. Measured 2026-08-24 -- one chat() with a
+        # 2s budget and two hanging providers consumed 4.01s. A deadline a
+        # failover silently doubles is not a deadline.
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        def left():
+            """Budget remaining for this call, or None when uncapped."""
+            return (None if deadline is None
+                    else max(deadline - time.monotonic(), 0.0))
+
         first = self._preferred(messages)
         try:
             return self._attempt(
                 first,
                 model or first.model if first is self.primary else first.model,
-                messages, tools, think, timeout)
+                messages, tools, think, left())
         except Exception as exc:
             # Already on the fallback: there is nowhere further to go, and
             # trying the primary now would be a failover in the wrong
@@ -651,8 +664,19 @@ class Gateway:
                     "reason": type(exc).__name__,
                 },
             )
+            over = left()
+            if over is not None and over <= 0:
+                # The primary consumed the whole budget. Starting a fallback
+                # here would begin new provider work after the deadline,
+                # which is the one thing the deadline exists to prevent.
+                log.warning("fallback_skipped_deadline_exhausted", extra={
+                    "from_provider": self.primary.provider,
+                    "to_provider": self.fallback.provider,
+                    "reason": type(exc).__name__,
+                })
+                raise
             return self._attempt(self.fallback, self.fallback.model,
-                                 messages, tools, think, timeout)
+                                 messages, tools, think, over)
 
     def probe(self):
         """

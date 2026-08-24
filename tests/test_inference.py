@@ -978,7 +978,11 @@ class TestTheDeadlineClamp:
 
         gate.chat("m", [], [], False, timeout=5)
 
-        assert self.Timed.seen == [5.0]
+        # Approximate, not exact: since 2026-08-24 the budget becomes a
+        # deadline the moment chat() is entered, so the clock has already moved
+        # a little by the time the ceiling is computed. An exact assertion here
+        # would be asserting that no time passes.
+        assert self.Timed.seen[0] == pytest.approx(5.0, abs=0.2)
 
     def test_a_longer_budget_does_not_lengthen_the_call(self):
         """
@@ -1009,7 +1013,8 @@ class TestTheDeadlineClamp:
 
         gate.chat("m", [], [], False, timeout=2.99)
 
-        assert self.Timed.seen == [2.99]
+        assert self.Timed.seen[0] == pytest.approx(2.99, abs=0.2)
+        assert self.Timed.seen[0] != int(self.Timed.seen[0])
 
     def test_a_clamped_backend_is_cached_separately(self):
         """
@@ -1022,7 +1027,132 @@ class TestTheDeadlineClamp:
         gate.chat("m", [], [], False, timeout=10)
         gate.chat("m", [], [], False, timeout=3)
 
-        assert self.Timed.seen == [10.0, 3.0]
+        assert len(self.Timed.seen) == 2
+        assert self.Timed.seen[0] == pytest.approx(10.0, abs=0.2)
+        assert self.Timed.seen[1] == pytest.approx(3.0, abs=0.2)
+
+
+class TestTheDeadlineIsSpentOnceAcrossProviders:
+    """
+    F-05, requirement 12: the budget covers the whole call, not each provider
+    separately. Passing the same number to the primary and then to the fallback
+    gave the fallback a fresh ceiling -- measured 2026-08-24, one chat() with a
+    2s budget and two hanging providers consumed 4.01s.
+    """
+
+    class Hang(Recorder):
+        name = "hang"
+        wire = "ollama"
+
+        def chat(self, model, messages, tools, think):
+            import time as _t
+            _t.sleep(self.timeout)
+            raise ConnectionError("hung until the timeout")
+
+    @pytest.fixture(autouse=True)
+    def _register(self):
+        backends.register("hang", self.Hang)
+        yield
+        backends._BACKENDS.pop("hang", None)
+
+    def _hanging_pair(self):
+        return gateway(target(provider="hang", timeout=300),
+                       target(provider="hang", model="fb", timeout=300),
+                       fallback_enabled=True)
+
+    @pytest.mark.parametrize("budget", [0.5, 1.0])
+    def test_one_call_cannot_exceed_the_budget_it_was_given(self, budget):
+        import time as _t
+
+        gate = self._hanging_pair()
+        began = _t.perf_counter()
+        with pytest.raises(Exception):
+            gate.chat("m", [{"role": "user", "content": "q"}], [], False,
+                      timeout=budget)
+        spent = _t.perf_counter() - began
+
+        assert spent <= budget + 0.4, (
+            f"one chat() spent {spent:.2f}s against a {budget}s budget -- the "
+            f"fallback was handed a fresh ceiling"
+        )
+
+    def test_the_fallback_receives_the_remainder_not_a_fresh_ceiling(self):
+        """
+        The precise defect. Earlier budgets here were so tight the primary
+        consumed everything and the fallback never ran, so `over` versus
+        `timeout` was never exercised -- mutation testing caught that.
+
+        A primary that hangs for part of the budget leaves the rest. With the
+        bug the fallback got the FULL budget again, so the pair could spend
+        nearly twice it.
+        """
+        import time as _t
+
+        gate = gateway(target(provider="hang", timeout=0.4),
+                       target(provider="hang", model="fb", timeout=5),
+                       fallback_enabled=True)
+        began = _t.perf_counter()
+        with pytest.raises(Exception):
+            gate.chat("m", [{"role": "user", "content": "q"}], [], False,
+                      timeout=1.2)
+        spent = _t.perf_counter() - began
+
+        # Fixed: primary 0.4s + fallback capped at the ~0.8s remainder = 1.2s.
+        # Bug:   primary 0.4s + fallback handed a fresh 1.2s        = 1.6s.
+        # The bound has to sit between those two, or the mutation survives --
+        # the first version of this test used +/-0.35 and did exactly that.
+        assert spent < 1.4, (
+            f"pair spent {spent:.2f}s against a 1.2s budget -- the fallback "
+            f"was handed a fresh ceiling"
+        )
+
+    def test_a_fallback_is_not_started_once_the_budget_is_gone(self, caplog):
+        """
+        Requirement: no new provider work begins after the deadline. The
+        primary consuming everything must not buy the fallback another go.
+        """
+        gate = self._hanging_pair()
+
+        with caplog.at_level("WARNING"):
+            with pytest.raises(Exception):
+                gate.chat("m", [{"role": "user", "content": "q"}], [], False,
+                          timeout=0.4)
+
+        assert "fallback_skipped_deadline_exhausted" in caplog.text
+
+    def test_a_fallback_still_runs_when_budget_remains(self):
+        """The behaviour the guard must not cost."""
+        gate = gateway(target(provider="broken"),
+                       target(provider="recorder", model="fb"),
+                       fallback_enabled=True)
+
+        assert gate.chat("m", [], [], False, timeout=30).content == "ok"
+
+    def test_an_uncapped_call_is_unchanged(self):
+        # No budget passed means no deadline, exactly as before.
+        gate = gateway(target(provider="broken"),
+                       target(provider="recorder", model="fb"),
+                       fallback_enabled=True)
+
+        assert gate.chat("m", [], [], False).content == "ok"
+
+    def test_the_skipped_fallback_logs_no_exception_body(self, caplog):
+        """
+        Requirement 11. A provider's error text can quote the request, and the
+        request is the evidence.
+        """
+        self.Hang.raises = None
+        gate = self._hanging_pair()
+
+        with caplog.at_level("WARNING"):
+            with pytest.raises(Exception):
+                gate.chat("m", [{"role": "user", "content": "q"}], [], False,
+                          timeout=0.4)
+
+        emitted = "\n".join(
+            observability.JsonFormatter().format(r) for r in caplog.records)
+        assert "hung until the timeout" not in emitted
+        assert '"reason": "ConnectionError"' in emitted
 
 
 class TestTheLoopCannotTell:
