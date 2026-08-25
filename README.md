@@ -5,35 +5,294 @@
 [![python](https://img.shields.io/badge/python-3.11%20--%203.13-blue.svg)](requirements.txt)
 [![MCP](https://img.shields.io/badge/MCP-server-8A2BE2.svg)](#use-it-from-claude-cursor-or-any-mcp-client)
 
-**Air-gapped Kubernetes root-cause analysis.** Everything tells you *what* is
-broken. `kubewhy` tells you **why** — reading the real logs, events and
-resource limits behind a failure with a model running on your own hardware. No
-cloud API, no API key, no cluster data leaving your network.
+kubewhy is an **evidence-first Kubernetes AIOps investigation agent**. It
+collects Kubernetes evidence, reasons over that evidence using configurable LLM
+inference, validates every claim against the evidence it collected, and presents
+an auditable root-cause analysis.
 
-Six surfaces on one set of read-only tools: a CLI (with a cluster-wide scan), a
-REST API, an MCP server, a browser UI, a controller that diagnoses failures
-without being asked, and a Slack bot you can talk back to over Socket Mode.
+![the console](docs/images/console.gif)
 
-![demo](docs/demo.gif)
+*A real investigation on a kind cluster with a local model. Nothing scripted —
+the 46.6s in the verdict strip is the model thinking.*
 
-It works down the chain like a person would. Given only *"crasher-svc is
-unreachable"*, it finds the service has no ready endpoints, identifies which
-pod backs it, reads why that pod is restarting, and pulls the application
-error out of the dead container's logs:
+## Why kubewhy?
+
+Pointing a language model at a Kubernetes cluster produces a specific set of
+failures, and each one is a design problem rather than a prompting problem:
+
+| Failure | What kubewhy does about it |
+|---|---|
+| **Hallucinated causes** — a plausible sentence with no measurement behind it | Every claim is checked against collected evidence. Unsupported figures are rewritten in place as `[unverified: …]`, not left to read as fact |
+| **Lost entity scope** — asked about one workload, answers about a louder broken neighbour | The target is fixed before the first round and every tool call is enforced against it. Off-target calls are rewritten or refused |
+| **Overstated conclusions** — a guess presented with the confidence of a measurement | Five verdicts, including `insufficient_evidence` and `contradicted`. Claims split into Observed / Inferred / Unknown |
+| **Status mistaken for cause** — "CrashLoopBackOff" is where, not why | The scan reports *where*; the cause always costs a follow-up call. A deterministic policy sends a run back when it stops before reading the evidence that holds the answer |
+| **Evidence leaving the network** | Local inference is the default and it is enforced, not documented. External endpoints refuse to start without an explicit flag, and logs are redacted at collection and again at the egress boundary |
+| **Runs that never end** | One deadline per investigation, shared across primary and fallback. A fallback cannot reset it |
+| **Provider lock-in** | Where inference happens is configuration. The loop cannot tell which backend it has |
+
+The distinction that makes this work: **the model chooses how to investigate; it
+does not decide what is true, what it is investigating, or when to stop.** Those
+are deterministic code, covered by unit tests. See the
+[deterministic-versus-model table](docs/ARCHITECTURE.md#deterministic-code-versus-model-behaviour).
+
+## Key capabilities
+
+- **Evidence-first investigation** — a bounded loop that collects before it concludes
+- **Kubernetes-native tools** — fourteen read-only collectors returning projections, not raw API objects
+- **Entity-scoped investigations** — the target is enforced on every tool call
+- **Grounded claims** — each observation carries the `tool.field` it came from
+- **Contradiction detection** — a separate deterministic stage; "the tools did not say" and "the tools said otherwise" are different verdicts
+- **Observed / Inferred / Unknown** — the answer split by how well it is supported
+- **Three inference modes** — local, in-cluster, or a hosted API
+- **Provider abstraction** — one gateway; the loop is unchanged across backends
+- **Wire-aware failover** — mid-run only between providers sharing a wire format
+- **Read-only RBAC** — a ClusterRole with no write verbs
+- **Evidence redaction** — at collection and at the egress boundary
+- **External-data policy** — external inference refuses to start without an explicit opt-in
+- **NetworkPolicy support** — the dataplane enforces the claim rather than this process promising it
+- **Bounded investigation lifecycle** — a global deadline, not a per-request timeout
+- **Streamlit operator console** — the investigation as an auditable object
+
+## Architecture
+
+```mermaid
+flowchart TB
+    U["Operator"] --> UI["Streamlit console<br/>ui.py"]
+    U --> CLI["CLI · REST · MCP · controller · Slack"]
+
+    UI --> AG
+    CLI --> AG
+
+    subgraph AG ["Agent · bounded investigation loop"]
+        LOOP["stream() / ask()<br/>MAX_ROUNDS · global deadline"]
+        TGT["targeting.py<br/>entity scope enforced per call"]
+    end
+
+    AG --> TOOLS
+
+    subgraph TOOLS ["Read-only Kubernetes tools"]
+        K8S["pods · events · logs · services<br/>nodes · deployments · scan"]
+        RED["redaction.redact()"]
+    end
+
+    TOOLS --> CLUSTER[("Kubernetes API")]
+    TOOLS --> EV["Evidence<br/>projected, redacted"]
+
+    EV --> GR
+
+    subgraph GR ["Grounding · claims checked against evidence"]
+        CHK["grounding.check()<br/>does the evidence contain this?"]
+        CON["contradiction.scan()<br/>does the evidence say otherwise?"]
+    end
+
+    GR --> RCA["Auditable RCA<br/>Observed · Inferred · Unknown<br/>+ citations"]
+    RCA --> UI
+
+    AG --> GW
+
+    subgraph GW ["Inference gateway · inference.py"]
+        POL["egress policy · endpoint classification<br/>wire-aware failover · one deadline"]
+    end
+
+    GW --> L["Local<br/>Ollama"]
+    GW --> C["In-cluster<br/>Ollama / vLLM"]
+    GW --> A["Hosted API<br/>OpenAI-protocol"]
+```
+
+**Grounding sits between the investigation and the diagnosis.** The model never
+hands you a conclusion the evidence has not been checked against.
+
+## An example investigation
+
+Real, from the recording above — `demo/memory-hog` on a kind cluster, local
+`qwen3`:
+
+**Question** — *why is demo/memory-hog failing?*
+
+**Evidence collected** (2 tool calls, 46.6s, 3 model rounds)
 
 ```
-$ python agent.py "The crasher-svc service in demo is unreachable. Why?"
-  -> get_service_endpoints({'name': 'crasher-svc', 'namespace': 'demo'})
-  -> list_pods({'namespace': 'demo', 'only_unhealthy': True})
-  -> describe_pod({'name': 'crasher-5964d99948-28p5k', ...})
-  -> get_pod_logs({'name': 'crasher-5964d99948-28p5k', 'tail': 100, ...})
-
-crasher-svc is unreachable because its pod is crashing with exit code 1,
-repeatedly restarting due to a database connection failure. The logs show it
-cannot connect to db:5432, which is refused.
-
-[grounded] every figure traced to a tool result
+scan_cluster(workload=demo/memory-hog)
+describe_pod(name=memory-hog-bc76968c6-6xflg, namespace=demo)
 ```
+
+```json
+{"demo/memory-hog": {"status": "OOMKilled", "pods": 1, "fault": "crash"}}
+{"containers": {"hog": {"limits": {"memory": "64Mi"},
+                        "restarts": 65,
+                        "last_termination": {"reason": "OOMKilled",
+                                             "exit_code": 137}}}}
+```
+
+**Grounding** — verdict `grounded`. Observed · 5, Inferred · 0, Unknown · 0:
+
+| claim | traced to |
+|---|---|
+| `oomkilled` | `scan_cluster.demo/memory-hog.status` |
+| `65` | `describe_pod.containers.hog.restarts` |
+| `64` | `describe_pod.containers.hog.limits.memory` |
+
+**Root cause**
+
+> The pod `memory-hog-bc76968c6-6xflg` is crashing due to **OOMKilled**
+> (Out-Of-Memory Killed) with 65 restarts. Its memory limit of **64Mi** is
+> insufficient for its workload, likely caused by the `polinux/stress` container
+> exceeding allocated resources.
+
+Every figure in that sentence is in the table above. That is the whole point.
+
+## Security model
+
+- **Read-only Kubernetes access.** A ClusterRole with no write verbs. There is no
+  apply, scale or delete path in the code.
+- **Collection-time redaction.** `redaction.py` strips AWS keys, GitHub and Slack
+  tokens, JWTs, private keys, URL passwords, `KEY=value` secrets and bearer
+  headers from pod logs before they reach the model or your terminal. It is
+  pattern matching and it will miss novel formats.
+- **Egress-boundary redaction.** Outbound messages get a second pass at the
+  boundary.
+- **External-data policy.** `TRIAGE_INFERENCE_MODE=api` moves the boundary
+  deliberately and additionally requires `TRIAGE_ALLOW_EXTERNAL_INFERENCE`. An
+  external endpoint without it refuses to start; a request to one is a 403, not a
+  500, because a 500 reads as a bug and gets retried. A fallback is not a way
+  around it.
+- **NetworkPolicy.** `networkPolicy.enabled=true` makes the claim a property the
+  dataplane enforces. Validated on GKE with Calico.
+- **Credentials stay server-side.** Streamlit renders server-side; the browser
+  holds no Kubernetes client and no provider key. Pinned by
+  `tests/test_ui_security.py`.
+
+Full threat model: [docs/SECURITY.md](docs/SECURITY.md).
+
+## Inference modes
+
+| Mode | Where the model runs | Evidence destination | Status |
+|---|---|---|---|
+| `local` (default) | your workstation, via Ollama | on-network | **validated** |
+| `cluster` | a pod in this cluster | on-network | **validated with in-cluster Ollama** |
+| `api` | a hosted OpenAI-protocol endpoint | **external** | **validated live against OpenAI** |
+
+The `vllm` provider is the OpenAI wire protocol under another name. It is
+**protocol-level support only** — validated against a local Ollama `/v1`
+endpoint, and **never run against a real vLLM server**.
+
+Details: [docs/INFERENCE.md](docs/INFERENCE.md).
+
+## Validation
+
+| Capability | Evidence |
+|---|---|
+| Automated tests | 977 passing |
+| Grounding replay | 907 recorded runs, no regressions |
+| AI evaluation | 29 scenarios × 5 runs per configuration |
+| GKE runtime | Validated |
+| GKE / Calico NetworkPolicy | Validated |
+| RBAC | Runtime validated |
+| Local Ollama | Validated |
+| OpenAI API | Live validated |
+| In-cluster inference | Validated (Ollama) |
+| Real vLLM | **Not tested** |
+| EKS | **Not tested** |
+| Browser paint automation | **Not tested** |
+| Generalized AI diagnostic accuracy | **Not established** |
+
+The defects found during development — an egress bypass, a target-extraction
+failure, two contradiction false-positive classes — are documented with their
+detection, root cause, fix and regression evidence in
+[docs/VALIDATION.md](docs/VALIDATION.md).
+
+## AI evaluation
+
+29 scenarios with declared ground truth, run 5 times per configuration against a
+live cluster:
+
+| | qwen3 (local) | gpt-4o-mini (API) |
+|---|---|---|
+| RCA correct | 127/145 | 132/145 |
+| Contradicted claims | 9 | 3 |
+| Unsupported claims | 42 | 10 |
+| `insufficient_evidence` | 14 | 32 |
+| Median / p95 latency | 73s / 188s | 6s / 14s |
+
+**Overall model comparison: UNDETERMINED.** Paired at the scenario level — both
+configurations see the same scenarios — 19 of 29 are identical and a two-sided
+sign test gives **p = 0.3438**. The sample does not separate them.
+
+**91% is not a diagnostic accuracy figure and must not be read as one.** It is a
+pass rate on 29 hand-built scenarios, on one cluster, with one prompt
+configuration. Four individual scenarios do separate the two models completely,
+but none survives multiplicity correction — at 5-versus-5 the design cannot
+reach that threshold. They are reproducible leads, not proven claims.
+
+Methodology, metrics and what the numbers do not support:
+[docs/AI_EVALUATION.md](docs/AI_EVALUATION.md).
+
+## Limitations
+
+Measurement scope:
+
+- **One cluster, one machine, one prompt configuration.** Everything measured
+  here was measured there.
+- **n=5 per scenario, 29 scenarios.** Enough to make per-scenario behaviour
+  reproducible; not enough to rank two configurations. The overall model
+  comparison is UNDETERMINED.
+- **Generalized diagnostic accuracy is not established** and is not claimed.
+- **Answers vary between runs.** The same question can produce a different chain.
+  The `confidence` field and the `tool_calls` trace tell you which measurements
+  an answer actually rests on.
+
+Not tested:
+
+- **Real vLLM.** The `vllm` provider is the OpenAI wire protocol under another
+  name, validated against a local Ollama `/v1` endpoint. It has never been run
+  against an actual vLLM server.
+- **EKS.** AKS and GKE have both been run against for real, including GKE's exec
+  credential plugin and a live token expiry. EKS auth is verified by reading the
+  client rather than by running against one.
+- **Browser visual validation.** `AppTest` asserts the element tree, not the
+  painted page — escaped markup, clipping and invisible text are structurally
+  invisible to it. [docs/E2E.md](docs/E2E.md) designs the browser suite; none of
+  it is implemented.
+- **Mutation testing.** The harness used during development is not part of this
+  repository.
+
+Product boundaries:
+
+- **The scan reports where, never why.** `--scan` finds failing workloads across
+  every namespace in one API call, but the cause of any one of them still costs
+  a full diagnosis — so `--explain` is bounded to a few workloads rather than
+  the whole list.
+- **The console has no authentication.** It is loopback-pinned for that reason,
+  and the chart requires a second explicit acknowledgement before it will expose
+  one in-cluster.
+- **The controller holds dedup state in memory by default**, so a restart forgets
+  what it already reported. `persistence.enabled=true` fixes the restart case; it
+  does not buy a second replica. One replica stays pinned either way.
+- **`/ask` holds a request open** for the whole run; `/ask/stream` makes the wait
+  legible without shortening it. `/ask/jobs` detaches the work, but the result
+  lives in this process's store — one replica or nothing.
+- **Cumulative context is unbounded.** Per-call output is projected, but a long
+  chain over a busy namespace can still grow past the window.
+- **Requires a tool-capable model.** Models without a thinking mode fall back
+  automatically but score materially worse.
+- **Latency.** Tens of seconds per diagnosis on a local model. `kubectl describe`
+  is faster when you already know where to look.
+- **No rate limiting**, no audit log of questions, no lockfile.
+
+## Documentation
+
+| | |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | The system at engineering depth, and what is deterministic |
+| [SECURITY.md](docs/SECURITY.md) | Threat model, assets, controls |
+| [INFERENCE.md](docs/INFERENCE.md) | Modes, providers, egress policy, failover |
+| [VALIDATION.md](docs/VALIDATION.md) | The authoritative evidence document |
+| [AI_EVALUATION.md](docs/AI_EVALUATION.md) | Corpus, metrics, methodology |
+| [UI.md](docs/UI.md) | The operator console |
+| [DEMO.md](docs/DEMO.md) | Fault set and a 5–10 minute walkthrough |
+| [CASE_STUDY.md](docs/CASE_STUDY.md) | How it was built, and what broke |
+| [E2E.md](docs/E2E.md) | A browser suite, designed and not built |
+| [FUTURE.md](docs/FUTURE.md) | Ideas, explicitly not current capability |
 
 ## When you don't know where to look
 
@@ -499,6 +758,13 @@ Run it locally against your current kubecontext with `python controller.py`.
 
 ## Managed clusters (EKS, GKE, AKS)
 
+> **Validation status.** **GKE: runtime validated** — the released chart on a
+> real cluster, RBAC validated by attempting operations, NetworkPolicy enforced
+> by Calico, a live token expiry exercised. **AKS: partially validated** —
+> Kubernetes v1.35, single node, non-AAD. **EKS: NOT TESTED** — the auth path is
+> verified by reading the client, not by running against a cluster. This section
+> is guidance on how each provider authenticates, not a claim of support.
+
 All three authenticate with **exec credential plugins**, which the Kubernetes
 Python client supports and refreshes automatically — an expired token is
 re-fetched when the next request is built. Long-lived watches reconnect every
@@ -615,145 +881,6 @@ answer that counts:
 ```bash
 kubectl create token kubewhy-agent -n kubewhy --duration=8h
 ```
-
-## Security
-
-**Read the [security policy](SECURITY.md) before pointing this at anything you
-care about.** The short version:
-
-**Use the supplied RBAC, not your admin kubeconfig.**
-
-```bash
-kubectl apply -f deploy/rbac.yaml
-kubectl create token kubewhy-agent -n kubewhy --duration=8h
-```
-
-Verified against a live cluster:
-
-```
-get pods            -> yes      delete pods        -> no
-get pods/log        -> yes      create pods        -> no
-list endpointslices -> yes      patch deployments  -> no
-list deployments    -> yes      get secrets        -> no
-list pods (all ns)  -> yes      watch pods         -> yes
-```
-
-The cluster-wide scan needs no additional grant: `list pods` at cluster scope
-is already covered. Verified by running `--scan` under a token minted for the
-`kubewhy-agent` ServiceAccount, not by reading the YAML.
-
-**Authenticate the API.** Set `TRIAGE_API_TOKEN` and every endpoint requires
-`Authorization: Bearer <token>`. Unset, the API is open — acceptable only on
-loopback, which is why compose publishes to `127.0.0.1`.
-
-**Logs are redacted, imperfectly.** `redaction.py` strips AWS keys, GitHub and
-Slack tokens, JWTs, private keys, URL passwords, `KEY=value` secrets and bearer
-headers from pod logs before they reach the model or your terminal. It is
-pattern matching and it will miss novel formats. If your logs must never be
-read by a model, drop the `pods/log` rule from the ClusterRole.
-
-**Nothing leaves your network unless you say so.** The default modes -- a model
-on your workstation or in your cluster -- keep every prompt and every projected
-tool result inside it. `TRIAGE_INFERENCE_MODE=api` moves that boundary
-deliberately, and requires `TRIAGE_ALLOW_EXTERNAL_INFERENCE` on top: an
-external endpoint without it refuses to start, and a request to one is a 403
-rather than a 500, because a 500 reads as a bug and gets retried while a 403
-reads as a decision. A fallback is not a way around it. Outbound messages get
-a second redaction pass at the boundary. And `networkPolicy.enabled=true` in
-the chart makes the claim a property the dataplane enforces rather than one
-this process promises. See [docs/INFERENCE.md](docs/INFERENCE.md).
-
-## Does it actually work?
-
-Unit tests prove the code is right; they say nothing about whether the agent
-reaches the right conclusion. `evals/` asks a real model real questions against
-the demo cluster, where every fault is known in advance.
-
-The corpus is **29 scenarios** across oomkill, crashloop, imagepull, config,
-scheduling, service, readiness, entity-scoping, grounding, adversarial,
-insufficient-evidence and healthy controls. Each declares its ground truth,
-the evidence a defensible answer must have read, the claims that are forbidden,
-and which grounding verdicts it may legitimately produce — including two
-categories where a confident root cause is the *failure*. Ten metrics are
-recorded per run and reported separately; there is deliberately no single "AI
-score". Methodology, and what the numbers do not support, in
-[docs/AI_EVALUATION.md](docs/AI_EVALUATION.md).
-
-```bash
-python evals/run_eval.py --repeat 10 --json results/qwen3.json
-python evals/summarise.py results/*.json
-```
-
-Measured on the demo cluster. The `qwen3` row is ten cases at n=10 on one
-machine, taken in a single set under `caffeinate` so no run contains a nap;
-the `llama3.2` row is the older seven-case set and is not directly comparable.
-
-| Model | Pass rate (95% CI) | n | Median | p95 | Fully grounded |
-| --- | --- | --- | --- | --- | --- |
-| `qwen3:8b` | **99%** — CI [95–100] | 100 | 54s | 133s | 86/100 |
-| `llama3.2:3b` | **54%** — CI [38–70] | 35 | 3.2s | 6.1s | 20/35 |
-
-**This table predates one change to `scan_cluster`.** It is
-`results/baseline-n10-2.json`, taken before the tool began labelling a
-Running-but-unready workload `fault: not-ready`. Only `cluster_wide_scan` can
-reach that line — the other nine cases either never call `scan_cluster` (they
-use `list_pods`, unchanged) or call it as `scan_cluster(workload='healthy-web')`,
-which returns one workload that is Running *and* ready. That case was measured
-separately at n=98 against the tool result itself, which is a stricter check
-than this suite's grader applies: complete summaries went from 8/18 to 29/38.
-The table will be re-taken as a whole rather than patched.
-
-The interval matters more than the headline. At n=100 the lower bound is 95%,
-which is worth having; at the 21 runs this table used to quote it was 85%,
-which cannot distinguish a perfect agent from one that fails 15% of the time.
-`summarise.py` reports Wilson intervals precisely so the number is not read as
-more precise than it is.
-
-The per-case split is the useful part:
-
-| Case | `qwen3` (n=10) | `llama3.2` (n=5) |
-| --- | --- | --- |
-| oomkill_root_cause | 10/10 | **0/5** |
-| crashloop_root_cause | 10/10 | **0/5** |
-| image_pull_failure | 10/10 | 3/5 |
-| service_unreachable_chain | 10/10 | 5/5 |
-| service_selector_typo | 10/10 | 5/5 |
-| healthy_not_reported_broken | 10/10 | 4/5 |
-| host_not_cluster | 10/10 | 2/5 |
-| cluster_wide_scan | **9/10** | not in that set |
-| healthy_workload_not_substituted | 10/10 | not in that set |
-| inference_is_marked | 10/10 | not in that set |
-
-The one failure is worth more than the ninety-nine passes. Asked what is
-broken anywhere, the model called `scan_cluster`, received eight failing
-workloads, and wrote a numbered list of six — dropping `crasher` and
-`log-shipper` from a list it had been handed complete. Nothing was missed by
-the tools and nothing was invented; a summary silently lost two entries. That
-is a different fault from failing to look, and it is why the answer text is
-kept with every run now.
-
-llama3.2 is 14× faster and solves the shallow cases — a service whose selector
-matches nothing is visible in one call. It scores **zero** on the two that
-require drilling from a status into termination reasons or container logs. It
-reports *that* a pod is failing without finding *why*, which is the entire
-point. Speed is not the tradeoff; depth is.
-
-Note also that 14 of 100 `qwen3` answers were not **fully** grounded. Those
-contained at least one figure the checker could not trace — usually arithmetic
-the model did itself. Correct and fully-traceable are different bars, and the
-gap between them is worth watching.
-
-Cases assert on substance — the root cause and the tools used — not wording.
-Two are controls: an agent that calls everything broken is worse than useless,
-and one case asks what is wrong with a workload that is fine while the
-namespace around it is full of workloads that are not.
-
-**What these numbers are not.** One synthetic cluster, ten faults, one machine,
-one model, taken in a single sitting. Real clusters fail in uglier and more
-ambiguous ways, and ten cases is a smoke test, not a benchmark. Latency in
-particular is this laptop's: every figure above was taken under `caffeinate`
-with `slept_ms` zero on all 100 runs, so it excludes the host naps that made
-earlier numbers unusable, but it says nothing about your hardware.
 
 ## Verifying the model's claims
 
@@ -939,52 +1066,6 @@ No cluster and no model needed — the Kubernetes API and the Ollama client are
 mocked. Fixtures use real `V1*` client models rather than bare mocks, so a
 projection reaching for a field the API does not have fails the test. CI runs
 the suite on Python 3.11–3.13 and separately builds and starts the container.
-
-## Limitations
-
-- **The scan reports where, never why.** `--scan` finds failing workloads
-  across every namespace in one API call, but the cause of any one of them
-  still costs a full diagnosis — so `--explain` is bounded to a few workloads
-  rather than the whole list.
-- **The controller holds dedup state in memory by default**, so a restart
-  forgets what it already reported. `persistence.enabled=true` puts it on a
-  PersistentVolume and fixes the restart case; it does **not** buy a second
-  replica, which would be two pods with two files, or SQLite over a shared
-  filesystem. One replica stays pinned either way.
-- **Untested on EKS.** AKS and GKE have both been run against for real,
-  including GKE's exec credential plugin and a live token expiry. EKS auth is
-  still verified by reading the client rather than by running against one.
-- **Latency.** Tens of seconds per diagnosis. `kubectl describe` is faster
-  when you already know where to look.
-- **Diagnostic accuracy is a smoke test, not a measurement.** The evaluation
-  corpus is 29 scenarios at n=1 per scenario. A 95% interval on that sample is
-  wide enough that it cannot rank two configurations, and this README does not
-  try to. See [docs/AI_EVALUATION.md](docs/AI_EVALUATION.md).
-- **No real vLLM.** The `vllm` provider is the OpenAI wire protocol under
-  another name and is validated against a local Ollama `/v1` endpoint. It has
-  never been run against an actual vLLM server.
-- **No hosted-model comparison.** The corpus is provider-neutral and running it
-  against a hosted API costs one command, but that comparison has not been run.
-  Stated as UNDETERMINED rather than guessed at.
-- **The browser console has no authentication.** It is pinned to loopback for
-  that reason, and the chart requires a second explicit acknowledgement before
-  it will expose one in-cluster.
-- **AppTest sees the element tree, not the rendered page.** Appearance defects —
-  escaped markup, clipping, invisible text — are structurally invisible to the
-  UI suite. [docs/E2E.md](docs/E2E.md) designs the browser suite that would see
-  them; none of it is implemented.
-- **`/ask` still holds a request open** for the whole run, and `/ask/stream`
-  makes the wait legible without shortening it. `/ask/jobs` detaches the work
-  properly — but the result lives in this process's store, so it is one
-  replica or nothing.
-- **Answers vary between runs.** The same question can produce a different
-  chain. The `confidence` field and `tool_calls` trace tell you which
-  measurements an answer actually rests on.
-- **Cumulative context is unbounded.** Per-call output is projected, but a
-  long chain over a busy namespace can still grow past the window.
-- **Requires a tool-capable model.** Models without a thinking mode fall back
-  automatically, but score materially worse — see the benchmark.
-- **No rate limiting**, no audit log of questions, no lockfile.
 
 ## Configuration
 

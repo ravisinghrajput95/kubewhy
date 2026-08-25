@@ -110,3 +110,39 @@ decision.
 *submitted*, never the text the browser *painted*. Appearance defects are
 structurally invisible to it; `docs/E2E.md` designs the browser suite that would
 see them and says which of them are worth having.
+
+## Validation status
+
+| | |
+|---|---|
+| **Functional UI validation** | **PROVEN** — rendering, failure modes, per-verdict panels, form behaviour, investigation identity, security boundary |
+| **Automated browser-paint validation** | **NOT TESTED** — no browser E2E suite exists |
+
+The screenshots and the GIF in `docs/images/` are real recordings against a live
+cluster and serve as *qualitative* visual evidence. They are not automated
+validation and must not be cited as such.
+
+## Failure states the console renders
+
+Each is a state the loop can genuinely produce, and each has a test:
+
+| State | What the operator sees |
+|---|---|
+| `contradicted` | the contradiction rendered as an error **before** the answer, with the rule and the measurement |
+| `insufficient_evidence` | the verdict named, with whatever evidence was collected still readable |
+| `deadline_exceeded` | a bad chip in the status strip; nothing invented to fill the gap |
+| `max_rounds` | likewise |
+| zero tool calls | a warning that nothing was measured |
+| backend unreachable | a red error, the form still usable, no blank page |
+| cluster unreachable | the error shown, and no table implying a healthy cluster |
+| an unrecognised verdict | rendered as-is rather than silently mapped onto a known one |
+
+## Limitations
+
+- **No authentication.** Loopback-pinned for that reason; the chart requires
+  `ui.exposureAcknowledged=true` before exposing one in-cluster, ClusterIP only.
+- **One replica.** Investigation history lives in this process's store.
+- **Appearance is untested.** See the table above.
+- **Streamlit's generated class names are not an API.** The console emits its own
+  (`kw-strip`, `kw-claim`, `kw-hdr`) precisely so tests and any future browser
+  suite have a stable anchor.

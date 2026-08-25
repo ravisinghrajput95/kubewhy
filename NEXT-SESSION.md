@@ -12,7 +12,7 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `42a4b12`, tree clean and pushed, 935 tests pass, tags
+**State: `main` at `175d16c`, tree clean and pushed, 977 tests pass, tags
 through **v0.1.8** (cut 2026-08-24). Nothing running: no kind cluster, no GKE
 cluster, Docker quit, Ollama stopped, GCP empty.**
 
@@ -599,7 +599,7 @@ Do not round it.
 
 ```bash
 cd /Users/ravirajput/Projects/AIOps-agent
-.venv/bin/python -m pytest              # 603 tests, no cluster, no model needed
+.venv/bin/python -m pytest              # 977 tests, no cluster, no model needed
 ollama list                             # qwen3 (5.2GB) is the default model
 ```
 

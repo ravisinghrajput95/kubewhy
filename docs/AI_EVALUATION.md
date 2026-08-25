@@ -101,27 +101,90 @@ possible at all.
 Replay the recorded **`draft`**, never the **`answer`** — the answer has already
 been through `grounding.verify()` and rewritten.
 
-## Sample size, stated honestly
+## Sample size and what it supports
 
-The baseline is **n=1 per scenario**. That is a smoke test, not a measurement of
-accuracy. 29/29 at n=1 has a 95% Wilson interval of roughly [88–100]; 25/29 is
-roughly [69–93]. Those intervals overlap heavily, so **n=1 cannot rank two
-configurations** and this document does not try to.
+The baseline is **29 scenarios × 5 runs = 145 runs per configuration**.
 
-Where a comparison is not supported by the sample, the word used is
-**UNDETERMINED**, not "roughly equal".
+n=5 was chosen over n=3 deliberately: the interesting differences between
+configurations are per-scenario, and only n=5 gives enough resolution to test one
+(a 0/5 versus 5/5 split is the smallest that reaches p < 0.05 on Fisher exact).
+The cost was ~3 hours of local model time against ~2 hours for n=3.
 
-## Model comparison
+## Paired comparison
 
-The corpus is provider-neutral: the same 29 scenarios run against any configured
-backend by setting `TRIAGE_INFERENCE_MODE` / `_PROVIDER` / `_MODEL`. Comparing
-`local · ollama · qwen3` against a hosted API costs one command each.
+Both configurations see the same scenarios, so the unit of analysis is the
+**scenario**, not the run. Treating five repeats of one scenario as five
+independent facts about the model would overstate the evidence.
 
-At the time of writing only the local configuration has been run against the
-full corpus. The hosted comparison is **NOT TESTED**: the API key used earlier
-in development was revoked, and inventing a comparison from the handful of
-ad-hoc hosted runs that exist would be exactly the statistical claim from an
-inadequate sample that this methodology forbids.
+`evals/compare_paired.py` pairs at scenario level and runs a two-sided sign test
+on the discordant scenarios.
+
+## Results — 2026-08-25
+
+| Metric | qwen3 (local) | gpt-4o-mini (API) |
+|---|---|---|
+| RCA correctness | **127/145** (88%) [81–92] | **132/145** (91%) [85–95] |
+| Evidence-supported claims | 570 | 745 |
+| Contradicted claims | 9 | 3 |
+| Unsupported claims | 42 | 10 |
+| `insufficient_evidence` verdicts | 14 | 32 |
+| `grounded` verdicts | 106 | 101 |
+| Mean tool calls | 2.5 | 2.6 |
+| Median model rounds | 4 | 4 |
+| Re-asks: named-tool | 27 | 0 |
+| Re-asks: evidence policy | 27 | 36 |
+| Median / p95 / p99 latency | 73s / 188s / 259s | 6s / 14s / 34s |
+| Target extracted | 135/145 | 135/145 |
+| Wrong-target rate | 0.7% | 0.0% |
+
+### Overall comparison: UNDETERMINED
+
+- qwen3 better on **3** scenarios, gpt-4o-mini on **7**, **19 identical**
+- 10 discordant, two-sided sign test **p = 0.3438**
+- Wilson intervals overlap substantially
+
+**The sample does not separate them on overall correctness.** 91% is a pass rate
+on 29 hand-built scenarios in one environment. It is not a diagnostic accuracy
+figure and must not be quoted as one.
+
+### Four scenarios that do separate — as leads, not conclusions
+
+| Scenario | qwen3 | gpt-4o-mini | Fisher p |
+|---|---|---|---|
+| `unschedulable_unbound_pvc` | 5/5 | 0/5 | 0.0079 |
+| `unschedulable_node_affinity` | 4/5 | 0/5 | 0.0476 |
+| `never_ready_readiness_probe` | 0/5 | 5/5 | 0.0079 |
+| `scoping_quiet_workload_beside_loud_one` | 0/5 | 5/5 | 0.0079 |
+
+**None survives Bonferroni correction** for 29 comparisons (p < 0.0017), and at
+5-versus-5 the design *cannot* reach that threshold — 0.0079 is the floor. These
+are reproducible capability differences worth investigating, **not** evidence
+that either model is better.
+
+What they appear to show: qwen3 reads scheduling events and gpt-4o-mini does not
+(0/2 scenarios, never calling `get_pod_events`); gpt-4o-mini handles the
+readiness case and the quiet-workload scoping case where qwen3 fails 0/5.
+
+### Behaviour, which matters more than the pass rate
+
+The two configurations **fail differently**:
+
+- gpt-4o-mini collects **more** evidence (745 observations vs 570) yet **refuses
+  more often** (32 `insufficient_evidence` vs 14).
+- qwen3 makes **four times more unsupported claims** (42 vs 10) and three times
+  more contradicted ones (9 vs 3). It is more willing to conclude — sometimes
+  wrongly: it reads exit code 137 on `slow-starter` and says OOMKilled, which
+  `last_termination.reason = error` contradicts, 5/5 times.
+- gpt-4o-mini needed **zero** named-tool re-asks; qwen3 needed 27.
+- **More tool calls did not mean better reasoning** — mean calls were
+  near-identical, 2.6 vs 2.5.
+
+### Latency: environment-specific
+
+~12× at the median and holding at p95 and p99. **One laptop, one cluster, one
+local model.** This does not generalise: a different machine, a different local
+model or a colocated API would move it. It is reported because it is real in the
+tested environment, not because it is a property of the architecture.
 
 ## Running it
 
@@ -130,13 +193,36 @@ kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \
               -f demo/tricky-pods.yaml -f demo/adversarial.yaml
 
 TRIAGE_INFERENCE_MODE=local TRIAGE_MODEL=qwen3 \
-  caffeinate -is python evals/run_eval.py --json results/baseline.json
+  caffeinate -is python evals/run_eval.py --repeat 5 --json results/local.json
+
+python evals/report_baseline.py results/local.json
+python evals/compare_paired.py results/local.json results/api.json qwen3 gpt-4o-mini
 ```
 
 `caffeinate -is` is not optional for an unattended run. Two months of "Ollama
 stalls" turned out to be the laptop sleeping.
 
 The runner **refuses to start** if a fixture a scenario declares in `needs` is
-absent, rather than running and reporting failures that are really missing
-setup. A missing `demo/adversarial.yaml` used to fail four scenarios and pass
-two.
+absent, rather than running and reporting failures that are really missing setup.
+
+`evals/regrade.py` re-applies the current corpus to a recorded run: the answers
+are the model's, unchanged, and only the expectations move. Without it, an
+expectation fixed after a run started costs hours of model time to apply — and
+re-running would change the answers too, which makes an expectation fix
+indistinguishable from a different sample.
+
+## Corpus defects found and fixed
+
+Honesty about the corpus matters as much as honesty about the model:
+
+- **Four scenarios could be passed by repeating the question.** `expect_all:
+  [["log-shipper"]]` on a question that says "log-shipper" scores a parrot. The
+  scoping cases were the worst — staying on the right workload is their whole
+  point, and naming it was the entire expectation. Caught by
+  `tests/test_eval_graders.py`.
+- **Refusals were scored by phrase matching**, and the list missed three correct
+  answers across two models: "could not be found", "the tools provided do not
+  include", "could not find any information". Now scored on the verdict plus
+  `forbid`.
+- **One scenario was nondeterministic** — its CronJob pods rotated faster than an
+  investigation. Fixed in the fixture.

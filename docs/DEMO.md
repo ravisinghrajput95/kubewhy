@@ -97,6 +97,27 @@ The point the walkthrough should make: kubewhy does not ask an LLM about
 Kubernetes. It collects Kubernetes evidence, reasons over that evidence, checks
 each claim back against the evidence, and shows its work.
 
+## What the demo must make obvious
+
+The message is **Evidence → Grounding → Diagnosis**, not **Chat → AI answer**.
+Three moments carry it:
+
+1. **The raw `describe_pod` output before you ask anything.** The operator sees
+   `last_termination.reason: OOMKilled`, `limits.memory: 64Mi`, `restarts: 65`
+   with their own eyes. Whatever the model says next is checkable against that.
+2. **The tool chain streaming.** The investigation is visibly *collecting*, not
+   composing.
+3. **Observed · 5 / Inferred · 0 / Unknown · 0**, each observation carrying
+   `scan_cluster.demo/memory-hog.status` or
+   `describe_pod.containers.hog.limits.memory`. Every figure in the root cause
+   appears in that list.
+
+If a viewer takes away one thing, it should be that the answer is *auditable*:
+they can point at any number in the diagnosis and be shown the tool result it
+came from.
+
+A recording of exactly this flow is in `docs/images/console.gif`.
+
 ## What to expect on timing
 
 On a laptop with local `qwen3`, an investigation takes **90–110 seconds** and
