@@ -155,8 +155,20 @@ metadata:
   name: nightly-sync
   namespace: demo
 spec:
-  schedule: "*/1 * * * *"
-  failedJobsHistoryLimit: 2
+  # Every five minutes, keeping six failures, rather than every minute keeping
+  # two. Both numbers are about determinism, not about the fault.
+  #
+  # At one run per minute with two retained, a failed pod lives ~2 minutes --
+  # shorter than a local-model investigation, which is 72s at the median and
+  # was measured at 247s at the maximum. The eval scenario would be told a pod
+  # name by scan_cluster and find it deleted by the time describe_pod ran, and
+  # the answer became "the pod no longer exists" rather than the diagnosis.
+  # A scenario whose ground truth evaporates mid-run is not reproducible.
+  #
+  # Six retained at one run per five minutes is ~30 minutes of life, against a
+  # 4-minute worst-case investigation: roughly 7x margin.
+  schedule: "*/5 * * * *"
+  failedJobsHistoryLimit: 6
   jobTemplate:
     spec:
       backoffLimit: 0

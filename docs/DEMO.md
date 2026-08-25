@@ -45,7 +45,7 @@ intent.
 | `log-shipper` | demo | Error (DaemonSet) | `last_termination.reason=Error` | container exits non-zero |
 | `needs-db` | demo | Init:CrashLoopBackOff | init container `wait-for-db` back-off | never starts; its init container fails |
 | `never-ready` | demo | Running, never Ready | `Readiness probe failed: … connection refused` on `:8080/healthz` | passes liveness, fails readiness — the container never restarts |
-| `nightly-sync` | demo | Error (CronJob) | per-run pod `last_termination` | each scheduled run fails; the runs are one workload, not many |
+| `nightly-sync` | demo | Error (CronJob, every 5 min) | per-run pod `last_termination`, logs `FATAL: upstream returned 503` | each scheduled run fails; the runs are one workload, not many |
 | `crasher-svc` | demo | 0 ready endpoints | `ready_endpoints=[]`, `not_ready_endpoints=[…]` | a pod matches the selector but never becomes ready |
 | `typo-svc` | demo | 0 endpoints | `selector`, empty endpoints | the selector matches nothing |
 | `healthy-web` | demo | **healthy control** | `2/2 ready` | nothing is wrong with it |

@@ -549,6 +549,13 @@ CASES = [
         "name": "cronjob_runs_are_one_workload",
         "category": "crashloop",
         "ground_truth": "nightly-sync's runs fail logging 'FATAL: upstream returned 503'; each scheduled run is not a separate broken workload",
+        # Reproducibility note: this scenario was nondeterministic until
+        # 2026-08-25. The CronJob fired every minute keeping two failures, so a
+        # failed pod lived ~2 minutes -- shorter than a local investigation.
+        # scan_cluster named a pod and describe_pod found it deleted, and the
+        # answer became "the pod no longer exists". Fixed in the fixture, not
+        # in the agent and not in the expectation: */5 with six retained is
+        # ~30 minutes of pod life against a 4-minute worst case.
         "required_evidence": ["container logs", "pod status"],
         "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
         "question": "Why is the nightly-sync cronjob in the demo namespace failing?",
