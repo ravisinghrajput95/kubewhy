@@ -391,6 +391,29 @@ reports the one the client is actually **bound** to, which is not always what
 `current-context` says: creating a cluster in another shell rewrites that file
 without moving this process's connection.
 
+### A five-minute demonstration
+
+`docs/DEMO.md` has the full walkthrough and the fault table. The short version:
+
+1. **Open it.** The header names the cluster, the inference mode, the provider
+   and model, and where evidence goes — `on-network` or `external`.
+2. **Read the scan.** The call that produced the table is printed above it.
+   The table says *where*, never *why*.
+3. **Pick `demo/memory-hog`** and ask why it is failing.
+4. **Watch the chain run** — `scan_cluster`, `describe_pod`, `get_pod_events` —
+   with elapsed time in the label, not just a spinner.
+5. **Read the panel top down**: verdict, root cause, then Observed / Inferred /
+   Unknown with each observation carrying the `tool.field` it came from.
+6. **Open Timeline and Evidence** to see the arguments actually executed and
+   the raw results the answer was built from.
+7. **Then ask about `demo/healthy-web`.** One call, and the answer is "it is
+   running normally". A tool that can only find problems cannot tell you a
+   thing is fine.
+
+The point that walkthrough makes: kubewhy does not ask an LLM about Kubernetes.
+It collects Kubernetes evidence, reasons over it, checks each claim back against
+the evidence, and shows its working.
+
 ## Deploying the controller
 
 ```bash
@@ -645,6 +668,16 @@ this process promises. See [docs/INFERENCE.md](docs/INFERENCE.md).
 Unit tests prove the code is right; they say nothing about whether the agent
 reaches the right conclusion. `evals/` asks a real model real questions against
 the demo cluster, where every fault is known in advance.
+
+The corpus is **29 scenarios** across oomkill, crashloop, imagepull, config,
+scheduling, service, readiness, entity-scoping, grounding, adversarial,
+insufficient-evidence and healthy controls. Each declares its ground truth,
+the evidence a defensible answer must have read, the claims that are forbidden,
+and which grounding verdicts it may legitimately produce — including two
+categories where a confident root cause is the *failure*. Ten metrics are
+recorded per run and reported separately; there is deliberately no single "AI
+score". Methodology, and what the numbers do not support, in
+[docs/AI_EVALUATION.md](docs/AI_EVALUATION.md).
 
 ```bash
 python evals/run_eval.py --repeat 10 --json results/qwen3.json
@@ -923,6 +956,23 @@ the suite on Python 3.11–3.13 and separately builds and starts the container.
   still verified by reading the client rather than by running against one.
 - **Latency.** Tens of seconds per diagnosis. `kubectl describe` is faster
   when you already know where to look.
+- **Diagnostic accuracy is a smoke test, not a measurement.** The evaluation
+  corpus is 29 scenarios at n=1 per scenario. A 95% interval on that sample is
+  wide enough that it cannot rank two configurations, and this README does not
+  try to. See [docs/AI_EVALUATION.md](docs/AI_EVALUATION.md).
+- **No real vLLM.** The `vllm` provider is the OpenAI wire protocol under
+  another name and is validated against a local Ollama `/v1` endpoint. It has
+  never been run against an actual vLLM server.
+- **No hosted-model comparison.** The corpus is provider-neutral and running it
+  against a hosted API costs one command, but that comparison has not been run.
+  Stated as UNDETERMINED rather than guessed at.
+- **The browser console has no authentication.** It is pinned to loopback for
+  that reason, and the chart requires a second explicit acknowledgement before
+  it will expose one in-cluster.
+- **AppTest sees the element tree, not the rendered page.** Appearance defects —
+  escaped markup, clipping, invisible text — are structurally invisible to the
+  UI suite. [docs/E2E.md](docs/E2E.md) designs the browser suite that would see
+  them; none of it is implemented.
 - **`/ask` still holds a request open** for the whole run, and `/ask/stream`
   makes the wait legible without shortening it. `/ask/jobs` detaches the work
   properly — but the result lives in this process's store, so it is one
