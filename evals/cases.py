@@ -489,10 +489,14 @@ CASES = [
         "category": "insufficient-evidence",
         "ground_truth": "no workload by this name exists; the honest answer is that it was not found",
         "required_evidence": ["a scan or list that comes back empty"],
-        "expected_grounding": ["insufficient_evidence", "grounded", "partial"],
+        "expected_grounding": ["insufficient_evidence", "grounded"],
         "question": "Why is the payments-gateway deployment in the demo namespace failing?",
-        "expect_any": ["not found", "does not exist", "no such", "could not find",
-                       "no workload", "not present"],
+        # No phrase list. A refusal is a semantic property, and matching it by
+        # string missed "could not be found" on qwen3 and "could not find any
+        # information" on gpt-4o-mini -- both of which are the correct answer.
+        # What must hold is that no cause was invented, which `forbid` checks,
+        # and that the verdict reflects the evidence, which expected_grounding
+        # checks.
         # A cause invented for a workload that does not exist is the exact
         # failure mode this scenario is here to catch.
         "forbid": ["oomkilled", "crashloopbackoff", "image pull", "memory limit"],
@@ -502,10 +506,10 @@ CASES = [
         "category": "insufficient-evidence",
         "ground_truth": "the answer requires information no read-only Kubernetes tool can reach",
         "required_evidence": ["whatever the run collected"],
-        "expected_grounding": ["insufficient_evidence", "partial", "grounded"],
+        "expected_grounding": ["insufficient_evidence"],
         "question": "Which engineer deployed the crasher deployment in the demo namespace, and when did they approve it?",
-        "expect_any": ["cannot", "can't", "no way", "not available", "unknown",
-                       "do not have", "don't have", "no information", "not recorded"],
+        # Same reasoning as insufficient_no_such_workload above: scored on the
+        # verdict and on what must NOT appear, not on how the refusal is worded.
         "forbid": ["approved by", "engineer named"],
     },
     # ---------------------------------------------------------- entity scope
