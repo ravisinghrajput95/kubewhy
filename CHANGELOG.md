@@ -6,6 +6,63 @@ signatures and response shapes may still change.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-26
+
+A minor rather than a patch release: the grounding contract changed what
+verdicts it produces, and an operator console shipped.
+
+### Added
+
+- **Operator console.** `ui.py` renders the investigation as the primary object:
+  verdict strip, root cause, contradictions ahead of everything, Observed /
+  Inferred / Unknown with per-claim `tool.field` citations, the timeline of calls
+  with the arguments actually executed, and the raw evidence. The view computes
+  no verdict -- every field comes from what `stream()` returned and
+  `contract()` produced.
+- **Investigation identity.** Every event carries `run_id`; every answer carries
+  its `target`. "selected == requested == tool == evidence == RCA" is a
+  comparison a caller can make rather than an assumption.
+- **`agent.scoped_target()`** and `stream(target=...)`, so a surface that knows
+  its target passes it as data instead of leaving it to be re-parsed.
+- **Confirmed absences in the grounding contract.** An absence the evidence
+  positively settles is now an observation with a citation, not silence.
+- **Evaluation corpus of 29 scenarios** with declared ground truth, required
+  evidence, forbidden claims and expected grounding verdicts, plus per-metric
+  reporting and paired scenario-level comparison.
+- **`store.list_jobs()`** on both store implementations.
+- Documentation: ARCHITECTURE, SECURITY, VALIDATION, AI_EVALUATION, UI, DEMO,
+  CASE_STUDY, E2E, FUTURE, RELEASE_CHECKLIST.
+
+### Fixed
+
+- **The loop re-derived a target it had already been given.** `target_of()`
+  parsed the prompt `scoped_question()` had just written, and that prompt is full
+  of English that parses as a name: "(for example pod nightly-sync-abc)" yielded
+  a workload called `example`. `enforce()` then rewrote every tool call to the
+  phantom, including calls the model had got right, and every scoped run died on
+  "no workload named example exists in this cluster" -- identically on two
+  different models, because this is deterministic code.
+- **The investigation target could move on its own.** The workload selectbox was
+  positional, so a re-ordered scan moved it; and when the selected workload left
+  the scan -- which `only_unhealthy` and a CronJob both cause routinely -- the
+  index fell back to 0. Measured: demo/nightly-sync to demo/bad-image, silently.
+- **A correct answer whose only claim was an absence scored
+  `insufficient_evidence`.** 45 recorded runs affected. The contract could say
+  CONTRADICTED about an absence and had no way to say SUPPORTED.
+- **`st.error(icon="X")` blanked the page on every contradiction** -- the one
+  verdict most worth reading. Nothing had ever rendered one.
+- **Diagnose did nothing with an empty question box**, silently.
+- **History recorded the scoping directive** instead of the typed question, and a
+  finished investigation was missing from the sidebar until a reload.
+
+### Changed
+
+- `contradiction.check()` is now a thin wrapper over `scan()`, which returns
+  contradictions and confirmations from one pass.
+- The eval record carries `rca`, `contradictions`, `termination`, `run_id` and
+  `target`, so every metric is reportable separately.
+
+
 ### Added
 
 - **Probe reporting in `describe_pod`.** Each container's readiness, liveness
