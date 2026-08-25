@@ -357,6 +357,51 @@ class TestTheClusterCannotMoveTheTarget:
             assert app.session_state["subject"]["workload"] == B["key"], \
                 "a background re-scan moved the investigation target"
 
+    def test_a_workload_leaving_the_scan_does_not_move_the_target(self):
+        """
+        The other half of requirement 9, and the half the first fix missed.
+        `only_unhealthy` hides a workload the moment it recovers, and a
+        CronJob's workload leaves the scan every time its pods complete -- so
+        this fires on its own, repeatedly, with nobody touching the page.
+
+        Measured before the fix: demo/nightly-sync -> demo/bad-image, silently.
+        The next Diagnose would then have investigated a workload nobody chose,
+        which is the reported bug arriving without the stray click that was
+        blamed for it.
+        """
+        rec = Recorder()
+        import streamlit as st
+
+        gone = {k: v for k, v in SCAN.items() if k != B["key"]}
+        state = {"scan": SCAN}
+        st.cache_data.clear()
+        with patch.multiple(
+            k8s,
+            scan_cluster=lambda *a, **k: state["scan"],
+            list_nodes=lambda *a, **k: {},
+            describe_pod=lambda *a, **k: {"pod": "x", "containers": {}},
+            get_pod_events=lambda *a, **k: {"pod": "x", "events": []},
+            get_pod_logs=lambda *a, **k: {"pod": "x", "source": "c", "logs": "b"},
+        ), patch.object(agent, "stream", rec):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.run()
+            app.selectbox[0].set_value(B["key"]).run()
+            assert app.session_state["subject"]["workload"] == B["key"]
+
+            state["scan"] = gone
+            st.cache_data.clear()
+            app.run()
+
+            assert app.session_state["subject"]["workload"] == B["key"], \
+                "the target moved when its workload left the scan"
+            assert any(B["key"] in str(w.value) for w in app.warning), \
+                "the target was kept but the user was never told why"
+
+            # and a run started now still investigates what is on screen
+            app.button[0].click().run()
+
+        assert rec.last["target"]["name"] == B["name"]
+
     def test_a_cached_scan_cannot_overwrite_the_chosen_target(self):
         rec = Recorder()
         scan, stream = app_with(rec)

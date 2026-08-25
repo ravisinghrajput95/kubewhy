@@ -758,12 +758,28 @@ if findings:
     # investigation must never change because a background read finished.
     _options = list(findings)
     _previous = st.session_state.get("workload_choice")
+    # A workload can leave the scan while you are looking at it: `only_unhealthy`
+    # hides it the moment it recovers, and a CronJob's workload disappears every
+    # time its pods complete. Falling back to index 0 then retargets the
+    # investigation to an unrelated workload without saying a word -- measured,
+    # demo/nightly-sync -> demo/bad-image, and the next Diagnose would have
+    # investigated a workload nobody chose. Keep it selected and say what
+    # happened; moving the target is the user's decision to make.
+    _vanished = bool(_previous) and _previous not in _options
+    if _vanished:
+        _options = [_previous] + _options
     choice = st.selectbox(
         "Workload", _options, label_visibility="collapsed",
         index=_options.index(_previous) if _previous in _options else 0,
         key="workload_choice",
     )
-    if choice:
+    if _vanished and choice == _previous:
+        st.warning(
+            f"**{_previous}** is no longer in the scan — it may have recovered, "
+            "or its pods may have completed. It is still the selected target; "
+            "pick another workload to move on."
+        )
+    if choice and choice in findings:
         entry = findings[choice]
         # Keys are "namespace/workload", or "namespace/workload:fault" when one
         # workload carries two faults at once.
