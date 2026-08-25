@@ -1,0 +1,649 @@
+[
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3",
+  "context": "kind-kubewhy-ui",
+  "think": true,
+  "passed": true,
+  "seconds": 57.2,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-25T18:33:50",
+  "load_before": 2.37,
+  "load_after": 1.93,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "memory-hog"
+   },
+   {
+    "name": "memory-hog-bc76968c6-6xflg",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-6xflg\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 7, \"node\": \"kubewhy-ui-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-6xflg\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-ui-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 7, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-6xflg_demo(2735b9db-f266-4dc9-af0e-a48a1a5a2157)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod `memory-hog-bc76968c6-6xflg` keeps restarting because its container `hog` is being **OOMKilled** (Out-Of-Memory Killed) by the kubelet. Here's why:\n\n- **Memory Limit Too Low**: The container's memory limit is set to **64Mi**, but the workload (likely the `stress` tool from `polinux/stress`) is consuming more memory than allowed. Kubernetes kills the container to prevent the node from crashing.\n- **CrashLoopBackOff**: The pod is in a crash loop with **7 restarts**, as Kubernetes retries to start the container after each OOM kill.\n- **Resource Requests vs. Limits**: The memory request (32Mi) is the minimum the container guarantees, but the limit (64Mi) is the hard cap. If the workload exceeds 64Mi, it gets terminated.\n\n**Fix**: Increase the memory limit in the pod's resource configuration (e.g., set `limits.memory` to a higher value like `256Mi` or more, depending on the workload's needs).",
+  "answer": "The pod `memory-hog-bc76968c6-6xflg` keeps restarting because its container `hog` is being **OOMKilled** (Out-Of-Memory Killed) by the kubelet. Here's why:\n\n- **Memory Limit Too Low**: The container's memory limit is set to **64Mi**, but the workload (likely the `stress` tool from `polinux/stress`) is consuming more memory than allowed. Kubernetes kills the container to prevent the node from crashing.\n- **CrashLoopBackOff**: The pod is in a crash loop with **7 restarts**, as Kubernetes retries to start the container after each OOM kill.\n- **Resource Requests vs. Limits**: The memory request (32Mi) is the minimum the container guarantees, but the limit (64Mi) is the hard cap. If the workload exceeds 64Mi, it gets terminated.\n\n**Fix**: Increase the memory limit in the pod's resource configuration (e.g., set `limits.memory` to a higher value like `256Mi` or more, depending on the workload's needs).",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 57185.4,
+   "tool_ms": 23.9,
+   "rounds": 3,
+   "round_ms": [
+    15761.2,
+    13366.5,
+    28057.6
+   ],
+   "slowest_round_ms": 28057.6,
+   "model_share": 1.0,
+   "wall_ms": 57211.5,
+   "unaccounted_ms": 2.2,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "6",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "76968",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "76968"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.reason",
+       "value": "oomkilled"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-6xflg.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-6xflg.restarts",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "32",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.requests.memory",
+       "value": "32"
+      }
+     ]
+    },
+    {
+     "claim": "64",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.limits.memory",
+       "value": "64"
+      }
+     ]
+    },
+    {
+     "claim": "64",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.limits.memory",
+       "value": "64"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "5ab81e1a95e2",
+  "target": {
+   "kind": "workload",
+   "name": "memory-hog",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3",
+  "context": "kind-kubewhy-ui",
+  "think": true,
+  "passed": true,
+  "seconds": 65.4,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-25T18:34:47",
+  "load_before": 1.93,
+  "load_after": 2.07,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "crasher"
+   },
+   {
+    "name": "crasher-5964d99948-d7qtz",
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-d7qtz",
+    "namespace": "demo",
+    "container": "crasher",
+    "tail": 50
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"crasher-5964d99948-d7qtz\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 17, \"node\": \"kubewhy-ui-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-d7qtz\", \"namespace\": \"demo\", \"status\": \"Error\", \"node\": \"kubewhy-ui-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 17, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-d7qtz\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\", \"container\": \"crasher\"}"
+   }
+  ],
+  "draft": "The crasher pod is failing because its container cannot connect to the database. Logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the database at `db:5432` (likely PostgreSQL) is unreachable. Possible causes:\n1. The database service is not running\n2. Network policies block access from the pod\n3. The service name `db` is not resolvable in the demo namespace\n4. The database is not listening on port 5432\n\nCheck if the database pod is running and exposed via a service in the same namespace.",
+  "answer": "The crasher pod is failing because its container cannot connect to the database. Logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\nThis indicates the database at `db:5432` (likely PostgreSQL) is unreachable. Possible causes:\n1. The database service is not running\n2. Network policies block access from the pod\n3. The service name `db` is not resolvable in the demo namespace\n4. The database is not listening on port 5432\n\nCheck if the database pod is running and exposed via a service in the same namespace.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 65343.7,
+   "tool_ms": 36.1,
+   "rounds": 4,
+   "round_ms": [
+    15638.2,
+    10563.9,
+    17774.9,
+    21366.8
+   ],
+   "slowest_round_ms": 21366.8,
+   "model_share": 0.999,
+   "wall_ms": 65381.3,
+   "unaccounted_ms": 1.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "dd509a03c91e",
+  "target": {
+   "kind": "workload",
+   "name": "crasher",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3",
+  "context": "kind-kubewhy-ui",
+  "think": true,
+  "passed": true,
+  "seconds": 41.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-25T18:35:52",
+  "load_before": 2.07,
+  "load_after": 1.59,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "bad-image"
+   },
+   {
+    "name": "bad-image-647c5576d5-np9kj",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"bad-image-647c5576d5-np9kj\": {\"status\": \"ImagePullBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-ui-control-plane\"}, \"bad-image-5d65fbd88d-qjzvl\": {\"status\": \"Running\", \"ready\": \"1/1\", \"restarts\": 0, \"node\": \"kubewhy-ui-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"bad-image-647c5576d5-np9kj\", \"namespace\": \"demo\", \"status\": \"ImagePullBackOff\", \"node\": \"kubewhy-ui-control-plane\", \"containers\": {\"bad-image\": {\"image\": \"nginx:this-tag-does-not-exist\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ImagePullBackOff\", \"waiting_message\": \"Back-off pulling image \\\"nginx:this-tag-does-not-exist\\\": ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack image \\\"docker.io/library/nginx:this-tag-does-not-exist\\\": failed to resolve reference \\\"docker.io/library/nginx:this-tag-does-not-exist\\\": docker.io/library/nginx:this-tag-d\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod `bad-image-647c5576d5-np9kj` in the `demo` namespace is stuck in `ImagePullBackOff` because the image `nginx:this-tag-does-not-exist` cannot be found. The tag `this-tag-does-not-exist` is invalid or the image does not exist in the registry. \n\n**Solution**:  \nUpdate the image reference in your deployment to use a valid tag (e.g., `nginx:latest`) or ensure the image exists in the specified registry. If the image is private, verify that pull secrets are correctly configured.",
+  "answer": "The pod `bad-image-647c5576d5-np9kj` in the `demo` namespace is stuck in `ImagePullBackOff` because the image `nginx:this-tag-does-not-exist` cannot be found. The tag `this-tag-does-not-exist` is invalid or the image does not exist in the registry. \n\n**Solution**:  \nUpdate the image reference in your deployment to use a valid tag (e.g., `nginx:latest`) or ensure the image exists in the specified registry. If the image is private, verify that pull secrets are correctly configured.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 41229.0,
+   "tool_ms": 23.4,
+   "rounds": 3,
+   "round_ms": [
+    12852.5,
+    11091.4,
+    17285.1
+   ],
+   "slowest_round_ms": 17285.1,
+   "model_share": 0.999,
+   "wall_ms": 41253.3,
+   "unaccounted_ms": 0.9,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "5",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "647",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "647"
+      }
+     ]
+    },
+    {
+     "claim": "5576",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5576"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "bad-image-647c5576d5-np9kj.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "feb6b27c9f7c",
+  "target": {
+   "kind": "workload",
+   "name": "bad-image",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3",
+  "context": "kind-kubewhy-ui",
+  "think": true,
+  "passed": true,
+  "seconds": 84.2,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-25T18:36:34",
+  "load_before": 1.59,
+  "load_after": 1.54,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "name": "crasher-svc",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "only_unhealthy": true
+   },
+   {
+    "name": "crasher-5964d99948-d7qtz",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "tail": 50,
+    "name": "crasher-5964d99948-d7qtz"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_service_endpoints",
+    "result": "{\"service\": \"crasher-svc\", \"namespace\": \"demo\", \"type\": \"ClusterIP\", \"selector\": {\"app\": \"crasher\"}, \"ports\": [{\"port\": 80, \"target_port\": \"8080\"}], \"ready_endpoints\": [], \"not_ready_endpoints\": [\"10.244.0.12\"], \"diagnosis\": \"no ready endpoints: 1 pod(s) match the selector but none are ready -- inspect those pods, they are crashing or failing a readiness probe\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"bad-image-647c5576d5-np9kj\": {\"status\": \"ImagePullBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-ui-control-plane\"}, \"crasher-5964d99948-d7qtz\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 17, \"node\": \"kubewhy-ui-control-plane\"}, \"log-shipper-tmhl5\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 17, \"node\": \"kubewhy-ui-control-plane\"}, \"memory-hog-bc76968c6-6xflg\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 7, \"node\": \"kubewhy-ui-control-plane\"}, \"needs-db-58886b67f-sj9tm\": {\"status\": \"Init:CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-ui-control-plane\"}, \"never-ready-7d86d8c5f7-x89wn\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 1, \"node\": \"kubewhy-ui-control-plane\"}, \"nightly-sync-29794385-c7mt4\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-ui-control-plane\"}, \"nightly-sync-29794386-4hfs7\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-ui-control-plane\"}, \"slow-starter-56c8f89495-c4qtf\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 23, \"node\": \"kubewhy-ui-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-d7qtz\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-ui-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 17, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-d7qtz_demo(5f87f0bf-914b-477d-a0c2-c302d0739b21)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-d7qtz\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"}"
+   }
+  ],
+  "draft": "The crasher-svc service is unreachable because its pod **crasher-5964d99948-d7qtz** cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod is attempting to connect to a database at `db:5432` (likely a PostgreSQL service), but the connection is being refused. This could mean:\n  - The database service is **not running** or **unreachable**.\n  - The database service is in a **different namespace** (e.g., `production`), but the pod is using the wrong DNS name.\n  - A **network policy** or firewall is blocking traffic to the database.\n  - The database is **overloaded** or has incorrect credentials.\n\n### Fix:\n1. **Check the database service** (e.g., `db-service` in the same namespace) for readiness:\n   ```bash\n   kubectl get pods -l app=db -n demo\n   kubectl exec -it <db-pod> -n demo -- sh\n   ```\n2. **Verify DNS resolution** from the pod:\n   ```bash\n   kubectl exec -it crasher-5964d99948-d7qtz -n demo -- nslookup db\n   ```\n3. **Check for network policies** or firewall rules blocking the connection.\n4. **Ensure the database is configured correctly** (e.g., credentials, port, and availability).",
+  "answer": "The crasher-svc service is unreachable because its pod **crasher-5964d99948-d7qtz** cannot connect to the database. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\n- The pod is attempting to connect to a database at `db:5432` (likely a PostgreSQL service), but the connection is being refused. This could mean:\n  - The database service is **not running** or **unreachable**.\n  - The database service is in a **different namespace** (e.g., `production`), but the pod is using the wrong DNS name.\n  - A **network policy** or firewall is blocking traffic to the database.\n  - The database is **overloaded** or has incorrect credentials.\n\n### Fix:\n1. **Check the database service** (e.g., `db-service` in the same namespace) for readiness:\n   ```bash\n   kubectl get pods -l app=db -n demo\n   kubectl exec -it <db-pod> -n demo -- sh\n   ```\n2. **Verify DNS resolution** from the pod:\n   ```bash\n   kubectl exec -it crasher-5964d99948-d7qtz -n demo -- nslookup db\n   ```\n3. **Check for network policies** or firewall rules blocking the connection.\n4. **Ensure the database is configured correctly** (e.g., credentials, port, and availability).",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 84111.6,
+   "tool_ms": 42.1,
+   "rounds": 5,
+   "round_ms": [
+    12279.7,
+    12756.6,
+    14566.2,
+    16136.2,
+    28372.9
+   ],
+   "slowest_round_ms": 28372.9,
+   "model_share": 0.999,
+   "wall_ms": 84158.4,
+   "unaccounted_ms": 4.7,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "crasher-5964d99948-d7qtz.restarts",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "5964",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5964"
+      }
+     ]
+    },
+    {
+     "claim": "99948",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "99948"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "crasher-5964d99948-d7qtz.restarts",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "5964",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5964"
+      }
+     ]
+    },
+    {
+     "claim": "99948",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "99948"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "34adebf4869f",
+  "target": {
+   "kind": "service",
+   "name": "crasher-svc",
+   "namespace": "demo"
+  }
+ }
+]

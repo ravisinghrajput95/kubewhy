@@ -152,6 +152,40 @@ def grade(case, result):
         else:
             notes.append(f"stated {unverified} with no measurement behind it")
 
+    # The verdict the checker reached, scored against the verdict this scenario
+    # is supposed to produce. `require_grounded` above is a boolean and can only
+    # say "no unverified claims"; it cannot express "this scenario has no
+    # answer in the cluster, so insufficient_evidence is the CORRECT outcome and
+    # a confident root cause is the failure". Those cases are the point of the
+    # insufficient-evidence category and there was no way to score them.
+    expected = case.get("expected_grounding")
+    if expected:
+        got = result.get("confidence")
+        if got not in expected:
+            failures.append(f"grounding verdict {got!r}, expected one of {expected}")
+
+    # Contradictions are RECORDED, not scored, and that is a measured decision
+    # rather than a soft one. Replaying this rule as a hard failure over the 793
+    # recorded runs that kept both answer and evidence flipped 4 previously
+    # passing runs. Two were read in full:
+    #
+    #   TRUE  - "the workload does not exist in the cluster" for crasher-svc,
+    #           while the evidence carried not_ready_endpoints ["10.0.0.13"].
+    #           The pod exists and is merely unready. The old grader passed it.
+    #   FALSE - a correct database-connection diagnosis citing exit code 1,
+    #           failed because the word "oomkilled" appeared later in the answer
+    #           as a possibility being ruled out.
+    #
+    # One in two of the runs it would newly fail was a false positive, and a
+    # grader that cries wolf on correct work is one people learn to ignore.
+    # `contradictions` is reported as its own metric instead -- which is what
+    # the phase brief asks for anyway: every metric independently, no collapsing
+    # into a single score.
+    if result.get("contradictions"):
+        notes.append("contradicted: " + "; ".join(
+            f"{c.get('claim')} vs {c.get('measured')}"
+            for c in result["contradictions"][:3]))
+
     return not failures, failures, notes
 
 
@@ -472,6 +506,29 @@ def main():
                 # was slow, which is the distinction that killed the last two
                 # hypotheses for lack of evidence.
                 "timing": result.get("timing"),
+                # --- added for the evaluation baseline ----------------------
+                # Every metric the report states independently has to come out
+                # of the record, not out of a re-run. Collapsing these into one
+                # number is what the phase brief forbids, and a record that
+                # cannot separate "wrong" from "correct but unsupported" forces
+                # exactly that.
+                #
+                # The grounding contract as the checker produced it: observed /
+                # inferred / unknown / contradicted, each with citations.
+                "rca": result.get("rca"),
+                # Claims the checker found a measurement AGAINST. Distinct from
+                # `unverified`, which is silence. Only one of the two means the
+                # answer is wrong.
+                "contradictions": result.get("contradictions", []),
+                # Why the run stopped. `deadline_exceeded` and `max_rounds` are
+                # different operational failures and neither is a wrong answer.
+                "termination": result.get("termination"),
+                "budget_s": result.get("budget_s"),
+                # Which investigation produced this record, and what it was
+                # about -- so a scoped run can be checked for having stayed on
+                # its target rather than assumed to have.
+                "run_id": result.get("run_id"),
+                "target": result.get("target"),
             })
 
             # Written after every run, not at the end. A full set is over an
