@@ -104,6 +104,25 @@ _ABSENCE = (
     "no pods are associated",
     "no matching pods",
     "there are no pods",
+    # Endpoint phrasings. Measured on 2026-08-25: qwen3 wrote "has no endpoints
+    # because its selector ... matches no pods" and gpt-4o-mini wrote "has no
+    # ready endpoints because the selector ... matches no pods at all". Neither
+    # matched anything above, so the endpoint rule below -- which has existed
+    # since the contradiction stage shipped -- could not fire in either
+    # direction for the two most common ways of saying it.
+    # A verb is required. The bare phrase "no endpoints" matched a heading
+    # ("- **No Endpoints**:") and the antecedent of a conditional ("If no
+    # endpoints, investigate the database deployment") -- neither of which
+    # asserts anything, and both of which were scored as contradictions of a
+    # correct answer. Two false positives in 907 replayed runs, against one
+    # true finding, which is the wrong ratio for a rule that calls an answer
+    # wrong.
+    "has no endpoints",
+    "have no endpoints",
+    "has no ready endpoints",
+    "no ready endpoints to",
+    "matches no pods",
+    "match no pods",
 )
 
 # Phrases asserting a workload is not ready or not running.
@@ -275,6 +294,16 @@ def facts(entries):
                     value, list):
                 found["endpoints_total"] = found.get(
                     "endpoints_total", 0) + len(value)
+                # Separately, because "no ready endpoints" and "no endpoints"
+                # are different claims against different measurements. A
+                # Service whose only endpoint is not ready satisfies the first
+                # and contradicts the second, and collapsing them scored nine
+                # correct answers as contradictions -- every one of them saying
+                # "crasher-svc has no ready endpoints", which is exactly what
+                # ready_endpoints: [] means.
+                if key == "ready_endpoints":
+                    found["ready_endpoints_total"] = found.get(
+                        "ready_endpoints_total", 0) + len(value)
     return found
 
 
@@ -330,8 +359,38 @@ def _finding(rule, asserted, measured, clause, entries, field=None):
 
 
 def check(answer, tool_outputs):
+    """Contradictions only. See scan() for both halves."""
+    return scan(answer, tool_outputs)[0]
+
+
+def confirmations(answer, tool_outputs):
     """
-    Contradictions between an answer and the evidence behind it.
+    Absence claims the evidence positively CONFIRMS.
+
+    The mirror of the endpoint contradiction rule, and it exists because the
+    two halves of one measurement were being treated differently. Asked about
+    `typo-svc`, both qwen3 and gpt-4o-mini answered correctly -- the selector
+    matches no pods -- and both were scored `insufficient_evidence`, meaning
+    "nothing here could be checked". But `get_service_endpoints` had returned
+    `ready_endpoints: []` and `not_ready_endpoints: []`, which is exactly the
+    measurement that settles the claim. The evidence was there; the contract
+    had no way to say "supported" about an absence, only "contradicted".
+
+    A confirmation requires the tool to have been CALLED: `endpoints_total` is
+    set to 0 when both lists are read and empty, and absent when no service
+    document was read at all. Confirming an absence from silence would be the
+    unfalsifiable tick this checker exists to prevent.
+    """
+    return scan(answer, tool_outputs)[1]
+
+
+def scan(answer, tool_outputs):
+    """
+    (contradictions, confirmations) for an answer against its evidence.
+
+    One pass, two outputs, deliberately. Scoping is grounding's own, and a
+    second implementation of it here is how two stages come to disagree about
+    which entity a clause is about.
 
     Returns a list of findings, empty when nothing disagrees. Scoping is
     grounding's own, so the two stages cannot disagree about which entity a
@@ -341,7 +400,7 @@ def check(answer, tool_outputs):
     """
     text = (answer or "").strip()
     if not text or not tool_outputs:
-        return []
+        return [], []
 
     evidence = (
         tool_outputs
@@ -352,6 +411,7 @@ def check(answer, tool_outputs):
     index = grounding._entity_index(evidence)
 
     findings = []
+    supported = []
     for clause in grounding._claims(answer):
         lowered = clause.lower()
 
@@ -424,11 +484,30 @@ def check(answer, tool_outputs):
         # returned ready_endpoints ["10.244.0.12"] and the answer was scored
         # insufficient_evidence, which reads as "nothing to check" rather than
         # "this is false".
-        if hit and known.get("endpoints_total", 0) > 0:
+        # Which measurement settles this claim is decided by the claim. A
+        # phrase naming readiness is about ready_endpoints; one naming
+        # endpoints or pods in general is about all of them.
+        ready_scoped = hit is not None and "ready" in hit
+        field = "ready_endpoints" if ready_scoped else "endpoints_total"
+        count = known.get("ready_endpoints_total" if ready_scoped
+                          else "endpoints_total")
+
+        if hit and count is not None and count > 0:
             findings.append(_finding(
                 "service_has_endpoints_vs_claimed_none", hit,
-                f"get_service_endpoints reported "
-                f"{known['endpoints_total']} endpoint(s)",
+                f"get_service_endpoints reported {count} "
+                f"{'ready ' if ready_scoped else ''}endpoint(s)",
+                clause, entries, "ready_endpoints"))
+        elif hit and count == 0:
+            # The same predicate, the same fact, the other direction. `== 0`
+            # rather than `not known.get(...)`: the key is absent when no
+            # service document was read, and confirming an absence from a tool
+            # that was never called is exactly the unfalsifiable tick this
+            # module exists to prevent.
+            supported.append(_finding(
+                "service_endpoints_confirmed_empty", hit,
+                f"get_service_endpoints reported 0 "
+                f"{'ready ' if ready_scoped else ''}endpoint(s)",
                 clause, entries, "ready_endpoints"))
 
         if hit:
@@ -481,4 +560,16 @@ def check(answer, tool_outputs):
         if key not in seen:
             seen.add(key)
             unique.append(finding)
-    return unique
+
+    seen_ok, unique_ok = set(), []
+    for finding in supported:
+        key = (finding["rule"], finding["claim"], finding["measured"])
+        if key not in seen_ok:
+            seen_ok.add(key)
+            unique_ok.append(finding)
+
+    # A clause cannot be both. If anything in this answer is contradicted the
+    # confirmations are dropped, because the verdict is CONTRADICTED either way
+    # and a confirmed absence sitting beside a contradiction reads as partial
+    # support for an answer that is wrong.
+    return unique, ([] if unique else unique_ok)

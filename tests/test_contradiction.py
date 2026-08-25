@@ -291,3 +291,123 @@ class TestFactExtraction:
             "source": {}}]
 
         assert contradiction.facts(entries)["ready"] is False
+
+
+class TestAbsenceTheEvidenceConfirms:
+    """
+    The other half of the endpoint measurement.
+
+    Asked about `typo-svc`, both qwen3 and gpt-4o-mini answered correctly --
+    the selector matches no pods -- and both were scored
+    `insufficient_evidence`, which reads as "nothing here could be checked".
+    But `get_service_endpoints` had returned `ready_endpoints: []` and
+    `not_ready_endpoints: []`, which is precisely the measurement that settles
+    it. The contract could say an absence was CONTRADICTED and had no way to
+    say it was SUPPORTED. 45 recorded runs were affected.
+    """
+
+    EMPTY = ("get_service_endpoints", {
+        "service": "typo-svc", "namespace": "demo",
+        "selector": {"app": "web-frontend"},
+        "ready_endpoints": [], "not_ready_endpoints": []})
+    UNREADY_ONLY = ("get_service_endpoints", {
+        "service": "crasher-svc", "namespace": "demo",
+        "selector": {"app": "crasher"},
+        "ready_endpoints": [], "not_ready_endpoints": ["10.244.0.12"]})
+    POPULATED = ("get_service_endpoints", {
+        "service": "healthy-svc", "namespace": "demo",
+        "selector": {"app": "healthy"},
+        "ready_endpoints": ["10.244.0.20"], "not_ready_endpoints": []})
+
+    def test_a_confirmed_absence_is_an_observation_not_silence(self):
+        answer = ("The `typo-svc` service has no endpoints because its "
+                  "selector matches no pods in that namespace.")
+
+        verdict = grounding.check(answer, ev(self.EMPTY))
+
+        assert verdict["confidence"] == "grounded"
+        assert verdict["checked"] >= 1
+
+    def test_the_observation_cites_the_field_that_settled_it(self):
+        answer = "The `typo-svc` service has no endpoints."
+
+        claims = grounding.check(answer, ev(self.EMPTY))["claims"]
+        absence = [c for c in claims if c.get("kind") == "absence"]
+
+        assert absence, "the confirmed absence was not recorded as a claim"
+        assert absence[0]["evidence"][0]["tool"] == "get_service_endpoints"
+        assert absence[0]["evidence"][0]["field"] == "ready_endpoints"
+
+    def test_no_ready_endpoints_is_true_when_the_only_endpoint_is_unready(self):
+        """
+        The nine false positives. `crasher-svc` has one endpoint and it is not
+        ready, so "has no ready endpoints" is exactly correct -- and counting
+        ready and not-ready together called nine correct answers wrong.
+        """
+        answer = ("The crasher-svc service is unreachable because it has no "
+                  "ready endpoints.")
+
+        verdict = grounding.check(answer, ev(self.UNREADY_ONLY))
+
+        assert verdict["contradictions"] == []
+        assert verdict["confidence"] != grounding.CONTRADICTED
+
+    def test_claiming_no_pods_at_all_is_still_contradicted_by_an_unready_one(self):
+        """The protection the fix must not cost: a pod that exists, exists."""
+        answer = "The crasher-svc service matches no pods."
+
+        found = grounding.check(answer, ev(self.UNREADY_ONLY))["contradictions"]
+
+        assert found and found[0]["rule"] == "service_has_endpoints_vs_claimed_none"
+
+    def test_claiming_no_endpoints_of_a_populated_service_is_contradicted(self):
+        answer = "The healthy-svc service has no endpoints."
+
+        found = grounding.check(answer, ev(self.POPULATED))["contradictions"]
+
+        assert found and found[0]["rule"] == "service_has_endpoints_vs_claimed_none"
+
+    def test_a_heading_is_not_an_assertion(self):
+        """
+        Recorded in think-ON-n12.json: `- **No Endpoints**:` as a section
+        label. A bare phrase with no verb asserts nothing, and scoring it as a
+        claim called a correct answer contradicted.
+        """
+        answer = ("- **No Endpoints**: the service is unreachable.\n"
+                  "The pod is not ready.")
+
+        assert grounding.check(answer, ev(self.UNREADY_ONLY))["contradictions"] == []
+
+    def test_a_conditional_is_not_an_assertion(self):
+        """Also recorded: "If no endpoints, investigate the database"."""
+        answer = "If no endpoints, investigate the database deployment."
+
+        assert grounding.check(answer, ev(self.UNREADY_ONLY))["contradictions"] == []
+
+    def test_an_absence_is_not_confirmed_from_silence(self):
+        """
+        The tool has to have been called. Confirming an absence because nothing
+        was measured is the unfalsifiable tick this whole module exists to
+        prevent -- and it would turn every unchecked claim into a green one.
+        """
+        unrelated = ("list_pods", {"some-pod": {"status": "Running"}})
+        answer = "The typo-svc service has no endpoints."
+
+        verdict = grounding.check(answer, ev(unrelated))
+
+        assert verdict["confidence"] == grounding.INSUFFICIENT
+        assert not [c for c in verdict["claims"] if c.get("kind") == "absence"]
+
+    def test_a_confirmation_never_softens_a_contradicted_answer(self):
+        """
+        An answer can state one absence correctly and another wrongly. The
+        verdict is CONTRADICTED either way, and a confirmed absence displayed
+        beside it reads as partial support for an answer that is wrong.
+        """
+        answer = ("The crasher-svc service has no ready endpoints. "
+                  "The container exited with an application error.")
+
+        verdict = grounding.check(answer, ev(self.UNREADY_ONLY, OOM_POD))
+
+        if verdict["confidence"] == grounding.CONTRADICTED:
+            assert not [c for c in verdict["claims"] if c.get("kind") == "absence"]

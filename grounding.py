@@ -656,7 +656,24 @@ def check(answer, tool_outputs):
     # contradiction.check() asks whether the evidence says something else.
     # Both questions are worth asking and only one of them was being asked.
     # See contradiction.py for why it is a separate module.
-    contradictions = contradiction.check(answer, evidence)
+    contradictions, confirmed = contradiction.scan(answer, evidence)
+    for finding in confirmed:
+        # An absence the evidence positively settles. Counted as `checked`
+        # because it IS a measurement: the claim was traced to a field of a
+        # tool result, which is the whole definition this module uses.
+        # Without it, a correct answer whose only claim is an absence scored
+        # `insufficient_evidence` -- "nothing here could be checked" -- while
+        # the tool it had just called returned the empty list that settles it.
+        checked += 1
+        claims.append({
+            "value": finding["claim"],
+            "kind": "absence",
+            "status": "observed",
+            "measured": finding["measured"],
+            "rule": finding["rule"],
+            "evidence": finding["evidence"],
+            "clause": finding.get("clause"),
+        })
     for finding in contradictions:
         claims.append({
             "value": finding["claim"],
