@@ -52,6 +52,16 @@ _NOT_A_NAME = {
     # Imperatives that precede a kind: "describe pod X", "check the service Y".
     "describe", "show", "list", "get", "check", "inspect", "diagnose",
     "explain", "tell", "find", "look", "read", "give", "report", "please",
+    # "for example pod nightly-sync-abc" is a textbook name-before-kind phrase,
+    # and _NAME_FIRST is tried first, so it beat the "workload demo/nightly-sync"
+    # the same sentence had already stated. scoped_question() emitted exactly
+    # that shape, so the scoping layer was handing the enforcement layer a
+    # string it misread -- and enforce() then rewrote a *correct*
+    # scan_cluster(workload='demo/nightly-sync') to workload='example'. Every
+    # run so scoped died on "no workload named example exists in this cluster",
+    # on two different models, because this is deterministic code and not the
+    # model's choice at all. See test_targeting.py::TestTheExampleTrap.
+    "example", "instance", "e.g", "eg", "i.e", "ie", "such",
 }
 
 _NAME = r"[a-z0-9][a-z0-9.-]*"
@@ -125,13 +135,31 @@ def target_of(question):
 
 def _same_workload(name, target_name):
     """
-    Whether a pod name belongs to the target.
+    Whether a pod or workload name belongs to the target.
 
     A Deployment target `crasher` owns `crasher-5964d99948-9g8vg`; a DaemonSet
     target owns `log-shipper-8gnqk`. Prefix on a segment boundary, so `crasher`
     does not match `crasher-two`.
+
+    A leading `namespace/` is stripped first. The scan keys workloads as
+    `demo/crasher` and says so in its own output, so that is the spelling a
+    model reads and echoes back -- and comparing it to the bare `crasher`
+    called it a different workload and logged a retarget for a call that was
+    already right. The arguments still carry the bare name, which is what
+    scan_cluster and list_pods match on; only the comparison changed.
     """
-    name, target_name = name.lower(), target_name.lower()
+    def bare(value):
+        # Exactly one separator, or none. A `namespace/workload` spelling is
+        # the scan's own, and is the only one worth accepting -- observed live
+        # on 2026-08-25, qwen3 produced
+        # `config-faults/missing-configfaults/missing-configmap-key`, whose
+        # last segment matches the target exactly. Taking the last segment
+        # unconditionally would wave that through and call the tool with a name
+        # no cluster has; falling through to a full compare gets it retargeted.
+        parts = value.lower().split("/")
+        return parts[1] if len(parts) == 2 else value.lower()
+
+    name, target_name = bare(name), bare(target_name)
     return name == target_name or name.startswith(target_name + "-")
 
 

@@ -374,6 +374,7 @@ class TestStream:
         assert "type" not in asked
         # Same fields, both ways. This is the half that catches drift.
         assert set(asked) == set(streamed) - {"type"}
+        assert asked["run_id"] and asked["run_id"] != streamed["run_id"]
 
         # Everything except the measured fields must be equal. Timing is
         # measured, so two runs of the same mocked chain legitimately differ
@@ -383,7 +384,12 @@ class TestStream:
         # make this test flaky for the fields that are supposed to vary, and
         # the set comparison above is what actually catches drift. Evidence
         # is pinned by value in TestEvidenceIsReturnedOnRequest.
-        ignore = {"type", "timing", "evidence"}
+        #
+        # run_id joins them for the same reason and a stronger one: it is
+        # minted per investigation, so two drains of the same chain *must*
+        # differ. Equal run_ids here would mean the identity was not per-run,
+        # which is the whole point of having one.
+        ignore = {"type", "timing", "evidence", "run_id"}
         assert {k: v for k, v in asked.items() if k not in ignore} == {
             k: v for k, v in streamed.items() if k not in ignore
         }

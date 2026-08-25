@@ -751,7 +751,18 @@ if findings:
         "termination reason, events and logs behind it."
     )
 
-    choice = st.selectbox("Workload", list(findings), label_visibility="collapsed")
+    # Keyed, and re-anchored by *value* rather than by position. The options
+    # are rebuilt from every scan, and this cluster's CronJob workloads come
+    # and go between scans -- so an unkeyed selectbox silently moved the
+    # investigation target to whatever had taken index 0. The target of an
+    # investigation must never change because a background read finished.
+    _options = list(findings)
+    _previous = st.session_state.get("workload_choice")
+    choice = st.selectbox(
+        "Workload", _options, label_visibility="collapsed",
+        index=_options.index(_previous) if _previous in _options else 0,
+        key="workload_choice",
+    )
     if choice:
         entry = findings[choice]
         # Keys are "namespace/workload", or "namespace/workload:fault" when one
@@ -897,11 +908,23 @@ if submitted and not question:
 
 if submitted and question:
     asked = question
+    # None means "no selection was made, infer the target from the words" --
+    # the CLI and Slack path. Bound here so that an unscoped run cannot reach
+    # the stream() call with the name unset.
+    target = None
     if scoped:
         # Shared with the CLI, the REST API and the controller: see
         # agent.scoped_question for why this is directive rather than a hint.
         question = agent.scoped_question(
             question, subject["workload"], subject["namespace"], subject["pod"]
+        )
+        # The same selection, as data. Without this the loop re-derived the
+        # target by parsing the prompt just built above -- and that prompt says
+        # "(pod: x)" and "any other workload", both of which parse as workload
+        # names. Passing it means the target cannot be anything but the one on
+        # screen.
+        target = agent.scoped_target(
+            subject["workload"], subject["namespace"], subject["pod"]
         )
         # Say so, and show the rewrite. The checkbox defaults to on, so a
         # question about a namespace or about some other workload gets silently
@@ -931,7 +954,7 @@ if submitted and question:
         # stream() rather than ask(): the chain is the point, and a diagnosis
         # runs long enough that a caller shown only the final answer is
         # watching a spinner for a minute.
-        for event in agent.stream(question):
+        for event in agent.stream(question, target=target):
             if event["type"] == "tool_call":
                 calls += 1
                 # Progress in the LABEL, not only in the spinner beside it.

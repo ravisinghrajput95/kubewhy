@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import time
+import uuid
 
 import backends  # noqa: F401  -- re-exported for callers that name a backend
 
@@ -313,6 +314,39 @@ def _outcome(output):
     return "error" if isinstance(parsed, dict) and "error" in parsed else "ok"
 
 
+def scoped_target(workload, namespace, pod=None):
+    """
+    The structured target for a surface that already knows its selection.
+
+    `scoped_question` states the target in prose for the model; this states the
+    same target as data for `targeting.enforce`. Both are built from one
+    selection, so the two cannot disagree.
+
+    They used to. `targeting.target_of()` re-derived the target by parsing the
+    prompt `scoped_question` had just written, and that prompt is full of
+    name-before-kind English: "(for example pod nightly-sync-abc)" yields a
+    workload called `example`, and "Do not report on any other workload" yields
+    one called `other`. Whichever it picked, `enforce` then rewrote every tool
+    call to it -- including calls the model had got right -- and the run died on
+    "no workload named example exists in this cluster". Deterministic, so it
+    reproduced identically on two different models.
+
+    Naming the target is the caller's job whenever the caller knows it. Parsing
+    stays for the surfaces that genuinely only have a sentence: the CLI, Slack,
+    and an MCP client.
+
+    `name` is the bare workload name, not `namespace/workload`: enforce matches
+    pod names against it by prefix, so `crasher` has to own
+    `crasher-5964d99948-9g8vg`.
+    """
+    bare = (workload or "").split("/")[-1].split(":")[0].strip()
+    if not bare:
+        return None
+    return {"kind": "workload", "name": bare.lower(),
+            "namespace": (namespace or "").strip().lower() or None,
+            "pod": pod}
+
+
 def scoped_question(question, workload, namespace, pod=None):
     """
     Bind a question to one workload, for every surface that has a selection.
@@ -331,7 +365,13 @@ def scoped_question(question, workload, namespace, pod=None):
     no call the model can make will see a healthy workload, so "it is fine" is
     not an available answer and the silence gets filled with something else.
     """
-    example = f" (for example pod {pod})" if pod else ""
+    # "(for example pod X)" reads to a human as an aside and to
+    # targeting.target_of() as a name-before-kind phrase naming a workload
+    # called "example" -- which then rewrote every tool call in the run. A
+    # colon cannot be read as either: _KIND_FIRST requires whitespace after the
+    # kind word, and there is no bare word in front of "pod" to be taken as a
+    # name. Keep it that way.
+    example = f" (pod: {pod})" if pod else ""
     return (
         f"Answer only about the workload {workload} in namespace {namespace}"
         f"{example}. Start with scan_cluster(workload='{workload}') to read its "
@@ -848,7 +888,7 @@ NUDGE = (
 )
 
 
-def stream(question, model=MODEL, think=None, prefetched=None):
+def stream(question, model=MODEL, think=None, prefetched=None, target=None):
     """
     Run the loop, yielding each step as it happens.
 
@@ -858,6 +898,10 @@ def stream(question, model=MODEL, think=None, prefetched=None):
         {"type": "tool_result", "name":..., "result": <json str>, "duration_ms":...}
         {"type": "answer",      "answer":..., "tool_calls":[...],
                                 "confidence":..., "unverified":[...]}
+
+    Every event also carries "run_id", and the answer carries "target": one
+    investigation's artifacts are identifiable as its own rather than by having
+    arrived most recently.
 
     Exactly one "answer" event is emitted, last. ask() is this drained to
     completion, so the two cannot drift.
@@ -869,10 +913,18 @@ def stream(question, model=MODEL, think=None, prefetched=None):
     endpoint are all consumers of these events.
     """
     think = THINK if think is None else think
+    # One identity per investigation, minted before anything is collected.
+    # Every artifact this run produces is stamped with it, so "is this the
+    # evidence for the answer above it?" is a comparison rather than an
+    # assumption -- which is the only way a caller tells a stale panel from a
+    # fresh one.
+    run_id = uuid.uuid4().hex[:12]
     # The entity this question is about, fixed before the first round and not
     # revisable by the model. It may choose how to investigate; it may not
     # change what it is investigating. See targeting.py.
-    target = targeting.target_of(question)
+    # An explicit target from a surface that made a selection is authoritative
+    # and is never second-guessed by re-reading the prompt. See scoped_target().
+    target = target or targeting.target_of(question)
     if not (target or {}).get("name"):
         # The question names something and never says what kind of thing it
         # is -- "Why is crasher-svc unreachable?". Guessing from the text
@@ -988,6 +1040,8 @@ def stream(question, model=MODEL, think=None, prefetched=None):
         })
         return {
             "type": "answer",
+            "run_id": run_id,
+            "target": target,
             "answer": text,
             # Why this run stopped, as data rather than as prose a caller has
             # to pattern-match. `deadline_exceeded` and `max_rounds` are
@@ -1182,6 +1236,11 @@ def stream(question, model=MODEL, think=None, prefetched=None):
 
             yield {
                 "type": "answer",
+                # Which investigation this is, and what it was about. Read
+                # together they are an acceptance test a UI can actually run:
+                # the target it selected must equal the target that came back.
+                "run_id": run_id,
+                "target": target,
                 "answer": grounding.annotate(verified, verdict),
                 # What the answer establishes, split by how well: observations
                 # carry the result id and field they came from, inferences do
@@ -1263,7 +1322,8 @@ def stream(question, model=MODEL, think=None, prefetched=None):
             trace.append({"name": name, "arguments": arguments,
                           **({"scope": violation} if violation else {})})
 
-            yield {"type": "tool_call", "name": name, "arguments": arguments,
+            yield {"type": "tool_call", "run_id": run_id, "name": name,
+                   "arguments": arguments,
                    **({"scope_violation": violation} if violation else {})}
 
             started = time.perf_counter()
@@ -1298,6 +1358,7 @@ def stream(question, model=MODEL, think=None, prefetched=None):
 
             yield {
                 "type": "tool_result",
+                "run_id": run_id,
                 "name": name,
                 "result": output,
                 "duration_ms": duration_ms,
@@ -1308,7 +1369,7 @@ def stream(question, model=MODEL, think=None, prefetched=None):
 
 
 def ask(question, model=MODEL, verbose=False, think=None, prefetched=None,
-        evidence=False):
+        evidence=False, target=None):
     """
     Answer a question about this host, letting the model call collectors.
 
@@ -1343,7 +1404,8 @@ def ask(question, model=MODEL, verbose=False, think=None, prefetched=None,
     answer = None
     think = THINK if think is None else think
 
-    for event in stream(question, model=model, think=think, prefetched=prefetched):
+    for event in stream(question, model=model, think=think,
+                        prefetched=prefetched, target=target):
         if verbose and event["type"] == "tool_call":
             print(f"  -> {event['name']}({event['arguments']})", file=sys.stderr)
         if event["type"] == "answer":
