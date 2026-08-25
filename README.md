@@ -328,10 +328,31 @@ pip install -r requirements-ui.txt
 streamlit run ui.py
 ```
 
-The scan as a table, drill-down into any workload's detail, events and logs,
-and an ask panel that renders the tool chain **as it runs** rather than after —
-which matters when a diagnosis takes a minute. Every panel names the tool
-behind it, so the UI shows its working the same way the CLI does.
+An **operator console**, not a chatbot with Kubernetes branding. The scan as a
+table, drill-down into any workload's detail, events and logs, and an
+investigation panel that renders the tool chain **as it runs** rather than
+after — which matters when a diagnosis takes a minute.
+
+The investigation is the primary object on the page, laid out top down:
+
+| | |
+|---|---|
+| status strip | verdict, tool calls, wall clock, backend, any non-answer termination |
+| root cause | the answer, with contradictions rendered *before* it |
+| what the evidence says | Observed / Inferred / Unknown, each observation carrying the `tool.field` it came from |
+| timeline | every call with the arguments actually executed |
+| evidence | the raw tool results the answer was built from |
+
+**The view computes no verdict.** Every field is read from what `agent.stream()`
+returned and `grounding.contract()` produced — a second implementation of the
+checker in the view is how a console comes to disagree with its own backend.
+Even the "recommended next step" is `agent.evidence_gap()`, the same function
+the loop uses to decide whether to send a run back.
+
+The selected workload is the investigated workload all the way through:
+selection → prompt → tool arguments → evidence → grounding → RCA. Every event
+carries a `run_id` and every answer its `target`, so that chain is a comparison
+rather than an assumption. See `docs/UI.md`.
 
 Kept out of `requirements.txt` on purpose: Streamlit pulls numpy, pandas,
 pyarrow and friends — 13 packages against this tool's five — into a process

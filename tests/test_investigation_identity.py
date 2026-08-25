@@ -402,6 +402,86 @@ class TestTheClusterCannotMoveTheTarget:
 
         assert rec.last["target"]["name"] == B["name"]
 
+    def test_narrowing_the_namespace_filter_does_not_retarget(self):
+        """
+        The sidebar's namespace filter changes what the scan returns, which
+        changes the option list -- the same mechanism as a TTL re-read, reached
+        by a different door. Filtering to one namespace must not silently move
+        an investigation that was aimed at another.
+        """
+        rec = Recorder()
+        import streamlit as st
+
+        st.cache_data.clear()
+        # scan_cluster is called with the chosen namespaces; honour them, so the
+        # option list genuinely shrinks the way it does live.
+        def scan(*args, **kwargs):
+            # ui.py calls scan_cluster(only_unhealthy, limit, namespaces,
+            # workload) POSITIONALLY. Reading a namespaces= kwarg here returned
+            # None every time, the option list never narrowed, and the
+            # assertion below passed for the wrong reason until the setup was
+            # made to prove itself.
+            ns = kwargs.get("namespaces")
+            if ns is None and len(args) >= 3:
+                ns = args[2]
+            ns = ns or ""
+            if not ns:
+                return SCAN
+            wanted = {n.strip() for n in str(ns).split(",") if n.strip()}
+            return {k: v for k, v in SCAN.items()
+                    if k.split("/")[0] in wanted}
+
+        with patch.multiple(
+            k8s,
+            scan_cluster=scan,
+            list_nodes=lambda *a, **k: {},
+            list_namespaces=lambda *a, **k: [A["ns"], B["ns"]],
+            describe_pod=lambda *a, **k: {"pod": "x", "containers": {}},
+            get_pod_events=lambda *a, **k: {"pod": "x", "events": []},
+            get_pod_logs=lambda *a, **k: {"pod": "x", "source": "c", "logs": "b"},
+        ), patch.object(agent, "stream", rec):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.run()
+            app.selectbox[0].set_value(B["key"]).run()
+            assert app.session_state["subject"]["workload"] == B["key"]
+
+            # Narrow to the OTHER namespace, which removes B from the scan.
+            app.multiselect[0].set_value([A["ns"]]).run()
+
+            # Prove the setup did what it claims before asserting on it: if the
+            # filter never reached scan_cluster the option list is unchanged and
+            # everything below passes for the wrong reason.
+            assert any(B["key"] in str(w.value) for w in app.warning), \
+                "the namespace filter did not actually narrow the scan"
+            assert app.session_state["subject"]["workload"] == B["key"], \
+                "narrowing the namespace filter moved the investigation target"
+
+    def test_a_reload_loses_the_panel_but_not_the_history(self):
+        """
+        session_state dies with the browser tab; the store does not. After a
+        refresh the answer is gone from the page and recoverable from the
+        sidebar -- which is what _history() exists for and what nothing had
+        exercised.
+        """
+        rec = Recorder()
+        scan, stream = app_with(rec)
+        with scan, stream:
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.run()
+            investigate(app, B["key"])
+            assert "answer" in app.session_state
+
+            # A reload is a fresh session against the same server process.
+            fresh = AppTest.from_file(UI, default_timeout=60)
+            fresh.run()
+
+            assert "answer" not in fresh.session_state or \
+                not fresh.session_state["answer"], \
+                "an answer survived into a new session"
+            labels = [b.label for b in fresh.button]
+            assert any(B["name"] in str(label) for label in labels), \
+                "the finished investigation was not recoverable after a reload"
+
     def test_a_cached_scan_cannot_overwrite_the_chosen_target(self):
         rec = Recorder()
         scan, stream = app_with(rec)
