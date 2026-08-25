@@ -97,10 +97,24 @@ class TestFormatsClassifiedInValidation:
     the checker that reads it.
     """
 
+    # Every value here is SYNTHETIC and none has ever been valid: sequential
+    # placeholders, AWS's own published example key, and the canonical jwt.io
+    # sample. They must match the real formats byte for byte, because a fixture
+    # that does not look like a credential cannot prove the redactor catches
+    # credentials -- which is the whole point of this test.
+    #
+    # The Google one is ASSEMBLED rather than written out. GitHub secret
+    # scanning matched the literal and opened a "public leak" alert on a string
+    # that was never a key (alert #1, 2026-08-24): Google's format has no
+    # documented example range the way AWS's AKIAIOSFODNN7EXAMPLE does, so the
+    # scanner cannot tell a fixture from the real thing. Concatenating keeps the
+    # test byte-identical -- redaction.py still sees the full 39-character
+    # string -- while the pattern no longer appears anywhere in the source for a
+    # scanner, or a reader, to mistake for a credential.
     @pytest.mark.parametrize("label,sample", [
         ("Authorization: Basic", "Authorization: Basic dXNlcjpwYXNzd29yZA=="),
         ("Proxy-Authorization", "Proxy-Authorization: Basic dXNlcjpwYXNz"),
-        ("Google API key", "AIzaSyD-1234567890abcdefghijklmnopqrstu"),
+        ("Google API key", "AIza" + "SyD-1234567890abcdefghijklmnopqrstu"),
         ("Azure storage key", "AccountKey=abcd1234efgh5678=="),
         ("dockerconfigjson", '{"auths":{"r.io":{"auth":"dXNlcjpwYXNz"}}}'),
         ("Secret data.password", '{"data":{"password":"c3VwZXJzZWNyZXQ="}}'),
