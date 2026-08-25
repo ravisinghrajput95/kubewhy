@@ -184,3 +184,123 @@ What none of this is: pod logs still enter this process, this terminal and this
 machine's memory whatever the mode. `redaction.py` strips common secret shapes
 and `deploy/rbac.yaml` limits what the agent can read at all, but "local" is
 not the same as "safe to point at prod".
+
+## Deterministic code versus model behaviour
+
+This is the load-bearing distinction in the system, and it is worth stating
+plainly: **the model chooses how to investigate; it does not decide what is
+true, what it is investigating, or when to stop.** Everything in the left
+column runs the same way every time and is covered by unit tests. Everything in
+the right column varies between runs and is measured statistically instead.
+
+| Deterministic | Model |
+|---|---|
+| Which tools exist, and their schemas (`tool_schema.py`) | Which tool to call next |
+| Tool arguments, after `targeting.enforce()` rewrites off-target ones | The arguments it proposes |
+| What a tool returns — a projection, not raw API objects | How the result is interpreted |
+| Redaction, at collection and again at the egress boundary | — |
+| Whether a claim is supported, contradicted, unsupported or unknown | Which claims to make |
+| The five grounding verdicts | The wording of the answer |
+| When the investigation stops (`MAX_ROUNDS`, `TRIAGE_INVESTIGATION_BUDGET`) | When it would like to stop |
+| Which endpoint counts as external, and whether egress is permitted | — |
+| Whether a run is sent back for evidence it provably lacks | — |
+| Failover between providers sharing a wire format | — |
+
+A consequence worth naming: **kubewhy's safety properties do not depend on the
+model behaving well.** Swapping `qwen3` for `gpt-4o-mini` changes the answers;
+it does not change what the tools may do, where evidence may go, how long a run
+may take, or how a claim is scored.
+
+## The agent loop
+
+`agent.stream()` yields every step as it happens; `agent.ask()` is that drained
+to completion, so the two cannot drift. Each event carries a `run_id`, and the
+answer carries the `target`, so a caller can check that the artifacts in front
+of it belong to the investigation it asked for rather than assuming so.
+
+One round is: send messages → receive tool calls or a final answer → for each
+tool call, enforce scope, execute, project, append the result → repeat.
+
+Three deterministic things can send a round back:
+
+- **named-tool re-ask** — the answer names a tool it never called
+- **evidence policy** — `evidence_gap()` finds a pod whose cause is provably not
+  in its status block and which the run never read. Events hold the cause for a
+  container that never started; logs hold it for one that started and exited.
+  They are not interchangeable.
+- **coverage** — the summary omits workloads the scan returned
+
+## Tool registry
+
+Plain Python functions returning JSON-able dicts. That is what lets one
+definition serve as a REST handler, a model tool, an MCP tool and a UI panel
+with no adapter. `tool_schema.py` derives JSON Schema from the same callables
+Ollama introspects, so there is one definition and two consumers rather than
+two definitions that drift.
+
+**Every tool is read-only.** There is no write path, no `kubectl apply`, no
+scale, no delete. `errors come back as {"error": ...} data and are never
+raised`, so a failing tool costs a round rather than the run.
+
+## Targeting and entity scope
+
+`targeting.py` extracts the entity a question is about and holds it fixed. Every
+tool call is checked against it: a call that would widen or move the scope is
+rewritten where the arguments allow and refused where they do not.
+
+A surface that already knows its target — the console, which has a selection —
+passes it as data via `agent.scoped_target()`. Parsing is reserved for surfaces
+that genuinely have only a sentence. That split exists because re-deriving the
+target by parsing a generated prompt produced a workload called `example`; see
+[VALIDATION.md](VALIDATION.md).
+
+## Grounding and contradiction
+
+Two stages, deliberately separate:
+
+- `grounding.check()` asks **does the evidence contain this value?**
+- `contradiction.scan()` asks **does the evidence say something else?**
+
+"The tools did not say" and "the tools said otherwise" are different, and only
+the second means the answer is wrong. Five verdicts: `grounded`, `partial`,
+`ungrounded`, `insufficient_evidence`, `contradicted`. `grounding.contract()`
+splits the result into observations (each citing tool and field), inferences,
+unknowns, contradictions and corrections — which is what the console renders.
+
+`grounding.verify()` rewrites an unsupported figure **in place** in the answer
+text, so a reader skimming for a number finds the measured one or an explicit
+`[unverified: ...]` marker rather than a fabricated value.
+
+## Inference gateway
+
+`backends.py` is the protocol; `inference.py` is where inference happens, plus
+egress policy, failover and telemetry. `Gateway` presents the same four methods
+a backend does, so `agent._backend()` returns one and the loop is unchanged.
+
+- **Endpoint classification** decides internal vs external on the name *as
+  written*, never resolved. The classifier and the HTTP client normalise through
+  the same parser, by construction — two parsers on one string agree only by
+  coincidence, and that gap was once an exploitable egress bypass.
+- **Failover** is wire-aware: mid-run only between providers sharing a wire
+  format, because a conversation half in one dialect is not resumable in
+  another.
+- **One deadline per investigation**, shared across primary and fallback. A
+  fallback cannot reset it; when the budget is exhausted the fallback is skipped
+  and logged as `fallback_skipped_deadline_exhausted`.
+
+## Policy boundaries
+
+| Boundary | Enforced by |
+|---|---|
+| Cluster reads | ClusterRole with no write verbs |
+| What leaves the process | `redaction.redact()` at collection and at egress |
+| Where inference may go | `TRIAGE_ALLOW_EXTERNAL_INFERENCE` + endpoint classification |
+| What the dataplane permits | `networkPolicy.enabled=true` in the chart |
+| How long a run may take | `TRIAGE_INVESTIGATION_BUDGET`, one deadline per `chat()` |
+
+## Presentation layer
+
+`ui.py`, a single Streamlit page, rendered server-side. The browser holds no
+Kubernetes client and no provider credential. **The view computes no verdict** —
+every field is read from what `stream()` returned and `contract()` produced.
+See [UI.md](UI.md).
