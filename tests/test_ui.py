@@ -704,3 +704,120 @@ class TestTheRewriteStaysDisclosed:
 
         assert not any("what was actually sent" in (e.label or "")
                        for e in app.expander)
+
+
+# --- states an investigation can end in --------------------------------------
+#
+# Section 2 of the demo-validation brief: a console is judged on what it does
+# when a run does NOT go well, and those paths are the ones a demo never
+# exercises. Each of these is a state the loop can genuinely produce.
+
+class TestAnInvestigationThatDoesNotSucceed:
+    def test_a_backend_failure_is_shown_and_the_page_stays_usable(self):
+        """
+        Anything reaching this handler is the model backend -- the loop hands
+        tool failures back as data. The operator has to see it, and has to be
+        able to try again without reloading.
+        """
+        import streamlit as st
+        import agent as agent_mod
+
+        st.cache_data.clear()
+
+        def explode(*args, **kwargs):
+            raise ConnectionError("model backend unreachable")
+            yield  # pragma: no cover -- makes this a generator
+
+        with patch.object(k8s, "scan_cluster", return_value={
+                "demo/crasher": {"status": "CrashLoopBackOff", "pods": 1,
+                                 "example": "crasher-1", "fault": "crash"}}), \
+             patch.object(k8s, "list_nodes", return_value={}), \
+             patch.object(k8s, "describe_pod",
+                          return_value={"pod": "x", "containers": {}}), \
+             patch.object(k8s, "get_pod_events",
+                          return_value={"pod": "x", "events": []}), \
+             patch.object(k8s, "get_pod_logs",
+                          return_value={"pod": "x", "source": "c", "logs": "b"}), \
+             patch.object(agent_mod, "stream", explode):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.run()
+            app.button[0].click().run()
+
+        assert any("unreachable" in e.value for e in app.error), \
+            "a backend failure was swallowed"
+        # Still usable: the form is on the page, not replaced by a stack trace.
+        assert app.button, "the page lost its controls"
+        assert not app.exception
+
+    def test_a_timed_out_investigation_says_so_and_invents_nothing(self):
+        """
+        `deadline_exceeded` is an operational outcome, not an answer. The strip
+        must name it, and the panel must not dress the partial evidence up as a
+        conclusion.
+        """
+        app = render_answer({**ANSWER,
+                             "termination": "deadline_exceeded",
+                             "confidence": "insufficient_evidence",
+                             "answer": "Ran out of time before reaching a "
+                                       "conclusion.",
+                             "rca": {"observations": [], "inferences": [],
+                                     "unknowns": [], "contradictions": [],
+                                     "corrections": []}})
+        strip = _html(app, "<div class='kw-strip'>")
+
+        assert "deadline exceeded" in strip[0]
+        assert "Insufficient evidence" in strip[0]
+        # The evidence it did collect is still there to read.
+        assert any("Evidence" in (e.label or "") for e in app.expander)
+
+    def test_a_run_that_hit_max_rounds_is_labelled_as_such(self):
+        app = render_answer({**ANSWER, "termination": "max_rounds"})
+
+        assert "max rounds" in _html(app, "<div class='kw-strip'>")[0]
+
+
+class TestTheUiDisplaysTheBackendsGroundingNotItsOwn:
+    """
+    The rule the console is built on. A second implementation of the checker in
+    the view is how a console comes to disagree with its own backend, and then
+    neither one is obviously right.
+    """
+
+    def test_the_verdict_shown_is_the_verdict_supplied(self):
+        """
+        Deliberately inconsistent input: the backend says `grounded` while the
+        contract carries an unknown. A view that recomputed would downgrade it.
+        The view must show what it was given.
+        """
+        app = render_answer({**ANSWER,
+                             "confidence": "grounded",
+                             "rca": {"observations": [],
+                                     "inferences": [],
+                                     "unknowns": ["something unsupported"],
+                                     "contradictions": [], "corrections": []}})
+        strip = _html(app, "<div class='kw-strip'>")
+
+        assert "Grounded" in strip[0]
+        assert "Partial" not in strip[0] and "Ungrounded" not in strip[0]
+
+    def test_an_unrecognised_verdict_is_shown_rather_than_guessed_at(self):
+        """
+        If grounding.py grows a sixth verdict, the console must render it, not
+        silently map it onto one of the five it knows.
+        """
+        app = render_answer({**ANSWER, "confidence": "provisional"})
+
+        assert "provisional" in _html(app, "<div class='kw-strip'>")[0]
+
+    def test_claim_counts_come_from_the_contract(self):
+        app = render_answer({**ANSWER,
+                             "rca": {"observations": [{"claim": "a", "kind": "s"},
+                                                      {"claim": "b", "kind": "s"}],
+                                     "inferences": [{"claim": "c"}],
+                                     "unknowns": ["d", "e", "f"],
+                                     "contradictions": [], "corrections": []}})
+        body = " ".join(str(m.value) for m in app.markdown)
+
+        assert "**Observed** · 2" in body
+        assert "**Inferred** · 1" in body
+        assert "**Unknown** · 3" in body

@@ -515,11 +515,14 @@ CASES = [
     {
         "name": "scoping_holds_among_many_broken",
         "category": "entity-scoping",
-        "ground_truth": "log-shipper is a DaemonSet whose container exits; the answer must be about it and not about a noisier neighbour",
-        "required_evidence": ["log-shipper pod status", "its logs or events"],
+        "ground_truth": "log-shipper exits 2 logging 'no sink configured'; the answer must be about it and not about a noisier neighbour",
+        "required_evidence": ["container logs", "last_termination.exit_code"],
         "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
         "question": "Why is the log-shipper daemonset in the demo namespace failing?",
-        "expect_all": [["log-shipper"]],
+        # Not ["log-shipper"]: the case name is in the question, and an answer
+        # that only repeats the question would pass. The cause is in the log
+        # line, which nothing in the question says.
+        "expect_any": ["sink", "no sink configured", "exit code 2", "exit 2"],
         # Every one of these is genuinely broken at the same time. Naming one
         # as the answer is the substitution failure.
         "forbid": ["memory-hog", "bad-image", "missing-configmap-key"],
@@ -527,22 +530,25 @@ CASES = [
     {
         "name": "scoping_quiet_workload_beside_loud_one",
         "category": "entity-scoping",
-        "ground_truth": "slow-starter restarts on a failing probe while memory-hog is OOMKilling nearby; the answer must stay on slow-starter",
-        "required_evidence": ["slow-starter pod status"],
+        "ground_truth": "slow-starter is killed with exit 137 before it finishes starting, while memory-hog is OOMKilling nearby",
+        "required_evidence": ["last_termination.exit_code", "probe configuration or events"],
         "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
         "question": "Why is the slow-starter deployment in the demo namespace restarting?",
-        "expect_all": [["slow-starter"]],
+        # 137 is SIGKILL. Naming the mechanism requires having read the status;
+        # naming the workload only requires having read the question.
+        "expect_any": ["137", "liveness", "probe", "killed", "sigkill",
+                       "terminated"],
         "forbid": ["memory-hog", "oomkilled"],
     },
     # -------------------------------------------------------------- workload
     {
         "name": "cronjob_runs_are_one_workload",
         "category": "crashloop",
-        "ground_truth": "nightly-sync is a CronJob whose runs fail; each scheduled run is not a separate broken workload",
-        "required_evidence": ["pod status", "last_termination"],
+        "ground_truth": "nightly-sync's runs fail logging 'FATAL: upstream returned 503'; each scheduled run is not a separate broken workload",
+        "required_evidence": ["container logs", "pod status"],
         "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
         "question": "Why is the nightly-sync cronjob in the demo namespace failing?",
-        "expect_all": [["nightly-sync"]],
+        "expect_any": ["503", "upstream"],
         "forbid": ["oomkilled", "image pull"],
     },
     # ------------------------------------------------------------- misleading
@@ -565,7 +571,9 @@ CASES = [
         "required_evidence": ["waiting_reason", "image reference"],
         "expected_grounding": ["grounded", "partial"],
         "question": "Is the bad-image deployment in the demo namespace being OOMKilled? Explain what is actually happening.",
-        "expect_any": ["image", "pull", "not exist", "not found", "registry"],
+        # "image" is in the question -- `bad-image` -- so it cannot be an
+        # expectation here. The registry's answer is what has to appear.
+        "expect_any": ["pull", "not exist", "not found", "registry", "tag"],
         "forbid": ["oomkilled", "out of memory", "memory limit"],
     },
 ]
