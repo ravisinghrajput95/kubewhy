@@ -161,6 +161,13 @@ Every figure in that sentence is in the table above. That is the whole point.
 - **Credentials stay server-side.** Streamlit renders server-side; the browser
   holds no Kubernetes client and no provider key. Pinned by
   `tests/test_ui_security.py`.
+- **An audit record per investigation.** Who asked, through which surface, the
+  redacted question, every tool called and with what arguments, which pods'
+  logs were read, the verdict, and whether evidence could have left the
+  network. Emitted for abandoned and failed runs too. It deliberately does
+  **not** carry the tool output, the answer, the inference endpoint or an
+  exception message — an audit log is shipped centrally and kept for a long
+  time, and a copy of your pod logs does not belong in one.
 
 Full threat model: [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -1130,7 +1137,11 @@ policy and the fallback rules.
 | `OLLAMA_TIMEOUT` | `300` | Seconds before a model call is abandoned |
 | `OLLAMA_KEEP_ALIVE` | *unset* | How long Ollama holds the weights after a request, e.g. `24h`. Forwarded on every call, because the client library does not read it. Unset means the server's own default (5m) |
 | `K8S_TIMEOUT` | `15` | Seconds before a cluster call is abandoned |
-| `TRIAGE_API_TOKEN` | *unset* | Bearer token; unset means no auth |
+| `TRIAGE_API_TOKEN` | *unset* | Bearer token for machine callers; unset means no auth |
+| `TRIAGE_AUTH_MODE` | `none` | `proxy` trusts an identity header from an authenticating reverse proxy and **refuses a request without one**. An unrecognised value refuses to start |
+| `TRIAGE_AUTH_EMAIL_HEADER` | oauth2-proxy's | Comma-separated header names carrying the identity. Naming your own replaces the built-in names rather than adding to them |
+| `TRIAGE_AUDIT` | `1` | One audit record per investigation. `0` turns it off |
+| `TRIAGE_AUDIT_LOG` | *unset* | Append audit records to this file as well as to the log stream |
 | `TRIAGE_STUCK_AFTER` | `300` | Seconds a pod may sit in `ContainerCreating` or `PodInitializing` before the controller treats it as a fault rather than a start-up |
 | `TRIAGE_STATE_DB` | *unset* | Path to a SQLite file for controller dedup state and `/ask` job results. Unset, both live in memory and a restart forgets them. The Helm chart sets it when `persistence.enabled=true` |
 | `TRIAGE_JOB_TTL` | `86400` | Seconds an `/ask` job result is kept before purging |

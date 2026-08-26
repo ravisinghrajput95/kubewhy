@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1063 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1097 passing, no cluster or model required |
 | Grounding replay | **PROVEN** | 907 recorded runs, 0 regressions on the last change |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -22,6 +22,8 @@ and does not support. Four words are used and they mean specific things:
 | Console authentication | **PROVEN** | kind + real OIDC issuer; console unreachable from another pod |
 | Forged identity header | **PROVEN** | overwritten by the proxy, measured with a session held |
 | Per-user authorization | **NOT TESTED** | deliberately not implemented — see SECURITY.md |
+| Audit trail (CLI, REST) | **PROVEN** | live runs; evidence absent from the record |
+| Audit trail (console, controller, Slack) | **PARTIALLY PROVEN** | unit tests only, same hook |
 | Read-only RBAC | **PROVEN** | runtime validated on GKE by attempting operations |
 | GKE runtime | **PROVEN** | released chart, real cluster |
 | GKE / Calico NetworkPolicy | **PROVEN** | dataplane-enforced egress |
@@ -270,6 +272,56 @@ provider has been tested, and `networkPolicy.enabled=true` cannot reach one
 anyway — it selects the console pod and permits egress only to private address
 space. Nothing here is evidence about authorization, which does not exist.
 
+### 11. The audit trail credited every API investigation to nobody
+
+**Problem.** An investigation run through `POST /ask` produced an audit record
+reading `principal: anonymous, auth: unknown, surface: unknown`. The request
+log line immediately beside it named the caller correctly.
+
+**Detection.** Running a real investigation through the API against a real
+cluster and reading the record. Every unit test passed, because they drove
+`agent.stream()` directly and never crossed the ASGI boundary.
+
+**Root cause.** FastAPI runs a **sync dependency on an AnyIO worker thread**.
+A ContextVar set there lives in that thread's copied context and is discarded
+when the dependency returns, so `audit.actor()` — called from
+`require_caller` — never reached the loop. Measured against a live app: a
+value set in middleware is seen by both sync and async endpoints; one set in a
+sync dependency is seen by neither.
+
+**Fix.** Computing identity was separated from refusing on it.
+`authenticate()` decides who a request is and whether it should be refused,
+never raising; the middleware calls it before dispatch and stores both on
+`request.state`; `require_caller` only enforces. Identity is now computed once
+rather than twice, which is also why the two log lines can no longer disagree.
+
+**Regression evidence.** Three tests, one of which asserts the request line
+and the audit record agree — they disagreed, and that is what made the defect
+survivable. Restoring `audit.actor()` to the dependency turns all three red.
+
+## What the audit trail was verified against
+
+Live runs on a kind cluster with the `demo/broken-pods.yaml` fixtures and
+qwen3 on local Ollama, one per surface that has a different actor:
+
+| Surface | principal | auth | Record |
+|---|---|---|---|
+| CLI | the OS account | `os` | 5 tool calls, verdict `partial` |
+| REST `/ask` | `sre@example.com` | `proxy` | 4 tool calls, verdict `grounded` |
+
+Both records named the pod whose logs were read. **Neither carried the logs.**
+The demo pod's actual output is `FATAL: could not connect to db:5432:
+connection refused`; searching the record of the run that read it for
+`connect`, `5432`, `db`, `Traceback` and `error` returns nothing, while
+`sensitive_reads` names the pod. That is the property this design exists for,
+and it is measured rather than asserted.
+
+**What this does not establish.** Three surfaces are wired and untested live:
+the console, the controller and Slack. Their wiring is covered by unit tests
+and the hook they use is the same one, but the API defect above is exactly
+what a unit test could not see — so they are PARTIALLY PROVEN at best and are
+not claimed otherwise.
+
 ## Test-harness failures worth recording
 
 Three times a harness reported a clean result it had not earned. Recording them
@@ -292,7 +344,7 @@ is not a result.
 ## Reproducing
 
 ```bash
-pytest                                   # 1063, no cluster or model needed
+pytest                                   # 1097, no cluster or model needed
 
 kind create cluster --name kubewhy
 kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \

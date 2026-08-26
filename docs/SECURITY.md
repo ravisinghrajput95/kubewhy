@@ -85,6 +85,41 @@ their own service.
   n=5 baseline: 9 contradicted claims (qwen3), 3 (gpt-4o-mini) — caught, not
   shipped as fact.
 
+### No record of who read what
+
+- **One audit record per investigation**, on the `triage.audit` logger as
+  `msg: investigation`, and optionally appended to `TRIAGE_AUDIT_LOG` as well.
+  It names the principal and how they authenticated, the surface, the
+  (redacted) question, the target, every tool called and with what arguments,
+  the namespaces touched, which pods' **logs** were read specifically, the
+  verdict, and where inference was configured to happen.
+- **Emitted for every run, not only successful ones.** A run that raised, one
+  that hit its deadline, and one whose caller closed the browser tab all
+  produce a record — that last is `abandoned` rather than `error`, because an
+  audit trail that files closed tabs as failures has people chasing incidents
+  that did not happen.
+- **The record does not carry the evidence.** Not the tool output, not the
+  answer (it quotes the evidence), not the inference endpoint (it can carry a
+  token in its userinfo), not an exception message (a provider's error text
+  can quote the request). The question is carried, capped and passed through
+  `redaction.redact()`, because a person can paste a credential into it.
+  Verified live: the string a demo pod actually logs
+  (`FATAL: could not connect to db:5432`) appears nowhere in the record of the
+  run that read it, while `sensitive_reads` names the pod whose logs were read.
+- **`evidence_left_network` is derived from policy, not observed.**
+  `inference.Gateway` holds one `active` target for the whole process, so
+  reading it at the end of a run is right with one investigation in flight and
+  wrong with two. Policy is provable: `allow_external=False` makes egress
+  impossible because the gateway raises before a request is built. It is
+  three-valued — `false`, `true`, `"possible"` — because an auditor can act on
+  "possible" and cannot act on a `false` that meant "probably not".
+
+**Limitations.** The record says a tool was called and what it was called with;
+it cannot say what a person then did with the answer. It is written to a log
+stream this process can also write other things to, so it is as tamper-evident
+as your log pipeline and no more. And `TRIAGE_AUDIT=0` turns it off, which is a
+decision someone has to make rather than a default.
+
 ### Unbounded runs
 
 - **One deadline per investigation** (`TRIAGE_INVESTIGATION_BUDGET`, default
@@ -173,9 +208,6 @@ that passes while its payload never arrived is proving nothing.
 ## What is not protected
 
 - **Redaction is incomplete by nature.** See above.
-- **No audit log of questions asked.** The request line names the principal and
-  how they authenticated, which is where that will be built, but a per-question
-  trail of what evidence was collected does not exist.
 - **No rate limiting.**
 - **Authentication is not authorization, and there is no per-user authorization
   model.** Everyone who signs in sees everything the ServiceAccount can read.

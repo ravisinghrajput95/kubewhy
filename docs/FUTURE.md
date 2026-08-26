@@ -50,8 +50,6 @@ with its own ServiceAccount is the shape to reach for.
 detaches the work but the result lives in this process's store — one replica or
 nothing.
 
-**Audit logging** of questions asked and evidence collected.
-
 **Rate limiting.**
 
 ## Explicitly not planned
