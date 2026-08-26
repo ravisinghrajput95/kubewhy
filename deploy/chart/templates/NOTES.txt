@@ -21,6 +21,23 @@ so latency is not a problem here. Findings are capped at
 {{ .Values.watch.maxPerHour }}/hour with a {{ .Values.watch.cooldownSeconds }}s
 per-workload cooldown.
 {{- if .Values.ui.enabled }}
+{{- if .Values.ui.auth.enabled }}
+
+The browser UI is running behind an authenticating proxy. Reach it at the URL
+you configured as ui.auth.externalUrl:
+
+  {{ .Values.ui.auth.externalUrl }}
+
+Signing in is required: the console binds loopback and the Service reaches the
+proxy, so its own port is in no Service at all. Everyone who signs in sees
+everything the ServiceAccount can read -- authentication is not authorization,
+and kubewhy has no per-user authorization model. Narrow what anyone can see by
+narrowing the ClusterRole, and narrow who may sign in with ui.auth.emailDomains
+or an --allowed-group in ui.auth.extraArgs.
+
+This chart still ships no Ingress. If you put one in front, it must terminate
+at the proxy's port ({{ .Values.ui.auth.port }}), never the console's.
+{{- else }}
 
 The browser UI is running, and it has no authentication. Reach it deliberately:
 
@@ -29,6 +46,7 @@ The browser UI is running, and it has no authentication. Reach it deliberately:
 
 This chart ships no Ingress on purpose. The page renders cluster state and pod
 logs, and there is no token to set -- anyone who can reach the Service sees
-everything the ServiceAccount can read. If you expose it, put something in
-front that authenticates.
+everything the ServiceAccount can read. Set ui.auth.enabled=true to put an
+authenticating proxy in front of it.
+{{- end }}
 {{- end }}

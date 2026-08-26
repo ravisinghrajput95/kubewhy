@@ -102,6 +102,36 @@ spec:
               value: {{ .Values.logLevel | quote }}
           # Streamlit ships a health endpoint, which is what tells you the
           # difference between a pod that is Running and a page that renders.
+          {{- if .Values.ui.auth.enabled }}
+          # exec, not httpGet, and this is not a style preference. The kubelet
+          # probes the POD IP; with auth on, the console binds loopback, so an
+          # httpGet probe dials 10.x.x.x:8501 and gets connection refused
+          # forever. The readiness failure keeps the pod out of the Service
+          # and the liveness failure kills the container every 40 seconds,
+          # while the proxy beside it stays perfectly healthy.
+          #
+          # Found by installing the chart, not by rendering it: `helm template`
+          # produces the same probe whether or not it can ever pass, and the
+          # chart tests were green. Probing over loopback from inside the
+          # container is also the more honest check -- it is the address the
+          # proxy actually uses.
+          readinessProbe:
+            exec:
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:{{ .Values.ui.port }}/_stcore/health', timeout=5)"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:{{ .Values.ui.port }}/_stcore/health', timeout=5)"]
+            # Generous: Streamlit is slow to start, and a liveness probe that
+            # fires during startup kills the container forever while reporting
+            # CrashLoopBackOff, which reads as an application bug.
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 3
+          {{- else }}
           readinessProbe:
             httpGet:
               path: /_stcore/health
@@ -118,6 +148,7 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
             failureThreshold: 3
+          {{- end }}
           resources:
             {{- toYaml .Values.ui.resources | nindent 12 }}
           volumeMounts:
@@ -164,6 +195,10 @@ spec:
             # that matters is worth stating where someone editing this can see
             # it. Turn it on only with a trusted proxy ahead of this one.
             - --reverse-proxy=false
+            # Straight to the provider instead of an interstitial page whose
+            # only content is one button. There is exactly one provider here,
+            # so the choice it offers is not a choice.
+            - --skip-provider-button=true
             - --silence-ping-logging=true
             {{- with .Values.ui.auth.extraArgs }}
             {{- toYaml . | nindent 12 }}

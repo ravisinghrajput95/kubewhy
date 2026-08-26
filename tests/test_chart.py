@@ -532,3 +532,93 @@ class TestWithoutAuthNothingChanged:
         """
         env = container_env(render("ui.enabled=true", "ui.exposureAcknowledged=true"), "ui")
         assert "TRIAGE_AUTH_MODE" not in env
+
+
+class TestTheConsoleCanActuallyBeProbed:
+    """
+    The defect installing found and rendering could not.
+
+    The kubelet probes the POD IP. With auth on the console binds loopback, so
+    an httpGet probe dials 10.x.x.x:8501 and gets connection refused forever:
+    readiness keeps the pod out of the Service and liveness kills the
+    container every 40 seconds, while the proxy beside it stays healthy. On
+    kind the pod sat 1/2 Running with 4 restarts and `helm template` rendered
+    the broken probe and the working one identically.
+    """
+
+    def test_the_probes_do_not_dial_the_pod_ip(self):
+        ui = containers(render(*AUTH), "ui")["ui"]
+
+        for probe in ("readinessProbe", "livenessProbe"):
+            assert "httpGet" not in ui[probe], (
+                f"{probe} uses httpGet, which the kubelet sends to the pod IP; "
+                "the console binds loopback when auth is on")
+
+    def test_the_probes_reach_the_console_over_loopback(self):
+        ui = containers(render(*AUTH), "ui")["ui"]
+        port = ui["ports"][0]["containerPort"]
+
+        for probe in ("readinessProbe", "livenessProbe"):
+            command = " ".join(ui[probe]["exec"]["command"])
+            assert f"127.0.0.1:{port}" in command
+            assert "/_stcore/health" in command
+
+    def test_the_probe_follows_a_changed_console_port(self):
+        ui = containers(render(*AUTH, "ui.port=9000"), "ui")["ui"]
+        assert "127.0.0.1:9000" in " ".join(ui["readinessProbe"]["exec"]["command"])
+
+    def test_the_proxy_is_still_probed_over_http(self):
+        """
+        It binds every interface, so the pod IP reaches it. Converting this to
+        an exec probe too would be cargo-culting the fix.
+        """
+        proxy = containers(render(*AUTH), "ui")["auth"]
+        assert proxy["readinessProbe"]["httpGet"]["path"] == "/ping"
+
+    def test_without_auth_the_http_probe_is_unchanged(self):
+        ui = containers(render("ui.enabled=true", "ui.exposureAcknowledged=true"), "ui")["ui"]
+        assert ui["readinessProbe"]["httpGet"]["path"] == "/_stcore/health"
+
+
+class TestTheNotesMatchTheDeployment:
+    """
+    NOTES.txt is the last thing an operator reads and the first thing they
+    believe. It told them the console had no authentication while it was
+    running behind a proxy, and printed a port-forward to a port that is in no
+    Service -- both found by installing, because nothing renders NOTES.txt in
+    a test but `helm install` prints it.
+    """
+
+    def test_the_notes_do_not_claim_the_console_is_unauthenticated(self):
+        # NOTES.txt is not a manifest, so it is not among the rendered
+        # documents and `helm template` never produces it. A dry-run install
+        # is the only way a test can see what an operator is told.
+        assert "no authentication" not in _notes(*AUTH)
+
+    def test_the_notes_name_the_proxy_port_not_the_console_port(self):
+        notes = _notes(*AUTH)
+        assert "4180" in notes
+        assert "port-forward" not in notes
+
+    def test_the_notes_say_authentication_is_not_authorization(self):
+        """
+        The single most likely misreading of this feature, and the one that
+        would put kubewhy in front of two teams that must not see each other.
+        """
+        assert "not authorization" in _notes(*AUTH)
+
+    def test_without_auth_the_notes_still_warn(self):
+        notes = _notes("ui.enabled=true", "ui.exposureAcknowledged=true")
+        assert "no authentication" in notes
+        assert "ui.auth.enabled=true" in notes
+
+
+def _notes(*settings):
+    """NOTES.txt, which only a dry-run install renders."""
+    command = ["helm", "install", "t", CHART, "--dry-run", "--namespace", "t"]
+    for setting in settings:
+        command += ["--set", setting]
+    out = subprocess.run(command, capture_output=True, text=True)
+    if out.returncode != 0:
+        raise AssertionError(out.stderr.strip())
+    return out.stdout.split("NOTES:", 1)[-1]
