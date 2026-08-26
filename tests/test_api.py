@@ -450,3 +450,87 @@ class TestPrincipalIsLogged:
         line = next(r for r in caplog.records if r.message == "request")
         assert line.principal == "anonymous"
         assert line.auth == "anonymous"
+
+
+class TestTheAuditTrailNamesTheApiCaller:
+    """
+    The defect a live run found and every unit test had missed.
+
+    FastAPI runs a sync dependency on an AnyIO worker thread, so a ContextVar
+    set there lives in that thread's copied context and is discarded when the
+    dependency returns. audit.actor() was called from require_caller, and the
+    result was that every API investigation was recorded as `anonymous` while
+    the request log line immediately beside it named the caller correctly --
+    which is the worst shape for this defect, because the surface that would
+    make you doubt the audit trail is the one that looks right.
+
+    Measured: a value set in middleware reaches both sync and async endpoints;
+    one set in a sync dependency reaches neither.
+    """
+
+    @pytest.fixture
+    def canned(self, monkeypatch):
+        """One trivial investigation, so no model or cluster is needed."""
+        import agent
+
+        def fake(*a, **k):
+            yield {"type": "tool_call", "run_id": "api-1", "name": "list_pods",
+                   "arguments": {"namespace": "demo"}}
+            yield {"type": "tool_result", "run_id": "api-1", "name": "list_pods",
+                   "result": "{}", "duration_ms": 1.0}
+            yield {"type": "answer", "run_id": "api-1", "answer": "ok",
+                   "target": {"name": "crasher", "namespace": "demo"},
+                   "confidence": "grounded", "tool_calls": [], "unverified": []}
+
+        monkeypatch.setattr(agent, "_stream", fake)
+
+    def audit_record(self, caplog):
+        lines = [r for r in caplog.records if r.message == "investigation"]
+        assert len(lines) == 1, f"expected one audit record, got {len(lines)}"
+        return lines[0]
+
+    def test_a_proxied_caller_is_named_in_the_audit_record(
+            self, monkeypatch, caplog, canned):
+        monkeypatch.setenv("TRIAGE_AUTH_MODE", "proxy")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            with caplog.at_level("INFO", logger="triage.audit"):
+                response = client.post(
+                    "/ask", json={"question": "why?"},
+                    headers={"X-Forwarded-Email": "sre@example.com"})
+
+        assert response.status_code == 200
+        line = self.audit_record(caplog)
+        assert line.principal == "sre@example.com"
+        assert line.auth == "proxy"
+        assert line.surface == "api"
+
+    def test_a_token_caller_is_named_as_a_token(self, monkeypatch, caplog, canned):
+        with patch.object(app_module, "API_TOKEN", "s3cret-token"):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            with caplog.at_level("INFO", logger="triage.audit"):
+                client.post("/ask", json={"question": "why?"},
+                            headers={"Authorization": "Bearer s3cret-token"})
+
+        line = self.audit_record(caplog)
+        assert line.auth == "token"
+        assert line.surface == "api"
+
+    def test_the_audit_record_and_the_request_line_agree(
+            self, monkeypatch, caplog, canned):
+        """
+        They disagreed, and that is what made the defect survivable. Pinned so
+        a future change cannot let them drift apart again.
+        """
+        monkeypatch.setenv("TRIAGE_AUTH_MODE", "proxy")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            with caplog.at_level("INFO"):
+                client.post("/ask", json={"question": "why?"},
+                            headers={"X-Forwarded-Email": "sre@example.com"})
+
+        request_line = next(r for r in caplog.records if r.message == "request")
+        audit_line = self.audit_record(caplog)
+
+        assert request_line.principal == audit_line.principal
+        assert request_line.auth == audit_line.auth

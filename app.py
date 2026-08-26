@@ -16,7 +16,7 @@ import uuid
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -67,9 +67,20 @@ def _bearer(authorization):
     return secrets.compare_digest(presented, API_TOKEN), True
 
 
-def require_caller(request: Request, authorization: str = Header(default="")):
+def authenticate(request):
     """
-    Who is calling, or 401.
+    Who this request is, and why it should be refused if it should. Never
+    raises, and never refuses on its own -- that is require_caller's job.
+
+    Split from the refusal so identity is computed exactly once, in the
+    request's own context, before anything is dispatched. That is not
+    tidiness. **Measured:** FastAPI runs a sync dependency on an AnyIO worker
+    thread, and a ContextVar set there lives in that thread's copied context
+    and is discarded when the dependency returns -- so the audit trail was
+    attributing every API investigation to `anonymous` while the request log
+    line beside it named the caller correctly. A value set in middleware
+    reaches both sync and async endpoints; one set in a sync dependency
+    reaches neither.
 
     Two ways in, because this API has two kinds of caller and they cannot
     authenticate the same way:
@@ -82,52 +93,45 @@ def require_caller(request: Request, authorization: str = Header(default="")):
       anything scripted. These have no browser to complete an OIDC flow with,
       so removing the token when the proxy arrived would break them.
 
-    A presented-but-wrong token is refused immediately rather than falling
-    through to the header path. Falling through would let a caller probe
-    tokens for free and, worse, would hand a valid proxy session to a request
-    that was simultaneously guessing credentials.
+    A presented-but-wrong token is refused rather than falling through to the
+    header path. Falling through would let a caller probe tokens for free and,
+    worse, would hand a valid proxy session to a request that was
+    simultaneously guessing credentials.
 
     Left with neither configured the API is open, which is only safe bound to
     localhost -- startup warns loudly about it.
     """
-    valid, attempted = _bearer(authorization)
+    valid, attempted = _bearer(request.headers.get("authorization", ""))
     if attempted:
         if not valid or not API_TOKEN:
-            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
-        principal = identity.Principal(name="api-token", source="token")
-        request.state.principal = principal
-        _record_actor(principal)
-        return principal
+            return identity.ANONYMOUS, "invalid or missing bearer token"
+        return identity.Principal(name="api-token", source="token"), None
 
     if API_TOKEN and not identity.required():
         # The pre-proxy contract, unchanged: a configured token is required.
-        raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+        return identity.ANONYMOUS, "invalid or missing bearer token"
 
     try:
-        principal = identity.require(request.headers, peer=_peer(request))
+        return identity.require(request.headers, peer=_peer(request)), None
     except identity.Unauthenticated as exc:
+        return identity.ANONYMOUS, exc.reason
+
+
+def require_caller(request: Request):
+    """
+    The caller, or 401. The decision was already made in the middleware; this
+    is where it is enforced, so that adding a route without this dependency
+    fails closed on the endpoints that matter rather than silently serving.
+    """
+    refusal = getattr(request.state, "auth_refusal", None)
+    if refusal:
         # 401 with the reason. Not 403: this is "we do not know who you are",
         # and the distinction tells whoever is on call whether the proxy is
         # misconfigured or whether someone reached the app around it.
-        log.warning("unauthenticated", extra={"reason": exc.reason,
+        log.warning("unauthenticated", extra={"reason": refusal,
                                               "path": request.url.path})
-        raise HTTPException(status_code=401, detail=exc.reason)
-
-    request.state.principal = principal
-    _record_actor(principal)
-    return principal
-
-
-def _record_actor(principal):
-    """
-    Hand the caller to the audit trail.
-
-    Set here rather than in each /ask handler: this dependency runs on every
-    authenticated route, and a handler that forgot the call would produce
-    investigations attributed to nobody -- which is exactly the failure mode
-    that put /references on the network without a token.
-    """
-    audit.actor(principal, surface="api")
+        raise HTTPException(status_code=401, detail=refusal)
+    return getattr(request.state, "principal", identity.ANONYMOUS)
 
 
 def _peer(request):
@@ -193,13 +197,17 @@ async def request_logging(request: Request, call_next):
     request_id = str(uuid.uuid4())[:8]
     started = time.perf_counter()
 
-    response = await call_next(request)
+    # Before dispatch, and here rather than in the dependency, because this is
+    # the only place a ContextVar set reaches the endpoint -- see
+    # authenticate(). The audit trail depends on it, and the audit trail is
+    # the thing that says who read a namespace's logs.
+    principal, refusal = authenticate(request)
+    request.state.principal = principal
+    request.state.auth_refusal = refusal
+    audit.actor(principal if principal.authenticated else "anonymous",
+                surface="api", auth=principal.source)
 
-    # The principal is set by require_caller, so it is absent on the
-    # unauthenticated endpoints (/healthz, /readyz) and on a request that was
-    # refused. "anonymous" is the honest value in both cases -- a request line
-    # that omits the field entirely is one a log query cannot count.
-    principal = getattr(request.state, "principal", identity.ANONYMOUS)
+    response = await call_next(request)
 
     log.info(
         "request",
