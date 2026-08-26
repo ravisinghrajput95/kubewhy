@@ -2,6 +2,10 @@
   {{- fail "\n\nui.enabled=true needs either ui.auth.enabled=true or ui.exposureAcknowledged=true.\n\nThe UI renders cluster state and pod logs, and running it in a pod means\nbinding every interface rather than the loopback address it is pinned to on a\nlaptop. Without a proxy in front, anyone who can reach the Service sees\neverything it can read.\n\nui.auth.enabled=true puts an authenticating proxy in front and binds the\nconsole to loopback behind it, which is the answer. ui.exposureAcknowledged=true\nsays you understand there is none and want it anyway -- keep that behind\nport-forward: this chart deliberately ships no Ingress.\n" }}
 {{- end }}
 
+{{- if and .Values.ui.enabled (gt (int .Values.ui.replicas) 1) }}
+  {{- fail "\n\nui.replicas must be 1.\n\nThe console is not stateless. ui.py keeps investigation history in\nstore.build(), so two pods are two histories, and which one a person sees\ndepends on which pod their websocket landed on -- a reconnect after a rollout\nshows them a sidebar that has forgotten the investigation they were reading.\n\nSharing one volume between replicas is not the fix: that is SQLite over a\nshared filesystem, which corrupts. See store.py, where the interface is the\nseam a Redis or Postgres implementation would slot into.\n\nGive the pod more room instead. A console serving one SRE team is bound by\nhow long a model takes, not by throughput.\n" }}
+{{- end }}
+
 {{- if and .Values.ui.enabled .Values.ui.auth.enabled }}
   {{- $missing := list }}
   {{- if not .Values.ui.auth.issuerUrl }}{{ $missing = append $missing "ui.auth.issuerUrl" }}{{ end }}
@@ -26,10 +30,11 @@ metadata:
     app.kubernetes.io/component: ui
     app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 spec:
-  # The UI holds no state between requests -- the cluster is the state, and
-  # each session's context lives in its own session. More than one replica is
-  # safe here in a way it is not for the controller, whose dedup state is
-  # in-process.
+  # One, and the chart refuses more -- see the guard above. This comment used
+  # to say the opposite: that the UI holds no state between requests and more
+  # than one replica was safe here. It does hold state. ui.py keeps
+  # investigation history in store.build(), so a second replica is a second
+  # history and a reconnect lands in whichever one it lands in.
   replicas: {{ .Values.ui.replicas }}
   selector:
     matchLabels:
@@ -96,6 +101,14 @@ spec:
             - name: TRIAGE_AUTH_MODE
               value: proxy
             {{- end }}
+            {{- if .Values.persistence.enabled }}
+            # The console's investigation history, on its own volume. Without
+            # this the sidebar comes back empty after every restart, which is
+            # the same defect persistence.enabled already fixes for the
+            # controller and did not fix here.
+            - name: TRIAGE_STATE_DB
+              value: {{ printf "%s/state.db" .Values.persistence.mountPath | quote }}
+            {{- end }}
             - name: LOG_FORMAT
               value: {{ .Values.logFormat | quote }}
             - name: LOG_LEVEL
@@ -157,6 +170,10 @@ spec:
             # readOnlyRootFilesystem is on and Streamlit writes here on start.
             - name: streamlit
               mountPath: /.streamlit
+            {{- if .Values.persistence.enabled }}
+            - name: state
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
         {{- if .Values.ui.auth.enabled }}
         # The authenticating proxy, and the only listener the Service targets.
         # A sidecar rather than an Ingress annotation on purpose: sharing the
@@ -242,6 +259,11 @@ spec:
           emptyDir: {}
         - name: streamlit
           emptyDir: {}
+        {{- if .Values.persistence.enabled }}
+        - name: state
+          persistentVolumeClaim:
+            claimName: {{ .Values.ui.persistence.existingClaim | default (printf "%s-ui-state" .Release.Name) }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1097 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1130 passing, no cluster or model required |
 | Grounding replay | **PROVEN** | 907 recorded runs, 0 regressions on the last change |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -23,7 +23,9 @@ and does not support. Four words are used and they mean specific things:
 | Forged identity header | **PROVEN** | overwritten by the proxy, measured with a session held |
 | Per-user authorization | **NOT TESTED** | deliberately not implemented — see SECURITY.md |
 | Audit trail (CLI, REST) | **PROVEN** | live runs; evidence absent from the record |
-| Audit trail (console, controller, Slack) | **PARTIALLY PROVEN** | unit tests only, same hook |
+| Audit trail (console) | **PROVEN** | live run through a browser against a real cluster |
+| Audit trail (controller, Slack) | **PARTIALLY PROVEN** | unit tests only, same hook |
+| Restart-interrupted jobs | **PROVEN** | SIGKILL mid-run, restarted against the same state file |
 | Read-only RBAC | **PROVEN** | runtime validated on GKE by attempting operations |
 | GKE runtime | **PROVEN** | released chart, real cluster |
 | GKE / Calico NetworkPolicy | **PROVEN** | dataplane-enforced egress |
@@ -322,6 +324,50 @@ and the hook they use is the same one, but the API defect above is exactly
 what a unit test could not see — so they are PARTIALLY PROVEN at best and are
 not claimed otherwise.
 
+### 12. An /ask job that a restart left running forever
+
+**Problem.** With `TRIAGE_STATE_DB` set, a job that was `running` when the
+process died survived the restart still marked `running`, with no thread
+anywhere that would ever finish it. A caller polling `/ask/jobs/{id}` waited on
+an investigation that could not complete.
+
+**Detection.** Writing the restart runbook — specifically, filling in the row
+of a table that asked what each piece of state costs. Persistence made the bug
+visible rather than causing it: without a state file the job vanished and the
+404 told the caller to ask again.
+
+**Fix.** `fail_interrupted()` at startup marks anything `queued` or `running`
+as failed, with a message saying what happened and that re-asking will work.
+Nothing resumes the work: the thread is gone, and re-running someone's question
+unasked is not a decision this process makes quietly. An already-failed job is
+left alone, because its own error is the only diagnosis anyone has.
+
+**Regression evidence.** Seven tests across both store implementations, and a
+live check: an API killed with SIGKILL mid-investigation and restarted against
+the same state file read `running` before and `failed` with the message after,
+with `jobs_interrupted_by_restart count: 1` in the startup log.
+
+### 13. Audit records with no timestamp
+
+**Problem.** Records appended to `TRIAGE_AUDIT_LOG` carried no time at all.
+
+**Detection.** Writing the runbook's `jq` examples and running them against
+real records — the query referenced `.ts`, which exists only on the copy the
+log formatter stamps. The file copy, which is the one that gets shipped, had
+nothing.
+
+**Root cause.** The timestamp belonged to the logging framework rather than to
+the record, so the second sink never got one.
+
+**Fix.** `at`, UTC, in the payload, so both copies carry it. The record also
+gained `cluster`: a namespace and a pod without a cluster name is ambiguous the
+moment anyone works against two, and the console can switch context
+mid-session.
+
+**Regression evidence.** Four tests, including one asserting the file sink's
+copy is parseable as a timestamp. Removing it from the payload turns two red;
+using local time instead of UTC turns one red.
+
 ## Test-harness failures worth recording
 
 Three times a harness reported a clean result it had not earned. Recording them
@@ -344,7 +390,7 @@ is not a result.
 ## Reproducing
 
 ```bash
-pytest                                   # 1097, no cluster or model needed
+pytest                                   # 1130, no cluster or model needed
 
 kind create cluster --name kubewhy
 kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \

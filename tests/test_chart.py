@@ -622,3 +622,101 @@ def _notes(*settings):
     if out.returncode != 0:
         raise AssertionError(out.stderr.strip())
     return out.stdout.split("NOTES:", 1)[-1]
+
+
+class TestOneReplicaOfTheConsole:
+    """
+    The chart's comment used to say the UI held no state between requests and
+    that more than one replica was safe here. It does hold state: ui.py keeps
+    investigation history in store.build(), so two pods are two histories and
+    which one a person sees depends on which pod their websocket landed on.
+    """
+
+    def test_two_replicas_are_refused(self):
+        assert "ui.replicas must be 1" in refuses(
+            "ui.enabled=true", "ui.exposureAcknowledged=true", "ui.replicas=2")
+
+    def test_the_refusal_explains_what_breaks(self):
+        """
+        "Not supported" would send someone looking for the supported way. What
+        they need to know is that a reconnect lands in a different history.
+        """
+        message = refuses("ui.enabled=true", "ui.exposureAcknowledged=true",
+                          "ui.replicas=2")
+        assert "two histories" in message
+
+    def test_one_replica_renders(self):
+        render("ui.enabled=true", "ui.exposureAcknowledged=true", "ui.replicas=1")
+
+    def test_the_controller_is_pinned_to_one_and_recreated(self):
+        """
+        Two controllers deliver every finding twice, and a RollingUpdate is
+        how you get two: old pod and new pod both watching during a rollout.
+        """
+        import yaml
+
+        for document in yaml.safe_load_all(render()):
+            if not document or document.get("kind") != "Deployment":
+                continue
+            if "app.kubernetes.io/component" in document["spec"]["template"]["metadata"]["labels"]:
+                continue
+            assert document["spec"]["replicas"] == 1
+            assert document["spec"]["strategy"]["type"] == "Recreate"
+            return
+        raise AssertionError("no controller Deployment")
+
+
+class TestTheConsoleKeepsItsHistoryAcrossARestart:
+    """
+    persistence.enabled fixed the restart case for the controller and did not
+    fix it here: the console's sidebar came back empty after every restart,
+    because nothing gave it a TRIAGE_STATE_DB.
+    """
+
+    PERSISTED = ("ui.enabled=true", "ui.exposureAcknowledged=true",
+                 "persistence.enabled=true", "podSecurityContext.fsGroup=1000")
+
+    def test_the_console_gets_a_state_db(self):
+        env = container_env(render(*self.PERSISTED), "ui")
+        assert env["TRIAGE_STATE_DB"].endswith("/state.db")
+
+    def test_it_is_not_the_controllers_claim(self):
+        """
+        Two processes writing one SQLite file over a volume is the corruption
+        case store.py describes, and mounting the controller's claim here
+        would look tidier than creating a second PVC -- which is how it would
+        get done.
+        """
+        import yaml
+
+        claims = {}
+        for document in yaml.safe_load_all(render(*self.PERSISTED)):
+            if not document or document.get("kind") != "Deployment":
+                continue
+            component = document["spec"]["template"]["metadata"]["labels"].get(
+                "app.kubernetes.io/component", "controller")
+            for volume in document["spec"]["template"]["spec"].get("volumes", []):
+                if "persistentVolumeClaim" in volume:
+                    claims[component] = volume["persistentVolumeClaim"]["claimName"]
+
+        assert claims["controller"] != claims["ui"], (
+            f"both components mount {claims['controller']}")
+
+    def test_both_claims_are_created(self):
+        import yaml
+
+        names = {d["metadata"]["name"] for d in yaml.safe_load_all(render(*self.PERSISTED))
+                 if d and d.get("kind") == "PersistentVolumeClaim"}
+        assert names == {"t-state", "t-ui-state"}
+
+    def test_the_claims_are_read_write_once(self):
+        """RWX here would advertise a multi-replica story the store cannot honour."""
+        import yaml
+
+        for document in yaml.safe_load_all(render(*self.PERSISTED)):
+            if document and document.get("kind") == "PersistentVolumeClaim":
+                assert document["spec"]["accessModes"] == ["ReadWriteOnce"]
+
+    def test_without_persistence_the_console_gets_no_state_db(self):
+        env = container_env(render("ui.enabled=true", "ui.exposureAcknowledged=true"), "ui")
+        assert "TRIAGE_STATE_DB" not in env

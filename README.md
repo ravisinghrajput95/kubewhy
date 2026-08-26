@@ -287,7 +287,12 @@ Product boundaries:
   automatically but score materially worse.
 - **Latency.** Tens of seconds per diagnosis on a local model. `kubectl describe`
   is faster when you already know where to look.
-- **No rate limiting**, no audit log of questions, no lockfile.
+- **No rate limiting**, and no lockfile.
+- **One replica of each component.** The controller's dedup state and the
+  console's investigation history are per-process, so two of either is two of
+  everything. The chart refuses more and [RUNBOOK.md](docs/RUNBOOK.md) says
+  what a restart costs. Nothing's health depends on kubewhy running, which is
+  what makes that a reasonable trade rather than a risk to manage.
 
 ## Documentation
 
@@ -297,6 +302,7 @@ Product boundaries:
 | [SECURITY.md](docs/SECURITY.md) | Threat model, assets, controls |
 | [INFERENCE.md](docs/INFERENCE.md) | Modes, providers, egress policy, failover |
 | [VALIDATION.md](docs/VALIDATION.md) | The authoritative evidence document |
+| [RUNBOOK.md](docs/RUNBOOK.md) | Replicas, what a restart costs, restart procedures, reading the audit trail |
 | [AI_EVALUATION.md](docs/AI_EVALUATION.md) | Corpus, metrics, methodology |
 | [UI.md](docs/UI.md) | The operator console |
 | [DEMO.md](docs/DEMO.md) | Fault set and a 5–10 minute walkthrough |

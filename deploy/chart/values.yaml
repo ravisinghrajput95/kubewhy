@@ -249,6 +249,13 @@ watch:
 # that silently provisions storage on install is a worse surprise than a
 # controller that forgets. Turn it on for anything long-lived.
 persistence:
+  # State that outlives a restart: the controller's dedup memory, and the
+  # console's investigation history. Without it a rollout re-announces every
+  # failure in the cluster and the console's sidebar comes back empty.
+  #
+  # Each component gets its OWN claim. Sharing one between them would be two
+  # processes writing one SQLite file over a volume -- see store.py. That also
+  # means enabling this creates two PVCs, not one.
   enabled: false
   # ReadWriteOnce, and one replica. SQLite over a shared filesystem corrupts;
   # see store.py for why this is the seam where Redis or Postgres would go.
@@ -259,17 +266,35 @@ persistence:
   existingClaim: ""
   mountPath: /var/lib/kubewhy
 
-# The browser UI. Off by default, and not merely as a default: it has no
-# authentication at all, so switching it on is a decision about who can see
-# your cluster rather than a convenience.
+# The browser UI. Off by default, and not merely as a default: without
+# auth.enabled below it has no authentication at all, so switching it on is a
+# decision about who can see your cluster rather than a convenience.
 ui:
   enabled: false
   # Deliberate friction, and the only way past it other than auth.enabled
   # below. enabled alone renders nothing and fails the install with an
   # explanation, so nobody turns this on without reading what it means.
   exposureAcknowledged: false
+
+  # One, and the chart refuses more.
+  #
+  # The console is not stateless: ui.py keeps investigation history in
+  # store.build(), so two pods are two histories and which one a person sees
+  # depends on which pod their websocket landed on. A reconnect after a
+  # rollout shows them a sidebar that has forgotten the investigation they
+  # were reading. Sharing one volume between replicas is not the fix either --
+  # that is SQLite over a shared filesystem, which store.py explains corrupts.
+  #
+  # Scale by giving the pod more room, not more copies. A console serving one
+  # SRE team is not throughput-bound; it is bound by how long a model takes.
   replicas: 1
   port: 8501
+
+  # The console's investigation history, surviving a restart. Created when the
+  # top-level persistence.enabled is on; this is only here to point it at a
+  # claim you manage yourself instead.
+  persistence:
+    existingClaim: ""
 
   # An authenticating reverse proxy in front of the console.
   #
