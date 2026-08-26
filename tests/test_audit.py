@@ -353,3 +353,68 @@ class TestTheSwitchesAndTheSink:
 
         assert drained  # the investigation completed
         assert any(r.message == "audit_sink_failed" for r in caplog.records)
+
+
+class TestTheQuestionIsTheOneAPersonAsked:
+    """
+    scoped_question() wraps a question in four sentences of direction before
+    the loop ever sees it. Measured on a real console run, the audit record's
+    question field was 430 characters of generated boilerplate with "why is
+    demo/nightly-sync failing?" at the end. "Who asked what" means the what a
+    person would recognise.
+    """
+
+    def test_the_scaffolding_is_not_recorded(self, run):
+        prompt = agent.scoped_question(
+            "why is demo/nightly-sync failing?", "demo/nightly-sync", "demo",
+            pod="nightly-sync-1")
+        line = run(question=prompt)
+
+        assert line.question == "why is demo/nightly-sync failing?"
+        assert "Do not report on any other workload" not in line.question
+
+    def test_a_scaffolded_run_says_so(self, run):
+        """
+        Otherwise a reader cannot tell a bare question from one the surface
+        rewrote, and the two reach the model as very different things.
+        """
+        prompt = agent.scoped_question("why?", "demo/x", "demo")
+        assert run(question=prompt).scaffolded is True
+
+    def test_an_unscaffolded_run_says_so_too(self, run):
+        assert run(question="why is crasher failing?").scaffolded is False
+
+    def test_a_secret_in_the_typed_question_is_still_redacted(self, run):
+        prompt = agent.scoped_question("why did password=hunter2 fail?",
+                                       "demo/x", "demo")
+        line = run(question=prompt)
+
+        assert "hunter2" not in line.question
+        assert "REDACTED" in line.question
+
+    def test_an_abandoned_scoped_question_cannot_label_the_next_run(self, run):
+        """
+        scoped_question() sets it; a Record consumes it. Without the consume, a
+        surface that built a prompt and never ran it would put that question on
+        whatever investigation happened next -- which is a false audit record,
+        and worse than a missing one.
+        """
+        agent.scoped_question("a question that was never asked", "demo/x", "demo")
+        audit._take_asked()          # the abandoned run's Record would do this
+
+        assert run(question="a different question").question == "a different question"
+
+    def test_the_consume_happens_even_when_the_run_fails(self, run, monkeypatch, caplog):
+        agent.scoped_question("first question", "demo/x", "demo")
+
+        def exploding(*a, **k):
+            raise ConnectionError("boom")
+            yield
+
+        monkeypatch.setattr(agent, "_stream", exploding)
+        with caplog.at_level(logging.INFO, logger="triage.audit"):
+            with pytest.raises(ConnectionError):
+                for _ in agent.stream("wrapped first question"):
+                    pass
+
+        assert audit._ASKED.get() == ""

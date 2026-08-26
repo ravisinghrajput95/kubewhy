@@ -70,6 +70,10 @@ _MAX_QUESTION = 2000
 # question it exists to answer.
 SENSITIVE_TOOLS = frozenset({"get_pod_logs"})
 
+# What the person typed, when a surface wrapped it in scaffolding before
+# handing it to the loop. See asked().
+_ASKED = contextvars.ContextVar("audit_asked", default="")
+
 _PRINCIPAL = contextvars.ContextVar("audit_principal", default="anonymous")
 _AUTH = contextvars.ContextVar("audit_auth", default="anonymous")
 _SURFACE = contextvars.ContextVar("audit_surface", default="unknown")
@@ -104,6 +108,29 @@ def actor(principal=None, surface=None, auth=None):
         _AUTH.set(auth)
     if surface is not None:
         _SURFACE.set(surface)
+
+
+def asked(question):
+    """
+    The question as a person typed it, before a surface scaffolded it.
+
+    `agent.scoped_question()` wraps a question in four sentences of direction
+    -- naming the workload, naming the first tool to call, forbidding the
+    others -- and the loop only ever sees the result. Auditing that is
+    auditing the prompt engineering: measured on a real console run, the field
+    was 430 characters of boilerplate with "why is demo/nightly-sync failing?"
+    at the end of it. "Who asked what" means the what a person would recognise.
+
+    Consumed by the next Record rather than left set, so a scoped_question()
+    whose investigation never ran cannot label the following one.
+    """
+    _ASKED.set(question or "")
+
+
+def _take_asked():
+    question = _ASKED.get()
+    _ASKED.set("")
+    return question
 
 
 def current():
@@ -167,13 +194,20 @@ class Record:
     record of -- and at that point there is no answer event to build one from.
     """
 
-    __slots__ = ("run_id", "question", "model", "started", "target",
+    __slots__ = ("run_id", "question", "prompted", "model", "started", "target",
                  "tools", "namespaces", "sensitive", "verdict", "termination",
                  "outcome", "error", "rounds", "_emitted")
 
     def __init__(self, question, model):
         self.run_id = ""
-        self.question = redaction.redact((question or "")[:_MAX_QUESTION])
+        asked_directly = _take_asked()
+        # `prompted` records that the loop was handed something other than
+        # what the person typed -- not the scaffolding itself, which is
+        # generated, identical every time and would triple the size of every
+        # record for a string that is in scoped_question().
+        self.prompted = bool(asked_directly and asked_directly != question)
+        self.question = redaction.redact(
+            (asked_directly or question or "")[:_MAX_QUESTION])
         self.model = model
         self.started = time.perf_counter()
         self.target = None
@@ -257,6 +291,7 @@ class Record:
             "run_id": self.run_id,
             **current(),
             "question": self.question,
+            "scaffolded": self.prompted,
             "target": self.target,
             "model": self.model,
             "outcome": self.outcome,

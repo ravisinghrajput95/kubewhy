@@ -372,6 +372,11 @@ def scoped_question(question, workload, namespace, pod=None):
     # colon cannot be read as either: _KIND_FIRST requires whitespace after the
     # kind word, and there is no bare word in front of "pod" to be taken as a
     # name. Keep it that way.
+    # The audit trail wants what the person typed, not the four sentences of
+    # direction wrapped around it. Recorded here because this is the one place
+    # that does the wrapping, and the loop below never sees the difference.
+    audit.asked(question)
+
     example = f" (pod: {pod})" if pod else ""
     return (
         f"Answer only about the workload {workload} in namespace {namespace}"
