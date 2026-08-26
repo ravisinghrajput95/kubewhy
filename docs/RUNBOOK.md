@@ -152,6 +152,127 @@ Losing the file costs one round of re-announced findings and the job history.
 Nothing about the cluster is lost, because kubewhy stores nothing about the
 cluster — every diagnosis is read fresh.
 
+## When a diagnosis goes wrong
+
+Four things go wrong in different ways, and only one of them means the answer
+is wrong. Telling them apart is most of what this section is for.
+
+**The numbers below come from 2501 recorded runs in `results/`, and they are
+not a performance claim.** That corpus is a mixture of experiments — different
+models, prompt configurations, some deliberately degraded to measure the
+effect. It says what these failure modes look like when they occur, not how
+often kubewhy is right. For that, read [AI_EVALUATION.md](AI_EVALUATION.md),
+which is careful about what its numbers do and do not support.
+
+| Verdict | Share of 2501 runs | What it means |
+|---|---|---|
+| `grounded` | 1835 (73.4%) | Every claim traced to a tool result |
+| `partial` | 313 (12.5%) | Some claims traced, some not |
+| `insufficient_evidence` | 292 (11.7%) | Nothing here could be checked — often the **correct** answer |
+| `contradicted` | 28 (1.1%) | The evidence says otherwise |
+| `ungrounded` | 9 (0.4%) | Nothing traced |
+
+### The model is unreachable
+
+**Symptoms.** `/ask` returns **503** with `inference unreachable:
+ConnectionError`. `/readyz` returns 503 and names the provider it tried. The
+controller aborts at startup rather than watching a cluster it cannot diagnose.
+The console renders the error rather than an empty page.
+
+503 rather than 500 is deliberate: a 500 reads as a bug and gets retried, a 503
+reads as a dependency being down.
+
+**Check, in this order:**
+
+```bash
+curl -s localhost:8000/readyz | jq             # which provider, and why not
+kubectl logs deploy/<release> | grep inference_configured
+```
+
+`/readyz` is three-valued — ready, not ready, unknown — rather than assuming a
+reachable endpoint serves the model you asked for. "Ready on the fallback" and
+"ready on the primary" are different states of the world and it says which.
+
+**What still works.** Everything that does not need a model: `/scan`, `/pods`,
+`/nodes`, the console's cluster browser, every MCP tool. The API deliberately
+does **not** refuse to start on a misconfigured gateway, because killing
+working functionality to punish a setting nobody is using is worse than logging
+it loudly. This is degraded, not down.
+
+### The deadline fired
+
+**Symptom.** The answer carries `termination: deadline_exceeded` and reads as
+incomplete, because it is. The run was stopped while collecting evidence.
+
+**Measured, over 2457 recorded runs with a duration:** median **41.0s**, p95
+**173.3s**, p99 **272.4s**. The default `TRIAGE_INVESTIGATION_BUDGET` is 600s,
+which is roughly 2.2× the p99.
+
+Five runs exceeded 600s of wall clock. All five are in files from unattended
+overnight runs, and the cause was **the laptop sleeping**, not the model
+hanging — the budget measures elapsed time minus slept time for exactly this
+reason. Run unattended evaluations under `caffeinate -is`.
+
+**This is not a wrong answer.** It is the system refusing to keep spending on
+one question. The termination reason is returned as data rather than prose, so
+a caller can branch on it instead of pattern-matching a sentence.
+
+**What to do:** narrow the question before raising the budget. A scoped
+question — one naming a workload — holds the run to that entity:
+`targeting.enforce()` rewrites a call that would widen the scope and refuses
+one that would move it, so rounds are not spent on neighbours. The console
+passes its selection as data for that reason. Raise
+`TRIAGE_INVESTIGATION_BUDGET` only if a scoped question is still timing out,
+which usually means the model is slow rather than the question is broad.
+
+(How much scoping actually saves is not measured here, and the corpus cannot
+settle it — the scoped and open scenarios are different faults, so their tool
+counts are not comparable.)
+
+### A contradicted verdict
+
+**The rarest outcome, and the system working.** 28 of 2501 runs. It means a
+claim in the answer disagrees with evidence the run itself collected — caught
+before it reached you as fact.
+
+**Read the `measured` field first.** It names what the evidence actually said;
+trust it over the prose around it. The console renders contradictions ahead of
+everything else on the page for that reason — in `contract()`'s output they are
+a separate list rather than folded into `unknowns`, because "the tools did not
+say" and "the tools said otherwise" are different and only the second means the
+answer is wrong.
+
+**One caveat worth knowing before you escalate.** 12 of those 28 — **43%** —
+come from a single scenario, `scoping_quiet_workload_beside_loud_one`, which is
+a **known open defect**: asked about a quiet workload beside a loud broken one,
+the run reads a neighbour's exit code 137 as OOMKilled when
+`last_termination.reason` says `error`. If a contradiction involves a workload
+with a noisy neighbour, that is the first thing to suspect and it is a kubewhy
+bug rather than a cluster one.
+
+**When to escalate:** contradictions clustering on one *shape* of workload
+suggest a projection gap — a field a diagnosis depends on that the tools do not
+return. That is a code change, not a configuration one. See ARCHITECTURE.md on
+why projection is the load-bearing decision and what it costs.
+
+### An answer full of `[unverified: ...]`
+
+**Not a failure mode — a disclosure.** Unsupported figures are rewritten **in
+place**, so a reader skimming the prose for a number finds the measured one or
+an explicit marker, never a fabricated value. The alternative — printing a
+correction underneath and leaving the invented figure standing — was tried and
+is worse, because people skim.
+
+`insufficient_evidence` deserves the same reading. Asked why a workload that
+does not exist is failing, "the evidence is not here" **is** the right answer,
+and a confident root cause would be the failure. Two scenarios in the corpus
+exist to score exactly that.
+
+If a run you expected to be grounded is not, check what it actually called: the
+audit record's `tools` field lists every call and its arguments, and a run that
+never called `get_pod_events` never saw the cause of a container that never
+started.
+
 ## The audit trail
 
 One record per investigation on the `triage.audit` logger, `msg: investigation`,

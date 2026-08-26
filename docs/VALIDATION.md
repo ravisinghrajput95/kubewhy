@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1130 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1142 passing, no cluster or model required |
 | Grounding replay | **PROVEN** | 907 recorded runs, 0 regressions on the last change |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -404,7 +404,7 @@ is not a result.
 ## Reproducing
 
 ```bash
-pytest                                   # 1130, no cluster or model needed
+pytest                                   # 1142, no cluster or model needed
 
 kind create cluster --name kubewhy
 kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \
