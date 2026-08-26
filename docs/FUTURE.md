@@ -17,7 +17,9 @@ which cases *should not* be browser cases, which is the more useful half.
 
 **Mutation testing in the repository.** A harness existed during development and
 killed 28 guards. It was never committed, so it is not reproducible and is listed
-as NOT TESTED.
+as NOT TESTED. The grounding replay was in exactly this position until it was
+written up as `evals/replay_grounding.py`; the mutation harness is the one that
+is left.
 
 **A larger evaluation corpus**, and n high enough to rank configurations rather
 than report UNDETERMINED. The current design cannot reach significance after

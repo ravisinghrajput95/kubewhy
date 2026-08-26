@@ -12,8 +12,8 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1142 passing, no cluster or model required |
-| Grounding replay | **PROVEN** | 907 recorded runs, 0 regressions on the last change |
+| Automated test suite | **PROVEN** | 1157 passing, no cluster or model required |
+| Grounding replay | **PROVEN** | 1469 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
 | Grounding + contradiction | **PROVEN** | caught a genuine wrong claim live, 5/5 reproducibly |
@@ -382,6 +382,55 @@ mid-session.
 copy is parseable as a timestamp. Removing it from the payload turns two red;
 using local time instead of UTC turns one red.
 
+### 14. The grounding replay was not in the repository
+
+**Problem.** This document claimed `Grounding replay — PROVEN — 907 recorded
+runs, 0 regressions`. Nothing committed could reproduce it. The script existed
+during development and was never checked in, which is the same criticism
+FUTURE.md makes of the mutation harness.
+
+**Detection.** Looking for a scheduled job to attach it to. A result nobody
+else can re-derive is a claim, not evidence, and this document is supposed to
+be the place that distinction is kept.
+
+**Fix.** `evals/replay_grounding.py`, committed, with a CI job that runs it on
+every push, every pull request and weekly. It re-scores each record's **draft**
+and **evidence** — the two inputs the checker was originally handed — and never
+`answer`, which has already been through `verify()` and `annotate()` and would
+reproduce a different verdict for reasons that are the tooling rather than the
+change under test.
+
+It carries guards for all three ways a replay has lied here. The loaded
+modules' paths and hashes are printed every run, so a stale `__pycache__` is
+visible. `_assert_not_shadowed()` refuses to run when `grounding` resolves
+anywhere but the repository root, because a copy beside the script silently
+wins — Python puts the script's own directory ahead of `PYTHONPATH`. And
+`--self-check` scores the corpus with a deliberately perturbed checker and
+fails if the replay does not notice, which is the only way the script can
+demonstrate it is exercising the code it claims to. **CI runs the self-check
+first, and separately**, because a replay wired to nothing reports "no
+regressions" and looks exactly like a clean run.
+
+**What the replay now says.** Of 1469 replayable records, 1418 score
+identically under current code and **51 moved**. Every transition is a
+documented fix taking effect on records written before it:
+
+| Transition | Count | Cause |
+|---|---|---|
+| `insufficient_evidence` → `grounded` | 45 | Defect 5, the absence rule in the SUPPORTED direction — the same 45 that entry reports |
+| `partial` → `grounded` | 2 | Same fix; a relation claim that is now confirmable |
+| `insufficient_evidence` → `contradicted` | 2 | Same fix in the other direction; inspected, and a true positive — the answer claimed a service had no endpoints while `get_service_endpoints` reported one |
+| `contradicted` → `grounded` | 1 | Defect 4, a false positive removed; the draft is a correct diagnosis and the record carries no contradiction list at all |
+| `contradicted` → `partial` | 1 | Same, with one claim still unsupported |
+
+**1032 records were skipped** because they retain no `draft` or `evidence`.
+Older runs did not keep them. The count is printed so a shrinking corpus is
+visible rather than silently reducing the replay to nothing.
+
+The 45 figure is worth noting on its own: it was written into this document
+from a replay nobody could re-run, and a committed tool now reproduces it
+exactly.
+
 ## Test-harness failures worth recording
 
 Three times a harness reported a clean result it had not earned. Recording them
@@ -391,7 +440,8 @@ about how validation actually goes.
 - **Two vacuous UI tests** passed against known-broken code — one asserted a
   caption that a previous test had already made absent; one stubbed a `namespaces=`
   kwarg while `ui.py` calls positionally, so the filter never narrowed anything.
-- **The grounding replay reported "zero changes" twice** — first from stale
+- **The grounding replay reported "zero changes" twice** (both now guarded
+  against by `evals/replay_grounding.py`, see defect 14) — first from stale
   `__pycache__`, then because copies of `grounding.py` and `contradiction.py` sat
   beside the replay script, and Python puts the script's directory ahead of
   `PYTHONPATH`. Both compared the new code against itself.
@@ -404,7 +454,7 @@ is not a result.
 ## Reproducing
 
 ```bash
-pytest                                   # 1142, no cluster or model needed
+pytest                                   # 1157, no cluster or model needed
 
 kind create cluster --name kubewhy
 kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \
