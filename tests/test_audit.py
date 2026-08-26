@@ -13,6 +13,7 @@ that walked away -- so those are tested by name rather than assumed to follow
 from the happy path.
 """
 
+import datetime as dt
 import json
 import logging
 
@@ -418,3 +419,46 @@ class TestTheQuestionIsTheOneAPersonAsked:
                     pass
 
         assert audit._ASKED.get() == ""
+
+
+class TestARecordCanBeReadLater:
+    """
+    Found by writing the runbook's jq examples against real records: the file
+    sink's copy had no timestamp at all. The log formatter stamps one on the
+    log-stream copy, and _sink writes the payload as it stands.
+    """
+
+    def test_the_record_carries_its_own_timestamp(self, run):
+        at = run().at
+        assert at.endswith("+00:00"), f"expected UTC, got {at}"
+        dt.datetime.fromisoformat(at)          # raises if it is not parseable
+
+    def test_the_file_sink_copy_carries_it_too(self, monkeypatch, tmp_path):
+        """The copy that gets shipped is the one that most needs a time on it."""
+        path = tmp_path / "audit.log"
+        monkeypatch.setenv("TRIAGE_AUDIT_LOG", str(path))
+        monkeypatch.setattr(agent, "_stream", lambda *a, **k: iter(events()))
+        for _ in agent.stream("why?"):
+            pass
+
+        written = json.loads(path.read_text().splitlines()[0])
+        assert "at" in written
+        dt.datetime.fromisoformat(written["at"])
+
+    def test_the_cluster_is_named(self, run, monkeypatch):
+        """
+        A namespace and a pod without a cluster is ambiguous the moment
+        anyone works against two, and the console can switch context
+        mid-session.
+        """
+        monkeypatch.setattr("routers.k8s_pods_info.active_context",
+                            lambda: "kind-aiops-test")
+        assert run().cluster == "kind-aiops-test"
+
+    def test_an_unreachable_cluster_is_named_as_such_rather_than_omitted(
+            self, run, monkeypatch):
+        def boom():
+            raise RuntimeError("no kubeconfig")
+
+        monkeypatch.setattr("routers.k8s_pods_info.active_context", boom)
+        assert run().cluster == "unavailable"

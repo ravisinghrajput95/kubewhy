@@ -47,6 +47,7 @@ act on "possible"; they cannot act on a `false` that meant "probably not".
 """
 
 import contextvars
+import datetime as dt
 import json
 import logging
 import os
@@ -154,6 +155,27 @@ def _egress(config):
         # Permission granted and unused: nothing configured points off-network.
         return False
     return "possible"
+
+
+def _cluster():
+    """
+    Which cluster was read.
+
+    Not decoration. The console can switch context mid-session, so a record
+    that names a namespace and a pod without naming the cluster is ambiguous
+    the moment anyone works against two -- and "one team, one cluster" is the
+    intended deployment, not a constraint anything enforces.
+
+    active_context() answers for the caller's own binding rather than for
+    whatever `current-context` says now, which is the distinction that matters
+    here: the record should name what was actually read.
+    """
+    try:
+        from routers.k8s_pods_info import active_context
+
+        return active_context()
+    except Exception:
+        return "unavailable"
 
 
 def _inference():
@@ -288,7 +310,15 @@ class Record:
         self._emitted = True
 
         payload = {
+            # In the payload, not left to the log formatter. The formatter
+            # stamps `ts` on the log-stream copy and the file sink writes the
+            # payload as it stands -- so records appended to TRIAGE_AUDIT_LOG
+            # carried no time at all, which for an audit trail is most of the
+            # point missing. "Who read that namespace's logs" always has "and
+            # when" attached to it.
+            "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
             "run_id": self.run_id,
+            "cluster": _cluster(),
             **current(),
             "question": self.question,
             "scaffolded": self.prompted,
