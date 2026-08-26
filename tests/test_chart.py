@@ -325,3 +325,210 @@ class TestSecretsStayInSecrets:
                    if d and d.get("kind") == "Secret"]
         assert secrets == [], "the chart created a Secret it was told existed"
         assert "my-openai-key" in manifests
+
+
+AUTH = (
+    "ui.enabled=true",
+    "ui.auth.enabled=true",
+    "ui.auth.issuerUrl=https://dex.example.com/dex",
+    "ui.auth.clientID=kubewhy",
+    "ui.auth.externalUrl=http://localhost:8080",
+    "ui.auth.existingSecret=kubewhy-auth",
+)
+
+
+def containers(manifests, component):
+    """Every container of one component's Deployment, by name."""
+    import yaml
+
+    for document in yaml.safe_load_all(manifests):
+        if not document or document.get("kind") != "Deployment":
+            continue
+        labels = document["spec"]["template"]["metadata"]["labels"]
+        if labels.get("app.kubernetes.io/component") != component:
+            continue
+        return {c["name"]: c for c in document["spec"]["template"]["spec"]["containers"]}
+    raise AssertionError(f"no Deployment for component {component!r}")
+
+
+def service(manifests, component):
+    import yaml
+
+    for document in yaml.safe_load_all(manifests):
+        if not document or document.get("kind") != "Service":
+            continue
+        if document["metadata"]["labels"].get("app.kubernetes.io/component") != component:
+            continue
+        return document
+    raise AssertionError(f"no Service for component {component!r}")
+
+
+class TestTheConsoleIsUnreachableExceptThroughTheProxy:
+    """
+    The arrangement, not its spelling.
+
+    The console's authentication is structural: with ui.auth.enabled the
+    Streamlit process binds loopback and the Service targets the sidecar, so
+    an unauthenticated browser cannot reach the app at all. Every assertion
+    here is one half of that arrangement, because each half is useless alone
+    -- a loopback bind whose Service still points at the console is an outage,
+    and a Service pointing at the proxy while the console binds every
+    interface is a bypass that works perfectly and looks fine.
+    """
+
+    def test_the_console_binds_loopback(self):
+        ui = containers(render(*AUTH), "ui")["ui"]
+        assert "--server.address=127.0.0.1" in ui["command"]
+        assert "--server.address=0.0.0.0" not in ui["command"]
+
+    def test_the_service_reaches_the_proxy_and_not_the_console(self):
+        manifests = render(*AUTH)
+        ports = service(manifests, "ui")["spec"]["ports"]
+
+        assert [p["targetPort"] for p in ports] == ["auth"]
+
+    def test_the_consoles_port_is_in_no_service(self):
+        """
+        The property that makes the bind meaningful. Asserted over every
+        Service in the release rather than the console's own, because a second
+        Service selecting the same pods would undo this from another file.
+        """
+        import yaml
+
+        manifests = render(*AUTH)
+        console_port = containers(manifests, "ui")["ui"]["ports"][0]["containerPort"]
+
+        for document in yaml.safe_load_all(manifests):
+            if not document or document.get("kind") != "Service":
+                continue
+            for port in document["spec"]["ports"]:
+                assert port.get("targetPort") != console_port
+                assert port.get("targetPort") != "http" or \
+                    document["metadata"]["labels"].get(
+                        "app.kubernetes.io/component") != "ui"
+
+    def test_the_proxy_forwards_to_the_console_over_loopback(self):
+        """
+        Naming the pod IP here would work, and would quietly undo the bind.
+        """
+        manifests = render(*AUTH)
+        console_port = containers(manifests, "ui")["ui"]["ports"][0]["containerPort"]
+        proxy = containers(manifests, "ui")["auth"]
+
+        assert f"--upstream=http://127.0.0.1:{console_port}" in proxy["args"]
+
+    def test_moving_the_console_port_moves_the_upstream_with_it(self):
+        """
+        Two places hold that number and a test that renders only the default
+        cannot tell they are coupled.
+        """
+        manifests = render(*AUTH, "ui.port=9000")
+        ui = containers(manifests, "ui")
+
+        assert "--server.port=9000" in ui["ui"]["command"]
+        assert "--upstream=http://127.0.0.1:9000" in ui["auth"]["args"]
+
+
+class TestTheConsoleKnowsWhatIsInFrontOfIt:
+    def test_proxy_mode_is_declared_to_the_app(self):
+        """
+        The second control. Without this the console would serve a request
+        carrying no identity header as anonymous, which is exactly what
+        happens if the sidecar is removed and the bind is loosened together.
+        """
+        assert container_env(render(*AUTH), "ui")["TRIAGE_AUTH_MODE"] == "proxy"
+
+    def test_the_proxy_passes_the_identity_the_app_reads(self):
+        """
+        Without --pass-user-headers the proxy authenticates the browser and
+        tells the console nothing, and the console then refuses every request.
+        A loud failure, but only because the app declares proxy mode -- this
+        pair has to stay together.
+        """
+        proxy = containers(render(*AUTH), "ui")["auth"]
+        assert "--pass-user-headers=true" in proxy["args"]
+
+    def test_the_proxy_does_not_trust_forwarded_headers_from_the_browser(self):
+        """
+        --reverse-proxy=true would let a client spell its own source address.
+        It is the default-off flag most likely to be turned on by somebody
+        copying an ingress example.
+        """
+        proxy = containers(render(*AUTH), "ui")["auth"]
+        assert "--reverse-proxy=false" in proxy["args"]
+        assert "--reverse-proxy=true" not in proxy["args"]
+
+
+class TestAuthSecretsStayOutOfTheManifest:
+    def test_the_client_secret_is_a_secret_reference(self):
+        proxy = containers(render(*AUTH), "ui")["auth"]
+        names = {e["name"]: e for e in proxy["env"]}
+
+        assert "valueFrom" in names["OAUTH2_PROXY_CLIENT_SECRET"]
+        assert "value" not in names["OAUTH2_PROXY_CLIENT_SECRET"]
+
+    def test_no_credential_is_passed_as_an_argument(self):
+        """
+        An argument is visible in `kubectl describe pod` and in every process
+        listing inside the container.
+        """
+        proxy = containers(render(*AUTH), "ui")["auth"]
+        joined = " ".join(proxy["args"])
+
+        assert "client-secret" not in joined
+        assert "cookie-secret" not in joined
+
+
+class TestTheAuthGuards:
+    def test_auth_satisfies_the_exposure_acknowledgement(self):
+        """
+        The acknowledgement exists because the console had no authentication.
+        Once it does, demanding the acknowledgement as well would be asking
+        the operator to confirm a risk they just removed.
+        """
+        render(*AUTH)  # raises if it refuses
+
+    def test_neither_auth_nor_acknowledgement_still_refuses(self):
+        assert "ui.auth.enabled=true or ui.exposureAcknowledged=true" in refuses(
+            "ui.enabled=true")
+
+    @pytest.mark.parametrize(
+        "omitted",
+        ["ui.auth.issuerUrl", "ui.auth.clientID",
+         "ui.auth.externalUrl", "ui.auth.existingSecret"],
+    )
+    def test_every_required_setting_is_named_when_it_is_missing(self, omitted):
+        """
+        Named individually rather than "auth is misconfigured". externalUrl in
+        particular produces a login loop rather than an error when it is
+        wrong, and a loop is much harder to diagnose than a failed install.
+        """
+        kept = [s for s in AUTH if not s.startswith(omitted + "=")]
+        assert omitted in refuses(*kept)
+
+
+class TestWithoutAuthNothingChanged:
+    """
+    The acknowledged-exposure path is what existing installs use, and adding
+    the proxy must not have moved it underneath them.
+    """
+
+    def test_the_console_still_binds_every_interface(self):
+        ui = containers(render("ui.enabled=true", "ui.exposureAcknowledged=true"), "ui")
+        assert "--server.address=0.0.0.0" in ui["ui"]["command"]
+
+    def test_there_is_no_sidecar(self):
+        ui = containers(render("ui.enabled=true", "ui.exposureAcknowledged=true"), "ui")
+        assert list(ui) == ["ui"]
+
+    def test_the_service_still_reaches_the_console(self):
+        manifests = render("ui.enabled=true", "ui.exposureAcknowledged=true")
+        assert service(manifests, "ui")["spec"]["ports"][0]["targetPort"] == "http"
+
+    def test_the_app_is_not_told_to_expect_an_identity(self):
+        """
+        Declaring proxy mode with no proxy would refuse every request, which
+        is a failure mode this path must not acquire by accident.
+        """
+        env = container_env(render("ui.enabled=true", "ui.exposureAcknowledged=true"), "ui")
+        assert "TRIAGE_AUTH_MODE" not in env

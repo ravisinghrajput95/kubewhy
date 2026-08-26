@@ -27,6 +27,16 @@ public, with an unlabelled pod alongside as the control.
 **What it permits.** DNS, so Service names resolve. Private address space, so
 the API server, an in-cluster model and an on-network one are all reachable.
 Nothing else -- which is the point.
+
+**It also selects the console pod, which collides with ui.auth.enabled.** The
+selector here is the chart's name and instance, and the console carries both,
+so the oauth2-proxy sidecar is inside this policy. An identity provider on
+your network is fine. A SaaS one -- Okta, Entra, Google -- is not reachable,
+and the symptom is the proxy failing OIDC discovery at startup rather than
+anything that names a NetworkPolicy. extraAllowedCIDRs is the escape hatch and
+is a poor one for a provider behind a CDN, where the address set is neither
+small nor stable. Either run the provider on-network, or accept that these two
+options are mutually exclusive for now and say which one you chose.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

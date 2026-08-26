@@ -1,5 +1,16 @@
-{{- if and .Values.ui.enabled (not .Values.ui.exposureAcknowledged) }}
-  {{- fail "\n\nui.enabled=true also needs ui.exposureAcknowledged=true.\n\nThe UI renders cluster state and pod logs and has NO authentication -- unlike\nthe API there is no token to set, and running it in a pod means binding every\ninterface rather than the loopback address it is pinned to on a laptop. Anyone\nwho can reach the Service sees everything it can read.\n\nSet ui.exposureAcknowledged=true if that is what you want, and keep it behind\nport-forward: this chart deliberately ships no Ingress.\n" }}
+{{- if and .Values.ui.enabled (not .Values.ui.auth.enabled) (not .Values.ui.exposureAcknowledged) }}
+  {{- fail "\n\nui.enabled=true needs either ui.auth.enabled=true or ui.exposureAcknowledged=true.\n\nThe UI renders cluster state and pod logs, and running it in a pod means\nbinding every interface rather than the loopback address it is pinned to on a\nlaptop. Without a proxy in front, anyone who can reach the Service sees\neverything it can read.\n\nui.auth.enabled=true puts an authenticating proxy in front and binds the\nconsole to loopback behind it, which is the answer. ui.exposureAcknowledged=true\nsays you understand there is none and want it anyway -- keep that behind\nport-forward: this chart deliberately ships no Ingress.\n" }}
+{{- end }}
+
+{{- if and .Values.ui.enabled .Values.ui.auth.enabled }}
+  {{- $missing := list }}
+  {{- if not .Values.ui.auth.issuerUrl }}{{ $missing = append $missing "ui.auth.issuerUrl" }}{{ end }}
+  {{- if not .Values.ui.auth.clientID }}{{ $missing = append $missing "ui.auth.clientID" }}{{ end }}
+  {{- if not .Values.ui.auth.externalUrl }}{{ $missing = append $missing "ui.auth.externalUrl" }}{{ end }}
+  {{- if not .Values.ui.auth.existingSecret }}{{ $missing = append $missing "ui.auth.existingSecret" }}{{ end }}
+  {{- if $missing }}
+    {{- fail (printf "\n\nui.auth.enabled=true is missing: %s\n\nNone of these can be defaulted. externalUrl in particular is what the browser\nreaches the console on, and oauth2-proxy builds its redirect URI from it --\nguessing it produces a login loop rather than an error, which is much harder to\ndiagnose than a failed install.\n\nexistingSecret must hold `client-secret` and `cookie-secret`; neither belongs\nin a values file:\n\n  kubectl create secret generic kubewhy-auth -n <namespace> \\\n    --from-literal=client-secret=... \\\n    --from-literal=cookie-secret=$(openssl rand -base64 32 | head -c 32)\n" (join ", " $missing)) }}
+  {{- end }}
 {{- end }}
 {{- if .Values.ui.enabled -}}
 {{- $name := default (printf "%s" .Release.Name) .Values.serviceAccount.name -}}
@@ -44,6 +55,19 @@ spec:
             - run
             - ui.py
             - --server.port={{ .Values.ui.port }}
+            {{- if .Values.ui.auth.enabled }}
+            # The control this entire surface rests on. The authenticating
+            # proxy is a sidecar, so it shares this pod's network namespace
+            # and reaches the console over loopback; nothing else can. The
+            # Service targets the proxy's port, and this port appears in no
+            # Service at all.
+            #
+            # This is what makes the console's own TRIAGE_AUTH_MODE=proxy
+            # check the *second* control rather than the only one: an
+            # unauthenticated browser never reaches the script to be turned
+            # away by it.
+            - --server.address=127.0.0.1
+            {{- else }}
             # Inside a pod this has to bind every interface for the Service to
             # reach it, which is exactly what the loopback pin in
             # .streamlit/config.toml prevents when you run it on a laptop.
@@ -51,6 +75,7 @@ spec:
             # page and the network, so overriding it is the decision this
             # whole surface turns on -- see ui.exposureAcknowledged.
             - --server.address=0.0.0.0
+            {{- end }}
             - --server.headless=true
             # Telemetry off, in-cluster as everywhere else: this project's
             # claim is that nothing leaves your network.
@@ -62,6 +87,15 @@ spec:
               containerPort: {{ .Values.ui.port }}
           env:
             {{- include "kubewhy.inference.env" . | nindent 12 }}
+            {{- if .Values.ui.auth.enabled }}
+            # Not cosmetic: this is the app declaring it expects an identity
+            # header, so a request without one is refused instead of served
+            # anonymously. It is what catches the proxy being removed, or
+            # misconfigured to pass no user headers, while the console stays
+            # up and looks fine.
+            - name: TRIAGE_AUTH_MODE
+              value: proxy
+            {{- end }}
             - name: LOG_FORMAT
               value: {{ .Values.logFormat | quote }}
             - name: LOG_LEVEL
@@ -92,6 +126,82 @@ spec:
             # readOnlyRootFilesystem is on and Streamlit writes here on start.
             - name: streamlit
               mountPath: /.streamlit
+        {{- if .Values.ui.auth.enabled }}
+        # The authenticating proxy, and the only listener the Service targets.
+        # A sidecar rather than an Ingress annotation on purpose: sharing the
+        # pod's network namespace is what lets the console bind loopback, and
+        # the loopback bind is the control. An ingress-level authenticator
+        # leaves the console's own port reachable from anywhere in the cluster.
+        - name: auth
+          image: "{{ .Values.ui.auth.image.repository }}:{{ .Values.ui.auth.image.tag }}"
+          imagePullPolicy: {{ .Values.ui.auth.image.pullPolicy }}
+          args:
+            - --provider=oidc
+            - --oidc-issuer-url={{ .Values.ui.auth.issuerUrl }}
+            - --client-id={{ .Values.ui.auth.clientID }}
+            - --redirect-url={{ trimSuffix "/" .Values.ui.auth.externalUrl }}/oauth2/callback
+            - --http-address=0.0.0.0:{{ .Values.ui.auth.port }}
+            # Loopback, matching the console's bind. Naming the pod IP here
+            # would work and would quietly undo the whole arrangement.
+            - --upstream=http://127.0.0.1:{{ .Values.ui.port }}
+            {{- range .Values.ui.auth.emailDomains }}
+            - --email-domain={{ . }}
+            {{- end }}
+            # What puts the identity in front of the app: X-Forwarded-User,
+            # -Email and -Groups on the upstream request. identity.py reads
+            # exactly these. Without it the proxy authenticates the browser
+            # and tells the console nothing, and TRIAGE_AUTH_MODE=proxy then
+            # refuses every request -- loudly, which is the right failure.
+            - --pass-user-headers=true
+            # No Authorization header upstream. The console has no use for
+            # one, and a credential forwarded to a process that ignores it is
+            # a credential in a log somewhere.
+            - --pass-basic-auth=false
+            - --pass-access-token=false
+            # Do NOT trust X-Forwarded-* arriving from the browser. This is
+            # the default and is pinned because it is the flag that decides
+            # whether a client can spell its own source address, and a default
+            # that matters is worth stating where someone editing this can see
+            # it. Turn it on only with a trusted proxy ahead of this one.
+            - --reverse-proxy=false
+            - --silence-ping-logging=true
+            {{- with .Values.ui.auth.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            # Read from the environment rather than the args above: an
+            # argument is visible in `kubectl describe pod` and in every
+            # process listing inside the container.
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ui.auth.existingSecret }}
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ui.auth.existingSecret }}
+                  key: cookie-secret
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: auth
+              containerPort: {{ .Values.ui.auth.port }}
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: auth
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: auth
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.ui.auth.resources | nindent 12 }}
+        {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
@@ -120,17 +230,29 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: ui
 spec:
-  # ClusterIP, and no Ingress in this chart at all. The UI renders cluster
-  # state and pod logs and has no authentication of any kind -- unlike the
-  # API, there is no token to set. Reaching it should cost a deliberate
-  # port-forward, not a hostname someone can guess.
+  # ClusterIP, and no Ingress in this chart at all, whether or not auth is on.
+  # With ui.auth.enabled this Service reaches the proxy and the console's own
+  # port is in no Service at all; without it, this is an unauthenticated
+  # cluster viewer and reaching it should cost a deliberate port-forward
+  # rather than a hostname someone can guess.
   type: ClusterIP
   selector:
     app.kubernetes.io/name: {{ .Chart.Name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: ui
   ports:
+{{- if .Values.ui.auth.enabled }}
+    # The proxy, never the console. Pointing this at `http` would leave the
+    # console bound to loopback and the Service unable to reach it -- which
+    # fails visibly -- but pointing it at the console's port while the console
+    # binds every interface would fail invisibly, which is the mistake this
+    # template exists to make impossible.
+    - name: http
+      port: {{ .Values.ui.auth.port }}
+      targetPort: auth
+{{- else }}
     - name: http
       port: {{ .Values.ui.port }}
       targetPort: http
+{{- end }}
 {{- end }}

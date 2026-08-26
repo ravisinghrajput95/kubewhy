@@ -264,11 +264,82 @@ persistence:
 # your cluster rather than a convenience.
 ui:
   enabled: false
-  # Deliberate friction. enabled alone renders nothing and fails the install
-  # with an explanation, so nobody turns this on without reading what it means.
+  # Deliberate friction, and the only way past it other than auth.enabled
+  # below. enabled alone renders nothing and fails the install with an
+  # explanation, so nobody turns this on without reading what it means.
   exposureAcknowledged: false
   replicas: 1
   port: 8501
+
+  # An authenticating reverse proxy in front of the console.
+  #
+  # This is what makes the console safe to put on a Service, and it is
+  # structural rather than a check the app performs: with auth.enabled the
+  # Streamlit process binds 127.0.0.1 and the Service targets the proxy, so
+  # nothing unauthenticated can reach the app at all. Streamlit has no route
+  # layer to hang an authenticator on, so an in-app check would run after the
+  # connection was already accepted -- see identity.py.
+  #
+  # The app still refuses a request carrying no identity header
+  # (TRIAGE_AUTH_MODE=proxy, set for you below). Two independent controls,
+  # because the one that saves you is the one nobody remembered to check.
+  #
+  # Authorization is NOT per-user and this does not make it so. kubewhy is
+  # built for one team against one cluster: everyone who signs in sees
+  # everything the ServiceAccount can read, and the ClusterRole is where that
+  # is narrowed. Restrict who may sign in with emailDomains or an
+  # --allowed-group in extraArgs; do not expect namespace isolation.
+  auth:
+    enabled: false
+    image:
+      repository: quay.io/oauth2-proxy/oauth2-proxy
+      tag: v7.7.1
+      pullPolicy: IfNotPresent
+    # The port the Service targets. The console's own port becomes internal
+    # to the pod once this is on.
+    port: 4180
+
+    # Your identity provider. issuerUrl is the OIDC discovery root -- the host
+    # serving /.well-known/openid-configuration.
+    issuerUrl: ""
+    clientID: ""
+
+    # externalUrl is what the browser reaches the console on, and oauth2-proxy
+    # builds its redirect URI from it. Getting it wrong produces a login loop
+    # rather than an error, so it has no default. With a port-forward this is
+    # http://localhost:<local port>.
+    externalUrl: ""
+
+    # Who may sign in. ["*"] accepts any address the provider issues, which is
+    # only what you want if the provider itself is the boundary.
+    emailDomains: ["*"]
+
+    # A Secret holding `client-secret` and `cookie-secret`. Required: neither
+    # belongs in a values file. cookie-secret must be 16, 24 or 32 bytes --
+    #   kubectl create secret generic kubewhy-auth \
+    #     --from-literal=client-secret=... \
+    #     --from-literal=cookie-secret=$(openssl rand -base64 32 | head -c 32)
+    existingSecret: ""
+
+    # Anything else oauth2-proxy takes -- --allowed-group, --scope,
+    # --provider for a non-generic provider, --cookie-secure=false behind a
+    # plain-HTTP port-forward.
+    extraArgs: []
+
+    # NOTE, and it is a real collision rather than a caveat: networkPolicy
+    # below selects this pod too, and permits egress only to private address
+    # space. A provider on your network is reachable; a SaaS one -- Okta,
+    # Entra, Google -- is not, and the symptom is the proxy failing OIDC
+    # discovery at startup with nothing pointing at a NetworkPolicy.
+    # networkPolicy.extraAllowedCIDRs is the escape hatch and a poor one for a
+    # provider behind a CDN. Pick one of the two for now.
+
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
   # A separate image: the base one has no streamlit in it, deliberately, so
   # the API and controller do not carry pandas and pyarrow. Built as the "ui"
   # target of the Dockerfile and published alongside the base image.
