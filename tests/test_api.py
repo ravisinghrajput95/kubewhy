@@ -534,3 +534,123 @@ class TestTheAuditTrailNamesTheApiCaller:
 
         assert request_line.principal == audit_line.principal
         assert request_line.auth == audit_line.auth
+
+
+class TestTheInvestigationCeiling:
+    """
+    429 on the endpoints that drive the model.
+
+    The ordering assertions matter as much as the ceiling: telling someone
+    "you have asked too often" when they were never let in is a confusing
+    thing to say, and it leaks that the endpoint exists.
+    """
+
+    @pytest.fixture
+    def canned(self, monkeypatch):
+        import agent
+        import limits
+
+        limits.reset()
+        monkeypatch.setattr(agent, "_stream", lambda *a, **k: iter([
+            {"type": "answer", "run_id": "r", "answer": "ok",
+             "confidence": "grounded", "tool_calls": [], "unverified": []}]))
+        yield
+        limits.reset()
+
+    def test_a_caller_past_the_ceiling_gets_429(self, monkeypatch, canned):
+        monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "2")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            codes = [client.post("/ask", json={"question": "why?"}).status_code
+                     for _ in range(3)]
+
+        assert codes == [200, 200, 429]
+
+    def test_the_429_says_when_to_come_back(self, monkeypatch, canned):
+        monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "1")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            client.post("/ask", json={"question": "why?"})
+            refused = client.post("/ask", json={"question": "why?"})
+
+        assert refused.status_code == 429
+        assert int(refused.headers["Retry-After"]) > 0
+
+    def test_an_unauthenticated_caller_gets_401_not_429(self, monkeypatch, canned):
+        """
+        Order, not coincidence. require_caller is listed first on every one of
+        these endpoints.
+        """
+        monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "1")
+        monkeypatch.setenv("TRIAGE_AUTH_MODE", "proxy")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            for _ in range(3):
+                response = client.post("/ask", json={"question": "why?"})
+
+        assert response.status_code == 401
+
+    def test_a_refused_caller_does_not_spend_another_allowance(
+            self, monkeypatch, canned):
+        """
+        Otherwise a client in a retry loop pushes its own window out forever
+        and never recovers, which turns a rate limit into a permanent ban.
+        """
+        import limits
+
+        monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "1")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            client.post("/ask", json={"question": "why?"})
+            first = client.post("/ask", json={"question": "why?"})
+            second = client.post("/ask", json={"question": "why?"})
+
+        assert first.status_code == second.status_code == 429
+        assert int(second.headers["Retry-After"]) <= int(first.headers["Retry-After"])
+
+    def test_two_callers_have_separate_allowances(self, monkeypatch, canned):
+        monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "1")
+        monkeypatch.setenv("TRIAGE_AUTH_MODE", "proxy")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            one = {"X-Forwarded-Email": "a@example.com"}
+            two = {"X-Forwarded-Email": "b@example.com"}
+            client.post("/ask", json={"question": "why?"}, headers=one)
+            blocked = client.post("/ask", json={"question": "why?"}, headers=one)
+            other = client.post("/ask", json={"question": "why?"}, headers=two)
+
+        assert blocked.status_code == 429
+        assert other.status_code == 200
+
+    def test_reads_are_not_rate_limited(self, monkeypatch, canned):
+        """
+        /scan and /pods cost no model time, and the same ceiling on them would
+        make the console's own browsing count against the person using it.
+        """
+        monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "1")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            client.post("/ask", json={"question": "why?"})
+            codes = [client.get("/platform").status_code for _ in range(5)]
+
+        assert codes == [200] * 5
+
+    @pytest.mark.parametrize("path", ["/ask", "/ask/jobs", "/ask/stream"])
+    def test_every_investigation_endpoint_carries_the_ceiling(self, path):
+        """
+        Enumerated, for the reason /references was: a new endpoint is
+        unlimited until someone remembers the dependency, and it works.
+        """
+        route = next(r for r in app_module.app.routes
+                     if getattr(r, "path", "") == path)
+        names = [getattr(d.dependency, "__name__", "") for d in route.dependencies]
+
+        assert "budgeted" in names, f"{path} has no ceiling"
+
+    def test_the_posture_is_reported(self, monkeypatch, canned):
+        monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "42")
+        with patch.object(app_module, "API_TOKEN", ""), patch("ollama.Client"):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            body = client.get("/inference").json()
+
+        assert body["limits"]["investigations_per_hour"] == 42

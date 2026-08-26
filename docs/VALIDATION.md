@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1157 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1196 passing, no cluster or model required |
 | Grounding replay | **PROVEN** | 1469 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -20,6 +20,8 @@ and does not support. Four words are used and they mean specific things:
 | Bounded investigation deadline | **PROVEN** | 38 tests incl. fallback-cannot-reset |
 | Security regression (UI) | **PROVEN** | credentials absent from page, no client-side calls |
 | Console authentication | **PROVEN** | kind + real OIDC issuer; console unreachable from another pod |
+| Rate limiting | **PARTIALLY PROVEN** | unit and API tests; never run against a real loop in a cluster |
+| External token budget | **PARTIALLY PROVEN** | charged through the real gateway with a stub provider; no hosted provider was billed |
 | Forged identity header | **PROVEN** | overwritten by the proxy, measured with a session held |
 | Per-user authorization | **NOT TESTED** | deliberately not implemented — see SECURITY.md |
 | Audit trail (CLI, REST) | **PROVEN** | live runs; evidence absent from the record |
@@ -454,7 +456,7 @@ is not a result.
 ## Reproducing
 
 ```bash
-pytest                                   # 1157, no cluster or model needed
+pytest                                   # 1196, no cluster or model needed
 
 kind create cluster --name kubewhy
 kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \

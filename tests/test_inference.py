@@ -21,6 +21,7 @@ import pytest
 
 import backends
 import inference
+import limits
 import observability
 import redaction
 import telemetry
@@ -1231,3 +1232,75 @@ class TestRedactionAtTheBoundary:
 
         assert inference._redacted([{"content": leak}])[0]["content"] == \
             redaction.redact(leak)
+
+
+class TestTokensAreChargedOnlyWhenTheyLeaveTheNetwork:
+    """
+    The wiring between the gateway and the spend budget.
+
+    Tested here rather than only in test_limits.py because the unit was
+    already covered and the *integration* was not: removing
+    `external=target.external` from the _count_tokens call failed no test at
+    all, which is the same shape as an audit trail whose actor never reached
+    the loop. The stub provider reports 11 prompt and 7 completion tokens.
+    """
+
+    @pytest.fixture(autouse=True)
+    def budget(self, monkeypatch):
+        monkeypatch.setenv("TRIAGE_MAX_EXTERNAL_TOKENS_PER_HOUR", "10000")
+        limits.reset()
+        yield
+        limits.reset()
+
+    def test_a_hosted_call_charges_the_budget(self):
+        hosted = target(mode="api", endpoint="https://api.openai.example/v1",
+                        api_key="k")
+        gateway(hosted, allow_external=True).chat("m", [], {}, False)
+
+        assert limits.spent() == 18
+
+    def test_a_local_call_charges_nothing(self):
+        """
+        Nothing is spent on a local model, and a budget that counted it would
+        stop meaning money.
+        """
+        gateway().chat("m", [], {}, False)
+
+        assert limits.spent() == 0
+
+    def test_an_in_cluster_call_charges_nothing(self):
+        """
+        `mode: cluster` is a model on your own network. It is the mode most
+        orgs want precisely because it costs no per-token spend.
+        """
+        in_cluster = target(mode="cluster",
+                            endpoint="http://vllm.kubewhy.svc.cluster.local:8000/v1")
+        gateway(in_cluster).chat("m", [], {}, False)
+
+        assert limits.spent() == 0
+
+    def test_a_fallback_to_a_hosted_provider_charges_the_budget(self):
+        """
+        The failover path spends real money and is the one nobody watches.
+        """
+        Broken.raises = ConnectionError("refused")
+        hosted = target(mode="api", provider="otherwire",
+                        endpoint="https://api.openai.example/v1", api_key="k")
+        config = inference.Config(
+            target(provider="broken"), hosted,
+            inference.Policy(allow_external=True, fallback_enabled=True))
+        inference.Gateway(config).chat("m", [], {}, False)
+
+        assert limits.spent() == 18
+
+    def test_the_metric_counts_local_tokens_even_though_the_budget_does_not(self):
+        """
+        Two different questions. Telemetry asks "how much work happened";
+        the budget asks "how much was spent". Conflating them would leave an
+        operator unable to see local usage at all.
+        """
+        gateway().chat("m", [], {}, False)
+        counted = sum(value for _, _, value in telemetry.INFERENCE_TOKENS.samples())
+
+        assert counted == 18
+        assert limits.spent() == 0

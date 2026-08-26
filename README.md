@@ -287,7 +287,10 @@ Product boundaries:
   automatically but score materially worse.
 - **Latency.** Tens of seconds per diagnosis on a local model. `kubectl describe`
   is faster when you already know where to look.
-- **No rate limiting**, and no lockfile.
+- **Rate limiting is per process, not per deployment.** A ceiling on
+  investigations per caller and on external inference tokens, both in memory —
+  three pods are three windows. It is a guardrail against a runaway loop, not a
+  billing control; set a spend cap with your provider. No lockfile.
 - **One replica of each component.** The controller's dedup state and the
   console's investigation history are per-process, so two of either is two of
   everything. The chart refuses more and [RUNBOOK.md](docs/RUNBOOK.md) says
@@ -1149,6 +1152,8 @@ policy and the fallback rules.
 | `TRIAGE_AUTH_EMAIL_HEADER` | oauth2-proxy's | Comma-separated header names carrying the identity. Naming your own replaces the built-in names rather than adding to them |
 | `TRIAGE_AUDIT` | `1` | One audit record per investigation. `0` turns it off |
 | `TRIAGE_AUDIT_LOG` | *unset* | Append audit records to this file as well as to the log stream |
+| `TRIAGE_MAX_INVESTIGATIONS_PER_HOUR` | `60` | Per authenticated caller, on the model-driving endpoints. `0` disables it. Refused as 429 with `Retry-After` |
+| `TRIAGE_MAX_EXTERNAL_TOKENS_PER_HOUR` | *unset* | Hourly ceiling on tokens that actually left your network. Local and in-cluster inference are not counted |
 | `TRIAGE_STUCK_AFTER` | `300` | Seconds a pod may sit in `ContainerCreating` or `PodInitializing` before the controller treats it as a fault rather than a start-up |
 | `TRIAGE_STATE_DB` | *unset* | Path to a SQLite file for controller dedup state and `/ask` job results. Unset, both live in memory and a restart forgets them. The Helm chart sets it when `persistence.enabled=true` |
 | `TRIAGE_JOB_TTL` | `86400` | Seconds an `/ask` job result is kept before purging |

@@ -23,6 +23,7 @@ from pydantic import BaseModel
 import audit
 import identity
 import inference
+import limits
 import observability
 import store
 import telemetry
@@ -134,6 +135,42 @@ def require_caller(request: Request):
     return getattr(request.state, "principal", identity.ANONYMOUS)
 
 
+def budgeted(request: Request):
+    """
+    Whether this caller may start another investigation. 429 if not.
+
+    Listed after require_caller on every endpoint that uses it, so a request
+    with no identity gets 401 rather than 429 -- "you have asked too often" is
+    a confusing thing to tell someone who has not been let in.
+
+    The allowance is spent here rather than in the handler. A check in the
+    dependency and an increment in the handler leaves a window where
+    concurrent requests all pass a stale count, and this is the one place that
+    sees every investigation endpoint.
+
+    Only the endpoints that drive the model carry it. /scan and /pods read the
+    cluster and cost no model time, and putting the same ceiling on them would
+    make the console's own browsing count against the person using it.
+    """
+    principal = getattr(request.state, "principal", identity.ANONYMOUS)
+    name = principal.label()
+    try:
+        limits.check(name)
+    except limits.Refused as refused:
+        log.warning("rate_limited", extra={"principal": name,
+                                           "reason": refused.reason,
+                                           "path": request.url.path})
+        raise HTTPException(
+            status_code=429,
+            detail=refused.reason,
+            # Seconds until the window has room, not the window length. A
+            # caller told to wait an hour when it frees up in ninety seconds
+            # will either give up or hammer, and both are worse than the truth.
+            headers={"Retry-After": str(refused.retry_after)},
+        )
+    limits.record(name)
+
+
 def _peer(request):
     """
     The address the request arrived from, or None if the server did not say.
@@ -156,6 +193,10 @@ async def lifespan(_app):
     # that quietly disables it. Starting anyway would serve pod logs to
     # anyone who asked, having logged a line nobody was watching for.
     unauthenticated = identity.required() is False
+
+    ceiling = limits.startup_warning()
+    if ceiling:
+        log.warning(ceiling)
 
     if unauthenticated and not API_TOKEN:
         log.warning(
@@ -322,7 +363,11 @@ def inference_config():
     no key, for the reason inference.Target.describe gives.
     """
     try:
-        return inference.gateway().config.describe()
+        # The ceilings alongside the mode, because they answer the same
+        # question from the other side: this says where evidence goes, and
+        # limits says how much of it may go there before the door shuts.
+        return {**inference.gateway().config.describe(),
+                "limits": limits.describe()}
     except ValueError as exc:
         # The one endpoint whose entire job is saying what inference is
         # configured to do must answer when the answer is "something illegal".
@@ -451,7 +496,7 @@ def _question(body):
     return body.question
 
 
-@app.post("/ask", dependencies=[Depends(require_caller)], tags=["agent"])
+@app.post("/ask", dependencies=[Depends(require_caller), Depends(budgeted)], tags=["agent"])
 def ask_agent(body: Question):
     """
     Answer a plain-English question about the host or the cluster.
@@ -463,7 +508,7 @@ def ask_agent(body: Question):
     return ask(_question(body))
 
 
-@app.post("/ask/jobs", status_code=202, dependencies=[Depends(require_caller)], tags=["agent"])
+@app.post("/ask/jobs", status_code=202, dependencies=[Depends(require_caller), Depends(budgeted)], tags=["agent"])
 def submit_job(body: Question):
     """
     Ask without holding the connection open. Returns immediately with an id.
@@ -515,7 +560,7 @@ def job_status(job_id: str):
     return job
 
 
-@app.post("/ask/stream", dependencies=[Depends(require_caller)], tags=["agent"])
+@app.post("/ask/stream", dependencies=[Depends(require_caller), Depends(budgeted)], tags=["agent"])
 def ask_agent_streaming(body: Question):
     """
     The same answer, delivered as server-sent events while it is produced.

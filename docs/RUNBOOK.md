@@ -273,6 +273,62 @@ audit record's `tools` field lists every call and its arguments, and a run that
 never called `get_pod_events` never saw the cause of a container that never
 started.
 
+## When a caller is refused with 429
+
+Two ceilings sit in front of the model-driving endpoints. Neither applies to
+`/scan`, `/pods` or the console's cluster browser, which cost no model time.
+
+| Setting | Default | Bounds |
+|---|---|---|
+| `TRIAGE_MAX_INVESTIGATIONS_PER_HOUR` | 60 | Investigations per authenticated caller |
+| `TRIAGE_MAX_EXTERNAL_TOKENS_PER_HOUR` | off | Tokens that actually left your network |
+
+`GET /inference` reports both, and how much of the token budget is spent.
+
+**The 429 carries `Retry-After`**, and it is the seconds until that caller's
+window has room — not the window length. A refused request does not spend
+another allowance, so a client in a retry loop does not push its own window out
+forever. (When the allowance was spent in a burst, that number *is* close to
+the window length, because the oldest event really is that recent.)
+
+**An attempt counts even when it fails.** The ceiling is checked before the
+handler, so a request that then 503s because the model is unreachable has still
+spent an allowance. That is deliberate: recording only successes would leave a
+loop against a down model unbounded, which is precisely when a client is most
+likely to be looping. Verified against a running API with no model behind it —
+one 503, then 429s.
+
+**If a person hits the investigation ceiling**, either something is looping on
+their credential or the ceiling is too low for how they work. Check the audit
+trail before raising it — the records name the principal and the question, so
+"is this a human or a script" is a query rather than a guess:
+
+```bash
+jq -r 'select(.principal == "sre@example.com") | [.at, .question] | @tsv' \
+  "$TRIAGE_AUDIT_LOG" | tail -20
+```
+
+**If the token budget is spent**, every caller is refused, because the budget
+is on total egress rather than per caller — a per-caller token ceiling would
+let N callers each spend the maximum, which is not a budget. It refills as the
+window slides.
+
+### What these ceilings are not
+
+**They are not billing controls.** This process can decline to start work; it
+cannot recall a request in flight. Set a spend cap with your provider — that is
+the control that actually bounds an invoice.
+
+**They are per process.** The windows are in memory, so a restart clears them
+(bounded by the window length), and a deployment running the API, the
+controller and the console as separate pods has three independent windows
+rather than one shared budget.
+
+**The console does not enforce them.** A person clicking Diagnose is not the
+runaway loop these exist to stop, and refusing an SRE mid-incident would cost
+more than it saved. Only the API refuses. If you need the console bounded too,
+the honest answer today is the provider's spend cap.
+
 ## The audit trail
 
 One record per investigation on the `triage.audit` logger, `msg: investigation`,

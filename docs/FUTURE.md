@@ -52,8 +52,6 @@ with its own ServiceAccount is the shape to reach for.
 detaches the work but the result lives in this process's store — one replica or
 nothing.
 
-**Rate limiting.**
-
 ## Explicitly not planned
 
 **Autonomous remediation.** Every tool is read-only, and that is a design

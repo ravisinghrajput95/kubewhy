@@ -120,6 +120,43 @@ stream this process can also write other things to, so it is as tamper-evident
 as your log pipeline and no more. And `TRIAGE_AUDIT=0` turns it off, which is a
 decision someone has to make rather than a default.
 
+### An unbounded caller
+
+`TRIAGE_INVESTIGATION_BUDGET` bounds one run; these bound how many.
+
+- **Investigations per caller per hour** (`TRIAGE_MAX_INVESTIGATIONS_PER_HOUR`,
+  default 60). Per principal, which is what the authentication above
+  establishes — a shared bucket would let one runaway client lock out the
+  person trying to diagnose the incident it caused. Refused as **429** with a
+  `Retry-After` naming the seconds until the window frees, not the window
+  length. Generous by design: at the recorded 41s median one process cannot
+  run much past 88 an hour serially, so it cannot bite a person working an
+  incident.
+- **External inference tokens per hour** (`TRIAGE_MAX_EXTERNAL_TOKENS_PER_HOUR`,
+  default off). Counted **only where evidence actually left the network** —
+  local and in-cluster inference spend nothing per token, and a ceiling there
+  would be friction with nothing behind it. Counted in tokens rather than
+  currency: a price table per model goes stale, and the provider reports
+  tokens exactly.
+- **A sliding window, not a fixed bucket.** A fixed hourly bucket lets a caller
+  spend the whole allowance in the last minute of one hour and the whole
+  allowance again in the first minute of the next.
+- **Only the endpoints that drive the model carry it.** `/scan` and `/pods`
+  cost no model time, and the same ceiling on them would make the console's own
+  browsing count against the person using it.
+
+**Limitations, and they matter for the cost half.** These are guardrails
+against a loop that got away, **not billing controls**. If money is at stake,
+set a spend cap with your provider — this process can decline to start work and
+that is all it can do; it cannot recall a request already in flight.
+
+The windows are **in memory and per process**. A restart clears them, bounded
+by the window length. And a deployment running the API, the controller and the
+console as separate pods has three independent windows, not one shared budget.
+**The console does not enforce the ceiling at all**: a person clicking a button
+is not the runaway loop this exists to stop, and blocking an SRE mid-incident
+would cost more than it saved. Only the API refuses.
+
 ### Unbounded runs
 
 - **One deadline per investigation** (`TRIAGE_INVESTIGATION_BUDGET`, default
@@ -208,7 +245,6 @@ that passes while its payload never arrived is proving nothing.
 ## What is not protected
 
 - **Redaction is incomplete by nature.** See above.
-- **No rate limiting.**
 - **Authentication is not authorization, and there is no per-user authorization
   model.** Everyone who signs in sees everything the ServiceAccount can read.
   This is a design decision, not an omission: kubewhy is built for one SRE team

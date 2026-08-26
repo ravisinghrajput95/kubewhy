@@ -60,6 +60,7 @@ import httpx
 
 import backends
 import redaction
+import limits
 import telemetry
 
 log = logging.getLogger("triage.inference")
@@ -760,7 +761,7 @@ class Gateway:
         telemetry.INFERENCE_DURATION.observe(
             time.perf_counter() - started, **labels)
         telemetry.INFERENCE_REQUESTS.inc(outcome="ok", **labels)
-        _count_tokens(reply, labels)
+        _count_tokens(reply, labels, external=target.external)
 
         # Recorded only on success: a failed attempt must not leave the
         # gateway shaping its next message in the protocol of a provider that
@@ -846,7 +847,7 @@ class Gateway:
         return self._backends[key]
 
 
-def _count_tokens(reply, labels):
+def _count_tokens(reply, labels, external=False):
     """
     Token counts, where the provider reports them.
 
@@ -855,12 +856,19 @@ def _count_tokens(reply, labels):
     object, and a provider reporting neither should produce no series at all.
     A zero would read as "this call used no tokens", which is a different and
     false claim.
+
+    `external` decides whether the count also lands against the spend budget.
+    Read here rather than derived later because this is the only place that
+    knows both what the provider reported and which target answered -- and the
+    gateway's `active` is process-wide, so asking it afterwards is right with
+    one investigation in flight and wrong with two.
     """
     usage = getattr(reply, "usage", None) or {}
     for kind in ("prompt", "completion"):
         value = usage.get(kind)
         if value:
             telemetry.INFERENCE_TOKENS.inc(value, kind=kind, **labels)
+            limits.record_tokens(value, external)
 
 
 _GATEWAY = None
