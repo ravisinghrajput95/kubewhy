@@ -20,6 +20,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
+import identity
 import inference
 import observability
 import store
@@ -48,29 +49,100 @@ log = logging.getLogger("triage.api")
 API_TOKEN = os.getenv("TRIAGE_API_TOKEN", "")
 
 
-def require_token(authorization: str = Header(default="")):
+def _bearer(authorization):
     """
-    Bearer auth, enabled by setting TRIAGE_API_TOKEN.
+    Whether a valid token was presented, and whether one was attempted.
 
-    Left unset the API is open, which is only safe bound to localhost -- so
-    startup warns loudly about it. Comparison is constant-time; a token check
-    that leaks length via early exit is not a token check.
+    Two answers rather than one because "no Authorization header" and "the
+    wrong token" lead to different places: the first can fall through to the
+    proxy identity, the second is someone guessing and is refused on the spot.
+
+    Comparison is constant-time; a token check that leaks length via early
+    exit is not a token check.
     """
-    if not API_TOKEN:
-        return
-
     scheme, _, presented = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not secrets.compare_digest(presented, API_TOKEN):
+    if scheme.lower() != "bearer":
+        return False, False
+    return secrets.compare_digest(presented, API_TOKEN), True
+
+
+def require_caller(request: Request, authorization: str = Header(default="")):
+    """
+    Who is calling, or 401.
+
+    Two ways in, because this API has two kinds of caller and they cannot
+    authenticate the same way:
+
+    - **A person, through the authenticating proxy.** Their identity arrives
+      in a header the proxy set. Trusted only in TRIAGE_AUTH_MODE=proxy, and
+      only from loopback -- see identity.py for why the peer address is
+      checked and what it is standing in for.
+    - **A machine, with TRIAGE_API_TOKEN.** Prometheus scraping /metrics and
+      anything scripted. These have no browser to complete an OIDC flow with,
+      so removing the token when the proxy arrived would break them.
+
+    A presented-but-wrong token is refused immediately rather than falling
+    through to the header path. Falling through would let a caller probe
+    tokens for free and, worse, would hand a valid proxy session to a request
+    that was simultaneously guessing credentials.
+
+    Left with neither configured the API is open, which is only safe bound to
+    localhost -- startup warns loudly about it.
+    """
+    valid, attempted = _bearer(authorization)
+    if attempted:
+        if not valid or not API_TOKEN:
+            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+        principal = identity.Principal(name="api-token", source="token")
+        request.state.principal = principal
+        return principal
+
+    if API_TOKEN and not identity.required():
+        # The pre-proxy contract, unchanged: a configured token is required.
         raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+
+    try:
+        principal = identity.require(request.headers, peer=_peer(request))
+    except identity.Unauthenticated as exc:
+        # 401 with the reason. Not 403: this is "we do not know who you are",
+        # and the distinction tells whoever is on call whether the proxy is
+        # misconfigured or whether someone reached the app around it.
+        log.warning("unauthenticated", extra={"reason": exc.reason,
+                                              "path": request.url.path})
+        raise HTTPException(status_code=401, detail=exc.reason)
+
+    request.state.principal = principal
+    return principal
+
+
+def _peer(request):
+    """
+    The address the request arrived from, or None if the server did not say.
+
+    None means the loopback check is skipped rather than failed. A transport
+    that reports no peer -- a test client, a UNIX socket -- is not evidence of
+    a bypass, and treating it as one would refuse requests that are fine while
+    protecting nothing.
+    """
+    client = getattr(request, "client", None)
+    return getattr(client, "host", None) if client else None
 
 
 @asynccontextmanager
 async def lifespan(_app):
-    if not API_TOKEN:
+    # Before anything else: a TRIAGE_AUTH_MODE this process does not recognise
+    # raises here and the API refuses to start. Deliberate, and the same
+    # posture inference.py takes towards an endpoint it cannot classify -- a
+    # typo in the setting that enables authentication must not be the thing
+    # that quietly disables it. Starting anyway would serve pod logs to
+    # anyone who asked, having logged a line nobody was watching for.
+    unauthenticated = identity.required() is False
+
+    if unauthenticated and not API_TOKEN:
         log.warning(
-            "TRIAGE_API_TOKEN is unset: the API is unauthenticated and exposes "
-            "cluster state, pod logs and the host process table. Bind to "
-            "localhost only."
+            "TRIAGE_API_TOKEN is unset and TRIAGE_AUTH_MODE is 'none': the API "
+            "is unauthenticated and exposes cluster state, pod logs and the "
+            "host process table. Bind to localhost only."
         )
 
     # Resolve inference at startup so the configuration is in the log before
@@ -108,6 +180,12 @@ async def request_logging(request: Request, call_next):
 
     response = await call_next(request)
 
+    # The principal is set by require_caller, so it is absent on the
+    # unauthenticated endpoints (/healthz, /readyz) and on a request that was
+    # refused. "anonymous" is the honest value in both cases -- a request line
+    # that omits the field entirely is one a log query cannot count.
+    principal = getattr(request.state, "principal", identity.ANONYMOUS)
+
     log.info(
         "request",
         extra={
@@ -115,6 +193,8 @@ async def request_logging(request: Request, call_next):
             "method": request.method,
             "path": request.url.path,
             "status": response.status_code,
+            "principal": principal.label(),
+            "auth": principal.source,
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
         },
     )
@@ -198,7 +278,7 @@ def readyz():
     return {"status": "ready", **report}
 
 
-@app.get("/inference", dependencies=[Depends(require_token)], tags=["health"])
+@app.get("/inference", dependencies=[Depends(require_caller)], tags=["health"])
 def inference_config():
     """
     Where inference happens and whether evidence may leave, as configured.
@@ -219,7 +299,7 @@ def inference_config():
         )
 
 
-@app.get("/metrics", dependencies=[Depends(require_token)], tags=["health"])
+@app.get("/metrics", dependencies=[Depends(require_caller)], tags=["health"])
 def metrics():
     """
     Prometheus exposition.
@@ -236,34 +316,34 @@ def metrics():
 
 # --- host -------------------------------------------------------------------
 
-@app.get("/platform", dependencies=[Depends(require_token)], tags=["host"])
+@app.get("/platform", dependencies=[Depends(require_caller)], tags=["host"])
 def platform():
     return get_platform_info()
 
 
-@app.get("/system", dependencies=[Depends(require_token)], tags=["host"])
+@app.get("/system", dependencies=[Depends(require_caller)], tags=["host"])
 def system():
     return get_system_info()
 
 
-@app.get("/processes", dependencies=[Depends(require_token)], tags=["host"])
+@app.get("/processes", dependencies=[Depends(require_caller)], tags=["host"])
 def process(name_filter: str = ""):
     return get_processes(name_filter)
 
 
-@app.get("/cpu", dependencies=[Depends(require_token)], tags=["host"])
+@app.get("/cpu", dependencies=[Depends(require_caller)], tags=["host"])
 def top_cpu(limit: int = 5):
     return get_top_cpu_processes(limit)
 
 
-@app.get("/memory", dependencies=[Depends(require_token)], tags=["host"])
+@app.get("/memory", dependencies=[Depends(require_caller)], tags=["host"])
 def top_memory(limit: int = 5):
     return get_top_memory_processes(limit)
 
 
 # --- kubernetes -------------------------------------------------------------
 
-@app.get("/scan", dependencies=[Depends(require_token)], tags=["kubernetes"])
+@app.get("/scan", dependencies=[Depends(require_caller)], tags=["kubernetes"])
 def scan(
     only_unhealthy: bool = True,
     limit: int = 20,
@@ -273,46 +353,46 @@ def scan(
     return scan_cluster(only_unhealthy, limit, namespaces, workload)
 
 
-@app.get("/pods", dependencies=[Depends(require_token)], tags=["kubernetes"])
+@app.get("/pods", dependencies=[Depends(require_caller)], tags=["kubernetes"])
 def pods(namespace: str = "default", only_unhealthy: bool = False):
     return list_pods(namespace, only_unhealthy)
 
 
-@app.get("/pods/{name}", dependencies=[Depends(require_token)], tags=["kubernetes"])
+@app.get("/pods/{name}", dependencies=[Depends(require_caller)], tags=["kubernetes"])
 def pod_detail(name: str, namespace: str = "default"):
     return describe_pod(name, namespace)
 
 
-@app.get("/pods/{name}/events", dependencies=[Depends(require_token)], tags=["kubernetes"])
+@app.get("/pods/{name}/events", dependencies=[Depends(require_caller)], tags=["kubernetes"])
 def pod_events(name: str, namespace: str = "default", limit: int = 10):
     return get_pod_events(name, namespace, limit)
 
 
-@app.get("/pods/{name}/logs", dependencies=[Depends(require_token)], tags=["kubernetes"])
+@app.get("/pods/{name}/logs", dependencies=[Depends(require_caller)], tags=["kubernetes"])
 def pod_logs(name: str, namespace: str = "default", tail: int = 20):
     return get_pod_logs(name, namespace, tail)
 
 
-@app.get("/nodes", dependencies=[Depends(require_token)], tags=["kubernetes"])
+@app.get("/nodes", dependencies=[Depends(require_caller)], tags=["kubernetes"])
 def nodes():
     return list_nodes()
 
 
-@app.get("/deployments", dependencies=[Depends(require_token)], tags=["kubernetes"])
+@app.get("/deployments", dependencies=[Depends(require_caller)], tags=["kubernetes"])
 def deployments(namespace: str = "default"):
     return list_deployments(namespace)
 
 
 @app.get(
     "/services/{name}/endpoints",
-    dependencies=[Depends(require_token)],
+    dependencies=[Depends(require_caller)],
     tags=["kubernetes"],
 )
 def service_endpoints(name: str, namespace: str = "default"):
     return get_service_endpoints(name, namespace)
 
 
-@app.get("/references", dependencies=[Depends(require_token)], tags=["kubernetes"])
+@app.get("/references", dependencies=[Depends(require_caller)], tags=["kubernetes"])
 def references(namespace: str = "default"):
     """Objects in this namespace whose references do not resolve."""
     return scan_references(namespace)
@@ -338,7 +418,7 @@ def _question(body):
     return body.question
 
 
-@app.post("/ask", dependencies=[Depends(require_token)], tags=["agent"])
+@app.post("/ask", dependencies=[Depends(require_caller)], tags=["agent"])
 def ask_agent(body: Question):
     """
     Answer a plain-English question about the host or the cluster.
@@ -350,7 +430,7 @@ def ask_agent(body: Question):
     return ask(_question(body))
 
 
-@app.post("/ask/jobs", status_code=202, dependencies=[Depends(require_token)], tags=["agent"])
+@app.post("/ask/jobs", status_code=202, dependencies=[Depends(require_caller)], tags=["agent"])
 def submit_job(body: Question):
     """
     Ask without holding the connection open. Returns immediately with an id.
@@ -387,7 +467,7 @@ def submit_job(body: Question):
     return {"id": job_id, "state": "queued"}
 
 
-@app.get("/ask/jobs/{job_id}", dependencies=[Depends(require_token)], tags=["agent"])
+@app.get("/ask/jobs/{job_id}", dependencies=[Depends(require_caller)], tags=["agent"])
 def job_status(job_id: str):
     """
     A job's state, and its answer once there is one.
@@ -402,7 +482,7 @@ def job_status(job_id: str):
     return job
 
 
-@app.post("/ask/stream", dependencies=[Depends(require_token)], tags=["agent"])
+@app.post("/ask/stream", dependencies=[Depends(require_caller)], tags=["agent"])
 def ask_agent_streaming(body: Question):
     """
     The same answer, delivered as server-sent events while it is produced.

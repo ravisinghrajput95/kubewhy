@@ -210,7 +210,7 @@ def test_a_valid_header_from_off_loopback_is_still_refused(monkeypatch, peer):
     proxy(monkeypatch)
     with pytest.raises(identity.Unauthenticated) as caught:
         identity.require({"X-Forwarded-Email": "attacker@example.com"}, peer=peer)
-    assert "bypassed the authenticating proxy" in caught.value.reason
+    assert "did not arrive over loopback" in caught.value.reason
 
 
 def test_off_loopback_is_not_checked_when_no_proxy_is_claimed(monkeypatch):
@@ -220,6 +220,19 @@ def test_off_loopback_is_not_checked_when_no_proxy_is_claimed(monkeypatch):
     on purpose, and would be enforcing a policy nobody asked for.
     """
     assert identity.require({}, peer="10.244.0.7").authenticated is False
+
+
+def test_the_bypass_refusal_names_the_proxy_header_rewrite(monkeypatch):
+    """
+    Measured: uvicorn rewrites the peer from X-Forwarded-For by default, so
+    the most likely cause of this refusal in a working deployment is a
+    missing --no-proxy-headers rather than an attacker. The message has to
+    say so, or the first person to hit it goes looking for an intrusion.
+    """
+    proxy(monkeypatch)
+    with pytest.raises(identity.Unauthenticated) as caught:
+        identity.require({"X-Forwarded-Email": "sre@example.com"}, peer="203.0.113.9")
+    assert "--no-proxy-headers" in caught.value.reason
 
 
 def test_the_two_refusals_are_distinguishable(monkeypatch):

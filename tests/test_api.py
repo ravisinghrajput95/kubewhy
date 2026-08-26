@@ -298,7 +298,7 @@ class TestEveryRouteIsAuthenticated:
     remembers the dependency -- and nobody notices, because the endpoint
     works.
 
-    That happened: GET /references shipped without Depends(require_token) and
+    That happened: GET /references shipped without Depends(require_caller) and
     served cluster topology to anyone who could reach the port while every
     other endpoint returned 401. Found by testing auth on a live cluster
     rather than on /scan alone. This enumerates the routes so the next one
@@ -309,7 +309,7 @@ class TestEveryRouteIsAuthenticated:
     # closed and gets the container killed during a credential problem.
     PUBLIC = {"/healthz", "/readyz", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 
-    def test_no_route_is_missing_the_token_dependency(self):
+    def test_no_route_is_missing_the_auth_dependency(self):
         import app as api
 
         unprotected = []
@@ -321,7 +321,7 @@ class TestEveryRouteIsAuthenticated:
                 getattr(d.dependency, "__name__", "")
                 for d in getattr(route, "dependencies", [])
             ]
-            if "require_token" not in names:
+            if "require_caller" not in names:
                 unprotected.append(f"{sorted(getattr(route, 'methods', []) or [])} {path}")
 
         assert not unprotected, f"routes served without auth: {unprotected}"
@@ -332,4 +332,121 @@ class TestEveryRouteIsAuthenticated:
 
         route = next(r for r in api.app.routes if getattr(r, "path", "") == "/references")
         names = [getattr(d.dependency, "__name__", "") for d in route.dependencies]
-        assert "require_token" in names
+        assert "require_caller" in names
+
+
+class TestProxyAuthentication:
+    """
+    TRIAGE_AUTH_MODE=proxy: a person arrives through the authenticating proxy
+    and their identity is a header it set.
+
+    Every client here is built with an explicit loopback peer, because that is
+    what a sidecar produces and because the default TestClient peer is the
+    string "testclient" -- which is correctly refused, and would otherwise
+    make every test in this class pass for the wrong reason.
+    """
+
+    HEADERS = {"X-Forwarded-Email": "sre@example.com"}
+
+    @pytest.fixture
+    def proxied(self, monkeypatch):
+        monkeypatch.setenv("TRIAGE_AUTH_MODE", "proxy")
+        with patch.object(app_module, "API_TOKEN", ""):
+            yield TestClient(app_module.app, client=("127.0.0.1", 51000))
+
+    def test_a_proxied_identity_is_admitted(self, proxied):
+        assert proxied.get("/platform", headers=self.HEADERS).status_code == 200
+
+    def test_no_identity_is_refused(self, proxied):
+        response = proxied.get("/platform")
+        assert response.status_code == 401
+        assert "no identity header" in response.json()["detail"]
+
+    def test_an_empty_identity_is_refused(self, proxied):
+        assert proxied.get("/platform",
+                           headers={"X-Forwarded-Email": ""}).status_code == 401
+
+    def test_liveness_stays_open(self, proxied):
+        """A probe that needs an OIDC session is a probe that kills the pod."""
+        assert proxied.get("/healthz").status_code == 200
+
+    def test_an_identity_from_off_loopback_is_refused(self, monkeypatch):
+        """
+        The premise the header trust rests on, checked. A request that reached
+        the app from a pod address got around the proxy, so nothing it carries
+        is worth reading however well-formed it is.
+        """
+        monkeypatch.setenv("TRIAGE_AUTH_MODE", "proxy")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("10.244.0.7", 51000))
+            response = client.get("/platform", headers=self.HEADERS)
+
+        assert response.status_code == 401
+        assert "did not arrive over loopback" in response.json()["detail"]
+
+    def test_a_token_still_works_alongside_the_proxy(self, monkeypatch):
+        """
+        Prometheus has no browser to complete an OIDC flow with. Removing the
+        token when the proxy arrived would break every machine caller, and
+        /metrics is behind the same auth as everything else.
+        """
+        monkeypatch.setenv("TRIAGE_AUTH_MODE", "proxy")
+        with patch.object(app_module, "API_TOKEN", "s3cret-token"):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            response = client.get("/metrics",
+                                  headers={"Authorization": "Bearer s3cret-token"})
+
+        assert response.status_code == 200
+
+    def test_a_wrong_token_does_not_fall_through_to_the_header_path(self, monkeypatch):
+        """
+        Otherwise a caller could probe tokens for free, and a request that was
+        simultaneously guessing credentials would be handed a valid session.
+        """
+        monkeypatch.setenv("TRIAGE_AUTH_MODE", "proxy")
+        with patch.object(app_module, "API_TOKEN", "s3cret-token"):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            response = client.get("/platform", headers={
+                "Authorization": "Bearer wrong", **self.HEADERS})
+
+        assert response.status_code == 401
+        assert response.json()["detail"] == "invalid or missing bearer token"
+
+    def test_a_configured_token_is_still_required_when_no_proxy_is_claimed(self):
+        """
+        The pre-proxy contract, unchanged. Adding the header path must not
+        turn an existing token-secured deployment into an open one.
+        """
+        with patch.object(app_module, "API_TOKEN", "s3cret-token"):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            assert client.get("/platform", headers=self.HEADERS).status_code == 401
+
+
+class TestPrincipalIsLogged:
+    """
+    The request line names who asked. This is the seam the per-question audit
+    trail is built on, so it is pinned now rather than assumed later.
+    """
+
+    def test_the_caller_is_named(self, monkeypatch, caplog):
+        monkeypatch.setenv("TRIAGE_AUTH_MODE", "proxy")
+        with patch.object(app_module, "API_TOKEN", ""):
+            client = TestClient(app_module.app, client=("127.0.0.1", 51000))
+            with caplog.at_level("INFO", logger="triage.api"):
+                client.get("/platform", headers={"X-Forwarded-Email": "sre@example.com"})
+
+        line = next(r for r in caplog.records if r.message == "request")
+        assert line.principal == "sre@example.com"
+        assert line.auth == "proxy"
+
+    def test_an_unauthenticated_request_is_logged_as_anonymous(self, open_client, caplog):
+        """
+        Not omitted. A request line missing the field is one a log query
+        cannot count, which is the query an audit review actually runs.
+        """
+        with caplog.at_level("INFO", logger="triage.api"):
+            open_client.get("/platform")
+
+        line = next(r for r in caplog.records if r.message == "request")
+        assert line.principal == "anonymous"
+        assert line.auth == "anonymous"

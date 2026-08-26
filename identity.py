@@ -261,6 +261,17 @@ def require(headers, peer=None):
     matters because the bind is the only reason the header can be trusted.
     Omitting it is not a hole so much as a weaker position: the bind still
     holds, there is just nothing here checking that it does.
+
+    A measured caveat, because it decides whether the check works at all.
+    uvicorn 0.51.0 rewrites the peer address from X-Forwarded-For by default,
+    trusting it from 127.0.0.1 -- which is precisely the sidecar. Measured
+    against a live server: with the default flags and `X-Forwarded-For:
+    203.0.113.9`, `request.client.host` reads 203.0.113.9 rather than
+    127.0.0.1, so this check would refuse every legitimate proxied request
+    while still catching a direct one. With --no-proxy-headers the same
+    request reads 127.0.0.1. The chart therefore pins that flag and
+    tests/test_chart.py asserts it; a caller that cannot make the same
+    guarantee should pass peer=None rather than a rewritten address.
     """
     if not required():
         return resolve(headers)
@@ -270,8 +281,12 @@ def require(headers, peer=None):
         # the pod's loopback means the proxy is not the only listener, and no
         # header this request carries is worth reading.
         raise Unauthenticated(
-            f"request from {peer} bypassed the authenticating proxy: in "
-            "TRIAGE_AUTH_MODE=proxy the app must bind loopback only"
+            f"request from {peer} did not arrive over loopback: in "
+            "TRIAGE_AUTH_MODE=proxy the app must bind loopback with the "
+            "authenticating proxy in front of it. Either something reached "
+            "the app around the proxy, or the server is rewriting the peer "
+            "address from X-Forwarded-For -- uvicorn does that by default "
+            "and needs --no-proxy-headers here"
         )
 
     principal = resolve(headers)
