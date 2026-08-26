@@ -262,9 +262,12 @@ Product boundaries:
   every namespace in one API call, but the cause of any one of them still costs
   a full diagnosis — so `--explain` is bounded to a few workloads rather than
   the whole list.
-- **The console has no authentication.** It is loopback-pinned for that reason,
-  and the chart requires a second explicit acknowledgement before it will expose
-  one in-cluster.
+- **The console authenticates but does not authorize.** `ui.auth.enabled=true`
+  puts an OIDC proxy in front and binds the console to loopback behind it;
+  everyone who signs in still sees everything the ServiceAccount can read.
+  kubewhy is built for one team against one cluster, and the ClusterRole is
+  where that is narrowed. Without that switch there is no authentication at
+  all, and the chart requires an explicit acknowledgement to expose it.
 - **The controller holds dedup state in memory by default**, so a restart forgets
   what it already reported. `persistence.enabled=true` fixes the restart case; it
   does not buy a second replica. One replica stays pinned either way.
@@ -626,7 +629,43 @@ pinned to loopback.
 
 ### Running it in the cluster
 
-The chart can deploy it, off by default and behind a second switch:
+The chart can deploy it, off by default and behind a second switch. `ui.enabled`
+alone fails the install with an explanation, and there are two ways past that.
+
+**With authentication**, which is the one to use:
+
+```bash
+kubectl create secret generic kubewhy-auth -n kubewhy \
+  --from-literal=client-secret=... \
+  --from-literal=cookie-secret=$(openssl rand -base64 32 | head -c 32)
+
+helm install kubewhy deploy/chart --set ui.enabled=true \
+  --set ui.auth.enabled=true \
+  --set ui.auth.issuerUrl=https://your-idp.example.com \
+  --set ui.auth.clientID=kubewhy \
+  --set ui.auth.externalUrl=https://kubewhy.example.com \
+  --set ui.auth.existingSecret=kubewhy-auth
+```
+
+That adds an oauth2-proxy sidecar, **flips the console's bind from `0.0.0.0` to
+`127.0.0.1`**, and points the Service at the proxy. The bind is the control:
+the console's own port ends up in no Service at all, so nothing unauthenticated
+can reach the app to be turned away by it. The app is also told
+`TRIAGE_AUTH_MODE=proxy`, so it refuses a request carrying no identity header —
+a second, independent control that catches the proxy being removed or
+misconfigured while the console stays up and looks fine.
+
+Measured on kind against a real Dex: the console's port is `ConnectionRefused`
+from another pod, an unauthenticated request through the Service is a 302 to
+the provider, and a forged `X-Forwarded-Email` presented with a valid session
+still reaches the app as the *real* address. See
+[VALIDATION.md](docs/VALIDATION.md).
+
+**Authentication is not authorization.** Everyone who signs in sees everything
+the ServiceAccount can read. Narrow what that is in the ClusterRole; narrow who
+may sign in with `ui.auth.emailDomains` or an `--allowed-group`.
+
+**Without authentication**, if you know what you are doing:
 
 ```bash
 helm install kubewhy deploy/chart --set ui.enabled=true \
@@ -634,12 +673,15 @@ helm install kubewhy deploy/chart --set ui.enabled=true \
 kubectl port-forward -n kubewhy svc/kubewhy-ui 8501:8501
 ```
 
-`ui.enabled` alone fails the install with an explanation. That friction is
-deliberate: in a pod the loopback pin has to be dropped for the Service to
-reach it, and **there is still no authentication** — unlike the API, there is
-no token to set, so anyone who can reach the Service sees everything the
-ServiceAccount can read. **ClusterIP only, and no Ingress in the chart**, so
-getting to it costs a port-forward rather than a hostname someone can guess.
+In a pod the loopback pin has to be dropped for the Service to reach it, so
+anyone who can reach the Service sees everything the ServiceAccount can read.
+**ClusterIP only, and no Ingress in the chart** either way, so getting to it
+costs a port-forward rather than a hostname someone can guess.
+
+One collision worth knowing before you combine them: `networkPolicy.enabled`
+permits egress only to private address space and selects this pod too, so the
+proxy cannot reach a **SaaS** identity provider. The symptom is OIDC discovery
+failing at startup with nothing that mentions a NetworkPolicy.
 
 It runs from a separate `:<tag>-ui` image. Streamlit's thirteen packages do not
 belong in the process the API, MCP server and controller run in, which is the

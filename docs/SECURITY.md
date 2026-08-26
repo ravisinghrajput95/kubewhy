@@ -108,12 +108,56 @@ their own service.
 - **Pinned by tests**: a configured API key appears nowhere on the rendered page,
   `ui.py` names no credential and contains no `fetch(`, no provider host and no
   Kubernetes host.
-- **The console has no authentication.** It is pinned to loopback for that
-  reason, and the Helm chart requires a second explicit acknowledgement
-  (`ui.exposureAcknowledged=true`) before it will expose one in-cluster —
-  ClusterIP only, no Ingress.
-- **The API can be authenticated** with `TRIAGE_API_TOKEN`. Unset, it is open,
+- **The console can be authenticated** with `ui.auth.enabled=true`, and the
+  enforcement is structural rather than a check the app performs. See below.
+- **The API can be authenticated** with `TRIAGE_API_TOKEN`, and accepts a
+  proxy-asserted identity in `TRIAGE_AUTH_MODE=proxy`. With neither it is open,
   which is acceptable only on loopback.
+
+### Unauthenticated access to the console
+
+Streamlit has no route layer to hang an authenticator on: anything the process
+checks runs after the connection is accepted and the websocket is up, which
+makes app-level authentication something a bug can undo. So the control is
+structural.
+
+- **An authenticating proxy is the only listener the Service targets.**
+  `ui.auth.enabled=true` adds an oauth2-proxy sidecar, flips the console's bind
+  from `0.0.0.0` to `127.0.0.1`, and points the Service at the proxy. The
+  console's own port is then in no Service at all. Same argument as
+  NetworkPolicy: a property the platform enforces beats one this process
+  promises.
+- **A sidecar rather than an ingress annotation**, deliberately. Sharing the
+  pod's network namespace is what lets the console bind loopback; an
+  ingress-level authenticator leaves the console's port reachable from anywhere
+  in the cluster, which is the arrangement that looks authenticated and is not.
+- **The app fails closed on the misconfiguration.** `TRIAGE_AUTH_MODE=proxy` is
+  the operator declaring a proxy is in front; a request that then carries no
+  identity header is refused rather than served anonymously. `st.stop()` fires
+  before the scan, so a refused caller causes no cluster read — a page that
+  collects pod logs and then declines to render them has already made the
+  disclosure.
+- **The API additionally checks the peer address.** A well-formed identity
+  header arriving from off the pod's loopback is refused, because that request
+  has proved the premise the header trust rests on is false. Streamlit exposes
+  no peer address, so the console relies on the bind alone.
+
+**Validated on kind v1.32.2 against a real OIDC issuer** (Dex v2.41.1,
+oauth2-proxy v7.7.1), from a separate pod: the console's port is
+`ConnectionRefused`, the proxy's is open, an unauthenticated request through
+the Service is a 302 to the provider, `/_stcore/stream` is gated the same way
+as `/`, and **a forged `X-Forwarded-Email` presented with a valid session
+reaches the app as the real address** — the proxy overwrites the client's
+header rather than appending to it. That last one is the property the whole
+design rests on. See [VALIDATION.md](VALIDATION.md).
+
+**Limitations, stated plainly.** Header trust is only as good as the guarantee
+that nothing else can reach the backend; the loopback bind is that guarantee,
+and an operator who restores `--server.address=0.0.0.0` has removed it, leaving
+only the app-level check. `networkPolicy.enabled=true` selects the console pod
+and permits egress only to private address space, so it cannot be combined with
+a SaaS identity provider. And the console is only as authenticated as the
+provider in front of it — kubewhy verifies a header, not a token signature.
 
 ### Prompt injection through cluster content
 
@@ -129,9 +173,17 @@ that passes while its payload never arrived is proving nothing.
 ## What is not protected
 
 - **Redaction is incomplete by nature.** See above.
-- **No audit log of questions asked.**
+- **No audit log of questions asked.** The request line names the principal and
+  how they authenticated, which is where that will be built, but a per-question
+  trail of what evidence was collected does not exist.
 - **No rate limiting.**
-- **A user who can reach the console sees everything the ServiceAccount can
-  read.** There is no per-user authorization model.
+- **Authentication is not authorization, and there is no per-user authorization
+  model.** Everyone who signs in sees everything the ServiceAccount can read.
+  This is a design decision, not an omission: kubewhy is built for one SRE team
+  against one cluster, the tools take `namespace` as a filter the caller picks
+  rather than a boundary, and making it a boundary would mean Kubernetes
+  impersonation — which needs the `impersonate` verb and turns kubewhy from a
+  least-privilege reader into a credential broker. Narrow the ClusterRole, or
+  run one release per team with its own ServiceAccount.
 - **`vllm` is protocol-level support only** — never run against a real vLLM
   server, so nothing about that path is validated at runtime.

@@ -12,13 +12,16 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 977 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1063 passing, no cluster or model required |
 | Grounding replay | **PROVEN** | 907 recorded runs, 0 regressions on the last change |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
 | Grounding + contradiction | **PROVEN** | caught a genuine wrong claim live, 5/5 reproducibly |
 | Bounded investigation deadline | **PROVEN** | 38 tests incl. fallback-cannot-reset |
 | Security regression (UI) | **PROVEN** | credentials absent from page, no client-side calls |
+| Console authentication | **PROVEN** | kind + real OIDC issuer; console unreachable from another pod |
+| Forged identity header | **PROVEN** | overwritten by the proxy, measured with a session held |
+| Per-user authorization | **NOT TESTED** | deliberately not implemented — see SECURITY.md |
 | Read-only RBAC | **PROVEN** | runtime validated on GKE by attempting operations |
 | GKE runtime | **PROVEN** | released chart, real cluster |
 | GKE / Calico NetworkPolicy | **PROVEN** | dataplane-enforced egress |
@@ -185,6 +188,83 @@ of pod life against a 72s-median investigation.
 **Fix.** In the **fixture**, not the agent and not the expectation: `*/5` with six
 retained, ~30 minutes against a 4-minute worst case.
 
+### 9. A console probe that could never pass
+
+**Problem.** With `ui.auth.enabled=true` the console pod sat `1/2 Running` with
+four restarts, forever. The proxy beside it was healthy the whole time.
+
+**Detection.** Installing the chart on kind. `helm template` renders the broken
+probe and the working one identically, and twenty chart tests were green.
+
+**Root cause.** The kubelet probes the **pod IP**. Authentication binds the
+console to `127.0.0.1`, so `httpGet` dialled `10.244.0.7:8501` and got
+`connection refused` — readiness kept the pod out of the Service and liveness
+killed the container every 40 seconds.
+
+**Fix.** An `exec` probe reaching the console over loopback from inside the
+container, which is also the address the proxy actually uses. The proxy keeps
+its `httpGet`: it binds every interface, and converting it too would be
+cargo-culting the fix. After: `2/2 Running`, 0 restarts, endpoint 4180 only.
+
+**Regression evidence.** Five tests asserting the probes do not dial the pod IP
+and do follow a changed `ui.port`; the defect restored turns three of them red.
+
+### 10. NOTES.txt told operators the console was unauthenticated
+
+**Problem.** After installing *with* authentication, `helm install` printed "it
+has no authentication" and a `port-forward` to a port that is in no Service.
+
+**Detection.** Reading what the install printed. Nothing else could have: `helm
+template` does not produce NOTES.txt at all, so no test had ever rendered it.
+
+**Fix.** Both branches written, and the notes now say plainly that
+authentication is not authorization — the single most likely misreading of this
+feature, and the one that would put kubewhy in front of two teams that must not
+see each other.
+
+**Regression evidence.** Four tests rendering NOTES.txt through a dry-run
+install, which is the only way a test can see what an operator is told.
+
+## What the console authentication was tested against
+
+Not a mock. Dex v2.41.1 as a real OIDC issuer and oauth2-proxy v7.7.1, first in
+containers sharing one network namespace — which reproduces a pod's, so the
+proxy's `--upstream=http://127.0.0.1:8501` was the chart's argument verbatim
+rather than one rewritten for the test — and then on kind v1.32.2 through the
+installed chart.
+
+| Check | Result |
+|---|---|
+| console port from another pod | `ConnectionRefused` |
+| proxy port from another pod | open |
+| unauthenticated through the Service | 302 to the issuer, app never reached |
+| `/_stcore/stream` unauthenticated | 302 — the websocket is gated, not just `/` |
+| forged `X-Forwarded-Email`, no session | 302 |
+| **forged `X-Forwarded-Email`, valid session** | **upstream received the real address** |
+| `Authorization` header forwarded upstream | none |
+| websocket handshake through the proxy | `HTTP/1.1 101 Switching Protocols` |
+| console rendered in a real browser | yes, sidebar reads the issuer's address |
+
+The forged-header row is the one that matters: it is the property the whole
+design rests on, and it is measured rather than assumed. oauth2-proxy
+overwrites the client's header rather than appending to it.
+
+**A measurement that changed the design.** uvicorn 0.51.0 rewrites
+`request.client.host` from `X-Forwarded-For` by default, trusting the header
+from `127.0.0.1` — precisely the sidecar case. Against a live server with
+`X-Forwarded-For: 203.0.113.9` from loopback, `client.host` reads `203.0.113.9`
+under the default flags and under an explicit `--proxy-headers`, and
+`127.0.0.1` under `--no-proxy-headers`. So the API's loopback peer check
+refuses every *legitimate* proxied request unless that flag is set, while still
+catching a direct one. The refusal message names the rewrite, because in a
+working deployment a missing `--no-proxy-headers` is a likelier cause than an
+intruder.
+
+**What this does not establish.** One issuer, and a self-hosted one. No SaaS
+provider has been tested, and `networkPolicy.enabled=true` cannot reach one
+anyway — it selects the console pod and permits egress only to private address
+space. Nothing here is evidence about authorization, which does not exist.
+
 ## Test-harness failures worth recording
 
 Three times a harness reported a clean result it had not earned. Recording them
@@ -207,7 +287,7 @@ is not a result.
 ## Reproducing
 
 ```bash
-pytest                                   # 977, no cluster or model needed
+pytest                                   # 1063, no cluster or model needed
 
 kind create cluster --name kubewhy
 kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \

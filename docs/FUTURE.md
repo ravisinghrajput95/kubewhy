@@ -37,9 +37,14 @@ cluster.
 
 ## Product
 
-**Application authentication for the console.** Today it is loopback-pinned and
-the chart requires an explicit acknowledgement before exposing it in-cluster,
-because there is no per-user authorization model.
+**Per-user authorization.** The console now authenticates
+(`ui.auth.enabled=true`, see [SECURITY.md](SECURITY.md)); it does not
+authorize. Everyone who signs in sees everything the ServiceAccount can read.
+That is a decision rather than an unfinished feature — kubewhy targets one SRE
+team against one cluster, and per-user authorization would mean Kubernetes
+impersonation, which needs the `impersonate` verb and turns a least-privilege
+reader into a credential broker. If it is ever wanted, one release per team
+with its own ServiceAccount is the shape to reach for.
 
 **An asynchronous investigation API that survives a restart.** `/ask/jobs`
 detaches the work but the result lives in this process's store — one replica or

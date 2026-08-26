@@ -139,8 +139,12 @@ Each is a state the loop can genuinely produce, and each has a test:
 
 ## Limitations
 
-- **No authentication.** Loopback-pinned for that reason; the chart requires
-  `ui.exposureAcknowledged=true` before exposing one in-cluster, ClusterIP only.
+- **Authentication, but no authorization.** `ui.auth.enabled=true` puts an OIDC
+  proxy in front and binds the console to loopback behind it; everyone who signs
+  in sees everything the ServiceAccount can read, and there is no per-user
+  model. Without it there is no authentication at all — loopback-pinned for that
+  reason, and the chart requires `ui.exposureAcknowledged=true` to expose one
+  in-cluster. ClusterIP only either way.
 - **One replica.** Investigation history lives in this process's store.
 - **Appearance is untested.** See the table above.
 - **Streamlit's generated class names are not an API.** The console emits its own
