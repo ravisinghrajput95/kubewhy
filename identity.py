@@ -268,10 +268,16 @@ def require(headers, peer=None):
     against a live server: with the default flags and `X-Forwarded-For:
     203.0.113.9`, `request.client.host` reads 203.0.113.9 rather than
     127.0.0.1, so this check would refuse every legitimate proxied request
-    while still catching a direct one. With --no-proxy-headers the same
-    request reads 127.0.0.1. The chart therefore pins that flag and
-    tests/test_chart.py asserts it; a caller that cannot make the same
-    guarantee should pass peer=None rather than a rewritten address.
+    while still catching a direct one. With --no-proxy-headers the same request
+    reads 127.0.0.1.
+
+    So anyone putting a proxy in front of app.py must run uvicorn with
+    --no-proxy-headers. That is documentation rather than something enforced
+    here, and the gap is worth naming: the Helm chart ships the controller and
+    the console, not the API, so there is no template to pin the flag in. A
+    caller that cannot make the guarantee should pass peer=None rather than a
+    rewritten address -- weaker, but honest, where passing a rewritten one
+    refuses valid traffic and protects nothing.
     """
     if not required():
         return resolve(headers)

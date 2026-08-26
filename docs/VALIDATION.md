@@ -260,6 +260,11 @@ catching a direct one. The refusal message names the rewrite, because in a
 working deployment a missing `--no-proxy-headers` is a likelier cause than an
 intruder.
 
+That one is documentation rather than an enforced property, and the gap is
+worth naming: the chart ships the controller and the console, not the API, so
+there is no template to pin the flag in. The console is unaffected — Streamlit
+exposes no peer address, so it passes `peer=None` and relies on the bind.
+
 **What this does not establish.** One issuer, and a self-hosted one. No SaaS
 provider has been tested, and `networkPolicy.enabled=true` cannot reach one
 anyway — it selects the console pod and permits egress only to private address
