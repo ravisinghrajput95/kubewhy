@@ -24,7 +24,8 @@ and does not support. Four words are used and they mean specific things:
 | Per-user authorization | **NOT TESTED** | deliberately not implemented — see SECURITY.md |
 | Audit trail (CLI, REST) | **PROVEN** | live runs; evidence absent from the record |
 | Audit trail (console) | **PROVEN** | live run through a browser against a real cluster |
-| Audit trail (controller, Slack) | **PARTIALLY PROVEN** | unit tests only, same hook |
+| Audit trail (controller) | **PROVEN** | live unprompted run, attributed to controller/system |
+| Audit trail (Slack) | **NOT TESTED** | unit tests only; needs a workspace |
 | Restart-interrupted jobs | **PROVEN** | SIGKILL mid-run, restarted against the same state file |
 | Read-only RBAC | **PROVEN** | runtime validated on GKE by attempting operations |
 | GKE runtime | **PROVEN** | released chart, real cluster |
@@ -310,19 +311,32 @@ qwen3 on local Ollama, one per surface that has a different actor:
 |---|---|---|---|
 | CLI | the OS account | `os` | 5 tool calls, verdict `partial` |
 | REST `/ask` | `sre@example.com` | `proxy` | 4 tool calls, verdict `grounded` |
+| Console | `anonymous` (no proxy in that run) | `anonymous` | 3 tool calls, verdict `grounded`, question recorded as typed rather than as scaffolded |
+| Controller | `controller` | `system` | unprompted run on a newly-failing workload, verdict `grounded` |
 
-Both records named the pod whose logs were read. **Neither carried the logs.**
+**Slack is not in this table and is not claimed.** It uses the same hook and is
+covered by unit tests, but testing it needs a workspace, and the API defect
+below is exactly what a unit test could not see.
+
+The records that read logs named the pod. **None carried the logs.**
 The demo pod's actual output is `FATAL: could not connect to db:5432:
 connection refused`; searching the record of the run that read it for
 `connect`, `5432`, `db`, `Traceback` and `error` returns nothing, while
 `sensitive_reads` names the pod. That is the property this design exists for,
 and it is measured rather than asserted.
 
-**What this does not establish.** Three surfaces are wired and untested live:
-the console, the controller and Slack. Their wiring is covered by unit tests
-and the hook they use is the same one, but the API defect above is exactly
-what a unit test could not see — so they are PARTIALLY PROVEN at best and are
-not claimed otherwise.
+**What this does not establish.** Slack is wired and untested live. Its wiring
+is covered by unit tests and the hook is the same one, but that is precisely
+the evidence that failed to catch the API defect above, so it is listed as NOT
+TESTED rather than assumed to follow.
+
+**An environment note, because it affected the testing rather than the code.**
+Another process on the same machine created and deleted a kind cluster
+mid-session, which rewrote `current-context` and then unset it. The controller
+kept retrying its watch against the API server port it had resolved at startup
+and logged `watch_restarting` each time — the correct behaviour, and the same
+hazard `active_context()` exists to describe. Nothing was wrong with kubewhy;
+the run was repeated once the machine was quiet.
 
 ### 12. An /ask job that a restart left running forever
 
