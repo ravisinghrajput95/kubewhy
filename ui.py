@@ -27,6 +27,7 @@ import time
 import streamlit as st
 
 import agent
+import audit
 import identity
 import store
 from routers.k8s_pods_info import (
@@ -564,6 +565,13 @@ except identity.Unauthenticated as _refused:
         "rather than serving them to a caller it cannot name."
     )
     st.stop()
+
+# Re-asserted on every rerun, not set once. Streamlit runs the script on a
+# fresh thread each time and a ContextVar belongs to the thread that set it --
+# the same reason _bind() re-asserts the cluster context below.
+audit.actor(WHO if WHO.authenticated else "anonymous",
+            surface="console",
+            auth=WHO.source)
 
 _EXPOSED = _exposure_warning()
 if _EXPOSED:

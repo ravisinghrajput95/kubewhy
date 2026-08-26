@@ -18,6 +18,7 @@ import sys
 import time
 import uuid
 
+import audit
 import backends  # noqa: F401  -- re-exported for callers that name a backend
 
 import grounding
@@ -890,6 +891,40 @@ NUDGE = (
 
 def stream(question, model=MODEL, think=None, prefetched=None, target=None):
     """
+    The loop, with one audit record per investigation.
+
+    A thin wrapper rather than a `finally` threaded through the body below,
+    because the runs worth auditing most are the ones that do not reach the
+    answer event: a model that raised, a deadline that fired, a caller that
+    closed the generator half way through. `finally` catches all three,
+    including GeneratorExit, which is the one an `except Exception` misses.
+
+    Every surface reaches the loop through here -- CLI, REST, MCP, controller,
+    console, Slack -- so this is the only place the hook has to exist. Who is
+    asking arrives on a ContextVar the surface sets; see audit.actor().
+    """
+    record = audit.begin(question, model)
+    try:
+        for event in _stream(question, model, think, prefetched, target):
+            record.observe(event)
+            yield event
+    except GeneratorExit:
+        # The caller walked away -- a browser tab closed mid-investigation,
+        # an HTTP client that hung up. Recorded as abandoned rather than as an
+        # error, because an audit trail that files those as failures has
+        # people chasing incidents that did not happen. The run still read
+        # whatever it read by then, which is the part worth having.
+        record.abandoned()
+        raise
+    except BaseException as exc:
+        record.failed(exc)
+        raise
+    finally:
+        record.emit()
+
+
+def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
+    """
     Run the loop, yielding each step as it happens.
 
     Every event is a dict with a "type":
@@ -1483,6 +1518,19 @@ def scan(explain=0):
 
 
 if __name__ == "__main__":
+    # The CLI has a real user and no authentication: whoever is at the
+    # terminal already holds the kubeconfig, so the OS account is both the
+    # honest answer and the only one available. Recorded as `os` rather than
+    # dressed up as an authenticated identity, because an audit trail that
+    # cannot distinguish "an OIDC session said so" from "this is whose shell
+    # it was" is one nobody can rely on.
+    try:
+        import getpass
+
+        audit.actor(getpass.getuser(), surface="cli", auth="os")
+    except Exception:
+        audit.actor("unknown", surface="cli", auth="os")
+
     if len(sys.argv) < 2:
         print(__doc__.strip(), file=sys.stderr)
         raise SystemExit(1)

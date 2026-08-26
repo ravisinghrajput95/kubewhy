@@ -20,6 +20,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
+import audit
 import identity
 import inference
 import observability
@@ -95,6 +96,7 @@ def require_caller(request: Request, authorization: str = Header(default="")):
             raise HTTPException(status_code=401, detail="invalid or missing bearer token")
         principal = identity.Principal(name="api-token", source="token")
         request.state.principal = principal
+        _record_actor(principal)
         return principal
 
     if API_TOKEN and not identity.required():
@@ -112,7 +114,20 @@ def require_caller(request: Request, authorization: str = Header(default="")):
         raise HTTPException(status_code=401, detail=exc.reason)
 
     request.state.principal = principal
+    _record_actor(principal)
     return principal
+
+
+def _record_actor(principal):
+    """
+    Hand the caller to the audit trail.
+
+    Set here rather than in each /ask handler: this dependency runs on every
+    authenticated route, and a handler that forgot the call would produce
+    investigations attributed to nobody -- which is exactly the failure mode
+    that put /references on the network without a token.
+    """
+    audit.actor(principal, surface="api")
 
 
 def _peer(request):

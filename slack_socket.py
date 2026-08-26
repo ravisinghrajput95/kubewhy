@@ -32,6 +32,7 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web import WebClient
 
 import agent
+import audit
 import observability
 import sinks
 
@@ -43,7 +44,7 @@ BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
 CHANNEL = os.getenv("SLACK_CHANNEL", "")
 
 
-def answer(question, channel, thread_ts):
+def answer(question, channel, thread_ts, user=""):
     """
     Diagnose, then post the result back into the thread that asked.
 
@@ -51,6 +52,14 @@ def answer(question, channel, thread_ts):
     and a diagnosis takes tens of them, so doing this inline would stall the
     connection and earn a redelivery of the same event.
     """
+    # On this thread, not in handle(). threading.Thread does not copy the
+    # caller's context, so setting it before start() would leave the record
+    # attributed to nobody.
+    #
+    # The Slack user id, not a display name: it is what the workspace's own
+    # audit log keys on, so the two can be joined. Slack authenticated them,
+    # which is what `auth` records -- kubewhy did not.
+    audit.actor(user or "unknown-slack-user", surface="slack", auth="slack")
     try:
         result = agent.ask(question)
     except Exception as exc:  # noqa: BLE001 - a failed diagnosis must still reply
@@ -115,7 +124,8 @@ def handle(client, request: SocketModeRequest):
     log.info("slack_question", extra={"channel": channel})
 
     threading.Thread(
-        target=answer, args=(question, channel, thread), daemon=True
+        target=answer, args=(question, channel, thread, event.get("user", "")),
+        daemon=True,
     ).start()
 
 

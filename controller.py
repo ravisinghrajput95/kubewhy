@@ -30,6 +30,7 @@ import time
 from kubernetes import client, config, watch
 
 import agent
+import audit
 import observability
 import sinks
 import store
@@ -367,6 +368,11 @@ class Controller:
 
         started = time.monotonic()
         try:
+            # Nobody asked. Recording the controller as the actor rather
+            # than leaving the field at its default is the point: an audit
+            # trail where unprompted runs are indistinguishable from
+            # unattributed ones cannot answer "did a person read this".
+            audit.actor("controller", surface="controller", auth="system")
             result = agent.ask(question, model=self.model, prefetched=evidence)
         except Exception as exc:
             log.error(
