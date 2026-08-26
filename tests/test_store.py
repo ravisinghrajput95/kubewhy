@@ -300,3 +300,80 @@ class TestListingRecentInvestigations:
         s.update_job("a", "done", result={"answer": "x" * 5000}, at=2.0)
 
         assert "result" not in s.list_jobs()[0]
+
+
+class TestJobsInterruptedByARestart:
+    """
+    Persistence made this visible rather than causing it.
+
+    Without a state file a job that was `running` when the process died simply
+    vanished, and the caller polling for it got a 404 and knew to ask again.
+    With one it survives, still marked `running`, with no thread anywhere that
+    will ever finish it -- so the caller polls an investigation that cannot
+    complete. That is worse than the 404 it replaced.
+    """
+
+    def test_a_running_job_is_failed_with_a_reason(self, state):
+        state.create_job("j1", "why?", 100.0)
+        state.update_job("j1", "running")
+
+        assert state.fail_interrupted(200.0) == 1
+
+        job = state.get_job("j1")
+        assert job["state"] == "failed"
+        assert "restarted" in job["result"]["error"]
+        assert job["finished_at"] == 200.0
+
+    def test_a_queued_job_is_failed_too(self, state):
+        """
+        It never started, so nothing will start it. Queued is as stranded as
+        running and only looks less so.
+        """
+        state.create_job("j1", "why?", 100.0)
+
+        assert state.fail_interrupted(200.0) == 1
+        assert state.get_job("j1")["state"] == "failed"
+
+    def test_a_finished_job_is_left_alone(self, state):
+        state.create_job("j1", "why?", 100.0)
+        state.update_job("j1", "done", {"answer": "because"}, 150.0)
+
+        assert state.fail_interrupted(200.0) == 0
+
+        job = state.get_job("j1")
+        assert job["state"] == "done"
+        assert job["result"] == {"answer": "because"}
+        assert job["finished_at"] == 150.0
+
+    def test_an_already_failed_job_is_not_rewritten(self, state):
+        """
+        Its own error is why it failed; replacing that with "the process
+        restarted" would erase the only diagnosis anyone has.
+        """
+        state.create_job("j1", "why?", 100.0)
+        state.update_job("j1", "failed", {"error": "ollama refused"}, 150.0)
+
+        state.fail_interrupted(200.0)
+        assert state.get_job("j1")["result"]["error"] == "ollama refused"
+
+    def test_nothing_to_do_is_not_an_error(self, state):
+        assert state.fail_interrupted(200.0) == 0
+
+    def test_several_at_once(self, state):
+        for job_id in ("j1", "j2", "j3"):
+            state.create_job(job_id, "why?", 100.0)
+        state.update_job("j2", "running")
+        state.update_job("j3", "done", {"answer": "x"}, 150.0)
+
+        assert state.fail_interrupted(200.0) == 2
+
+    def test_the_reason_tells_the_caller_what_to_do(self, state):
+        """
+        "failed" alone reads as a broken investigation. It was not broken; it
+        was interrupted, and asking again will work.
+        """
+        state.create_job("j1", "why?", 100.0)
+        state.update_job("j1", "running")
+        state.fail_interrupted(200.0)
+
+        assert "Ask again" in state.get_job("j1")["result"]["error"]

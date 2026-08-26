@@ -164,6 +164,16 @@ async def lifespan(_app):
             "host process table. Bind to localhost only."
         )
 
+    # Close out anything the previous process was running. With
+    # TRIAGE_STATE_DB a job that was `running` when the pod died survives the
+    # restart still marked running, with no thread that will ever finish it --
+    # so a caller polls an investigation that cannot complete. Persistence
+    # made that visible rather than causing it; without a state file the job
+    # vanished and the 404 told the caller to ask again.
+    interrupted = JOBS.fail_interrupted(store.now())
+    if interrupted:
+        log.warning("jobs_interrupted_by_restart", extra={"count": interrupted})
+
     # Resolve inference at startup so the configuration is in the log before
     # anyone asks a question, and so a configuration the gateway refuses is
     # discovered now rather than during an incident. See the same call in

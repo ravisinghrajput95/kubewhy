@@ -38,6 +38,15 @@ import os
 import sqlite3
 import threading
 import time
+
+# A job in one of these states has a thread behind it, or had one. After a
+# restart it has neither, and nothing will move it along.
+_UNFINISHED = ("queued", "running")
+
+_INTERRUPTED = (
+    "the process restarted while this investigation was running; it was not "
+    "resumed. Ask again."
+)
 import uuid
 
 STATE_DB = os.getenv("TRIAGE_STATE_DB", "")
@@ -150,6 +159,17 @@ class MemoryStore:
                 k for k, v in self._jobs.items() if v["created_at"] < cutoff
             ]:
                 del self._jobs[job_id]
+
+    def fail_interrupted(self, at):
+        """See the SQLite twin. Always zero here: memory died with the process."""
+        with self._lock:
+            interrupted = [j for j in self._jobs.values()
+                           if j["state"] in _UNFINISHED]
+            for job in interrupted:
+                job["state"] = "failed"
+                job["result"] = {"error": _INTERRUPTED}
+                job["finished_at"] = at
+        return len(interrupted)
 
 
 class SqliteStore:
@@ -314,6 +334,35 @@ class SqliteStore:
     def purge_jobs(self, cutoff):
         with self._connect() as connection:
             connection.execute("DELETE FROM jobs WHERE created_at < ?", (cutoff,))
+
+    def fail_interrupted(self, at):
+        """
+        Close out jobs this process was running when it died. Returns how many.
+
+        Called at startup, and it exists because persistence made a bug
+        visible rather than causing one. Without a state file a job that was
+        `running` when the pod restarted simply vanished, and the caller
+        polling for it got a 404 and knew to ask again. With one it survives
+        -- still marked `running`, with no thread anywhere that will ever
+        finish it. The caller polls an investigation that cannot complete,
+        which is worse than the 404 it replaced.
+
+        Nothing here can resume the work: the thread is gone and the question
+        is not idempotent to re-run silently. Marking it failed with a reason
+        is the honest close, and re-asking is the caller's decision.
+        """
+        with self._connect() as connection:
+            marks = ",".join("?" * len(_UNFINISHED))
+            rows = connection.execute(
+                f"SELECT id FROM jobs WHERE state IN ({marks})", _UNFINISHED
+            ).fetchall()
+            if rows:
+                connection.execute(
+                    f"UPDATE jobs SET state = 'failed', result = ?, "
+                    f"finished_at = ? WHERE state IN ({marks})",
+                    (json.dumps({"error": _INTERRUPTED}), at, *_UNFINISHED),
+                )
+        return len(rows)
 
 
 def build(path=None):
