@@ -27,6 +27,7 @@ import time
 import streamlit as st
 
 import agent
+import identity
 import store
 from routers.k8s_pods_info import (
     active_context,
@@ -69,6 +70,58 @@ def _bind(context):
     set once when the selector changed.
     """
     use_context(context or None)
+
+
+def _caller():
+    """
+    Who is looking at this page, or a refusal.
+
+    Streamlit has no route layer, so this cannot be a middleware and cannot
+    run before the connection is accepted -- it runs as the first thing the
+    script does instead. That is why it is the *second* control: the first is
+    that in a proxied deployment this app binds loopback and the Service
+    targets the proxy, so an unauthenticated browser never reaches the script
+    to be turned away by it. See identity.py.
+
+    No peer address is passed because Streamlit does not expose one. The
+    websocket's origin is not the request's, and inventing a peer from a
+    header would be checking the thing against itself.
+    """
+    try:
+        headers = dict(st.context.headers or {})
+    except Exception:
+        # Rendered outside a request -- AppTest, or a bare `python ui.py`.
+        # Errors are data everywhere else in this project and a page that
+        # dies deciding who is looking at it is worse than one that says.
+        headers = {}
+    return identity.require(headers)
+
+
+def _exposure_warning():
+    """
+    The combination that is actually dangerous, or None.
+
+    Unauthenticated is normal and correct on a laptop -- it is the documented
+    default and the OS is the access control. Unauthenticated *and bound to
+    every interface* is an unauthenticated cluster viewer on the LAN, and that
+    is what earns a banner. Warning on the first alone would put a permanent
+    red box on the ordinary case, which trains people to ignore it.
+    """
+    if identity.required():
+        return None
+    try:
+        address = st.get_option("server.address")
+    except Exception:
+        return None
+    if address in (None, "", "127.0.0.1", "::1", "localhost"):
+        return None
+    return (
+        f"This console is bound to {address} with no authentication. It "
+        "renders cluster state and pod logs, and anyone who can reach the "
+        "port sees everything the ServiceAccount can read. Put an "
+        "authenticating proxy in front and set TRIAGE_AUTH_MODE=proxy, or "
+        "bind it back to 127.0.0.1."
+    )
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
@@ -495,6 +548,27 @@ def render_investigation(answer):
 
 st.set_page_config(page_title="kubewhy", page_icon=PAGE_ICON, layout="wide")
 
+# Before the page renders anything. set_page_config has to come first because
+# Streamlit requires it to, and nothing between the two reads the cluster.
+try:
+    WHO = _caller()
+except identity.Unauthenticated as _refused:
+    # No icon= argument. st.error(icon="X") is not a valid emoji, Streamlit
+    # raises on it, and the raise blanks the whole page -- which is how this
+    # console once rendered nothing at all on every contradiction. A refusal
+    # that blanks the page cannot tell anyone why they were refused.
+    st.error(
+        "**Not signed in.**\n\n"
+        f"{_refused.reason}\n\n"
+        "This console renders cluster state and pod logs, so it refuses "
+        "rather than serving them to a caller it cannot name."
+    )
+    st.stop()
+
+_EXPOSED = _exposure_warning()
+if _EXPOSED:
+    st.warning(_EXPOSED)
+
 # Streamlit reserves about 6rem above the first element, which on a wide
 # dashboard is a screenful of nothing before the scan table. Pulled in to leave
 # room for the toolbar and no more.
@@ -573,6 +647,12 @@ st.markdown(
 _bind(_ctx())
 
 with st.sidebar:
+    # Who is looking, above everything else. On a shared console the first
+    # question about an investigation in the history is who ran it, and a page
+    # that cannot answer "who am I signed in as" cannot answer that either.
+    if WHO.authenticated:
+        st.caption(f"Signed in as **{WHO.label()}**")
+
     # Investigations first, cluster second. The investigation is the primary
     # object on this page; the cluster browser is how you pick a subject for
     # one.
