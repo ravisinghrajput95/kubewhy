@@ -23,8 +23,11 @@ models.
 ## Platform coverage
 
 **Real vLLM validation.** The `vllm` provider is the OpenAI wire protocol under
-another name and has never met a real vLLM server. Everything about that path is
-protocol-level.
+another name. It has now been run against a real OpenAI-protocol server —
+tool calls, tool results, grounding and token usage all round-tripped — but
+never against vLLM itself. What that leaves untested is vLLM's own
+`--tool-call-parser`, which is per-model and is the one part no other server
+can stand in for. See [VALIDATION.md](VALIDATION.md).
 
 **EKS.** Auth is verified by reading the client rather than by running against a
 cluster.

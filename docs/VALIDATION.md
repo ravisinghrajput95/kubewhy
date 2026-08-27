@@ -34,11 +34,11 @@ and does not support. Four words are used and they mean specific things:
 | GKE / Calico NetworkPolicy | **PROVEN** | dataplane-enforced egress |
 | Local Ollama inference | **PROVEN** | 145 live investigations |
 | Hosted OpenAI API inference | **PROVEN** | 145 live investigations |
-| In-cluster inference | **PARTIALLY PROVEN** | Ollama only |
+| In-cluster inference | **PARTIALLY PROVEN** | Ollama, and the `vllm` provider against a real OpenAI-protocol server |
 | AKS runtime | **PARTIALLY PROVEN** | non-AAD single node |
 | Model comparison | **UNDETERMINED** | p = 0.3438, paired, n=5 |
 | Generalized diagnostic accuracy | **NOT TESTED** | one cluster, one prompt configuration |
-| Real vLLM | **NOT TESTED** | protocol-level support only |
+| Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
 | Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, run on 5 modules; the rest of the codebase is unsurveyed |
@@ -536,6 +536,44 @@ delivered without it. That is not an argument against building the harness,
 but it is an argument for reading E2E.md's own table first: two of the three
 defects it lists were fixed in AppTest, and the third needed a screenshot once
 rather than a suite forever.
+
+## What the `vllm` provider has and has not been run against
+
+`vllm` in this project is the OpenAI chat-completions protocol under a name
+that tells the telemetry where the request went. That makes most of it
+testable without vLLM, and one part of it not.
+
+**Run on 2026-08-27**, `TRIAGE_INFERENCE_MODE=cluster`,
+`TRIAGE_INFERENCE_PROVIDER=vllm`, endpoint pointed at Ollama's
+OpenAI-compatible `/v1`, model qwen3, asking a host question so no cluster was
+involved:
+
+| Exercised | Result |
+|---|---|
+| Tool schemas serialised to the OpenAI shape | 2 tools called (`get_platform_info`, `get_system_info`) |
+| Tool calls parsed, results returned by `tool_call_id` | chain completed |
+| Final answer and grounding | verdict `grounded` |
+| Token usage reported by the provider | prompt 12, completion 261 |
+| Recorded destination | `internal` — the endpoint classifier agrees the path stays on-network |
+
+The token row matters beyond this test: it is the input the external-token
+budget in `limits.py` consumes, and a provider that reported no usage would
+leave that budget silently uncounted.
+
+**What is still NOT TESTED, and it is the part with the real risk.** vLLM
+needs `--enable-auto-tool-choice` and a `--tool-call-parser` chosen per model,
+and the shape of what it emits for a tool call varies with that choice.
+kubewhy's loop is entirely tool-driven, so that parser is the one thing most
+likely to break against a real vLLM server — and it is precisely the thing
+Ollama's `/v1` cannot stand in for. Everything either side of it is now
+proven; the parser is not.
+
+vLLM does not install on this machine at all (Darwin arm64: `Failed to build
+'vllm' when installing build dependencies`), so closing this needs a Linux
+host with a GPU, or a CPU build from source on Linux. Alternatives that
+*would* add a second independent implementation of the same wire protocol —
+llama.cpp's server, LocalAI — would raise confidence in the wire path that is
+already proven, and would still not exercise vLLM's parser.
 
 ## Test-harness failures worth recording
 
