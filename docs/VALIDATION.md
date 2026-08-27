@@ -500,6 +500,18 @@ about how validation actually goes.
 - **An adversarial eval case passed 3/3 while its payload never reached the
   model.** Cases now declare `payload` and the run fails if it did not arrive.
 
+- **Four chart tests passed on the laptop and failed every CI run for three
+  pushes, and nobody looked.** `helm install --dry-run` contacts the API server
+  for capability discovery in helm 3 and fails with "Kubernetes cluster
+  unreachable"; helm 4 deprecated the flag and made it client-side, so the
+  laptop (v4.2.0) rendered happily while CI (v3) failed. Emptying `HOME` and
+  unsetting `KUBECONFIG` locally did **not** reproduce it — the difference was
+  the tool version, not the environment, and chasing the environment would
+  have found nothing. Fixed with an explicit `--dry-run=client`, which means
+  the same thing in both. The lesson is smaller than the usual one here: a
+  green local suite is a claim about one machine's toolchain, and the run that
+  matters is the one on the machine you do not control.
+
 A "no regressions" result that has not proved it exercised two different versions
 is not a result.
 

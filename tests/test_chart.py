@@ -614,8 +614,19 @@ class TestTheNotesMatchTheDeployment:
 
 
 def _notes(*settings):
-    """NOTES.txt, which only a dry-run install renders."""
-    command = ["helm", "install", "t", CHART, "--dry-run", "--namespace", "t"]
+    """
+    NOTES.txt, which only an install renders -- `helm template` does not
+    produce it at all.
+
+    `--dry-run=client`, not a bare `--dry-run`. The plain form contacts the
+    API server for capability discovery, so these four tests passed on a
+    laptop with a kubeconfig and failed every CI run with "Kubernetes cluster
+    unreachable: dial tcp [::1]:8080". The rest of this module renders with
+    `helm template` and never noticed, which is why the skipif at the top
+    guards on helm being installed and not on a cluster being reachable.
+    """
+    command = ["helm", "install", "t", CHART, "--dry-run=client",
+               "--namespace", "t"]
     for setting in settings:
         command += ["--set", setting]
     out = subprocess.run(command, capture_output=True, text=True)
