@@ -16,6 +16,7 @@ that do not have it.
 """
 
 import json
+import os
 import shutil
 import subprocess
 
@@ -615,24 +616,51 @@ class TestTheNotesMatchTheDeployment:
 
 def _notes(*settings):
     """
-    NOTES.txt, which only an install renders -- `helm template` does not
-    produce it at all.
+    NOTES.txt, rendered offline.
 
-    `--dry-run=client`, not a bare `--dry-run`. The plain form contacts the
-    API server for capability discovery, so these four tests passed on a
-    laptop with a kubeconfig and failed every CI run with "Kubernetes cluster
-    unreachable: dial tcp [::1]:8080". The rest of this module renders with
-    `helm template` and never noticed, which is why the skipif at the top
-    guards on helm being installed and not on a cluster being reachable.
+    This is more contorted than it looks like it should be, and every simpler
+    form was tried against a real helm 3 first:
+
+    - `helm template` does not emit NOTES.txt at all.
+    - `helm install --dry-run` does, but contacts the API server for
+      capability discovery and fails with "Kubernetes cluster unreachable"
+      wherever there is no cluster. helm 4 deprecated the bare flag and made
+      it client-side, which is why these tests passed on a laptop with v4 and
+      failed every CI run on v3.
+    - `--dry-run=client` does **not** help on helm 3.16: same error.
+    - `--kube-version` is not a flag `helm install` accepts on helm 3.
+    - `--show-only templates/NOTES.txt` cannot find it; NOTES.txt is excluded
+      from the rendered manifest set by name.
+
+    So the chart is copied and NOTES.txt is duplicated under a name helm will
+    render. It is not YAML, so helm fails to parse it as a manifest and exits
+    non-zero -- and says "Use --debug flag to render out invalid YAML", which
+    is exactly what is wanted. The rendered text goes to stdout and the parse
+    error to stderr, so stdout is the notes and the exit code is ignored.
+
+    What this buys: the real template, with the real values, on any helm and
+    with no cluster.
     """
-    command = ["helm", "install", "t", CHART, "--dry-run=client",
-               "--namespace", "t"]
-    for setting in settings:
-        command += ["--set", setting]
-    out = subprocess.run(command, capture_output=True, text=True)
-    if out.returncode != 0:
-        raise AssertionError(out.stderr.strip())
-    return out.stdout.split("NOTES:", 1)[-1]
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="kubewhy-notes-") as tmp:
+        chart = os.path.join(tmp, "chart")
+        shutil.copytree(CHART, chart)
+        probe = "zz-rendered-notes.txt"
+        shutil.copyfile(os.path.join(chart, "templates", "NOTES.txt"),
+                        os.path.join(chart, "templates", probe))
+
+        command = ["helm", "template", "t", chart,
+                   "--show-only", f"templates/{probe}", "--debug",
+                   "--namespace", "t"]
+        for setting in settings:
+            command += ["--set", setting]
+        out = subprocess.run(command, capture_output=True, text=True)
+
+    if not out.stdout.strip():
+        raise AssertionError(
+            "helm rendered no notes at all:\n" + out.stderr.strip()[:800])
+    return out.stdout
 
 
 class TestOneReplicaOfTheConsole:

@@ -507,10 +507,17 @@ about how validation actually goes.
   laptop (v4.2.0) rendered happily while CI (v3) failed. Emptying `HOME` and
   unsetting `KUBECONFIG` locally did **not** reproduce it — the difference was
   the tool version, not the environment, and chasing the environment would
-  have found nothing. Fixed with an explicit `--dry-run=client`, which means
-  the same thing in both. The lesson is smaller than the usual one here: a
-  green local suite is a claim about one machine's toolchain, and the run that
-  matters is the one on the machine you do not control.
+  have found nothing. **The first fix was wrong too** — `--dry-run=client`
+  fails identically on helm 3.16, and that took a second red CI run to learn,
+  because it was reasoned about rather than reproduced. Downloading a helm 3
+  binary and running it against an emptied `HOME` reproduced the failure in
+  one command, and then four candidate fixes could be tested in a minute
+  instead of a push each. The working answer renders NOTES.txt through
+  `helm template` by copying the chart and duplicating NOTES.txt under a name
+  helm will render — see `_notes()` for why each simpler form does not work.
+  Two lessons, and the second is the bigger one: a green local suite is a
+  claim about one machine's toolchain, and a fix for a failure you have not
+  reproduced is a guess.
 
 A "no regressions" result that has not proved it exercised two different versions
 is not a result.
