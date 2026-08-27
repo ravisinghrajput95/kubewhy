@@ -20,6 +20,43 @@ than report UNDETERMINED. The current design cannot reach significance after
 multiplicity correction; that is a property of 29 scenarios at n=5, not of the
 models.
 
+**A fault list chosen from outside this project.** The corpus's real weakness
+is not its ground truth — `AI_EVALUATION.md` takes that from what the API
+server actually emitted, not from the manifests' intent. It is **selection**:
+the same person chose the system's capabilities and chose which 29 faults to
+measure it on, and nothing in the corpus can escape that from inside.
+
+The obvious fix is a corpus built from real incident history with independently
+recorded causes. That is the right answer and it needs data this project does
+not have.
+
+A cheaper approximation, written down here so it is not mistaken for that:
+
+1. Take the fault list from a source outside this project — Kubernetes' own
+   documented pod/container failure reasons, the `kubectl` waiting and
+   terminated reason sets, published postmortems. The point is that something
+   other than this project decides which faults exist.
+2. Build a fixture per fault **before** running kubewhy against any of them,
+   so the list cannot be trimmed to what it handles.
+3. Take ground truth from the cluster's own output, as the current corpus
+   already does.
+4. Run it once and publish the failures, including faults kubewhy has no tool
+   to see.
+
+**What that buys, and what it does not.** It removes the author's choice of
+*which faults exist*, which is the largest part of the bias. It does not remove
+the author from the fixtures, the expectations or the harness, and a fault
+reproduced on kind is not an incident. It would be evidence that the system was
+measured against a list it did not pick — not evidence that it works in
+production. Anything built this way must say so in VALIDATION.md, or it becomes
+the thing it was meant to replace.
+
+**An importer for real incidents** is the other half and is worth building
+first if the data exists: a documented case schema plus a validator, so an
+incident with a recorded cause becomes a runnable scenario. It also makes the
+ask precise — an incident is only usable if its cause was established
+independently of kubewhy.
+
 ## Platform coverage
 
 **Real vLLM validation.** The `vllm` provider is the OpenAI wire protocol under
