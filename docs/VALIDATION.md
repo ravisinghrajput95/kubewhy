@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1223 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1227 passing, no cluster or model required |
 | Grounding replay | **PROVEN** | 1469 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -40,7 +40,7 @@ and does not support. Four words are used and they mean specific things:
 | Generalized diagnostic accuracy | **NOT TESTED** | one cluster, one prompt configuration |
 | Real vLLM | **NOT TESTED** | protocol-level support only |
 | EKS | **NOT TESTED** | auth verified by reading the client |
-| Browser paint automation | **NOT TESTED** | designed in E2E.md, not implemented |
+| Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
 | Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, run on 3 modules; the rest of the codebase is unsurveyed |
 
 ## Defects found and fixed
@@ -483,6 +483,39 @@ which under-selects for modules exercised through other suites — a survivor
 count taken that way is an upper bound on the gaps, not a measurement of them.
 The rest of the codebase is unsurveyed and is not claimed otherwise.
 
+### 16. The contradiction panel printed its own markup at the reader
+
+**Problem.** Every contradicted verdict rendered
+`<span class='kw-dim'>rule: ...</span>` as literal angle-bracket text inside
+the red box — the one verdict this project says is most worth reading.
+
+**Detection.** A browser. `st.error` accepts no `unsafe_allow_html` and
+escapes its body, which was known from the API surface and recorded in
+[E2E.md](E2E.md) as case R-01, the case that justified a browser suite
+existing at all. It had never been confirmed visually. Confirming it took one
+Streamlit page rendering the two variants side by side.
+
+**Why no existing test could see it.** `tests/test_ui.py` has 37 tests over
+the element tree, and `element.value` is the string that was *submitted*, not
+the text that was *painted*. No assertion over that tree can distinguish them,
+ever — which is exactly the argument E2E.md makes.
+
+**Fix.** Markdown backticks, which `st.error` does render, and which suit a
+rule name anyway.
+
+**Regression evidence.** `tests/test_ui_markup.py` walks `ui.py`'s AST and
+fails if any escaping widget is handed markup. A static check rather than a
+browser test: weaker than a screenshot, far cheaper, and it covers all twelve
+call sites rather than the ones a test happens to render. Reverting the fix
+turns it red. It also asserts it found at least five call sites, because a
+scanner that matched nothing would pass this file forever.
+
+**What this says about the browser suite.** The finding that justified it was
+delivered without it. That is not an argument against building the harness,
+but it is an argument for reading E2E.md's own table first: two of the three
+defects it lists were fixed in AppTest, and the third needed a screenshot once
+rather than a suite forever.
+
 ## Test-harness failures worth recording
 
 Three times a harness reported a clean result it had not earned. Recording them
@@ -525,7 +558,7 @@ is not a result.
 ## Reproducing
 
 ```bash
-pytest                                   # 1223, no cluster or model needed
+pytest                                   # 1227, no cluster or model needed
 
 kind create cluster --name kubewhy
 kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \

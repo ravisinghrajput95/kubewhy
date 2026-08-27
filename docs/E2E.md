@@ -1,9 +1,15 @@
 # Browser tests for the console — a design
 
-**Status: design only. Nothing here is implemented.** Playwright is not a
-dependency of this repo yet, and no test in `tests/` drives a browser. This
-document specifies the harness, the selector contract and the cases; it does
-not describe anything that runs today.
+**Status: design only, with one case discharged.** Playwright is not a
+dependency of this repo and no test in `tests/` drives a browser. This document
+specifies the harness, the selector contract and the cases; it does not
+describe anything that runs today.
+
+The exception is **R-01**, the case that justified the suite. It was confirmed
+in a browser and fixed, and its regression guard is a static check rather than
+a browser test — see below. That is worth reading before building the harness:
+the finding cost one Streamlit page and a screenshot, and the guard costs no
+dependency at all.
 
 ## What this suite is for
 
@@ -34,9 +40,18 @@ contradiction. The AppTest assertion passes because `element.value` is the
 string that was *submitted*, not the text that was *painted*. No assertion over
 the element tree can distinguish those two, ever.
 
-*(That defect is confirmed from Streamlit's API surface, not yet confirmed
-visually. Confirming it is case R-01 below, and would be this suite's first
-finding.)*
+*(**Confirmed visually and fixed on 2026-08-27.** The console rendered
+`<span class='kw-dim'>rule: ...</span>` as literal angle-bracket text inside
+the red box, on every contradicted verdict. R-01 was this suite's first
+finding, as designed — and it was found by running one Streamlit page with the
+two variants side by side, not by building the harness below.*
+
+*The fix uses markdown backticks, which `st.error` does render. The regression
+guard is `tests/test_ui_markup.py`, which walks `ui.py`'s AST and fails if any
+widget that escapes its body is handed markup. That is a weaker instrument
+than a screenshot and a much cheaper one; for this defect class it is
+sufficient, because the bug is entirely decided by what the call site passes.
+It also covers every call site rather than the ones a test happens to render.)*
 
 So: **a case belongs here only if the answer depends on the browser having
 parsed, laid out, painted or animated something, or on a person having

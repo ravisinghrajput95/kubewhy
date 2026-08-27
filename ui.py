@@ -443,10 +443,18 @@ def render_investigation(answer):
         # "the tools said otherwise" are different, and only the second means
         # the answer is wrong.
         for item in answer.get("contradictions", []):
+            # No HTML here, and that is not a style preference. st.error takes
+            # no unsafe_allow_html and escapes its body, so a <span> reaches
+            # the reader as visible angle brackets -- in the red box that
+            # announces the one verdict most worth reading. Confirmed in a
+            # browser; the element tree cannot see it, because AppTest reads
+            # the string that was submitted rather than the text that was
+            # painted. Backticks are markdown, which st.error does render, and
+            # a rule name is an identifier anyway.
             st.error(
                 f"**Contradicted** — claimed *{item['claim']}*, but "
                 f"{item['measured']}  \n"
-                f"<span class='kw-dim'>rule: {item.get('rule','')}</span>",
+                f"rule: `{item.get('rule','')}`",
                 icon=":material/error:",
             )
     elif confidence == "grounded" and not answer.get("checked"):
