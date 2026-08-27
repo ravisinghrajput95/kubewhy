@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1196 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1223 passing, no cluster or model required |
 | Grounding replay | **PROVEN** | 1469 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -41,7 +41,7 @@ and does not support. Four words are used and they mean specific things:
 | Real vLLM | **NOT TESTED** | protocol-level support only |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md, not implemented |
-| Mutation testing | **NOT TESTED** | harness not in this repository |
+| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, run on 3 modules; the rest of the codebase is unsurveyed |
 
 ## Defects found and fixed
 
@@ -433,6 +433,56 @@ The 45 figure is worth noting on its own: it was written into this document
 from a replay nobody could re-run, and a committed tool now reproduces it
 exactly.
 
+### 15. Four defects behind a green suite, found by breaking the code
+
+`evals/mutate.py` applies one mutation at a time — a comparison flipped, a
+boolean operator swapped, a `not` dropped, a constant nudged — and reports the
+mutations no test failed on. FUTURE.md listed this as NOT TESTED from the
+beginning: a harness existed during development, killed 28 guards, and was
+never committed. It is the second of the two tools in that position; the
+grounding replay was the first.
+
+It never edits the working tree. Every mutant is written into a throwaway copy
+of the repository, which costs about 4MB and a fraction of a second, and which
+is why a mutant that hangs or a process killed at the wrong moment cannot leave
+a comment-stripped source file behind.
+
+**What it found, in three modules written the same week:**
+
+| Module | Before | After | What survived |
+|---|---|---|---|
+| `identity.py` | 20/26 | **20/20** | Six mutants inside a `Principal.__eq__` that nothing ever called |
+| `limits.py` | 24/28 | **28/28** | The window boundary, `retry_after` clearing only one event, rounding down, sub-second truncation, and the window length itself |
+| `audit.py` | 33/41 | **40/40** | A dead field, `emit()`'s documented idempotence, and `duration_ms` — asserted by nothing at all |
+
+The `identity.py` one was the most useful and the least expected. Nothing in
+the project compares two Principals, so `__eq__` was unused surface — and
+defining it without `__hash__` had silently made the class **unhashable**, a
+trap for the next person to key a dict or set on a principal. Which is exactly
+what per-caller rate limiting would reach for, and was written three days
+later. Removing `__eq__` fixed it; a test now pins hashability.
+
+Two more were docstring claims nobody had checked. `emit()` says it is
+idempotent "because `finally` can run more than once"; flipping the flag left
+every test green. `duration_ms` appeared in every audit record and four
+separate mutants on that line survived, including one that divided where it
+should multiply.
+
+**Mutation score is deliberately not reported as a number.** Some mutations
+cannot change behaviour — a bound never reached, a constant used only in a log
+line — so a percentage invites raising it by writing tests for equivalent
+mutants. Three of the survivors above were run through a search over thousands
+of generated inputs to find one that separated the mutant from the original;
+two were separable and became tests, and the third was not and is documented as
+a defensive branch that `_trim` makes unreachable.
+
+**What this does not establish.** Three modules out of roughly twenty were
+surveyed, and they are three that were written this week with mutation testing
+in mind by the end. The default test selection is `tests/test_<module>.py`,
+which under-selects for modules exercised through other suites — a survivor
+count taken that way is an upper bound on the gaps, not a measurement of them.
+The rest of the codebase is unsurveyed and is not claimed otherwise.
+
 ## Test-harness failures worth recording
 
 Three times a harness reported a clean result it had not earned. Recording them
@@ -456,7 +506,7 @@ is not a result.
 ## Reproducing
 
 ```bash
-pytest                                   # 1196, no cluster or model needed
+pytest                                   # 1223, no cluster or model needed
 
 kind create cluster --name kubewhy
 kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \

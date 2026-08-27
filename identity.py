@@ -133,15 +133,14 @@ class Principal:
         """
         return self.email or self.name or "anonymous"
 
-    def __eq__(self, other):
-        if not isinstance(other, Principal):
-            return NotImplemented
-        return (
-            self.name == other.name
-            and self.email == other.email
-            and self.groups == other.groups
-            and self.source == other.source
-        )
+    # No __eq__ here, deliberately. Nothing compares two Principals -- every
+    # comparison in this project is on label(), which is a string -- and
+    # defining __eq__ without __hash__ sets __hash__ to None, which silently
+    # makes the class unhashable. That is a trap for the next person who keys
+    # a dict or a set on a principal, which is exactly what per-caller rate
+    # limiting would reach for. Found by mutation testing: six mutants inside
+    # the __eq__ that used to be here all survived, because nothing exercised
+    # it at all.
 
     def __repr__(self):
         return f"Principal({self.label()!r}, source={self.source!r})"

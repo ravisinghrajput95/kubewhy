@@ -265,3 +265,20 @@ def test_principal_repr_does_not_leak_groups_into_a_log_line():
     """repr lands in logs; it should be short and name the person."""
     who = identity.Principal(email="sre@example.com", groups=("a",) * 50, source="proxy")
     assert repr(who) == "Principal('sre@example.com', source='proxy')"
+
+
+def test_a_principal_can_be_used_as_a_dict_key():
+    """
+    Pinned because it was briefly not true. A __eq__ defined without a
+    __hash__ sets __hash__ to None, and the class silently stops being
+    hashable -- which breaks the first thing that keys a set or a dict on a
+    principal, and per-caller rate limiting is exactly that shape.
+
+    Mutation testing found the __eq__: six mutants inside it survived, because
+    nothing in the project ever compared two Principals.
+    """
+    who = identity.Principal(email="sre@example.com", source="proxy")
+    seen = {who: 1, identity.ANONYMOUS: 2}
+
+    assert len(seen) == 2
+    assert seen[who] == 1

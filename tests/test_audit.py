@@ -462,3 +462,59 @@ class TestARecordCanBeReadLater:
 
         monkeypatch.setattr("routers.k8s_pods_info.active_context", boom)
         assert run().cluster == "unavailable"
+
+
+class TestTheThingsTheDocstringsPromise:
+    """
+    Each of these was claimed in a docstring and asserted nowhere. Mutation
+    testing found them: the mutants that broke them all survived.
+    """
+
+    def test_emitting_twice_writes_one_record(self, caplog):
+        """
+        emit() says it is idempotent "because `finally` can run more than once
+        on a generator that is closed after it has already completed". Nothing
+        checked, and flipping the flag to False left every test green.
+        """
+        entry = audit.begin("why?", "qwen3")
+        entry.observe({"type": "answer", "run_id": "r1", "confidence": "grounded"})
+
+        with caplog.at_level(logging.INFO, logger="triage.audit"):
+            entry.emit()
+            entry.emit()
+            entry.emit()
+
+        assert len([r for r in caplog.records if r.message == "investigation"]) == 1
+
+    def test_the_record_carries_how_long_the_run_took(self, run, monkeypatch):
+        """
+        duration_ms was in every record and asserted by nothing -- four
+        separate mutants on that line survived, including one that divided
+        where it should multiply.
+        """
+        clock = iter([100.0, 100.25])
+        monkeypatch.setattr(audit.time, "perf_counter", lambda: next(clock))
+
+        assert run().duration_ms == 250.0
+
+    def test_an_auth_source_can_be_set_without_a_principal(self):
+        """
+        The `elif auth is not None` branch. Surfaces that know how someone
+        authenticated before they know who they are use it, and inverting the
+        test left it unexercised.
+        """
+        audit.actor(principal="someone", surface="cli", auth="os")
+        audit.actor(auth="proxy")
+
+        assert audit.current() == {"principal": "someone", "auth": "proxy",
+                                   "surface": "cli"}
+
+    def test_naming_no_surface_leaves_the_last_one_alone(self):
+        """
+        Rather than clearing it. A surface that sets the actor per request but
+        the surface once would otherwise lose it on the second call.
+        """
+        audit.actor(principal="a@b.c", surface="console", auth="proxy")
+        audit.actor(principal="c@d.e")
+
+        assert audit.current()["surface"] == "console"

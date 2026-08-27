@@ -218,7 +218,7 @@ class Record:
 
     __slots__ = ("run_id", "question", "prompted", "model", "started", "target",
                  "tools", "namespaces", "sensitive", "verdict", "termination",
-                 "outcome", "error", "rounds", "_emitted")
+                 "outcome", "error", "_emitted")
 
     def __init__(self, question, model):
         self.run_id = ""
@@ -240,7 +240,6 @@ class Record:
         self.termination = None
         self.outcome = "incomplete"
         self.error = ""
-        self.rounds = 0
         self._emitted = False
 
     def observe(self, event):

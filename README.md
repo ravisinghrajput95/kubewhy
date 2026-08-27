@@ -307,6 +307,7 @@ Product boundaries:
 | [VALIDATION.md](docs/VALIDATION.md) | The authoritative evidence document |
 | [RUNBOOK.md](docs/RUNBOOK.md) | Replicas, what a restart costs, the four ways a diagnosis goes wrong, reading the audit trail |
 | [`evals/replay_grounding.py`](evals/replay_grounding.py) | Re-score the recorded corpus through the current checker — run before believing any grounding change |
+| [`evals/mutate.py`](evals/mutate.py) | Break the code one change at a time and report what the tests did not notice |
 | [AI_EVALUATION.md](docs/AI_EVALUATION.md) | Corpus, metrics, methodology |
 | [UI.md](docs/UI.md) | The operator console |
 | [DEMO.md](docs/DEMO.md) | Fault set and a 5–10 minute walkthrough |

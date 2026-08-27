@@ -52,6 +52,19 @@ class TestTheWindowSlides:
         assert window.total("k", now=1100) == 5
         assert window.retry_after("k", limit=5, now=1100) > 0
 
+    def test_an_event_exactly_one_window_old_is_outside_it(self):
+        """
+        The boundary, which nothing exercised until mutation testing pointed
+        at it. The window is half-open: an event exactly `seconds` old has
+        left. Swapping the index in _trim's comparison produced a mutant that
+        kept it, and every existing test agreed with both versions.
+        """
+        window = limits.Window(seconds=10)
+        window.add("k", now=1000)
+
+        assert window.total("k", now=1009) == 1
+        assert window.total("k", now=1010) == 0
+
     def test_keys_do_not_share_an_allowance(self):
         window = limits.Window(seconds=100)
         window.add("alice", now=1000)
@@ -85,6 +98,47 @@ class TestRetryAfterTellsTheTruth:
 
         # At t=1095 the limit of 2 is reached; the 1000 event leaves at 1100.
         assert window.retry_after("k", limit=2, now=1095) == 6
+
+    def test_the_wait_clears_every_event_over_the_ceiling_not_just_one(self):
+        """
+        Two events against a ceiling of one: dropping only the oldest still
+        leaves one, which is not below the limit. The wait has to run to the
+        newest event's expiry, not the oldest's.
+
+        Mutation testing found this: `running < limit` relaxed to `<=` inside
+        the loop returned 10 instead of 11 and no test noticed.
+        """
+        window = limits.Window(seconds=10)
+        window.add("k", now=1000)
+        window.add("k", now=1001)
+
+        assert window.retry_after("k", limit=1, now=1001) == 11
+
+    def test_the_wait_rounds_up_rather_than_down(self):
+        """
+        A wait rounded down lands the caller back inside the window and into
+        another 429. Mutation testing separated `+ 1` from `- 1` here: with a
+        one-second window and the event just placed, the honest answer is 2,
+        and every test agreed with 1.
+        """
+        window = limits.Window(seconds=1)
+        window.add("k", now=1000)
+
+        assert window.retry_after("k", limit=1, now=1000) == 2
+
+    def test_a_sub_second_remainder_still_rounds_up_to_a_whole_second(self):
+        """
+        The truncation case. int() of 0.5 is 0, so the wait is the +1 alone --
+        and the floor underneath it must not inflate that to 2, or every
+        near-expiry caller is told to wait twice as long as it needs.
+
+        This one needed fractional timestamps to find: 7280 integer-time
+        scenarios could not separate the mutant.
+        """
+        window = limits.Window(seconds=10)
+        window.add("k", now=1000)
+
+        assert window.retry_after("k", limit=1, now=1009.5) == 1
 
     def test_a_wait_is_never_zero_when_the_ceiling_is_reached(self):
         """Zero would tell a caller to retry immediately, into another 429."""
@@ -214,3 +268,15 @@ class TestThePosture:
 
     def test_no_warning_when_a_ceiling_is_set(self):
         assert limits.startup_warning() is None
+
+
+def test_the_window_is_an_hour_because_every_message_says_so():
+    """
+    The ceilings are named "per hour", the refusals say "per hour", and the
+    documented defaults are reasoned about per hour. Nothing pinned the
+    constant, so the window could have drifted away from every sentence
+    describing it. Found by mutation testing, which is the only thing that
+    would notice a constant nobody asserts.
+    """
+    assert limits.WINDOW_SECONDS == 3600
+    assert limits.Window().seconds == 3600
