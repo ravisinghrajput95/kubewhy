@@ -12,9 +12,65 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `175d16c`, tree clean and pushed, 977 tests pass, tags
-through **v0.1.8** (cut 2026-08-24). Nothing running: no kind cluster, no GKE
-cluster, Docker quit, Ollama stopped, GCP empty.**
+**State: `main` at `b90973f`, tree clean and pushed, **1240 tests pass, CI
+green on all six jobs**, tags through **v0.2.0**. Nothing running: no kind
+cluster, no GKE cluster, Docker quit, Ollama stopped, GCP empty.**
+
+**Read `docs/VALIDATION.md` before anything else — it is current, and most of
+this file below the next section is history from 2026-08-24 and earlier.**
+
+## What changed on 2026-08-26 / 27 (25 commits)
+
+**The tenancy question is settled: one SRE team, one cluster.** Authentication
+only; the ClusterRole is the authorization model; no Kubernetes impersonation.
+Do not reopen without new evidence — see `docs/SECURITY.md`.
+
+Done and validated live:
+
+- **Tier 1 item 1 — authentication.** `identity.py`, `require_caller` in
+  app.py, an `st.stop()` gate in ui.py before any cluster read, and
+  `ui.auth.enabled` in the chart (oauth2-proxy sidecar, console bound to
+  127.0.0.1, Service pointed at the proxy). Validated on kind against a real
+  Dex: the console's port is ConnectionRefused from another pod, and a forged
+  `X-Forwarded-Email` with a valid session still reaches the app as the real
+  address.
+- **Tier 1 item 3 — audit logging.** `audit.py`, one record per investigation,
+  hooked at `agent.stream()`. The record carries no evidence by design.
+  PROVEN live on CLI, REST, console and controller. **Slack is NOT TESTED.**
+- **Tier 1 item 4 — the replica story.** `docs/RUNBOOK.md`. The chart refuses
+  `ui.replicas > 1`, the console gets its own state PVC, and
+  restart-interrupted `/ask/jobs` are closed out instead of reading `running`
+  forever.
+- **Tier 2** — failure runbook with numbers recomputed from `results/`;
+  `evals/replay_grounding.py` committed and in CI (push, PR, weekly);
+  `limits.py` rate limiting and external-token budget.
+- **Tier 3** — `evals/mutate.py` committed. Both "harness existed but was
+  never committed" items are now closed.
+- **E2E case R-01 fixed**: the console printed `<span class='kw-dim'>` as
+  literal text on every contradicted verdict. Confirmed in a browser.
+
+**Still open, and unchanged:**
+
+1. **Tier 1 item 2 — an evidence corpus someone else produced.** Needs your
+   incident history and an author who is not the system's. The partial
+   approach (an externally-selected fault list) is written up in
+   `docs/FUTURE.md` as a backlog item, with what it does and does not buy.
+2. **Real vLLM.** The wire path is proven — the `vllm` provider ran against a
+   real OpenAI-protocol server with tool calls and token usage round-tripping.
+   What is untested is vLLM's own `--tool-call-parser`, which nothing else can
+   stand in for. **vLLM does not install on this Mac** (Darwin arm64, build
+   failure); needs a Linux GPU host.
+3. **EKS**, and the browser harness proper — `docs/E2E.md` now argues against
+   the latter more than for it.
+
+**Two open defects from before are untouched:**
+`never_ready_readiness_probe` 0/5 and
+`scoping_quiet_workload_beside_loud_one` 0/5.
+
+**An environment note:** another project on this machine repeatedly creates and
+deletes a kind cluster named `k8s-agent-verify` and rewrites
+`current-context`. Do not delete it; re-assert `kubectl config use-context`
+before trusting kubectl.
 
 **The `OPENAI_API_KEY` in `.env` was revoked on 2026-08-24 and is dead.** Any
 api-mode run needs a new one. Local Ollama is the default and needs no key.
@@ -599,7 +655,7 @@ Do not round it.
 
 ```bash
 cd /Users/ravirajput/Projects/AIOps-agent
-.venv/bin/python -m pytest              # 977 tests, no cluster, no model needed
+.venv/bin/python -m pytest              # 1240 tests, no cluster, no model needed
 ollama list                             # qwen3 (5.2GB) is the default model
 ```
 
