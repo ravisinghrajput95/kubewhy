@@ -73,6 +73,17 @@ their own service.
 - **Surfaces that know their target pass it as data**, never as prose to be
   re-parsed. Measured: 135/145 runs extracted a target, wrong-target rate 0.7%
   (qwen3) and 0.0% (gpt-4o-mini).
+- **One deliberate asymmetry, stated because it looks like a hole.** A
+  workload-targeted run may read *any* service in its own namespace; a
+  service-targeted run may read only the service it was asked about. The
+  service fronting a workload is named differently by convention — workload
+  `crasher`, service `crasher-svc` — so refusing on a name mismatch would
+  refuse the single most useful call in diagnosing an unreachable workload,
+  and no rule can tell a related service from an unrelated one by name. What
+  bounds it is the namespace, which is rewritten on these calls like every
+  other, so the exposure is endpoint lists within the namespace already under
+  investigation. Pinned by five tests in `tests/test_targeting.py`; mutation
+  testing is what showed nothing had pinned it.
 
 ### Hallucinated or overstated root cause
 

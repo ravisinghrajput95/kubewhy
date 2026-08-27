@@ -492,10 +492,14 @@ class TestTheThingsTheDocstringsPromise:
         separate mutants on that line survived, including one that divided
         where it should multiply.
         """
-        clock = iter([100.0, 100.25])
+        # A duration that rounds differently at one and two decimal places,
+        # so the assertion pins the precision too. 250.0 does not: it survives
+        # round(..., 2) unchanged, and a mutant that widened the precision sat
+        # in this line unnoticed.
+        clock = iter([100.0, 100.123456])
         monkeypatch.setattr(audit.time, "perf_counter", lambda: next(clock))
 
-        assert run().duration_ms == 250.0
+        assert run().duration_ms == 123.5
 
     def test_an_auth_source_can_be_set_without_a_principal(self):
         """

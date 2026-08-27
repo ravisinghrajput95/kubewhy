@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1227 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1240 passing, no cluster or model required |
 | Grounding replay | **PROVEN** | 1469 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -41,7 +41,7 @@ and does not support. Four words are used and they mean specific things:
 | Real vLLM | **NOT TESTED** | protocol-level support only |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
-| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, run on 3 modules; the rest of the codebase is unsurveyed |
+| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, run on 5 modules; the rest of the codebase is unsurveyed |
 
 ## Defects found and fixed
 
@@ -453,7 +453,28 @@ a comment-stripped source file behind.
 |---|---|---|---|
 | `identity.py` | 20/26 | **20/20** | Six mutants inside a `Principal.__eq__` that nothing ever called |
 | `limits.py` | 24/28 | **28/28** | The window boundary, `retry_after` clearing only one event, rounding down, sub-second truncation, and the window length itself |
-| `audit.py` | 33/41 | **40/40** | A dead field, `emit()`'s documented idempotence, and `duration_ms` — asserted by nothing at all |
+| `audit.py` | 33/41 | **40/40** | A dead field, `emit()`'s documented idempotence, `duration_ms` and its rounding precision |
+| `redaction.py` | 6/6 | **6/6** | Nothing |
+| `targeting.py` | 64/74 | **69/74** | The service asymmetry — see SECURITY.md; five parser heuristics remain |
+
+`targeting.py` is also the example of why the default test selection matters:
+run against `tests/test_targeting.py` alone it scored 64/74, and against its
+real test set (adding `test_investigation_identity.py`) 67/74 before any new
+test was written. The three-mutant difference was test selection, not coverage.
+
+**And the harness itself was wrong at first.** `Sites` recorded a node before
+descending into its children while `Apply` mutated after, so the nth reported
+site and the nth applied mutation were different things: the counts were
+right and every line number pointed somewhere else. It was caught by reading
+`targeting.py` survivors that made no sense — a mutant labelled `Eq -> NotEq`
+had swapped an `and` for an `or` two lines away. The first `audit.py` result
+published here, 40/40, was produced under that bug; the true figure was 39/40,
+and the survivor was a rounding precision the test could not distinguish. Both
+are fixed, and two tests now assert that the reported line is the line that
+actually changed and that the named operator is the one that moved.
+
+That is the third harness in this document to report something it had not
+earned, and the second to do so while looking completely healthy.
 
 The `identity.py` one was the most useful and the least expected. Nothing in
 the project compares two Principals, so `__eq__` was unused surface — and
@@ -558,7 +579,7 @@ is not a result.
 ## Reproducing
 
 ```bash
-pytest                                   # 1227, no cluster or model needed
+pytest                                   # 1240, no cluster or model needed
 
 kind create cluster --name kubewhy
 kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \

@@ -85,29 +85,34 @@ class Sites(ast.NodeVisitor):
         self.found.append({"kind": kind, "line": getattr(node, "lineno", 0),
                            "what": description})
 
+    # Children first, then this node -- the same order Apply uses. When these
+    # two disagreed, every reported line number was attributed to the wrong
+    # site: the counts were right and the labels pointed elsewhere, which is
+    # worse than no labels, because a survivor is only useful if you can find
+    # it. Any new operator must be added to both classes in the same shape.
     def visit_Compare(self, node):
+        self.generic_visit(node)
         for op in node.ops:
             swap = COMPARE_SWAPS.get(type(op))
             if swap:
                 self._add(node, "compare",
                           f"{type(op).__name__} -> {swap.__name__}")
-        self.generic_visit(node)
 
     def visit_BoolOp(self, node):
+        self.generic_visit(node)
         other = "Or" if isinstance(node.op, ast.And) else "And"
         self._add(node, "boolop", f"{type(node.op).__name__} -> {other}")
-        self.generic_visit(node)
 
     def visit_UnaryOp(self, node):
+        self.generic_visit(node)
         if isinstance(node.op, ast.Not):
             self._add(node, "not", "drop `not`")
-        self.generic_visit(node)
 
     def visit_BinOp(self, node):
+        self.generic_visit(node)
         swap = BINOP_SWAPS.get(type(node.op))
         if swap:
             self._add(node, "binop", f"{type(node.op).__name__} -> {swap.__name__}")
-        self.generic_visit(node)
 
     def visit_Constant(self, node):
         if isinstance(node.value, bool):

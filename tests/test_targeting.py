@@ -369,3 +369,72 @@ class TestUnlabelledTargets:
             agent.ask("Why is ghost-workload failing?")
 
         assert "workload" not in seen
+
+
+class TestTheServiceAsymmetryIsDeliberate:
+    """
+    A workload-targeted run may read any service in its own namespace; a
+    service-targeted run may read only the service it was asked about.
+
+    That asymmetry looks like a hole and is not. The service fronting a
+    workload is named differently by convention -- workload `crasher`, service
+    `crasher-svc` -- so refusing on a name mismatch would refuse the single
+    most useful call in diagnosing an unreachable workload. What bounds the
+    exposure instead is the namespace, which is rewritten for these calls like
+    every other.
+
+    Mutation testing is why this is written down: nothing pinned either half,
+    so `and` could become `or` in enforce() and no test noticed.
+    """
+
+    WORKLOAD = {"kind": "workload", "name": "crasher", "namespace": "demo"}
+    SERVICE = {"kind": "service", "name": "crasher-svc", "namespace": "demo"}
+
+    def test_a_workload_run_may_read_a_differently_named_service(self):
+        """The convention case, and the reason the name is not checked."""
+        _, violation = targeting.enforce(
+            self.WORKLOAD, "get_service_endpoints",
+            {"name": "crasher-svc", "namespace": "demo"})
+
+        assert violation is None
+
+    def test_a_workload_run_may_read_another_service_in_its_namespace(self):
+        """
+        Pinned as intended rather than tolerated. Diagnosing "why is this
+        unreachable" legitimately reaches a service the workload talks to, and
+        there is no reliable way to tell that from an unrelated one by name.
+        """
+        _, violation = targeting.enforce(
+            self.WORKLOAD, "get_service_endpoints",
+            {"name": "payments-svc", "namespace": "demo"})
+
+        assert violation is None
+
+    def test_but_not_one_in_another_namespace(self):
+        """
+        The namespace is what actually bounds it, so this is the assertion
+        that carries the security claim.
+        """
+        arguments, violation = targeting.enforce(
+            self.WORKLOAD, "get_service_endpoints",
+            {"name": "payments-svc", "namespace": "other-team"})
+
+        assert violation["action"] == "retargeted"
+        assert arguments["namespace"] == "demo"
+
+    def test_a_service_run_is_held_to_its_own_service(self):
+        _, violation = targeting.enforce(
+            self.SERVICE, "get_service_endpoints",
+            {"name": "payments-svc", "namespace": "demo"})
+
+        assert violation["action"] == "refused"
+
+    def test_a_call_naming_no_service_is_not_refused(self):
+        """
+        There is nothing off-target about it, and refusing would push the
+        model into guessing a name to satisfy the guard.
+        """
+        _, violation = targeting.enforce(
+            self.SERVICE, "get_service_endpoints", {"namespace": "demo"})
+
+        assert violation is None

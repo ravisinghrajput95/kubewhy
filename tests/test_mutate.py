@@ -156,3 +156,71 @@ class TestTheReport:
         })
 
         assert "%" not in text
+
+
+class TestTheLabelMatchesTheChange:
+    """
+    Sites and Apply must walk in the same order.
+
+    They did not: Sites recorded a node before descending into its children
+    and Apply mutated after, so the nth reported site and the nth applied
+    mutation were different things. The counts stayed correct and every line
+    number pointed somewhere else -- which is worse than reporting no line at
+    all, because a survivor is only worth having if you can find it.
+
+    Caught while reading survivors in targeting.py that made no sense: a
+    mutant labelled `Eq -> NotEq` had swapped an `and` for an `or` two lines
+    away.
+    """
+
+    SAMPLES = ["limits.py", "identity.py", "targeting.py", "redaction.py"]
+
+    @pytest.mark.parametrize("module", SAMPLES)
+    def test_every_mutant_changes_the_line_it_names(self, module):
+        source = open(os.path.join(ROOT, module), encoding="utf-8").read()
+        baseline = ast.unparse(ast.parse(source)).splitlines()
+        found = mutate.sites(source)
+
+        mismatched = []
+        for index, site in enumerate(found):
+            mutant = mutate.mutate(source, index)
+            if mutant is None:
+                continue
+            changed = [n for n, (a, b) in enumerate(zip(baseline, mutant.splitlines()))
+                       if a != b]
+            if len(changed) != 1:
+                mismatched.append(f"{module} site {index} changed {len(changed)} lines")
+
+        assert not mismatched, "\n".join(mismatched)
+
+    @pytest.mark.parametrize("module", SAMPLES)
+    def test_the_named_operator_is_the_one_that_moved(self, module):
+        """
+        A stronger form: the described swap has to be visible in the diff.
+        `Eq -> NotEq` must produce a line that gained `!=`, not one that
+        gained `or`.
+        """
+        marks = {"Eq -> NotEq": "!=", "NotEq -> Eq": "==",
+                 "Lt -> LtE": "<=", "LtE -> Lt": "<",
+                 "Gt -> GtE": ">=", "GtE -> Gt": ">",
+                 "And -> Or": " or ", "Or -> And": " and ",
+                 "In -> NotIn": "not in", "IsNot -> Is": " is "}
+
+        source = open(os.path.join(ROOT, module), encoding="utf-8").read()
+        baseline = ast.unparse(ast.parse(source)).splitlines()
+        wrong = []
+
+        for index, site in enumerate(mutate.sites(source)):
+            mark = marks.get(site["what"])
+            if not mark:
+                continue
+            mutant = mutate.mutate(source, index)
+            if mutant is None:
+                continue
+            lines = mutant.splitlines()
+            changed = [n for n, (a, b) in enumerate(zip(baseline, lines)) if a != b]
+            if changed and mark not in lines[changed[0]]:
+                wrong.append(f"{module} site {index}: says {site['what']!r}, "
+                             f"line reads {lines[changed[0]].strip()!r}")
+
+        assert not wrong, "\n".join(wrong[:8])
