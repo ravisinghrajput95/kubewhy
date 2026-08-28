@@ -154,7 +154,17 @@ figure and must not be quoted as one.
 | `unschedulable_unbound_pvc` | 5/5 | 0/5 | 0.0079 |
 | `unschedulable_node_affinity` | 4/5 | 0/5 | 0.0476 |
 | `never_ready_readiness_probe` | 0/5 | 5/5 | 0.0079 |
-| `scoping_quiet_workload_beside_loud_one` | 0/5 | 5/5 | 0.0079 |
+| `scoping_quiet_workload_beside_loud_one` | 0/5 | 4/5 † | 0.0476 |
+
+† **Corrected 2026-08-28, and the original 5/5 was wrong.** One of
+gpt-4o-mini's five answers said the container was killed "due to an
+out-of-memory (OOM) condition" while `last_termination.reason` read `error`.
+The contradiction checker did not recognise that spelling, so the run scored
+`grounded` and the case scored 5/5. Rescoring the recorded drafts against the
+fixed checker — the runs themselves are unchanged — gives 4/5 and moves the
+p from 0.0079 to 0.0476. The other three rows are unaffected; each was
+rescored the same way and did not move. See defect 18 in
+[VALIDATION.md](VALIDATION.md).
 
 **None survives Bonferroni correction** for 29 comparisons (p < 0.0017), and at
 5-versus-5 the design *cannot* reach that threshold — 0.0079 is the floor. These
@@ -164,6 +174,16 @@ that either model is better.
 What they appear to show: qwen3 reads scheduling events and gpt-4o-mini does not
 (0/2 scenarios, never calling `get_pod_events`); gpt-4o-mini handles the
 readiness case and the quiet-workload scoping case where qwen3 fails 0/5.
+
+**Two of these four were investigated on 2026-08-28 and neither turned out to
+be a capability difference in the way the table reads.**
+`never_ready_readiness_probe` was qwen3 never calling `get_pod_events` on a
+pod whose status block cannot explain itself; a deterministic evidence policy
+now sends the run for them, and the case is **5/5**. The scoping case was
+partly a checker that could not see the claim it was watching for — see the
+dagger above — and is **1/5** after the fix, still open. Neither number
+belongs in this table, which is a record of what was measured on 2026-08-25;
+they are here as a warning that a discordant row is a lead, not a finding.
 
 ### Behaviour, which matters more than the pass rate
 

@@ -12,8 +12,8 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1240 passing, no cluster or model required |
-| Grounding replay | **PROVEN** | 1469 recorded runs, reproducible from the repository |
+| Automated test suite | **PROVEN** | 1272 passing, no cluster or model required |
+| Grounding replay | **PROVEN** | 1489 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
 | Grounding + contradiction | **PROVEN** | caught a genuine wrong claim live, 5/5 reproducibly |
@@ -413,8 +413,8 @@ demonstrate it is exercising the code it claims to. **CI runs the self-check
 first, and separately**, because a replay wired to nothing reports "no
 regressions" and looks exactly like a clean run.
 
-**What the replay now says.** Of 1469 replayable records, 1414 score
-identically under current code and **55 moved**. Every transition is a
+**What the replay now says.** Of 1489 replayable records, 1429 score
+identically under current code and **60 moved**. Every transition is a
 documented fix taking effect on records written before it:
 
 | Transition | Count | Cause |
@@ -422,10 +422,12 @@ documented fix taking effect on records written before it:
 | `insufficient_evidence` → `grounded` | 45 | Defect 5, the absence rule in the SUPPORTED direction — the same 45 that entry reports |
 | `partial` → `grounded` | 2 | Same fix; a relation claim that is now confirmable |
 | `insufficient_evidence` → `contradicted` | 2 | Same fix in the other direction; inspected, and a true positive — the answer claimed a service had no endpoints while `get_service_endpoints` reported one |
-| `contradicted` → `grounded` | 5 | Defect 4 (1) and defect 16 (4), both false positives removed; each draft is a correct diagnosis |
+| `contradicted` → `grounded` | 5 | Defect 4 (1) and defect 17 (4), both false positives removed; each draft is a correct diagnosis |
 | `contradicted` → `partial` | 1 | Defect 4, with one claim still unsupported |
+| `grounded` → `contradicted` | 4 | Defect 18, the OOM spelling hole — inspected, all true positives, all recorded `passed: True` |
+| `partial` → `contradicted` | 1 | Same |
 
-The four that moved on 2026-08-28 are defect 16 below — `_absence_is_about`
+The four that moved on 2026-08-28 are defect 17 below — `_absence_is_about`
 recognised a backticked identifier and not a bolded one, so the same clause
 was a false contradiction or not depending on how the model chose to format a
 name. This is the case the replay exists for: the rule had been fixed once,
@@ -542,6 +544,118 @@ delivered without it. That is not an argument against building the harness,
 but it is an argument for reading E2E.md's own table first: two of the three
 defects it lists were fixed in AppTest, and the third needed a screenshot once
 rather than a suite forever.
+
+### 17. Readiness evidence, a contradiction nobody acted on, and a bolded name
+
+Three defects behind the two eval cases that had sat at 0/5, found by reading
+the recorded runs rather than re-running them.
+
+**17a. A Running-and-not-Ready pod had no evidence policy.** The two other
+policies key on the status string, and this pod's status is `Running` — the
+same word a healthy pod reports. Nothing terminated, nothing waiting, every
+field in the status block normal, and the only record of the failure in the
+kubelet's `Unhealthy` Event. All 5 recorded runs of
+`never_ready_readiness_probe` answered without calling `get_pod_events`,
+recorded `policies: 0`, and invented a cause.
+
+The **ordering** is the measured part. Replayed over the 1472 recorded runs
+whose case still exists, a readiness check placed first fires on 16 and takes
+the policy slot from 4 `cluster_wide_scan` runs that had spent it on logs (3)
+or events (1) — a crashing pod's logs traded for a not-ready pod's events,
+which is the failure the logs policy was hardened against. Placed last it
+fires on 12, every one a failing `never_ready` run, and displaces nothing.
+
+**Live result: 0/5 → 5/5** on kind + qwen3, Fisher exact p=0.0079, the floor
+at 5 against 5. `policies: 1` on all five and `get_pod_events` called 5/5
+against 0/5, so no run reached the events unaided. 5/5 is Wilson 95%
+[57-100] and remains a smoke test.
+
+**17b. A contradiction was detected and nothing acted on it.**
+`termination_reason_vs_memory_cause` caught the OOMKilled claim on
+`scoping_quiet_workload_beside_loud_one` 5 times in 5, against
+`last_termination.reason = error` from the same `describe_pod` result the run
+already held. The finding was annotated under an answer whose prose still
+named the wrong cause. A fourth re-ask sends the run back once. See
+**defect 19** for what it did and did not achieve.
+
+**17c. `_absence_is_about` recognised a backticked name and not a bolded
+one.** The guard was written in August against this exact clause and the
+corpus that day happened to spell the ConfigMap in backticks. The model
+writes `nginx-conf` some runs and **nginx-conf** others, so the same sentence
+was a false contradiction or not depending on formatting: 4 false
+contradictions on `stuck_volume_needs_events`, each against the correct
+answer. Markdown emphasis counts now, and the delimiter must close with
+itself — any-of-three let the entity's own backtick pair with the next
+apostrophe and silence a true contradiction. Undelimited names are
+deliberately still uncovered, and a test records why.
+
+### 18. A pattern hole that passed wrong answers as `grounded`
+
+**Problem.** `_MEMORY_CAUSE` carried `"oom killed"` and `"oom-killed"` and
+nothing else in that shape. An answer blaming **"the OOM killer"** — the
+commonest English spelling of the same claim — matched nothing.
+
+**Detection.** Not by reading it. A re-measurement of
+`scoping_quiet_workload_beside_loud_one` came back **3/5**, up from 0/5, and
+looked exactly like the fix in 17b working. It was not: `reconciles` was 0 on
+every run, so the re-ask had never fired. All five answers named OOM as the
+cause; two said "oomkilled" and were caught, three said "OOM killer" or "OOM
+kills" and were scored `grounded`. **The case passed 3/5 while every one of
+its five answers was wrong.**
+
+**Root cause.** A phrase list that enumerates spellings, missing one.
+
+**Fix.** The kill family is entered as the stem — `"oom kill"` subsumes
+killed, killer and kills, `"oom-kill"` the hyphenated forms — plus
+`"out-of-memory"` and `"oom termination"`. Still gated by `_asserted`, so
+"to avoid the OOM killer" and "this was not an OOM kill" stay out, and still
+inside the branch that fires only when the recorded reason is *not* an
+imposed termination, so a genuinely OOMKilled pod is left alone.
+
+**What the replay found.** Six more recorded runs, every one scored
+`passed: True` on a contradicted claim. One of them is **gpt-4o-mini on this
+very case**, whose published 5/5 is **4/5** under the corrected checker —
+Fisher p 0.0079 → 0.0476. The other three discordant scenarios in
+[AI_EVALUATION.md](AI_EVALUATION.md) do not move.
+
+**Why this one matters beyond its own row.** A pattern that misses a spelling
+does not report a smaller number, it reports the wrong one — and it reports
+it in the direction that looks like success. This is the fifth time in this
+project a harness has been caught reporting a result it had not earned, and
+the only reason it was caught here is that `reconciles` had been added to the
+eval record first, so "the mechanism fired" was a fact rather than an
+assumption.
+
+### 19. Telling a model its claim is contradicted is not enough
+
+**Problem.** `scoping_quiet_workload_beside_loud_one` remains **open at 1/5**,
+p=1.0 against the 0/5 baseline. It is recorded here because the failure is
+now understood rather than merely counted.
+
+**What the re-ask did.** Round 1 stated the claim and the measured value and
+stopped there. It fired — `reconciles: 1` on 4 of 5 runs — and the model
+argued back:
+
+> "The `last_termination.reason` field shows Error, which is a generic
+> placeholder in Kubernetes and does not specify the exact cause ... and does
+> not contradict the exit code 137."
+
+That is a false statement about Kubernetes, invented to protect a conclusion.
+A conflict a model can dismiss as a technicality is one it will dismiss.
+
+**Fix.** Each rule carries a sentence saying what the field would have read if
+the claim were true — the kubelet writes `OOMKilled` when the OOM killer
+fires, and exit 137 is SIGKILL, which says the container was killed and never
+by whom. None of the sentences names a cause, and a test asserts that across
+the whole table: naming the liveness probe would hand over the answer this
+case exists to measure.
+
+**Result: 1/5, and the one pass shows the mechanism works when accepted.**
+That run adopted the sentence — "The OOM Killer would have set the reason to
+OOMKilled if that were the cause" — withdrew the claim, and reached SIGKILL
+plus the liveness probe. Four runs kept the claim anyway. **One of five is
+not a fix**, the interval is Wilson 95% [4-62], and p=1.0 says the sample
+cannot distinguish it from the baseline. The case stays open.
 
 ## What the `vllm` provider has and has not been run against
 
