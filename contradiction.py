@@ -76,11 +76,27 @@ _APPLICATION_CAUSE = (
 )
 
 # Phrases asserting the container ran out of memory.
+#
+# The kill family is entered as the STEM, because the tuple used to carry
+# "oom killed" and "oom-killed" and nothing else in that shape -- so an answer
+# blaming "the OOM killer" said the same thing in the commonest English
+# spelling of it and was not recognised. Measured on
+# scoping_quiet_workload_beside_loud_one at n=5, 2026-08-28: all five answers
+# named OOM as the cause, two said "oomkilled" and were caught, and three said
+# "OOM killer" / "OOM kills" and came back `grounded` -- so the case scored
+# 3/5 while every one of its answers was wrong. A pattern that misses a
+# spelling does not report a smaller number; it reports the wrong one.
+#
+# "oom kill" subsumes killed, killer and kills; "oom-kill" does the same for
+# the hyphenated forms. Both are still gated by _asserted, so "to avoid the
+# OOM killer" and "this was not an OOM kill" stay out.
 _MEMORY_CAUSE = (
     "out of memory",
+    "out-of-memory",
     "oomkilled",
-    "oom killed",
-    "oom-killed",
+    "oom kill",
+    "oom-kill",
+    "oom termination",
     "memory limit exceeded",
     "exceeded its memory limit",
     "ran out of memory",
@@ -373,11 +389,54 @@ def _entity_present(entries, name):
     return False
 
 
+# Why the measured value settles the question, per rule. Each is a fact about
+# what Kubernetes writes into that field, not a statement about any particular
+# answer, and none of them names a cause.
+#
+# This exists because of what a re-ask WITHOUT it produced. Told only that
+# "oomkilled" conflicted with `last_termination.reason = error`, qwen3 kept
+# the claim and talked its way past the measurement: "the reason field shows
+# Error, which is a generic placeholder in Kubernetes and does not specify the
+# exact cause ... and does not contradict the exit code 137". That is a false
+# statement about Kubernetes, invented to protect a conclusion. Measured at
+# n=5 on scoping_quiet_workload_beside_loud_one, 2026-08-28: the re-ask fired
+# on 4 of 5 runs and every one came back contradicted anyway.
+#
+# A conflict a model can dismiss as a technicality is one it will dismiss. So
+# the re-ask says what the field would have read if the claim were true.
+WHY_IT_SETTLES = {
+    "termination_reason_vs_memory_cause": (
+        "the kubelet writes reason OOMKilled when the kernel's OOM killer "
+        "terminates a container, so a reason of Error means the kill came "
+        "from somewhere else. Exit code 137 is SIGKILL and says only that the "
+        "container was killed, never by whom"
+    ),
+    "imposed_termination_vs_application_cause": (
+        "that reason is recorded when something outside the container ended "
+        "it, so the process did not choose its own exit"
+    ),
+    "ready_vs_claimed_not_ready": (
+        "the container's ready field is the kubelet's own record of the "
+        "readiness probe result"
+    ),
+    "claimed_absent_but_measured_present": (
+        "the object came back in a tool result, so it exists"
+    ),
+    "service_has_endpoints_vs_claimed_none": (
+        "get_service_endpoints lists the pods behind the Service, so a "
+        "non-empty list means the selector matches something"
+    ),
+}
+
+
 def _finding(rule, asserted, measured, clause, entries, field=None):
     return {
         "rule": rule,
         "claim": asserted,
         "measured": measured,
+        # Absent for a rule with no honest one-line mechanism; callers must
+        # treat it as optional rather than assume every rule explains itself.
+        "because": WHY_IT_SETTLES.get(rule),
         "clause": clause.strip()[:220],
         "evidence": [
             {"id": (e["source"] or {}).get("id"),

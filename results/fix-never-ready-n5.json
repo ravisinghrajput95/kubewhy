@@ -1,0 +1,1347 @@
+[
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "think": true,
+  "passed": true,
+  "seconds": 184.9,
+  "confidence": "partial",
+  "model_resident": false,
+  "started_at": "2026-08-28T15:41:23",
+  "load_before": 2.73,
+  "load_after": 1.12,
+  "low_power_mode": true,
+  "unverified": [
+   "0.1",
+   "127",
+   "200"
+  ],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "workload": "never-ready"
+   },
+   {
+    "namespace": "demo",
+    "workload": "never-ready",
+    "only_unhealthy": true
+   },
+   {
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo",
+    "container": "web",
+    "tail": 20
+   },
+   {
+    "limit": 5,
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"error\": \"TypeError: list_deployments() got an unexpected keyword argument 'workload'\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-4fwrg\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"source\": \"current\", \"logs\": \"listening on :8080\", \"container\": \"web\"}"
+   },
+   {
+    "id": "tool-5",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 25, \"age\": \"2m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.44:8080/healthz\\\": dial tcp 10.244.0.44:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The pod `never-ready-848784c697-4fwrg` is **Running** but not `Ready` due to a **persistent readiness probe failure**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n1. **Readiness Probe Fails with \"Connection Refused\"**  \n   - The probe attempts to reach `http://10.244.0.44:8080/healthz` but gets a `connection refused` error (25 occurrences in 2 minutes).  \n   - Despite logs showing the app is listening on `:8080`, the probe cannot connect to the pod's IP (`10.244.0.44`).  \n\n2. **Possible Scenarios**  \n   - **Network Binding Issue**: The app might be bound to `127.0.0.1` (localhost) instead of all interfaces (`0.0.0.0`), preventing external probes from reaching it.  \n   - **Firewall/Network Policy**: A rule might block traffic to the pod's IP or port 8080.  \n   - **Probe Misconfiguration**: The probe's `initialDelaySeconds` (2s) or `timeoutSeconds` (1s) could conflict with the app's startup time, even if the app is listening.  \n\n---\n\n### **Fix**\n1. **Verify App Binding**  \n   - Ensure the app listens on `0.0.0.0:8080` (all interfaces) rather than `127.0.0.1`.  \n   - Check container logs (`get_pod_logs`) for binding errors.  \n\n2. **Adjust Readiness Probe Settings**  \n   - Increase `timeoutSeconds` to at least `5` to account for delays.  \n   - Set `initialDelaySeconds` to `5` to avoid premature failures during startup.  \n\n3. **Check Network Policies**  \n   - Ensure no firewall rules or network policies block traffic to the pod's IP and port 8080.  \n\n4. **Validate Health Endpoint**  \n   - Confirm `/healthz` returns a `200 OK` response. Use `curl http://<pod-ip>:8080/healthz` from the node to test.  \n\n---\n\n### **Why It\u2019s Not Ready**  \nThe deployment remains in `never-ready` state because the kubelet cannot mark the pod as `Ready` until the readiness probe succeeds. The probe's failure to connect to the endpoint (despite the app being active) prevents the deployment from progressing.",
+  "answer": "The pod `never-ready-848784c697-4fwrg` is **Running** but not `Ready` due to a **persistent readiness probe failure**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n1. **Readiness Probe Fails with \"Connection Refused\"**  \n   - The probe attempts to reach `http://10.244.0.44:8080/healthz` but gets a `connection refused` error (25 occurrences in 2 minutes).  \n   - Despite logs showing the app is listening on `:8080`, the probe cannot connect to the pod's IP (`10.244.0.44`).  \n\n2. **Possible Scenarios**  \n   - **Network Binding Issue**: The app might be bound to `127.0.0.1` (localhost) instead of all interfaces (`0.0.0.0`), preventing external probes from reaching it.  \n   - **Firewall/Network Policy**: A rule might block traffic to the pod's IP or port 8080.  \n   - **Probe Misconfiguration**: The probe's `initialDelaySeconds` (2s) or `timeoutSeconds` (1s) could conflict with the app's startup time, even if the app is listening.  \n\n---\n\n### **Fix**\n1. **Verify App Binding**  \n   - Ensure the app listens on `0.0.0.0:8080` (all interfaces) rather than `127.0.0.1`.  \n   - Check container logs (`get_pod_logs`) for binding errors.  \n\n2. **Adjust Readiness Probe Settings**  \n   - Increase `timeoutSeconds` to at least `5` to account for delays.  \n   - Set `initialDelaySeconds` to `5` to avoid premature failures during startup.  \n\n3. **Check Network Policies**  \n   - Ensure no firewall rules or network policies block traffic to the pod's IP and port 8080.  \n\n4. **Validate Health Endpoint**  \n   - Confirm `/healthz` returns a `[unverified: 200] OK` response. Use `curl http://<pod-ip>:8080/healthz` from the node to test.  \n\n---\n\n### **Why It\u2019s Not Ready**  \nThe deployment remains in `never-ready` state because the kubelet cannot mark the pod as `Ready` until the readiness probe succeeds. The probe's failure to connect to the endpoint (despite the app being active) prevents the deployment from progressing.\n\n---\n**Evidence audit.**\n3 of 24 stated values could not be traced to any tool result for the workload they were stated about: `0.1`, `127`, `200`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['0.1', '127', '200'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 184857.7,
+   "tool_ms": 27.2,
+   "rounds": 8,
+   "round_ms": [
+    18185.9,
+    21078.0,
+    17084.2,
+    25829.1,
+    21478.1,
+    23158.8,
+    11917.5,
+    46126.1
+   ],
+   "slowest_round_ms": 46126.1,
+   "model_share": 1.0,
+   "wall_ms": 184888.4,
+   "unaccounted_ms": 3.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "4",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "4"
+      }
+     ]
+    },
+    {
+     "claim": "697",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "697"
+      }
+     ]
+    },
+    {
+     "claim": "848784",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "848784"
+      }
+     ]
+    },
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.initial_delay",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "25",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_events",
+       "field": "events[0].count",
+       "value": "25"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "never-ready-848784c697-4fwrg.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "never-ready-848784c697-4fwrg.ready",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.initial_delay",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "never-ready-848784c697-4fwrg.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "0.1",
+     "kind": "number"
+    },
+    {
+     "claim": "127",
+     "kind": "number"
+    },
+    {
+     "claim": "0.1",
+     "kind": "number"
+    },
+    {
+     "claim": "127",
+     "kind": "number"
+    },
+    {
+     "claim": "200",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "200"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "c97c874720d5",
+  "target": {
+   "kind": "workload",
+   "name": "never-ready",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "think": true,
+  "passed": true,
+  "seconds": 121.7,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-28T15:44:27",
+  "load_before": 1.12,
+  "load_after": 0.94,
+  "low_power_mode": true,
+  "unverified": [
+   "notready"
+  ],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "never-ready"
+   },
+   {
+    "namespace": "demo",
+    "name": "never-ready-848784c697-4fwrg"
+   },
+   {
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:this-tag-does-not-exist\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-4fwrg\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 63, \"age\": \"1m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.44:8080/healthz\\\": dial tcp 10.244.0.44:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The `never-ready` deployment remains in a `NotReady` state because the pod's readiness probe is failing due to a **missing or unreachable health endpoint**. Here's the full breakdown:\n\n### 1. **Root Cause: Missing Health Endpoint**  \n   - The pod uses the `busybox:1.36` image, which does not include a web server or process listening on port `8080` (the port specified in the readiness probe).  \n   - The probe attempts to reach `http://10.244.0.44:8080/healthz` (the pod's IP and the `/healthz` endpoint), but the container does not serve this endpoint.  \n   - This results in a **\"connection refused\"** error, causing the probe to fail repeatedly.\n\n### 2. **Probe Configuration**  \n   - The readiness probe is configured with a **1-second timeout** and an **initial delay of 2 seconds**.  \n   - Since the container does not start a web server, the probe times out immediately, triggering the \"Unhealthy\" event.\n\n### 3. **Deployment State**  \n   - The deployment's pod (`never-ready-848784c697-4fwrg`) is marked as `Running` but not `Ready` because the readiness probe cannot validate the endpoint.  \n   - The pod remains in this state until the health endpoint becomes available or the probe configuration is adjusted.\n\n### 4. **Solution**  \n   - **Option 1**: Run a process in the container that listens on port `8080` and responds to `/healthz` (e.g., a simple HTTP server).  \n   - **Option 2**: Adjust the probe settings (e.g., increase the timeout or initial delay) to match the application's startup behavior.  \n   - **Option 3**: Replace the `busybox` image with one that includes a web server or health check endpoint.  \n\nThe pod itself is running, but without a valid health endpoint, it cannot pass the readiness probe, preventing the deployment from transitioning to `Ready`.",
+  "answer": "The `never-ready` deployment remains in a `[unverified: NotReady]` state because the pod's readiness probe is failing due to a **missing or unreachable health endpoint**. Here's the full breakdown:\n\n### 1. **Root Cause: Missing Health Endpoint**  \n   - The pod uses the `busybox:1.36` image, which does not include a web server or process listening on port `8080` (the port specified in the readiness probe).  \n   - The probe attempts to reach `http://10.244.0.44:8080/healthz` (the pod's IP and the `/healthz` endpoint), but the container does not serve this endpoint.  \n   - This results in a **\"connection refused\"** error, causing the probe to fail repeatedly.\n\n### 2. **Probe Configuration**  \n   - The readiness probe is configured with a **1-second timeout** and an **initial delay of 2 seconds**.  \n   - Since the container does not start a web server, the probe times out immediately, triggering the \"Unhealthy\" event.\n\n### 3. **Deployment State**  \n   - The deployment's pod (`never-ready-848784c697-4fwrg`) is marked as `Running` but not `Ready` because the readiness probe cannot validate the endpoint.  \n   - The pod remains in this state until the health endpoint becomes available or the probe configuration is adjusted.\n\n### 4. **Solution**  \n   - **Option 1**: Run a process in the container that listens on port `8080` and responds to `/healthz` (e.g., a simple HTTP server).  \n   - **Option 2**: Adjust the probe settings (e.g., increase the timeout or initial delay) to match the application's startup behavior.  \n   - **Option 3**: Replace the `busybox` image with one that includes a web server or health check endpoint.  \n\nThe pod itself is running, but without a valid health endpoint, it cannot pass the readiness probe, preventing the deployment from transitioning to `Ready`.\n\n---\n**Evidence audit.**\n1 of 14 stated values could not be traced to any tool result for the workload they were stated about: `notready`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['notready'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 121645.0,
+   "tool_ms": 28.1,
+   "rounds": 6,
+   "round_ms": [
+    14645.2,
+    12813.6,
+    21639.1,
+    31693.8,
+    11400.3,
+    29453.0
+   ],
+   "slowest_round_ms": 31693.8,
+   "model_share": 1.0,
+   "wall_ms": 121676.2,
+   "unaccounted_ms": 3.1,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "crasher.images[0]",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "healthy-web.desired",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "4",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "4"
+      }
+     ]
+    },
+    {
+     "claim": "697",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "697"
+      }
+     ]
+    },
+    {
+     "claim": "848784",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "848784"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "healthy-web.desired",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "3",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "crasher.images[0]",
+       "value": "3"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "notready",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "NotReady"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "0fd3ac00d3da",
+  "target": {
+   "kind": "workload",
+   "name": "never-ready",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "think": true,
+  "passed": true,
+  "seconds": 143.4,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-28T15:46:29",
+  "load_before": 0.94,
+  "load_after": 1.2,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "never-ready"
+   },
+   {
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo",
+    "container": "web",
+    "tail": 10
+   },
+   {
+    "namespace": "demo",
+    "limit": 5,
+    "name": "never-ready-848784c697-4fwrg"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:this-tag-does-not-exist\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-4fwrg\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"source\": \"current\", \"logs\": \"listening on :8080\", \"container\": \"web\"}"
+   },
+   {
+    "id": "tool-5",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 63, \"age\": \"3m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.44:8080/healthz\\\": dial tcp 10.244.0.44:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The **never-ready** deployment in the `demo` namespace is stuck in **Not Ready** state because the **readiness probe** is failing repeatedly. Here's why:\n\n1. **Root Cause**:  \n   The readiness probe is attempting to reach `http://10.244.0.44:8080/healthz` but is getting a **\"connection refused\"** error. This means the probe cannot reach the endpoint, even though the container logs show it is listening on port 8080. This discrepancy suggests a **networking issue** or **misconfigured probe settings**.\n\n2. **Probe Configuration**:  \n   - The probe checks `/healthz:8080` with an **initial delay of 2 seconds**. If the app takes longer than 2 seconds to start, the probe fails before the service is fully available.  \n   - The probe uses **HTTP** (not TCP/UDP), so ensure the endpoint is configured to respond to HTTP requests.  \n\n3. **Possible Fixes**:  \n   - Verify the **health check endpoint** (`/healthz`) is correctly implemented and accessible on port 8080.  \n   - Check if **firewall rules** or **network policies** are blocking traffic to the pod's IP (`10.244.0.44`) on port 8080.  \n   - Increase the **initial delay** or **failure threshold** in the readiness probe to account for slower startup times.  \n\n4. **Next Steps**:  \n   Use `get_pod_logs` again to confirm the container is behaving as expected, and ensure the health check endpoint is reachable from the kubelet's perspective. If the probe is correct, investigate network isolation or routing issues.",
+  "answer": "The **never-ready** deployment in the `demo` namespace is stuck in **Not Ready** state because the **readiness probe** is failing repeatedly. Here's why:\n\n1. **Root Cause**:  \n   The readiness probe is attempting to reach `http://10.244.0.44:8080/healthz` but is getting a **\"connection refused\"** error. This means the probe cannot reach the endpoint, even though the container logs show it is listening on port 8080. This discrepancy suggests a **networking issue** or **misconfigured probe settings**.\n\n2. **Probe Configuration**:  \n   - The probe checks `/healthz:8080` with an **initial delay of 2 seconds**. If the app takes longer than 2 seconds to start, the probe fails before the service is fully available.  \n   - The probe uses **HTTP** (not TCP/UDP), so ensure the endpoint is configured to respond to HTTP requests.  \n\n3. **Possible Fixes**:  \n   - Verify the **health check endpoint** (`/healthz`) is correctly implemented and accessible on port 8080.  \n   - Check if **firewall rules** or **network policies** are blocking traffic to the pod's IP (`10.244.0.44`) on port 8080.  \n   - Increase the **initial delay** or **failure threshold** in the readiness probe to account for slower startup times.  \n\n4. **Next Steps**:  \n   Use `get_pod_logs` again to confirm the container is behaving as expected, and ensure the health check endpoint is reachable from the kubelet's perspective. If the probe is correct, investigate network isolation or routing issues.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 143391.2,
+   "tool_ms": 42.3,
+   "rounds": 7,
+   "round_ms": [
+    12191.9,
+    12433.1,
+    19364.2,
+    15707.4,
+    17807.9,
+    27020.7,
+    38866.1
+   ],
+   "slowest_round_ms": 38866.1,
+   "model_share": 1.0,
+   "wall_ms": 143436.1,
+   "unaccounted_ms": 2.6,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "healthy-web.desired",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "healthy-web.desired",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "4f140ca5d118",
+  "target": {
+   "kind": "workload",
+   "name": "never-ready",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "think": true,
+  "passed": true,
+  "seconds": 122.6,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-28T15:48:53",
+  "load_before": 1.2,
+  "load_after": 1.2,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "never-ready"
+   },
+   {
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:this-tag-does-not-exist\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-4fwrg\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 124, \"age\": \"56s\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.44:8080/healthz\\\": dial tcp 10.244.0.44:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The `never-ready` deployment's pod is stuck in `Running` but not `Ready` due to a **failed readiness probe**. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n- **Missing Health Endpoint**: The container uses the `busybox:1.36` image, which does **not** include an HTTP server or `/healthz` endpoint. The readiness probe checks `http://10.244.0.44:8080/healthz`, but this endpoint does not exist.\n- **Short Timeout**: The probe has a **1-second timeout**, but the container fails to respond immediately (BusyBox lacks the necessary application logic to handle the endpoint). This causes the probe to time out repeatedly.\n\n---\n\n### **Evidence from Events**\n- **124 failures** with the message:  \n  `\"Readiness probe failed: Get \\\"http://10.244.0.44:8080/healthz\\\": dial tcp 10.244.0.44:8080: connect: connection refused\"`  \n  Confirm the probe is hitting a non-existent endpoint.\n\n---\n\n### **Fix Options**\n1. **Replace the Image**: Use an image that includes a `/healthz` endpoint (e.g., a custom image with a simple HTTP server or a full web server image).\n2. **Remove the Readiness Probe**: If the probe is unnecessary, remove it from the deployment configuration.\n3. **Adjust Probe Settings**: If you intend to keep the probe, ensure the container includes the endpoint and adjust the timeout/initial delay to match the container's startup time.\n\n---\n\n### **Why It\u2019s Not Recovering**\nThe pod remains in `Not Ready` because the kubelet continuously fails the readiness check. Without a valid endpoint, the probe will never pass, and the pod will never receive traffic.",
+  "answer": "The `never-ready` deployment's pod is stuck in `Running` but not `Ready` due to a **failed readiness probe**. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n- **Missing Health Endpoint**: The container uses the `busybox:1.36` image, which does **not** include an HTTP server or `/healthz` endpoint. The readiness probe checks `http://10.244.0.44:8080/healthz`, but this endpoint does not exist.\n- **Short Timeout**: The probe has a **1-second timeout**, but the container fails to respond immediately (BusyBox lacks the necessary application logic to handle the endpoint). This causes the probe to time out repeatedly.\n\n---\n\n### **Evidence from Events**\n- **124 failures** with the message:  \n  `\"Readiness probe failed: Get \\\"http://10.244.0.44:8080/healthz\\\": dial tcp 10.244.0.44:8080: connect: connection refused\"`  \n  Confirm the probe is hitting a non-existent endpoint.\n\n---\n\n### **Fix Options**\n1. **Replace the Image**: Use an image that includes a `/healthz` endpoint (e.g., a custom image with a simple HTTP server or a full web server image).\n2. **Remove the Readiness Probe**: If the probe is unnecessary, remove it from the deployment configuration.\n3. **Adjust Probe Settings**: If you intend to keep the probe, ensure the container includes the endpoint and adjust the timeout/initial delay to match the container's startup time.\n\n---\n\n### **Why It\u2019s Not Recovering**\nThe pod remains in `Not Ready` because the kubelet continuously fails the readiness check. Without a valid endpoint, the probe will never pass, and the pod will never receive traffic.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 122554.4,
+   "tool_ms": 31.5,
+   "rounds": 6,
+   "round_ms": [
+    14437.5,
+    11313.5,
+    19213.9,
+    29548.1,
+    19190.3,
+    28851.0
+   ],
+   "slowest_round_ms": 29548.1,
+   "model_share": 1.0,
+   "wall_ms": 122588.9,
+   "unaccounted_ms": 2.9,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "crasher.images[0]",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "124",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].count",
+       "value": "124"
+      }
+     ]
+    },
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "1a1629a56d03",
+  "target": {
+   "kind": "workload",
+   "name": "never-ready",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "think": true,
+  "passed": true,
+  "seconds": 144.4,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-28T15:50:55",
+  "load_before": 1.2,
+  "load_after": 1.3,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "never-ready"
+   },
+   {
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-4fwrg",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:this-tag-does-not-exist\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-4fwrg\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-4fwrg\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 124, \"age\": \"3m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.44:8080/healthz\\\": dial tcp 10.244.0.44:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The `never-ready` deployment in the `demo` namespace remains `Not Ready` due to a **failing readiness probe** that cannot reach the specified endpoint. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **Readiness Probe Failure**  \n   The probe checks `http://10.244.0.44:8080/healthz` (as defined in the pod's `readinessProbe` configuration) but consistently fails with:  \n   ```\n   Readiness probe failed: Get \"http://10.244.0.44:8080/healthz\": dial tcp 10.244.0.44:8080: connect: connection refused\n   ```  \n   This occurs because the container uses the `busybox:1.36` image, which is a minimal container with **no built-in HTTP server** or `/healthz` endpoint. The probe cannot reach the endpoint, leading to repeated failures.\n\n2. **No Application-Level Endpoint**  \n   The `busybox` image does not include a web server or any mechanism to respond to HTTP requests. The probe's check for `/healthz` is effectively a no-op, causing the pod to remain in a `Not Ready` state.\n\n3. **No Crash or Resource Limits**  \n   The pod is `Running` but not `Ready` because the probe is failing, not because of crashes or resource exhaustion. The `describe_pod` output confirms no restarts or resource constraints are involved.\n\n---\n\n### **Fix Options**\n- **Update the Readiness Probe**:  \n  Modify the probe to check a valid endpoint (e.g., a local file or a script that writes to stdout) if the application requires a probe. For example:  \n  ```yaml\n  readinessProbe:\n    exec:\n      command:\n        - sh\n        - -c\n        - \"echo 'OK' > /tmp/healthz\"\n    initialDelaySeconds: 2\n    periodSeconds: 5\n  ```\n- **Replace the Image**:  \n  Use an image that includes a web server or health check endpoint (e.g., `nginx:1.27-alpine` or a custom image with a `/healthz` endpoint).\n- **Remove the Readiness Probe**:  \n  If the probe is unnecessary, remove it to allow the pod to mark itself as `Ready`.\n\n---\n\n### **Summary**\nThe deployment is stuck in `Not Ready` because the readiness probe cannot reach the specified endpoint. The `busybox:1.36` image lacks the necessary components to satisfy the probe, and no crash or resource issue is involved. The solution requires either fixing the probe configuration or using an appropriate image.",
+  "answer": "The `never-ready` deployment in the `demo` namespace remains `Not Ready` due to a **failing readiness probe** that cannot reach the specified endpoint. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **Readiness Probe Failure**  \n   The probe checks `http://10.244.0.44:8080/healthz` (as defined in the pod's `readinessProbe` configuration) but consistently fails with:  \n   ```\n   Readiness probe failed: Get \"http://10.244.0.44:8080/healthz\": dial tcp 10.244.0.44:8080: connect: connection refused\n   ```  \n   This occurs because the container uses the `busybox:1.36` image, which is a minimal container with **no built-in HTTP server** or `/healthz` endpoint. The probe cannot reach the endpoint, leading to repeated failures.\n\n2. **No Application-Level Endpoint**  \n   The `busybox` image does not include a web server or any mechanism to respond to HTTP requests. The probe's check for `/healthz` is effectively a no-op, causing the pod to remain in a `Not Ready` state.\n\n3. **No Crash or Resource Limits**  \n   The pod is `Running` but not `Ready` because the probe is failing, not because of crashes or resource exhaustion. The `describe_pod` output confirms no restarts or resource constraints are involved.\n\n---\n\n### **Fix Options**\n- **Update the Readiness Probe**:  \n  Modify the probe to check a valid endpoint (e.g., a local file or a script that writes to stdout) if the application requires a probe. For example:  \n  ```yaml\n  readinessProbe:\n    exec:\n      command:\n        - sh\n        - -c\n        - \"echo 'OK' > /tmp/healthz\"\n    initialDelaySeconds: 2\n    periodSeconds: 5\n  ```\n- **Replace the Image**:  \n  Use an image that includes a web server or health check endpoint (e.g., `nginx:1.27-alpine` or a custom image with a `/healthz` endpoint).\n- **Remove the Readiness Probe**:  \n  If the probe is unnecessary, remove it to allow the pod to mark itself as `Ready`.\n\n---\n\n### **Summary**\nThe deployment is stuck in `Not Ready` because the readiness probe cannot reach the specified endpoint. The `busybox:1.36` image lacks the necessary components to satisfy the probe, and no crash or resource issue is involved. The solution requires either fixing the probe configuration or using an appropriate image.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 144374.7,
+   "tool_ms": 31.3,
+   "rounds": 6,
+   "round_ms": [
+    18330.4,
+    17586.6,
+    21573.2,
+    28172.6,
+    15656.7,
+    43055.2
+   ],
+   "slowest_round_ms": 43055.2,
+   "model_share": 1.0,
+   "wall_ms": 144412.2,
+   "unaccounted_ms": 6.2,
+   "slept_ms": 2.4
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "0.44",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "0.44"
+      }
+     ]
+    },
+    {
+     "claim": "10.244",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[0].message",
+       "value": "10.244"
+      }
+     ]
+    },
+    {
+     "claim": "8080",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.web.probes.readiness.check",
+       "value": "8080"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "crasher.images[0]",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "crasher.images[0]",
+       "value": "1.36"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "a5ba3800fb5d",
+  "target": {
+   "kind": "workload",
+   "name": "never-ready",
+   "namespace": "demo"
+  }
+ }
+]

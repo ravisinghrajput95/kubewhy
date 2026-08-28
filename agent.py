@@ -639,6 +639,23 @@ LOGS_POLICY = (
     "cause they do not show."
 )
 
+def _contradiction_line(finding):
+    """
+    One finding, as the re-ask states it: the claim, the measured value, and
+    what that value would have read if the claim were true.
+
+    The third part is the load-bearing one and it was not there at first. A
+    re-ask that says only "X conflicts with Y" leaves the model free to decide
+    Y is unreliable, and qwen3 did exactly that -- see WHY_IT_SETTLES in
+    contradiction.py for the sentence it invented. None of these explanations
+    names a cause; they say what the field means, which the model is then
+    holding rather than guessing at.
+    """
+    line = f"- you wrote {finding['claim']!r}, and {finding['measured']}"
+    because = finding.get("because")
+    return f"{line} -- {because}." if because else f"{line}."
+
+
 CONTRADICTION_POLICY = (
     "Before this answer goes out: a claim in it is contradicted by a value in "
     "the evidence you already collected.\n\n{findings}\n\nRe-read the tool "
@@ -1402,10 +1419,8 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
                 messages.append({
                     "role": "user",
                     "content": CONTRADICTION_POLICY.format(
-                        findings="\n".join(
-                            f"- you wrote {f['claim']!r}, and {f['measured']}"
-                            for f in found
-                        ),
+                        findings="\n".join(_contradiction_line(f)
+                                           for f in found),
                         question=question,
                     ),
                 })

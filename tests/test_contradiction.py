@@ -294,6 +294,71 @@ class TestWhatMustNotBeCalledAContradiction:
         assert grounding.check(answer, ev(HEALTHY_POD))["contradictions"] == []
 
 
+class TestTheOomSpellingsTheModelActuallyUses:
+    """
+    The tuple carried "oom killed" and "oom-killed" and nothing else in that
+    shape, so an answer blaming "the OOM killer" -- the commonest English
+    spelling of the same claim -- was not recognised at all.
+
+    Found by measuring, not by reading. On
+    scoping_quiet_workload_beside_loud_one at n=5, all five answers named OOM
+    as the cause; two said "oomkilled" and were caught, three said "OOM
+    killer" or "OOM kills" and came back `grounded`. The case scored 3/5 while
+    every one of its answers was wrong, and the three passes looked exactly
+    like a fix working. Replayed over the corpus the same hole had six more
+    recorded runs scored `passed: True` on a contradicted claim, including
+    gpt-4o-mini on this case.
+    """
+
+    KILLED = ("describe_pod", {
+        "pod": "slow-starter-1", "namespace": "demo",
+        "status": "CrashLoopBackOff",
+        "containers": {"web": {"ready": False, "restarts": 5, "limits": {},
+                               "last_termination": {"reason": "Error",
+                                                    "exit_code": 137}}}})
+
+    @pytest.mark.parametrize("wording", [
+        "the container was killed by the OOM killer",
+        "restarting due to Out-Of-Memory (OOM) kills",
+        "this is an OOM kill",
+        "the pod was OOMKilled",
+        "restarting due to Out-Of-Memory (OOM) termination",
+        "the container ran out of memory",
+    ])
+    def test_each_spelling_is_caught(self, wording):
+        answer = f"The slow-starter deployment is restarting: {wording}."
+        found = grounding.check(answer, ev(self.KILLED))["contradictions"]
+
+        assert found, f"not recognised: {wording!r}"
+        assert found[0]["rule"] == "termination_reason_vs_memory_cause"
+
+    @pytest.mark.parametrize("wording", [
+        "set a memory limit to avoid the OOM killer",
+        "raise the limit to prevent an OOM kill",
+        "this was not an OOM kill",
+    ])
+    def test_the_negation_and_advice_guards_still_hold(self, wording):
+        """The widened stem must not cost the two guards already measured."""
+        answer = f"The slow-starter deployment is restarting. {wording}."
+
+        assert grounding.check(answer, ev(self.KILLED))["contradictions"] == []
+
+    def test_a_genuinely_oomkilled_pod_is_left_alone(self):
+        """
+        The rule only fires when the recorded reason is something OTHER than
+        an imposed termination. A pod the kubelet really did record as
+        OOMKilled must not be contradicted for saying so, however spelled.
+        """
+        oom = ("describe_pod", {
+            "pod": "memory-hog-1", "namespace": "demo", "status": "OOMKilled",
+            "containers": {"web": {"ready": False, "restarts": 4,
+                                   "last_termination": {"reason": "OOMKilled",
+                                                        "exit_code": 137}}}})
+        answer = "memory-hog was killed by the OOM killer."
+
+        assert grounding.check(answer, ev(oom))["contradictions"] == []
+
+
 class TestTheStatusContract:
     def test_the_four_statuses_are_distinguishable(self):
         """

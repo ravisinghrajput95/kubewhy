@@ -1953,14 +1953,64 @@ class TestContradictionPolicy:
         it holds. A re-ask that named the probe would be handing over the
         answer the case exists to measure.
         """
+        import grounding
+        evidence = [{"id": "tool-1", "tool": "describe_pod",
+                     "result": json.dumps(self.KILLED)}]
+        found = grounding.check(self.OOM_DRAFT, evidence)["contradictions"]
         sent = agent.CONTRADICTION_POLICY.format(
-            findings="- you wrote 'oomkilled', and last_termination.reason = error",
+            findings="\n".join(agent._contradiction_line(f) for f in found),
             question="why is the slow-starter deployment restarting?",
         ).lower()
 
+        assert found, "the fixture must actually contradict, or this proves nothing"
         assert "oomkilled" in sent and "last_termination.reason = error" in sent
         assert "liveness" not in sent
         assert "probe" not in sent
+
+    def test_the_re_ask_says_what_the_field_would_have_read(self):
+        """
+        The half that was missing. Told only that its claim conflicted with a
+        value, qwen3 kept the claim and dismissed the value -- "the reason
+        field shows Error, which is a generic placeholder in Kubernetes and
+        does not specify the exact cause". Measured at n=5 on
+        scoping_quiet_workload_beside_loud_one: the re-ask fired on 4 of 5
+        runs and every one came back contradicted. So the line says what the
+        field would have read if the claim were true.
+        """
+        import grounding
+        evidence = [{"id": "tool-1", "tool": "describe_pod",
+                     "result": json.dumps(self.KILLED)}]
+        found = grounding.check(self.OOM_DRAFT, evidence)["contradictions"]
+        line = agent._contradiction_line(found[0]).lower()
+
+        assert "kubelet writes reason oomkilled" in line
+        assert "137 is sigkill" in line
+
+    def test_no_explanation_names_a_fault(self):
+        """
+        The whole set, not just the one this case needs. Each explanation says
+        what the FIELD means; naming what actually broke would hand over the
+        answer the suite exists to measure.
+
+        Naming a probe is not the same as naming a fault, and the distinction
+        is the point: `ready` is defined as the kubelet's record of the
+        readiness probe, so saying so is definitional. "the liveness probe is
+        killing it" would be the answer to
+        scoping_quiet_workload_beside_loud_one, and nothing here may say it.
+        """
+        import contradiction
+        faults = ("liveness", "connection refused", "typo", "misconfigur",
+                  "no memory limit", "initial delay", "crashloop")
+        for rule, why in contradiction.WHY_IT_SETTLES.items():
+            for fault in faults:
+                assert fault not in why.lower(), f"{rule} names a fault"
+
+    def test_a_rule_without_an_explanation_still_produces_a_line(self):
+        """`because` is optional; the caller must not assume every rule has one."""
+        line = agent._contradiction_line(
+            {"claim": "x", "measured": "y = z", "because": None})
+
+        assert line == "- you wrote 'x', and y = z."
 
     def test_a_run_that_repeats_itself_is_not_sent_back_twice(self):
         """
