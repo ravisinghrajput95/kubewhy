@@ -12,7 +12,7 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `b90973f`, tree clean and pushed, **1240 tests pass, CI
+**State: `main` at `fe6c0c4`, tree clean and pushed, **1272 tests pass, CI
 green on all six jobs**, tags through **v0.2.0**. Nothing running: no kind
 cluster, no GKE cluster, Docker quit, Ollama stopped, GCP empty.**
 
@@ -63,9 +63,33 @@ Done and validated live:
 3. **EKS**, and the browser harness proper — `docs/E2E.md` now argues against
    the latter more than for it.
 
-**Two open defects from before are untouched:**
-`never_ready_readiness_probe` 0/5 and
-`scoping_quiet_workload_beside_loud_one` 0/5.
+**Both of those defects were worked on 2026-08-28. One is fixed, one is not,
+and the investigation found two checker defects on the way.**
+
+- `never_ready_readiness_probe` **0/5 -> 5/5**, Fisher p=0.0079. A pod that is
+  Running and not Ready is a third evidence gap and could not be a status
+  marker, because the status is `Running`. The policy is deliberately LAST in
+  `evidence_gap`: placed first it stole the slot from 4 `cluster_wide_scan`
+  runs that had spent it on logs. `policies: 1` on all five runs and
+  `get_pod_events` called 5/5 against 0/5, so no run got there unaided.
+- `scoping_quiet_workload_beside_loud_one` **still open, 1/5**, p=1.0. A
+  contradiction re-ask was added and it fires; the model argues back. Telling
+  it "your claim conflicts with X" is dismissible, so the re-ask now says what
+  X would have read if the claim were true, and the one passing run adopted
+  that sentence and got the right answer. Four did not.
+- **`_MEMORY_CAUSE` could not see "OOM killer".** A re-measurement came back
+  3/5 and looked like a fix; `reconciles` was 0 on every run, so the re-ask had
+  never fired, and three answers blaming the OOM killer had scored `grounded`.
+  The case passed 3/5 while all five answers were wrong. Six more recorded runs
+  had the same false pass, including **gpt-4o-mini on this case, whose
+  published 5/5 is 4/5** under the fixed checker (p 0.0079 -> 0.0476).
+- **`_absence_is_about` could not see a bolded name**, only a backticked one —
+  4 false contradictions on `stuck_volume_needs_events`.
+
+**The lesson worth carrying: `reconciles` was added to the eval record BEFORE
+the measurement, and it is the only reason the fake 3/5 was caught.** A
+counter for the mechanism you are testing is not bookkeeping; without it "the
+fix worked" and "the checker went blind" are the same number.
 
 **An environment note:** another project on this machine repeatedly creates and
 deletes a kind cluster named `k8s-agent-verify` and rewrites
