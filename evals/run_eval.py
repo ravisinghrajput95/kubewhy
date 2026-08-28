@@ -494,6 +494,14 @@ def main():
                 # same reason they are there: a run that listed everything
                 # first time reads identically to one that was asked twice.
                 "coverage": result.get("coverage", 0),
+                # How many times the run was sent back because a claim in its
+                # answer contradicted a value in its own evidence. The three
+                # above are about what the run did; this one is about what it
+                # concluded. Recorded for the reason `policies` is: the first
+                # n=5 set after the re-ask shipped had no field for it, so the
+                # records could not say whether the thing being measured had
+                # fired at all.
+                "reconciles": result.get("reconciles", 0),
                 "failures": why,
                 # Not failures, and not noise either: an answer that names a
                 # broken neighbour beside a correct verdict is one edit away

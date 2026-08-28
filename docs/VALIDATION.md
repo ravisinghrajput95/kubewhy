@@ -413,8 +413,8 @@ demonstrate it is exercising the code it claims to. **CI runs the self-check
 first, and separately**, because a replay wired to nothing reports "no
 regressions" and looks exactly like a clean run.
 
-**What the replay now says.** Of 1469 replayable records, 1418 score
-identically under current code and **51 moved**. Every transition is a
+**What the replay now says.** Of 1469 replayable records, 1414 score
+identically under current code and **55 moved**. Every transition is a
 documented fix taking effect on records written before it:
 
 | Transition | Count | Cause |
@@ -422,8 +422,14 @@ documented fix taking effect on records written before it:
 | `insufficient_evidence` → `grounded` | 45 | Defect 5, the absence rule in the SUPPORTED direction — the same 45 that entry reports |
 | `partial` → `grounded` | 2 | Same fix; a relation claim that is now confirmable |
 | `insufficient_evidence` → `contradicted` | 2 | Same fix in the other direction; inspected, and a true positive — the answer claimed a service had no endpoints while `get_service_endpoints` reported one |
-| `contradicted` → `grounded` | 1 | Defect 4, a false positive removed; the draft is a correct diagnosis and the record carries no contradiction list at all |
-| `contradicted` → `partial` | 1 | Same, with one claim still unsupported |
+| `contradicted` → `grounded` | 5 | Defect 4 (1) and defect 16 (4), both false positives removed; each draft is a correct diagnosis |
+| `contradicted` → `partial` | 1 | Defect 4, with one claim still unsupported |
+
+The four that moved on 2026-08-28 are defect 16 below — `_absence_is_about`
+recognised a backticked identifier and not a bolded one, so the same clause
+was a false contradiction or not depending on how the model chose to format a
+name. This is the case the replay exists for: the rule had been fixed once,
+against the spelling that happened to be in the corpus that day.
 
 **1032 records were skipped** because they retain no `draft` or `evidence`.
 Older runs did not keep them. The count is printed so a shrinking corpus is
