@@ -170,6 +170,70 @@ class TestWhatMustNotBeCalledAContradiction:
 
         assert grounding.check(answer, ev(pod))["contradictions"] == []
 
+    @pytest.mark.parametrize("marked", [
+        "`nginx-conf`",
+        "**nginx-conf**",
+        "*nginx-conf*",
+        '"nginx-conf"',
+        "'nginx-conf'",
+    ])
+    def test_it_attaches_however_the_answer_marks_the_name_up(self, marked):
+        """
+        The fix above only recognised quotes and backticks, and the model
+        writes the same clause in markdown bold about as often. Replayed over
+        the 1469 recorded runs carrying a draft: the backticked spelling was
+        let through and the bold one fired, four false contradictions on
+        `stuck_volume_needs_events` and each of them against the correct
+        answer to that case.
+        """
+        pod = ("describe_pod", {
+            "pod": "missing-configmap-volume", "namespace": "config-faults",
+            "status": "ContainerCreating"})
+        answer = (f"The pod `missing-configmap-volume` is stuck because the "
+                  f"ConfigMap {marked} referenced in its volume configuration "
+                  f"does not exist in the `config-faults` namespace.")
+
+        assert grounding.check(answer, ev(pod))["contradictions"] == []
+
+    def test_an_undelimited_name_is_deliberately_not_covered(self):
+        """
+        The same false positive, and the trade to close it is worse than the
+        cost of leaving it. The only test available for a bare name is its
+        SHAPE, which would also swallow "the pod X in the config-faults
+        namespace does not exist" -- where the absence really is about X.
+        That buys a false negative on a true contradiction, which is the
+        failure this rule exists to catch. Recorded here so the gap is a
+        decision rather than an oversight.
+        """
+        pod = ("describe_pod", {
+            "pod": "missing-configmap-volume", "namespace": "config-faults",
+            "status": "ContainerCreating"})
+        answer = ("The pod missing-configmap-volume is stuck because the "
+                  "ConfigMap nginx-conf does not exist.")
+
+        assert grounding.check(answer, ev(pod))["contradictions"] != []
+
+    def test_the_entity_delimiter_cannot_pair_with_a_later_apostrophe(self):
+        """
+        Any-of-three let the pod's own closing backtick pair with the next
+        apostrophe in the sentence, so the guard read an ordinary possessive
+        as a second identifier and went quiet on a claim it should have
+        caught. The delimiter has to close with itself.
+
+        A residual this does not remove: two apostrophes in the same clause
+        still pair with each other. The {2,} minimum keeps it rare and the
+        cost is a missed contradiction rather than a false one, which is the
+        safer direction for this rule to fail in.
+        """
+        pod = ("describe_pod", {"pod": "crasher-abc123", "namespace": "demo",
+                                "status": "CrashLoopBackOff"})
+        answer = ("The pod `crasher-abc123` in the kubelet's own view does "
+                  "not exist.")
+
+        found = grounding.check(answer, ev(pod))["contradictions"]
+
+        assert found and found[0]["rule"] == "claimed_absent_but_measured_present"
+
     def test_a_bare_absence_claim_about_the_entity_still_fires(self):
         """The behaviour the fix must not cost."""
         pod = ("describe_pod", {"pod": "crasher-abc123", "namespace": "demo",

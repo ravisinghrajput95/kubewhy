@@ -1750,3 +1750,237 @@ class TestThePolicyStaysOutOfTheWay:
         assert not agent._looks_like_a_target("unhealthy")
         assert agent._looks_like_a_target("correctly-configured")
         assert agent._looks_like_a_target("crasher-abc123")
+
+
+class TestReadinessPolicy:
+    """
+    A pod that is Running and not Ready is the third evidence gap, and the
+    only one whose status block looks entirely normal.
+
+    Nothing has terminated, nothing is waiting, and the status is "Running" --
+    the same word a healthy pod reports. The kubelet records the failing probe
+    as an Event and nowhere else, so a run that answers without reading events
+    is guessing. Measured on `never_ready_readiness_probe` in
+    results/final-29-qwen3-n5.json: 5 runs of 5 recorded `policies: 0`, and
+    every one invented a cause -- "the container exits with exit code 0",
+    "triggering restarts" -- for a container whose command is `sleep 3600`.
+    """
+
+    DESCRIBED = json.dumps({
+        "pod": "never-ready-7d86d8c5f7-x89wn",
+        "namespace": "demo",
+        "status": "Running",
+        "containers": {"web": {"image": "busybox:1.36", "ready": False,
+                               "restarts": 0}},
+    })
+    LISTED = json.dumps({
+        "never-ready-7d86d8c5f7-x89wn": {
+            "status": "Running", "ready": "0/1", "restarts": 0},
+    })
+    SCANNED = json.dumps({
+        "demo/never-ready": {"status": "Running", "fault": "not-ready",
+                             "pods": 1,
+                             "example": "never-ready-7d86d8c5f7-x89wn"},
+    })
+
+    def test_describe_pod_readiness_is_a_gap(self):
+        assert agent.evidence_gap([], [self.DESCRIBED]) == (
+            "readiness", "never-ready-7d86d8c5f7-x89wn", "demo", "Running",
+        )
+
+    def test_the_list_pods_ready_fraction_is_a_gap(self):
+        """The listing carries "0/1" and no per-container readiness at all."""
+        trace = [{"name": "list_pods", "arguments": {"namespace": "demo"}}]
+
+        assert agent.evidence_gap(trace, [self.LISTED])[0] == "readiness"
+
+    def test_the_scan_not_ready_fault_is_a_gap(self):
+        """
+        scan_cluster keys the workload and labels the entry `not-ready`; the
+        pod to look at is the example it names, not the key.
+        """
+        trace = [{"name": "scan_cluster", "arguments": {}}]
+        gap = agent.evidence_gap(trace, [self.SCANNED])
+
+        assert gap[0] == "readiness"
+        assert gap[1] == "never-ready-7d86d8c5f7-x89wn"
+
+    def test_reading_the_events_closes_it(self):
+        trace = [{"name": "get_pod_events", "arguments": {
+            "name": "never-ready-7d86d8c5f7-x89wn", "namespace": "demo"}}]
+
+        assert agent.evidence_gap(trace, [self.DESCRIBED]) is None
+
+    def test_a_ready_container_is_not_a_gap(self):
+        ready = json.dumps({
+            "pod": "healthy-web-1", "namespace": "demo", "status": "Running",
+            "containers": {"web": {"ready": True}},
+        })
+
+        assert agent.evidence_gap([], [ready]) is None
+
+    def test_one_unready_container_of_two_is_enough(self):
+        """
+        A pod is not Ready when one of its containers is failing, and its
+        Service has already stopped sending it traffic. All-of would report
+        that pod as fine.
+        """
+        partial = json.dumps({
+            "pod": "sidecar-app-1", "namespace": "demo", "status": "Running",
+            "containers": {"web": {"ready": True}, "proxy": {"ready": False}},
+        })
+
+        assert agent.evidence_gap([], [partial])[0] == "readiness"
+
+    def test_a_crashing_pod_keeps_its_logs_policy(self):
+        """
+        The ordering is the whole care here, and it is measured. Replayed over
+        the 1472 recorded runs whose case still exists, a readiness check
+        placed FIRST fired on 16 and took the slot from 4 `cluster_wide_scan`
+        runs that had spent it on logs (3) or events (1) -- trading a crashing
+        pod's logs for a not-ready pod's events, which is the exact failure
+        the logs policy was hardened for. Placed last it fires on 12 and
+        displaces nothing.
+        """
+        trace = [{"name": "list_pods", "arguments": {"namespace": "demo"}}]
+        both = [json.dumps({
+            "never-ready-7d86d8c5f7-x89wn": {"status": "Running", "ready": "0/1"},
+            "crasher-5964d99948-9g8vg": {"status": "CrashLoopBackOff",
+                                         "ready": "0/1"},
+        })]
+        gap = agent.evidence_gap(trace, both, "what is broken in demo?")
+
+        assert gap[0] == "logs"
+        assert gap[1] == "crasher-5964d99948-9g8vg"
+
+    def test_a_malformed_ready_fraction_is_not_evidence(self):
+        """
+        Absent or unparseable readiness says nothing either way, and a policy
+        that fires on it would fire on every result that omits the field.
+        """
+        for ready in ("", "unknown", "1", "x/y", None):
+            listed = json.dumps({"p": {"status": "Running", "ready": ready}})
+            trace = [{"name": "list_pods", "arguments": {"namespace": "demo"}}]
+
+            assert agent.evidence_gap(trace, [listed]) is None
+
+
+class TestContradictionPolicy:
+    """
+    The fourth re-ask, and the only one that reads the answer against the
+    evidence rather than against the shape of the run.
+
+    Measured on `scoping_quiet_workload_beside_loud_one` in
+    results/final-29-qwen3-n5.json: 5 runs of 5 read exit code 137 on
+    slow-starter, called it OOMKilled, and were caught by
+    `termination_reason_vs_memory_cause` against last_termination.reason =
+    error -- from the same describe_pod result the run already held. The
+    detector fired every time and nothing acted on it: the contradiction was
+    annotated under an answer whose prose still named the wrong cause.
+
+    Replayed over the 1469 recorded runs carrying a draft, the re-ask fires on
+    24 (1.6%). Twenty-two of those runs failed their case anyway; the two that
+    passed both claimed a service had no endpoints while get_service_endpoints
+    had reported one, so they are the check working rather than the cost of
+    it.
+    """
+
+    # 137 is SIGKILL, which a liveness probe kill and an OOM kill both
+    # produce. reason = Error is what separates them, and it is in the same
+    # document as the exit code.
+    KILLED = {
+        "pod": "slow-starter-56c8f89495-c4qtf",
+        "namespace": "demo",
+        "status": "CrashLoopBackOff",
+        "containers": {"web": {
+            "image": "busybox:1.36",
+            "ready": False,
+            "restarts": 5,
+            "limits": {},
+            "probes": {"liveness": {"check": "tcp 8080",
+                                    "initial_delay": 5, "failure_threshold": 3}},
+            "last_termination": {"reason": "Error", "exit_code": 137},
+        }},
+    }
+
+    OOM_DRAFT = (
+        "The slow-starter deployment is restarting because the container was "
+        "OOMKilled: exit code 137 means the kernel's OOM killer terminated it "
+        "for exceeding available memory."
+    )
+    PROBE_DRAFT = (
+        "slow-starter restarts because its liveness probe on tcp 8080 fails "
+        "before the container is up: last_termination.reason is Error with "
+        "exit code 137, which is the kubelet killing it, not the OOM killer."
+    )
+
+    # The logs are read in the same round, so the logs policy has nothing to
+    # fire on: this test is about the contradiction re-ask and a run held back
+    # for evidence never reaches it.
+    FIRST = [
+        tool_call("describe_pod", {"name": "slow-starter-56c8f89495-c4qtf",
+                                   "namespace": "demo"}),
+        tool_call("get_pod_logs", {"name": "slow-starter-56c8f89495-c4qtf",
+                                   "namespace": "demo"}),
+    ]
+
+    def responses(self, second):
+        return [
+            reply(calls=list(self.FIRST)),
+            reply(content=self.OOM_DRAFT),
+            reply(content=second),
+        ]
+
+    def run(self, second):
+        stub = {"describe_pod": lambda **k: self.KILLED,
+                "get_pod_logs": lambda **k: {"pod": "slow-starter", "logs": []}}
+        with patch.dict(agent.TOOLS, stub), \
+                mock_chat(side_effect=self.responses(second)):
+            return agent.ask("why is the slow-starter deployment restarting?")
+
+    def test_a_contradicted_answer_is_sent_back(self):
+        result = self.run(self.PROBE_DRAFT)
+
+        assert result["reconciles"] == 1
+        assert result["confidence"] != "contradicted"
+        assert "liveness" in result["answer"].lower()
+
+    def test_the_re_ask_states_the_measurement_and_not_the_cause(self):
+        """
+        It says what was written and what was measured. It must not say what
+        the cause is: 137 is SIGKILL, and a liveness kill and an OOM kill both
+        produce it, so the run still has to work out which from the evidence
+        it holds. A re-ask that named the probe would be handing over the
+        answer the case exists to measure.
+        """
+        sent = agent.CONTRADICTION_POLICY.format(
+            findings="- you wrote 'oomkilled', and last_termination.reason = error",
+            question="why is the slow-starter deployment restarting?",
+        ).lower()
+
+        assert "oomkilled" in sent and "last_termination.reason = error" in sent
+        assert "liveness" not in sent
+        assert "probe" not in sent
+
+    def test_a_run_that_repeats_itself_is_not_sent_back_twice(self):
+        """
+        One round, like the other three policies. A model that will not let go
+        of a claim spends the budget once and the contradiction is annotated,
+        which is what happened before this policy existed.
+        """
+        result = self.run(self.OOM_DRAFT)
+
+        assert result["reconciles"] == 1
+        assert result["confidence"] == "contradicted"
+
+    def test_an_uncontradicted_answer_is_left_alone(self):
+        responses = [
+            reply(calls=list(self.FIRST)),
+            reply(content=self.PROBE_DRAFT),
+        ]
+        stub = {"describe_pod": lambda **k: self.KILLED,
+                "get_pod_logs": lambda **k: {"pod": "slow-starter", "logs": []}}
+        with patch.dict(agent.TOOLS, stub), mock_chat(side_effect=responses):
+            result = agent.ask("why is the slow-starter deployment restarting?")
+
+        assert result["reconciles"] == 0

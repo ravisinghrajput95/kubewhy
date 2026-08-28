@@ -639,6 +639,25 @@ LOGS_POLICY = (
     "cause they do not show."
 )
 
+CONTRADICTION_POLICY = (
+    "Before this answer goes out: a claim in it is contradicted by a value in "
+    "the evidence you already collected.\n\n{findings}\n\nRe-read the tool "
+    "results you have -- do not assume the measured value is wrong -- and "
+    "answer this question again in full:\n\n{question}\n\nKeep every finding "
+    "the evidence still supports. If the measured value leaves the cause "
+    "unsettled, say that rather than restating the claim."
+)
+
+READINESS_POLICY = (
+    "{pod} is Running and not Ready. Nothing has crashed, so its status block "
+    "cannot say why -- the kubelet records the reason a container is not ready "
+    "as an Event and nowhere else. Call get_pod_events on {pod} in namespace "
+    "{namespace}, read what it reports, and then answer this question in "
+    "full:\n\n{question}\n\nKeep every finding you already have and add to it. "
+    "If the events do not establish the cause either, say that plainly rather "
+    "than proposing one."
+)
+
 EVIDENCE_POLICY = (
     "The evidence for a {status} pod is not in its status block -- the kubelet "
     "puts the reason in an Event and nowhere else, which is why {pod} looks "
@@ -775,12 +794,72 @@ def _terminated_for(outputs, pod):
     return found
 
 
+def _not_every_container_ready(outputs, pod):
+    """
+    Whether some result recorded this pod with a container that is not ready.
+
+    Read from the readiness fields rather than from the status string, for the
+    same reason as _terminated_for: the status of a Running pod whose readiness
+    probe is failing is "Running", which is what a healthy pod says too. The
+    readiness is the only thing that separates them, and all three shapes carry
+    it -- describe_pod per container as a bool, list_pods as "0/1",
+    scan_cluster as the "not-ready" fault it labels the entry with.
+
+    Any container short of ready, not all of them: a pod is not Ready when one
+    of two is failing, and its Service has already stopped sending it traffic.
+    """
+    def short(ready):
+        # list_pods reports "1/2". Absent or malformed is not evidence.
+        have, sep, total = str(ready).partition("/")
+        if not sep or not have.strip().isdigit() or not total.strip().isdigit():
+            return False
+        return int(have) < int(total)
+
+    for output in outputs:
+        try:
+            data = json.loads(output)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        # describe_pod: one document about one pod, readiness per container.
+        if data.get("pod") == pod:
+            if str(data.get("status", "")).lower() != "running":
+                continue
+            states = [
+                container["ready"]
+                for container in (data.get("containers") or {}).values()
+                if isinstance(container, dict) and "ready" in container
+            ]
+            if states and not all(states):
+                return True
+            continue
+
+        # list_pods keys the pod; scan_cluster keys the workload and names an
+        # example pod, which is the one a follow-up call would be about.
+        for key, value in data.items():
+            if not isinstance(value, dict) or str(key).startswith("_"):
+                continue
+            if (value.get("example") if "example" in value else key) != pod:
+                continue
+            if str(value.get("status", "")).lower() != "running":
+                continue
+            if str(value.get("fault", "")).lower() == "not-ready":
+                return True
+            if short(value.get("ready", "")):
+                return True
+    return False
+
+
 def evidence_gap(trace, outputs, question=""):
     """
     A pod whose cause is provably not in its status block, that this run never
     went and read.
 
-    Returns ("events"|"logs", pod, namespace, status) or None. Deterministic,
+    Returns ("events"|"readiness"|"logs", pod, namespace, status) or None.
+    The first two are both closed by get_pod_events and are kept apart only so
+    each can say why in its own words. Deterministic,
     and deliberately narrow: it fires on the statuses whose cause is provably
     elsewhere, and only when the tool holding that cause was not called for
     that pod. The model still chooses its own path -- this catches the one gap
@@ -873,6 +952,35 @@ def evidence_gap(trace, outputs, question=""):
         if _terminated_for(outputs, pod) & set(SELF_EXPLANATORY_TERMINATION):
             continue
         return "logs", pod, namespace, status
+
+    # Readiness last, and the ordering is measured rather than tidy. A pod that
+    # is Running and not Ready has its cause in an Event too, but it cannot be
+    # a status marker: the status is "Running", which is the word a healthy pod
+    # reports. Nothing has terminated, nothing is waiting, and every field in
+    # the status block looks normal -- the only record of the failure is the
+    # kubelet's Unhealthy Event.
+    #
+    # Placing it third rather than beside the other events gap is the whole
+    # care here. Replayed over the 1472 recorded runs whose case still exists:
+    # first in the order it fired on 16 runs and took the slot from 4
+    # `cluster_wide_scan` runs that had used it for logs (3) or events (1) --
+    # a crashing pod's logs traded for a not-ready pod's events, which is the
+    # wrong trade and the exact failure the logs policy was hardened for. Last
+    # in the order it fires on 12 and displaces nothing.
+    #
+    # Measured on `never_ready_readiness_probe` in results/final-29-qwen3-n5:
+    # 5 runs of 5 answered without ever calling get_pod_events, recorded
+    # `policies: 0`, and every one of them invented a cause -- "the container
+    # exits with exit code 0", "triggering restarts" -- for a container whose
+    # command is `sleep 3600`.
+    for pod, namespace, status in reported:
+        if status.lower() != "running":
+            continue
+        if (pod, namespace) in asked:
+            continue
+        if not _not_every_container_ready(outputs, pod):
+            continue
+        return "readiness", pod, namespace, status
 
     return None
 
@@ -1034,6 +1142,7 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
     nudges = 0
     policies = 0
     coverage = 0
+    reconciles = 0
 
     # Two clocks, deliberately. perf_counter is monotonic and stops while the
     # machine is asleep; time.time() does not. Their difference over the same
@@ -1096,6 +1205,7 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
             "nudges": nudges,
             "policies": policies,
             "coverage": coverage,
+            "reconciles": reconciles,
             "confidence": "ungrounded",
             "unverified": [],
         }
@@ -1201,7 +1311,10 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
                     extra={"policy": kind, "pod": pod,
                            "namespace": namespace, "status": status},
                 )
-                template = EVIDENCE_POLICY if kind == "events" else LOGS_POLICY
+                template = {
+                    "events": EVIDENCE_POLICY,
+                    "readiness": READINESS_POLICY,
+                }.get(kind, LOGS_POLICY)
                 messages.append({
                     "role": "user",
                     "content": template.format(
@@ -1255,6 +1368,49 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
                 )
 
             verdict = grounding.check(answer, evidence)
+
+            # The fourth re-ask, and the only one that reads the answer against
+            # the evidence rather than against the shape of the run. The other
+            # three ask for evidence that was never gathered or never reported;
+            # this one fires when the evidence IS in hand and the answer says
+            # the opposite of it.
+            #
+            # Measured on `scoping_quiet_workload_beside_loud_one` in
+            # results/final-29-qwen3-n5.json: 5 runs of 5 read exit code 137 on
+            # slow-starter, called it OOMKilled, and were caught by
+            # `termination_reason_vs_memory_cause` against
+            # last_termination.reason = error, which the same describe_pod
+            # result had already returned. The detector worked every time and
+            # nothing acted on it -- the contradiction was annotated onto the
+            # answer and the wrong cause stayed in the prose above it.
+            #
+            # The re-ask states the claim and the measured value and stops
+            # there. It does not say what the cause is: 137 is SIGKILL and a
+            # liveness probe kill and an OOM kill both produce it, so the run
+            # still has to work out which from the evidence it holds. Same
+            # budget as the others -- once, and never on the last rounds,
+            # because a run with no round left to answer in would trade a
+            # flawed diagnosis for none at all.
+            found = verdict.get("contradictions") or []
+            if found and reconciles < MAX_NUDGES and rounds_left >= 2:
+                reconciles += 1
+                log.info(
+                    "contradiction_policy_applied",
+                    extra={"rules": [f["rule"] for f in found],
+                           "claims": [f["claim"] for f in found]},
+                )
+                messages.append({
+                    "role": "user",
+                    "content": CONTRADICTION_POLICY.format(
+                        findings="\n".join(
+                            f"- you wrote {f['claim']!r}, and {f['measured']}"
+                            for f in found
+                        ),
+                        question=question,
+                    ),
+                })
+                continue
+
             wall_ms, slept_ms = elapsed()
             telemetry.INVESTIGATIONS.inc(
                 outcome=verdict.get("confidence", "unknown"))
@@ -1300,6 +1456,13 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
                 # about evidence the run never gathered: this one is about
                 # evidence it had and did not report.
                 "coverage": coverage,
+                # How many times the run was sent back because a claim in its
+                # answer contradicted a value in its own evidence. The three
+                # above are about what the run did; this one is about what it
+                # concluded, and without it a run that reached the cause
+                # unaided cannot be told from one whose first attempt was
+                # refused.
+                "reconciles": reconciles,
                 "tool_calls": trace,
                 # The measurements themselves, in the records() shape that was
                 # handed to grounding.check() -- ids, tool names and the raw

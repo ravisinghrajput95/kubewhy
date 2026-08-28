@@ -190,6 +190,21 @@ def _asserted(lowered, phrase):
     return True
 
 
+# An identifier the answer set apart from the surrounding prose: quoted,
+# backticked, or in markdown emphasis. Two characters minimum, so an
+# apostrophe in ordinary English -- "the kubelet's" -- cannot pair with a
+# later one and read as a name.
+#
+# The delimiter has to close with itself. Any-of-three let the entity's own
+# closing backtick pair with the next apostrophe in the sentence, so "the pod
+# `X` isn't running and does not exist" read as though something else were
+# being called absent, and the rule went quiet on a claim it should have
+# caught. Found by testing this function directly rather than in a run.
+_MARKED_UP = re.compile(
+    r"""(?P<quote>[`"'])[^`"']{2,}(?P=quote)|\*\*[^*]{2,}\*\*|\*[^*]{2,}\*"""
+)
+
+
 def _absence_is_about(clause, phrase, name):
     """
     Whether `name` is the thing the absence phrase is talking about.
@@ -207,8 +222,23 @@ def _absence_is_about(clause, phrase, name):
     contradiction.
 
     An absence claim attaches to the nearest named thing before it. If some
-    other quoted identifier sits between the entity and the phrase, that
+    other marked-up identifier sits between the entity and the phrase, that
     identifier is the subject and this entity is not.
+
+    Markdown emphasis counts as marking it up, and leaving it out was a hole
+    rather than an omission. The clause above is the one this guard was
+    written for, and the model writes it `nginx-conf` on some runs and
+    **nginx-conf** on others: replayed over the 1469 recorded runs carrying a
+    draft, the backticked spelling was let through and the bold one fired --
+    4 false contradictions on `stuck_volume_needs_events`, each of them
+    against the correct answer to that case.
+
+    Undelimited names are deliberately NOT covered. "the ConfigMap nginx-conf
+    ... does not exist" is the same false positive, and the only test
+    available there is the identifier SHAPE -- which would also swallow "the
+    pod X in the config-faults namespace does not exist", where the absence
+    really is about X. That trade buys a false negative on a true
+    contradiction, which is the failure this rule exists to catch.
     """
     low = clause.lower()
     at = low.find(phrase)
@@ -218,7 +248,7 @@ def _absence_is_about(clause, phrase, name):
     if start < 0:
         return False
     between = clause[start + len(name):at]
-    return not re.search(r"[`\"'][^`\"']{2,}[`\"']", between)
+    return not _MARKED_UP.search(between)
 
 
 def _walk(node, seen):
