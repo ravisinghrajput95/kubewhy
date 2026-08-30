@@ -589,6 +589,42 @@ itself — any-of-three let the entity's own backtick pair with the next
 apostrophe and silence a true contradiction. Undelimited names are
 deliberately still uncovered, and a test records why.
 
+### 17d. A fixture whose premise was false, and the sweep that followed
+
+**Problem.** `never-ready` ran `sleep 3600`. That exits 0 after an hour and
+the kubelet restarts it, so on any cluster older than an hour the pod whose
+case asserts "the container never restarted once" carried a restart count and
+a last termination of exit code 0. A recorded run read `restarts: 4` and
+diagnosed "the container exits with exit code 0, triggering restarts". **The
+number was real; the fixture was lying.**
+
+**Measured, at a timescale that can be watched.** A pod running `sleep 5`
+against one running `while true; do sleep 5; done`, same image, same node:
+after 90 seconds the bare sleep had **3 restarts, `Completed`, exit code 0**
+and the loop had **0**. At 3600s that is one exit-0 restart per hour, which is
+exactly the 4 the recorded run saw on a four-hour cluster.
+
+Confirmed independently on the real fixture: on a 7-hour cluster `never-ready`
+showed **1** restart — exit code 255, reason Unknown, at the moment the node
+stopped — which is the same single restart nginx-based `healthy-web` took. Not
+one hourly exit.
+
+**Fix.** Swept across all four fixture files: 21 containers, every
+`sleep 3600` that ended a command replaced with a loop. Containers meant to
+exit are untouched — `exit 1`, `exit 2`, the `stress` hog and both CronJobs.
+
+**Regression evidence.** Applied to a fresh kind cluster and every fault class
+still reaches its intended state: crasher and log-shipper `Error` with
+restarts, memory-hog `OOMKilled`, needs-db `Init:Error`, slow-starter killed
+twice by its liveness probe, backup `Completed`, the three
+`CreateContainerConfigError` and `ContainerCreating` config faults unchanged —
+and **every container meant to stay up sits at 0 restarts**.
+
+**What it costs.** Cluster state that published numbers were measured against
+has changed. It changed in the direction of removing an artefact, so a future
+run stays comparable for any pod whose restart count was zero anyway, which on
+a freshly applied cluster was already all of them.
+
 ### 18. A pattern hole that passed wrong answers as `grounded`
 
 **Problem.** `_MEMORY_CAUSE` carried `"oom killed"` and `"oom-killed"` and
