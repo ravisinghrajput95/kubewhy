@@ -2,8 +2,8 @@
   {{- fail "\n\nui.enabled=true needs either ui.auth.enabled=true or ui.exposureAcknowledged=true.\n\nThe UI renders cluster state and pod logs, and running it in a pod means\nbinding every interface rather than the loopback address it is pinned to on a\nlaptop. Without a proxy in front, anyone who can reach the Service sees\neverything it can read.\n\nui.auth.enabled=true puts an authenticating proxy in front and binds the\nconsole to loopback behind it, which is the answer. ui.exposureAcknowledged=true\nsays you understand there is none and want it anyway -- keep that behind\nport-forward: this chart deliberately ships no Ingress.\n" }}
 {{- end }}
 
-{{- if and .Values.ui.enabled (gt (int .Values.ui.replicas) 1) }}
-  {{- fail "\n\nui.replicas must be 1.\n\nThe console is not stateless. ui.py keeps investigation history in\nstore.build(), so two pods are two histories, and which one a person sees\ndepends on which pod their websocket landed on -- a reconnect after a rollout\nshows them a sidebar that has forgotten the investigation they were reading.\n\nSharing one volume between replicas is not the fix: that is SQLite over a\nshared filesystem, which corrupts. See store.py, where the interface is the\nseam a Redis or Postgres implementation would slot into.\n\nGive the pod more room instead. A console serving one SRE team is bound by\nhow long a model takes, not by throughput.\n" }}
+{{- if and .Values.ui.enabled (gt (int .Values.ui.replicas) 1) (not .Values.sharedState.enabled) }}
+  {{- fail "\n\nui.replicas must be 1.\n\nThe console is not stateless. ui.py keeps investigation history in\nstore.build(), so two pods are two histories, and which one a person sees\ndepends on which pod their websocket landed on -- a reconnect after a rollout\nshows them a sidebar that has forgotten the investigation they were reading.\n\nSharing one volume between replicas is not the fix: that is SQLite over a\nshared filesystem, which corrupts.\n\nSet sharedState.enabled=true with sharedState.existingSecret pointing at a\nSecret holding a Postgres `dsn`. That moves the history into a database both\npods read, and this refusal lifts.\n\nOtherwise give the pod more room instead. A console serving one SRE team is\nbound by how long a model takes, not by throughput.\n" }}
 {{- end }}
 
 {{- if and .Values.ui.enabled .Values.ui.auth.enabled }}
@@ -101,7 +101,18 @@ spec:
             - name: TRIAGE_AUTH_MODE
               value: proxy
             {{- end }}
-            {{- if .Values.persistence.enabled }}
+            {{- if .Values.sharedState.enabled }}
+            # The shared database, which is also what allows more than one
+            # console replica. Checked before persistence rather than after:
+            # both can be enabled at once, one env var can only have one
+            # value, and emitting the name twice would leave which one wins to
+            # whichever entry kubelet reads last.
+            - name: TRIAGE_STATE_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.sharedState.existingSecret | quote }}
+                  key: dsn
+            {{- else if .Values.persistence.enabled }}
             # The console's investigation history, on its own volume. Without
             # this the sidebar comes back empty after every restart, which is
             # the same defect persistence.enabled already fixes for the

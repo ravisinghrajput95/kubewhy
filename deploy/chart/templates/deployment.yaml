@@ -1,5 +1,8 @@
 {{- $name := default (printf "%s" .Release.Name) .Values.serviceAccount.name -}}
 {{- include "kubewhy.inference.validate" . -}}
+{{- if and .Values.sharedState.enabled (not .Values.sharedState.existingSecret) }}
+  {{- fail "\n\nsharedState.enabled=true needs sharedState.existingSecret.\n\nThe DSN carries a database password, so it comes from a Secret rather than a\nvalues file -- values files end up in git and in `helm get values`.\n\n  kubectl create secret generic kubewhy-state -n <namespace> \\\n    --from-literal=dsn='postgresql://user:pass@host:5432/kubewhy'\n\nThen set sharedState.existingSecret=kubewhy-state.\n" }}
+{{- end }}
 {{- if and .Values.persistence.enabled .Values.podSecurityContext.runAsNonRoot (not .Values.podSecurityContext.fsGroup) }}
   {{- fail "\n\npersistence.enabled=true needs podSecurityContext.fsGroup set.\n\nA provisioned volume is owned by root and this pod is not root, so the\ncontroller would install cleanly, bind the PVC, and then crashloop with\nsqlite3.OperationalError: unable to open database file. That is a runtime\nfailure for a mistake that is visible here, so it fails here instead.\n\nSet podSecurityContext.fsGroup to podSecurityContext.runAsUser's group (the\nchart default is 1000 for both), or run as root if that is genuinely what you\nwant.\n" }}
 {{- end }}
@@ -13,11 +16,22 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 spec:
-  # Deliberately 1. Two controllers watching the same cluster would diagnose
-  # and post everything twice; the dedup state is in-process, not shared.
-  replicas: 1
+  # 1 unless the state is shared. Two controllers watching one cluster would
+  # diagnose and post everything twice, because dedup lives in the state store
+  # -- so a second replica is only safe once that store is something both can
+  # read. With sharedState.enabled they contend for store.claim_lease() and
+  # exactly one works while the rest stand by, which turns a restart from an
+  # outage into a failover of at most the lease ttl.
+  replicas: {{ if .Values.sharedState.enabled }}{{ .Values.sharedState.replicas | default 1 }}{{ else }}1{{ end }}
   strategy:
+    {{- if .Values.sharedState.enabled }}
+    # RollingUpdate is safe here only because of the lease: the incoming pod
+    # cannot act until the outgoing one stops renewing. Without shared state
+    # the overlap is exactly the double-posting Recreate exists to prevent.
+    type: RollingUpdate
+    {{- else }}
     type: Recreate
+    {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .Chart.Name }}
@@ -56,7 +70,18 @@ spec:
               value: {{ .Values.logFormat | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
-          {{- if .Values.persistence.enabled }}
+          {{- if .Values.sharedState.enabled }}
+            # The shared database, which is also what allows more than one
+            # replica. Checked before persistence rather than after it: both
+            # can be enabled at once, one env var can only have one value, and
+            # emitting the name twice would leave which one wins to whichever
+            # entry kubelet reads last.
+            - name: TRIAGE_STATE_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.sharedState.existingSecret | quote }}
+                  key: dsn
+          {{- else if .Values.persistence.enabled }}
             # Without this the controller forgets every finding it has already
             # reported whenever it restarts, and a rollout re-announces the
             # whole cluster -- which is the exact problem the cooldown exists

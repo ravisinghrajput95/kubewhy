@@ -8,7 +8,9 @@ it matters.
 """
 
 import datetime as dt
+import os
 import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -828,3 +830,60 @@ class TestControllerRunPath:
 
         assert not hasattr(controller, "store")
         self._run(controller)
+
+
+class TestASecondControllerStandsByRatherThanCrashing:  # noqa: E301
+    """
+    Losing the lease means two different things, and the difference is the
+    whole reason `sharedState.enabled` can ship a second replica.
+    """
+
+    def _watcher(self, state):
+        w = ctrl.Controller(sink=MagicMock(), budget=ctrl.Budget(state=state))
+        w.identity = "pod-b/2"
+        return w
+
+    def test_without_shared_state_it_still_exits(self, tmp_path):
+        # A second controller against a per-pod file is a duplicate, not a
+        # standby: it has its own state and would double every finding.
+        db = store.SqliteStore(str(tmp_path / "s.db"))
+        db.claim_lease("pod-a/1", at=store.now())
+        w = self._watcher(db)
+        with patch.dict(os.environ, {"TRIAGE_STATE_DB": str(tmp_path / "s.db")}):
+            assert w.wait_for_lease(poll=0.01) is False
+
+    def test_with_shared_state_it_waits_instead_of_exiting(self, tmp_path):
+        db = store.SqliteStore(str(tmp_path / "s.db"))
+        db.claim_lease("pod-a/1", at=store.now())
+        w = self._watcher(db)
+        # Shut it down from another thread; without the standby loop this
+        # would return False immediately instead of waiting to be stopped.
+        threading.Timer(0.15, w.stopping.set).start()
+        with patch.dict(os.environ,
+                        {"TRIAGE_STATE_DB": "postgresql://x/y"}):
+            started = time.monotonic()
+            assert w.wait_for_lease(poll=0.02) is False
+        assert time.monotonic() - started >= 0.1, (
+            "it exited immediately; a standby replica would CrashLoopBackOff"
+        )
+
+    def test_it_takes_over_when_the_holder_stops_renewing(self, tmp_path):
+        db = store.SqliteStore(str(tmp_path / "s.db"))
+        db.claim_lease("pod-a/1", at=store.now())
+        w = self._watcher(db)
+
+        # The holder goes away: its claim ages past the ttl.
+        def expire():
+            db.claim_lease("pod-a/1", at=store.now() - 600)
+        threading.Timer(0.05, expire).start()
+
+        with patch.dict(os.environ, {"TRIAGE_STATE_DB": "postgresql://x/y"}):
+            assert w.wait_for_lease(poll=0.02) is True, (
+                "the standby never took over after the holder stopped renewing"
+            )
+
+    def test_the_holder_does_not_wait_at_all(self, tmp_path):
+        db = store.SqliteStore(str(tmp_path / "s.db"))
+        w = self._watcher(db)
+        with patch.dict(os.environ, {"TRIAGE_STATE_DB": "postgresql://x/y"}):
+            assert w.wait_for_lease(poll=99) is True

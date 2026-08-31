@@ -211,9 +211,16 @@ async def lifespan(_app):
     # so a caller polls an investigation that cannot complete. Persistence
     # made that visible rather than causing it; without a state file the job
     # vanished and the 404 told the caller to ask again.
-    interrupted = JOBS.fail_interrupted(store.now())
+    #
+    # Scoped to THIS replica when the state is shared. With one writer there is
+    # nothing else the unfinished jobs could belong to, but against a shared
+    # Postgres an unscoped sweep would close out investigations that sibling
+    # replicas are still running -- telling their callers the work was lost to
+    # a restart that happened to a different pod. See store.fail_interrupted.
+    interrupted = JOBS.fail_interrupted(store.now(), owner=REPLICA)
     if interrupted:
-        log.warning("jobs_interrupted_by_restart", extra={"count": interrupted})
+        log.warning("jobs_interrupted_by_restart",
+                    extra={"count": interrupted, "owner": REPLICA})
 
     # Resolve inference at startup so the configuration is in the log before
     # anyone asks a question, and so a configuration the gateway refuses is
@@ -234,6 +241,15 @@ async def lifespan(_app):
 
 
 JOBS = store.build()
+
+# Which replica this is. The same shape the controller uses for its lease, and
+# for the same reason: HOSTNAME is the pod name in a cluster and the machine
+# name on a workstation, and the pid separates two processes on one host.
+#
+# Only meaningful when the store is shared -- on a single-writer state file
+# every job is this process's by definition, and `owner` is recorded but never
+# used to narrow anything.
+REPLICA = f"{os.getenv('HOSTNAME', 'local')}/{os.getpid()}"
 
 app = FastAPI(
     title="kubewhy",
@@ -524,7 +540,7 @@ def submit_job(body: Question):
     """
     job_id = store.new_job_id()
     question = _question(body)
-    JOBS.create_job(job_id, question, store.now())
+    JOBS.create_job(job_id, question, store.now(), owner=REPLICA)
     # Expiry is charged to whoever submits, so an idle deployment does not need
     # a reaper thread to stop the file growing forever.
     JOBS.purge_jobs(store.now() - store.JOB_TTL_SECONDS)

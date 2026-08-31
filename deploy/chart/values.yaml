@@ -248,6 +248,42 @@ watch:
 # Not enabled by default because it claims a PersistentVolume, and a chart
 # that silently provisions storage on install is a worse surprise than a
 # controller that forgets. Turn it on for anything long-lived.
+# State in a database every replica shares, which is what makes more than one
+# replica possible at all.
+#
+# Without this, state is a SQLite file on a per-pod volume: correct for one
+# writer, and corrupting for two over a shared filesystem. store.py said from
+# the beginning that its interface was the seam a Postgres implementation would
+# slot into; this is that implementation being switched on.
+#
+# What it changes:
+#   - `ui.replicas` and `replicas` may go above 1.
+#   - The controller elects a leader through store.claim_lease(), so extra
+#     controller replicas stand by rather than double-posting every finding.
+#   - The API scopes its restart sweep to its own jobs, so a restarting pod
+#     stops failing its siblings' running investigations.
+#
+# It does NOT make an in-flight investigation survive the pod running it, and
+# it does not make the console's per-session state shared. See docs/RUNBOOK.md.
+sharedState:
+  enabled: false
+  # Controller replicas. Ignored unless sharedState.enabled -- without a shared
+  # lease a second controller is a second voice, not a standby. Above 1 the
+  # extras hold no lease and do nothing until the holder stops renewing.
+  replicas: 1
+  # A Secret holding key `dsn`, e.g.
+  #   postgresql://kubewhy:...@postgres.db.svc:5432/kubewhy
+  #
+  # A Secret and not a value: the DSN carries a password, and values files end
+  # up in git and in `helm get values`. Create it yourself:
+  #
+  #   kubectl create secret generic kubewhy-state -n <namespace> \
+  #     --from-literal=dsn='postgresql://user:pass@host:5432/kubewhy'
+  #
+  # The database must exist and the user must be able to CREATE TABLE in it:
+  # kubewhy creates its own schema on startup.
+  existingSecret: ""
+
 persistence:
   # State that outlives a restart: the controller's dedup memory, and the
   # console's investigation history. Without it a rollout re-announces every
@@ -287,6 +323,11 @@ ui:
   #
   # Scale by giving the pod more room, not more copies. A console serving one
   # SRE team is not throughput-bound; it is bound by how long a model takes.
+  #
+  # More than 1 requires sharedState.enabled, which moves the history into a
+  # database both pods read. Even then a person's *session* -- selected
+  # workload, filters, the answer on screen -- is per-pod and does not survive
+  # landing on a different replica; what survives is the sidebar's history.
   replicas: 1
   port: 8501
 

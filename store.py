@@ -111,7 +111,7 @@ class MemoryStore:
             else:
                 self._last[key] = previous
 
-    def create_job(self, job_id, question, at):
+    def create_job(self, job_id, question, at, owner=None):
         with self._lock:
             self._jobs[job_id] = {
                 "id": job_id,
@@ -120,6 +120,7 @@ class MemoryStore:
                 "created_at": at,
                 "finished_at": None,
                 "result": None,
+                "owner": owner,
             }
 
     def update_job(self, job_id, state, result=None, at=None):
@@ -160,11 +161,12 @@ class MemoryStore:
             ]:
                 del self._jobs[job_id]
 
-    def fail_interrupted(self, at):
+    def fail_interrupted(self, at, owner=None):
         """See the SQLite twin. Always zero here: memory died with the process."""
         with self._lock:
             interrupted = [j for j in self._jobs.values()
-                           if j["state"] in _UNFINISHED]
+                           if j["state"] in _UNFINISHED
+                           and (owner is None or j.get("owner") == owner)]
             for job in interrupted:
                 job["state"] = "failed"
                 job["result"] = {"error": _INTERRUPTED}
@@ -214,8 +216,17 @@ class SqliteStore:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS jobs ("
                 "id TEXT PRIMARY KEY, state TEXT NOT NULL, question TEXT NOT NULL,"
-                "created_at REAL NOT NULL, finished_at REAL, result TEXT)"
+                "created_at REAL NOT NULL, finished_at REAL, result TEXT,"
+                "owner TEXT)"
             )
+            # Added when replicas became possible. A state file written before
+            # that has every other column and not this one, and the first
+            # query naming it would fail on a database that is otherwise fine.
+            # SQLite has no ADD COLUMN IF NOT EXISTS, so ask first.
+            columns = {row["name"] for row in
+                       connection.execute("PRAGMA table_info(jobs)")}
+            if "owner" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN owner TEXT")
 
     def claim_lease(self, holder, at, ttl=120):
         """
@@ -297,11 +308,12 @@ class SqliteStore:
                     (previous, key, at),
                 )
 
-    def create_job(self, job_id, question, at):
+    def create_job(self, job_id, question, at, owner=None):
         with self._connect() as connection:
             connection.execute(
-                "INSERT INTO jobs (id, state, question, created_at) VALUES (?,?,?,?)",
-                (job_id, "queued", question, at),
+                "INSERT INTO jobs (id, state, question, created_at, owner) "
+                "VALUES (?,?,?,?,?)",
+                (job_id, "queued", question, at, owner),
             )
 
     def update_job(self, job_id, state, result=None, at=None):
@@ -335,9 +347,13 @@ class SqliteStore:
         with self._connect() as connection:
             connection.execute("DELETE FROM jobs WHERE created_at < ?", (cutoff,))
 
-    def fail_interrupted(self, at):
+    def fail_interrupted(self, at, owner=None):
         """
         Close out jobs this process was running when it died. Returns how many.
+
+        `owner` narrows it to one replica's jobs; see the Postgres twin for
+        why that matters the moment there is more than one writer. On a
+        single-writer state file the default of None is the whole story.
 
         Called at startup, and it exists because persistence made a bug
         visible rather than causing one. Without a state file a job that was
@@ -353,15 +369,228 @@ class SqliteStore:
         """
         with self._connect() as connection:
             marks = ",".join("?" * len(_UNFINISHED))
+            owned = "" if owner is None else " AND owner = ?"
+            extra = () if owner is None else (owner,)
             rows = connection.execute(
-                f"SELECT id FROM jobs WHERE state IN ({marks})", _UNFINISHED
+                f"SELECT id FROM jobs WHERE state IN ({marks}){owned}",
+                (*_UNFINISHED, *extra),
             ).fetchall()
             if rows:
                 connection.execute(
                     f"UPDATE jobs SET state = 'failed', result = ?, "
-                    f"finished_at = ? WHERE state IN ({marks})",
-                    (json.dumps({"error": _INTERRUPTED}), at, *_UNFINISHED),
+                    f"finished_at = ? WHERE state IN ({marks}){owned}",
+                    (json.dumps({"error": _INTERRUPTED}), at,
+                     *_UNFINISHED, *extra),
                 )
+        return len(rows)
+
+
+class PostgresStore:
+    """
+    The same store again, in a database two processes can share.
+
+    This is the seam the runbook pointed at. Everything above `store.py` --
+    the controller's dedup, the hourly ceiling, the lease, `/ask/jobs` -- was
+    already written against one process holding one SQLite file, and none of
+    it changes here. What changes is that the file stops being the reason
+    there can only be one process.
+
+    **SQLite on an RWX volume is not the alternative.** Two writers over a
+    shared filesystem corrupt it; that is why `ui.replicas > 1` was refused
+    rather than documented as risky.
+
+    A pool rather than SqliteStore's connection-per-call: there the cost was
+    opening a local file, here it is a TCP connect and an auth round trip on
+    every dedup check. A long-lived shared connection is still wrong for the
+    reason the SQLite twin gives -- the watch thread, the worker and the API
+    all touch this concurrently -- so the pool hands each caller its own.
+    """
+
+    def __init__(self, dsn, min_size=1, max_size=8):
+        try:
+            from psycopg_pool import ConnectionPool
+        except ImportError as exc:  # pragma: no cover - depends on the install
+            raise RuntimeError(
+                "TRIAGE_STATE_DB is a postgresql:// DSN but psycopg is not "
+                "installed. It ships in the container image; a checkout needs "
+                "`pip install 'psycopg[binary,pool]'`."
+            ) from exc
+
+        self.dsn = dsn
+        self._pool = ConnectionPool(dsn, min_size=min_size, max_size=max_size,
+                                    open=True, kwargs={"autocommit": False})
+        self._setup()
+
+    def close(self):
+        self._pool.close()
+
+    def _setup(self):
+        with self._pool.connection() as connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS reports "
+                "(key TEXT PRIMARY KEY, last_at DOUBLE PRECISION NOT NULL)"
+            )
+            # A surrogate key because emissions are counted, never identified,
+            # and `undo_report` must delete exactly one of two rows written at
+            # the same instant. SQLite got this from its implicit rowid.
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS emissions "
+                "(id BIGSERIAL PRIMARY KEY, at DOUBLE PRECISION NOT NULL)"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS lease "
+                "(id INTEGER PRIMARY KEY CHECK (id = 1), holder TEXT NOT NULL,"
+                " renewed_at DOUBLE PRECISION NOT NULL)"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS jobs ("
+                "id TEXT PRIMARY KEY, state TEXT NOT NULL, question TEXT NOT NULL,"
+                "created_at DOUBLE PRECISION NOT NULL, finished_at DOUBLE PRECISION,"
+                "result TEXT, owner TEXT)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS jobs_created_at ON jobs (created_at DESC)"
+            )
+
+    def claim_lease(self, holder, at, ttl=120):
+        """
+        The SQLite twin's read-then-write, collapsed into one statement.
+
+        Two controllers racing is the case this exists for, so the check and
+        the claim cannot be two round trips with a gap between them: both
+        would read a free lease and both would take it. `ON CONFLICT DO UPDATE
+        ... WHERE` makes the decision inside the row lock, and `RETURNING`
+        reports whether it happened -- no row back means somebody else holds a
+        claim that has not expired.
+        """
+        with self._pool.connection() as connection:
+            row = connection.execute(
+                "INSERT INTO lease (id, holder, renewed_at) VALUES (1, %s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET holder = EXCLUDED.holder, "
+                "renewed_at = EXCLUDED.renewed_at "
+                "WHERE lease.holder = EXCLUDED.holder "
+                "   OR EXCLUDED.renewed_at - lease.renewed_at >= %s "
+                "RETURNING holder",
+                (holder, at, ttl),
+            ).fetchone()
+        return row is not None
+
+    def last_reported(self, key):
+        with self._pool.connection() as connection:
+            row = connection.execute(
+                "SELECT last_at FROM reports WHERE key = %s", (key,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def record_report(self, key, at):
+        with self._pool.connection() as connection:
+            connection.execute(
+                "INSERT INTO reports (key, last_at) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET last_at = EXCLUDED.last_at",
+                (key, at),
+            )
+            connection.execute("INSERT INTO emissions (at) VALUES (%s)", (at,))
+
+    def reports_since(self, cutoff):
+        with self._pool.connection() as connection:
+            connection.execute("DELETE FROM emissions WHERE at < %s", (cutoff,))
+            row = connection.execute("SELECT count(*) FROM emissions").fetchone()
+        return row[0]
+
+    def undo_report(self, key, at, previous):
+        with self._pool.connection() as connection:
+            connection.execute(
+                "DELETE FROM emissions WHERE id = "
+                "(SELECT id FROM emissions WHERE at = %s LIMIT 1)",
+                (at,),
+            )
+            # "Only if still ours", exactly as the other two: a newer report
+            # for this key supersedes the refund rather than being undone by it.
+            if previous is None:
+                connection.execute(
+                    "DELETE FROM reports WHERE key = %s AND last_at = %s", (key, at)
+                )
+            else:
+                connection.execute(
+                    "UPDATE reports SET last_at = %s WHERE key = %s AND last_at = %s",
+                    (previous, key, at),
+                )
+
+    def create_job(self, job_id, question, at, owner=None):
+        with self._pool.connection() as connection:
+            connection.execute(
+                "INSERT INTO jobs (id, state, question, created_at, owner) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (job_id, "queued", question, at, owner),
+            )
+
+    def update_job(self, job_id, state, result=None, at=None):
+        with self._pool.connection() as connection:
+            connection.execute(
+                "UPDATE jobs SET state = %s, result = %s, finished_at = %s "
+                "WHERE id = %s",
+                (state, json.dumps(result) if result is not None else None,
+                 at, job_id),
+            )
+
+    def get_job(self, job_id):
+        with self._pool.connection() as connection:
+            row = connection.execute(
+                "SELECT id, state, question, created_at, finished_at, result, owner "
+                "FROM jobs WHERE id = %s", (job_id,)
+            ).fetchone()
+        if not row:
+            return None
+        job = dict(zip(("id", "state", "question", "created_at", "finished_at",
+                        "result", "owner"), row))
+        job["result"] = json.loads(job["result"]) if job["result"] else None
+        return job
+
+    def list_jobs(self, limit=25):
+        with self._pool.connection() as connection:
+            rows = connection.execute(
+                "SELECT id, state, question, created_at, finished_at FROM jobs "
+                "ORDER BY created_at DESC LIMIT %s", (limit,)
+            ).fetchall()
+        return [dict(zip(("id", "state", "question", "created_at", "finished_at"),
+                         row)) for row in rows]
+
+    def purge_jobs(self, cutoff):
+        with self._pool.connection() as connection:
+            connection.execute("DELETE FROM jobs WHERE created_at < %s", (cutoff,))
+
+    def fail_interrupted(self, at, owner=None):
+        """
+        Close out interrupted jobs -- **this replica's**, when one is named.
+
+        The single-writer twins can fail every unfinished job at startup,
+        because the only process that could have been running one was the one
+        that just died. That is false the moment a second replica exists: a
+        pod restarting would mark its live siblings' investigations `failed`
+        while their threads are still working, and the caller polling one
+        would be told it was interrupted by a restart that happened to a
+        different pod.
+
+        So a replica closes out its own. `owner=None` keeps the old behaviour
+        for the single-replica and CLI paths, where there is nothing else to
+        confuse it with. Jobs owned by a replica that never comes back are
+        left for `purge_jobs`; wrongly failing a live investigation is worse
+        than a stale row that expires on its own.
+        """
+        with self._pool.connection() as connection:
+            if owner is None:
+                rows = connection.execute(
+                    "UPDATE jobs SET state = 'failed', result = %s, finished_at = %s "
+                    "WHERE state = ANY(%s) RETURNING id",
+                    (json.dumps({"error": _INTERRUPTED}), at, list(_UNFINISHED)),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "UPDATE jobs SET state = 'failed', result = %s, finished_at = %s "
+                    "WHERE state = ANY(%s) AND owner = %s RETURNING id",
+                    (json.dumps({"error": _INTERRUPTED}), at,
+                     list(_UNFINISHED), owner),
+                ).fetchall()
         return len(rows)
 
 
@@ -373,7 +602,26 @@ def build(path=None):
     and the CLI has nothing to remember.
     """
     path = STATE_DB if path is None else path
-    return SqliteStore(path) if path else MemoryStore()
+    if not path:
+        return MemoryStore()
+    if is_shared_dsn(path):
+        return PostgresStore(path)
+    return SqliteStore(path)
+
+
+# The schemes that mean "a database two replicas can share". Anything else in
+# TRIAGE_STATE_DB is a filesystem path, which is the single-writer case.
+_SHARED_SCHEMES = ("postgresql://", "postgres://")
+
+
+def is_shared_dsn(value):
+    """
+    Whether this state location is safe for more than one replica.
+
+    The chart asks the same question before it will accept `replicas > 1`, so
+    the answer lives here rather than being spelled twice.
+    """
+    return str(value).startswith(_SHARED_SCHEMES)
 
 
 def new_job_id():

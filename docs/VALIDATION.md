@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1280 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1319 passing; no cluster or model, and a real Postgres for the shared-state cases |
 | Grounding replay | **PROVEN** | 1489 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -29,6 +29,8 @@ and does not support. Four words are used and they mean specific things:
 | Audit trail (controller) | **PROVEN** | live unprompted run, attributed to controller/system |
 | Audit trail (Slack) | **NOT TESTED** | unit tests only; needs a workspace |
 | Restart-interrupted jobs | **PROVEN** | SIGKILL mid-run, restarted against the same state file |
+| Shared state (Postgres) | **PARTIALLY PROVEN** | full store contract + lease race against a real Postgres 17; never run as two replicas in a cluster |
+| High availability | **NOT TESTED** | no failover observed; the lease and the owner-scoped restart sweep are unit-proven, the behaviour they enable is not |
 | Read-only RBAC | **PROVEN** | runtime validated on GKE by attempting operations |
 | GKE runtime | **PROVEN** | released chart, real cluster |
 | GKE / Calico NetworkPolicy | **PROVEN** | dataplane-enforced egress |
@@ -889,6 +891,64 @@ change helped" from "0/5 was an unlucky floor". The three arms — 3/10, 4/10,
 4/5 — disagree more than their intervals suggest they should, which is a
 reason to distrust any single n=5 reading and a reason to distrust the pool.
 The row stays **open**.
+
+### 22. More than one replica, and the sweep that would have broken it
+
+`ui.replicas > 1` failed the install from the day the chart shipped, and the
+refusal was correct: the console keeps investigation history in
+`store.build()`, so two pods were two histories, and the only way to share one
+was SQLite over an RWX volume, which corrupts. The limit was never the design
+— `store.py` said from the beginning that its interface was the seam a
+Postgres implementation would slot into. This is that seam being used.
+
+**What is proven, against a real PostgreSQL 17 in a container, 2026-08-31:**
+
+- **The contract holds for the new backend.** The 17 cases in
+  `tests/test_store.py` that every implementation must pass now run three
+  times — memory, SQLite, Postgres — and the fixture skips loudly rather than
+  quietly when no server is configured. CI runs one as a service container and
+  **fails the job if those cases skipped**, because a skipped case and a
+  passing one produce the same dot.
+- **Two store handles share one state.** A report recorded through one is
+  visible through the other, and the hourly ceiling is one budget rather than
+  one per replica — otherwise scaling out would multiply the noise the ceiling
+  exists to cap.
+- **The lease excludes a second holder and expires.** Already used by
+  `controller.py`; what is new is that it now spans processes.
+- **The claim is atomic.** Twelve threads racing one row produce exactly one
+  winner. This case was verified against a deliberately wrong implementation:
+  the obvious read-then-write version produced **5 winners of 12**, so the test
+  fails when the property is absent rather than passing on the happy path.
+
+**The defect this work had to fix first.** `fail_interrupted()` closed out
+every job left `queued` or `running` at startup, with no filter. For one
+writer that is right. For two it is destructive: a restarting pod would mark
+its live siblings' investigations `failed`, telling the person polling one
+that their question was lost to a restart that happened to a different pod.
+Jobs now carry the replica that created them and a replica closes out only its
+own; `owner=None` keeps the old behaviour for the single-writer and CLI paths.
+The SQLite twin gained the same scoping and a migration, because a state file
+written before this has every column but that one.
+
+**The second defect, found by reading the code the chart was about to
+multiply.** A controller refused the lease called `return` — it exited. That
+is right for a per-pod state file, where a second controller is a duplicate
+rather than a peer. It is wrong the moment the chart ships a standby: the
+container ends, kubelet restarts it, it loses the claim again, and the replica
+that exists to take over sits in **CrashLoopBackOff** — indistinguishable, to
+an operator reading `kubectl get pods`, from a broken deployment, and burning
+its restart budget doing nothing. `wait_for_lease()` now waits when the state
+is shared and still exits when it is not. Four tests cover it, and two of them
+fail against the old behaviour: the standby's wait, and its takeover once the
+holder stops renewing.
+
+**What is NOT proven, and the row says so.** Nothing here has run as two
+replicas in a cluster. The lease is unit-proven and a controller failover has
+never been observed; `RollingUpdate` is now the strategy under
+`sharedState.enabled` and no rollout has been watched. The honest summary is
+that the mechanism is tested and the behaviour it enables is not, which is why
+the availability row reads NOT TESTED rather than borrowing the store's
+evidence.
 
 ### 20. Rate limiting, and what "in a cluster" could not mean
 

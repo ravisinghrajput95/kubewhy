@@ -20,6 +20,25 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
 
+    services:
+      # The shared-state path exists so two replicas can use one store, and a
+      # stub cannot demonstrate that -- the lease is a race between processes
+      # and the dedup budget is a row two of them write. So CI runs a real
+      # server. Without this the Postgres cases skip, and a skipped case
+      # reports the same green as a passing one.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: kubewhy
+          POSTGRES_DB: kubewhy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v7
 
@@ -34,8 +53,20 @@ jobs:
 
       - name: Run tests
         # The suite mocks the Kubernetes API and ollama.chat, so no cluster
-        # and no model are needed here.
-        run: pytest
+        # and no model are needed here. Postgres is the exception and is a
+        # real one, for the reason in `services` above.
+        env:
+          TRIAGE_TEST_PG_DSN: postgresql://postgres:kubewhy@localhost:5432/kubewhy
+        run: |
+          pytest
+          # A skipped Postgres case is indistinguishable from a passing one in
+          # the dot output, and the whole point of the service container is
+          # that these run. Fail the job if they did not.
+          pytest tests/test_store.py -o addopts= -q -rs 2>&1 | tee /tmp/store.txt
+          if grep -q "no Postgres to test against" /tmp/store.txt; then
+            echo "::error::the Postgres store cases skipped; the service container did not come up"
+            exit 1
+          fi
 
   ui:
     # Separate job on one version, because the UI extra pulls numpy, pandas,

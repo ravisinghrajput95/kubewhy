@@ -494,6 +494,54 @@ class Controller:
         """Whether the watch is still replaying pods that predate us."""
         return time.monotonic() - self.start_time < window
 
+    def wait_for_lease(self, poll=15):
+        """
+        Hold the claim, or stand by until the holder stops renewing.
+
+        Two behaviours behind one call, because two deployments want opposite
+        things from a lost claim.
+
+        With a per-pod state file a second controller is a mistake -- a rollout
+        overlapping two pods, both watching, every finding delivered twice.
+        There is nothing to wait for, because the other process is not a peer
+        sharing this state; it has its own. Exiting is the honest response and
+        is what this did.
+
+        With `sharedState.enabled` the second controller is a **standby**, and
+        exiting is wrong in a way that looks like a crash: the container ends,
+        kubelet restarts it, it loses the claim again, and the replica that
+        exists to take over sits in CrashLoopBackOff. An operator reading that
+        cannot tell a healthy standby from a broken pod, and the pod burns a
+        restart budget doing nothing.
+
+        So it waits, and says so once rather than every cycle. Failover takes
+        at most the lease ttl plus one poll: the holder stops renewing, the row
+        goes stale, and the next poll here wins it.
+        """
+        if self.budget.store.claim_lease(self.identity, store.now()):
+            return True
+
+        if not store.is_shared_dsn(os.getenv("TRIAGE_STATE_DB", "")):
+            log.error(
+                "controller_already_running",
+                extra={"identity": self.identity,
+                       "state_db": os.getenv("TRIAGE_STATE_DB")},
+            )
+            return False
+
+        log.info(
+            "controller_standby",
+            extra={"identity": self.identity,
+                   "reason": "another replica holds the lease"},
+        )
+        while not self.stopping.is_set():
+            if self.stopping.wait(poll):
+                return False
+            if self.budget.store.claim_lease(self.identity, store.now()):
+                log.info("controller_took_over", extra={"identity": self.identity})
+                return True
+        return False
+
     def run(self):
         self.start_time = time.monotonic()
         config.load_incluster_config() if os.getenv(
@@ -508,11 +556,7 @@ class Controller:
         # hourly ceiling exist to prevent, reintroduced by the Deployment doing
         # its ordinary job. Advisory, and only meaningful with TRIAGE_STATE_DB
         # set: without one there is no shared state to contend for.
-        if not self.budget.store.claim_lease(self.identity, store.now()):
-            log.error(
-                "controller_already_running",
-                extra={"identity": self.identity, "state_db": os.getenv("TRIAGE_STATE_DB")},
-            )
+        if not self.wait_for_lease():
             return
 
         # Resolve inference before watching anything. Found by installing the

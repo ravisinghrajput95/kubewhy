@@ -12,7 +12,7 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` tree clean and pushed, **1280 tests pass** (verified
+**State: `main` tree clean and pushed, **1319 tests pass** (verified
 2026-08-31, 83s), **CI green**, tags through **v0.2.0**. Last substantive
 commit `c7ee74a`. Nothing running: no kind cluster, no GKE cluster, Docker
 quit, Ollama unloaded (`{"models":[]}`), GCP empty. The full teardown check at
@@ -23,7 +23,8 @@ this file below the next section is history from 2026-08-24 and earlier.**
 
 ## Start here: what to pick up, in order
 
-Nothing below needs a cluster or a model except item 5, and nothing is blocked.
+Items 1, 2 and 4 need no cluster and no model. Item 3 needs kind plus a
+Postgres; item 6 needs kind plus Ollama. Nothing is blocked.
 
 1. **Review the 189 unreviewed mutation survivors.** The survey itself is now
    DONE -- 16 of 18 modules, 697 mutants, 508 killed (72.9%), measured
@@ -60,14 +61,28 @@ Nothing below needs a cluster or a model except item 5, and nothing is blocked.
    came from the dead cluster's port state did not survive contact with the
    durations output. The suite is stable in result and unstable in runtime, so
    nothing draws attention to it.
-3. **Add `pyproject.toml`, and ruff + mypy to CI.** The repo has 17k lines of
-   Python, 1280 tests, and **no linter, formatter or type checker anywhere** --
+3. **Run HA as two replicas in a cluster, which nothing has done yet.**
+   `sharedState.enabled` shipped with the store contract, the lease race and
+   the chart guards all proven -- against a real Postgres 17, including a
+   12-thread race that the obvious wrong implementation fails 5/12. What has
+   never happened is two replicas running. `docs/VALIDATION.md` records
+   **High availability: NOT TESTED** for exactly that reason, and the store's
+   evidence is deliberately not lent to the availability row.
+
+   The experiment: kind, a Postgres, `sharedState.replicas=2`, then kill the
+   lease holder and time the takeover -- it should be at most the 120s ttl
+   plus one 15s poll. Watch for the standby sitting in CrashLoopBackOff, which
+   is the failure `wait_for_lease()` was written to prevent and which no unit
+   test can rule out in a real kubelet. Then a `RollingUpdate` with findings
+   flowing, checking nothing is posted twice.
+4. **Add `pyproject.toml`, and ruff + mypy to CI.** The repo has 17k lines of
+   Python, 1319 tests, and **no linter, formatter or type checker anywhere** --
    no ruff, no mypy, no pre-commit, nothing in the workflows. It is also not
    pip-installable. This is the one structural gap left that is not blocked on
    hardware, a cloud account, or someone else's incident data.
-4. **Slack audit trail** is the only audit row still NOT TESTED, and it needs a
+5. **Slack audit trail** is the only audit row still NOT TESTED, and it needs a
    workspace. If one is available, it closes the last surface.
-5. **The n=10 paragraph-removed experiment** on `insufficient_no_such_workload`
+6. **The n=10 paragraph-removed experiment** on `insufficient_no_such_workload`
    (defect 21, described below). Needs kind + Ollama back up, ~40 min of model
    time, on mains power under `caffeinate -is`.
 

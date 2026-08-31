@@ -16,11 +16,44 @@ import controller
 import store
 
 
-@pytest.fixture(params=["memory", "sqlite"])
+# A real server, never a fake: the Postgres path exists so two replicas can
+# share state, and nothing about that is exercised by a stub. CI runs one as a
+# service container, so this is configured there and skipped only on a
+# workstation that has not started one -- and the skip says so out loud rather
+# than reporting a pass it did not earn.
+PG_DSN = os.getenv("TRIAGE_TEST_PG_DSN", "")
+
+
+@pytest.fixture
+def pg_dsn():
+    if not PG_DSN:
+        pytest.skip("TRIAGE_TEST_PG_DSN is unset; no Postgres to test against")
+    return PG_DSN
+
+
+def _fresh_postgres(dsn):
+    """A PostgresStore with the tables emptied, so cases cannot leak into
+    each other the way a per-test tmp_path stops the SQLite ones doing."""
+    db = store.PostgresStore(dsn)
+    with db._pool.connection() as connection:
+        connection.execute("TRUNCATE reports, emissions, lease, jobs")
+    return db
+
+
+@pytest.fixture(params=["memory", "sqlite", "postgres"])
 def state(request, tmp_path):
+    # One generator, so every branch yields: mixing `return` and `yield` in a
+    # fixture makes the returning branches raise "did not yield a value".
     if request.param == "memory":
-        return store.MemoryStore()
-    return store.SqliteStore(str(tmp_path / "state.db"))
+        yield store.MemoryStore()
+    elif request.param == "sqlite":
+        yield store.SqliteStore(str(tmp_path / "state.db"))
+    else:
+        if not PG_DSN:
+            pytest.skip("TRIAGE_TEST_PG_DSN is unset; no Postgres to test against")
+        db = _fresh_postgres(PG_DSN)
+        yield db
+        db.close()
 
 
 class TestBothImplementationsAgree:
@@ -377,3 +410,140 @@ class TestJobsInterruptedByARestart:
         state.fail_interrupted(200.0)
 
         assert "Ask again" in state.get_job("j1")["result"]["error"]
+
+
+class TestTwoReplicasShareOneStore:
+    """
+    The property that makes `replicas > 1` possible at all.
+
+    None of this can be tested against SQLite, which is the point: these cases
+    exist because a shared state file was the thing standing between kubewhy
+    and a second replica, and a single-writer store cannot demonstrate its own
+    replacement.
+    """
+
+    def test_one_replica_sees_what_another_recorded(self, pg_dsn):
+        a = _fresh_postgres(pg_dsn)
+        b = store.PostgresStore(pg_dsn)
+        try:
+            a.record_report("demo/web", at=1000)
+            assert b.last_reported("demo/web") == 1000
+        finally:
+            a.close()
+            b.close()
+
+    def test_the_hourly_ceiling_is_shared_not_per_replica(self, pg_dsn):
+        # Two replicas each reporting twice must spend four of one budget, not
+        # two of two budgets -- otherwise scaling out multiplies the noise the
+        # ceiling exists to cap.
+        a = _fresh_postgres(pg_dsn)
+        b = store.PostgresStore(pg_dsn)
+        try:
+            a.record_report("demo/one", at=1000)
+            a.record_report("demo/two", at=1001)
+            b.record_report("demo/three", at=1002)
+            b.record_report("demo/four", at=1003)
+            assert a.reports_since(0) == 4
+            assert b.reports_since(0) == 4
+        finally:
+            a.close()
+            b.close()
+
+    def test_only_one_replica_holds_the_lease(self, pg_dsn):
+        a = _fresh_postgres(pg_dsn)
+        b = store.PostgresStore(pg_dsn)
+        try:
+            assert a.claim_lease("pod-a/1", at=1000) is True
+            assert b.claim_lease("pod-b/2", at=1030) is False
+        finally:
+            a.close()
+            b.close()
+
+    def test_the_lease_passes_on_when_the_holder_stops_renewing(self, pg_dsn):
+        a = _fresh_postgres(pg_dsn)
+        b = store.PostgresStore(pg_dsn)
+        try:
+            a.claim_lease("pod-a/1", at=1000)
+            # Past the ttl: the holder is gone and did not say so.
+            assert b.claim_lease("pod-b/2", at=1000 + 121) is True
+        finally:
+            a.close()
+            b.close()
+
+    def test_a_racing_claim_produces_exactly_one_winner(self, pg_dsn):
+        """
+        The check and the claim must happen inside one statement.
+
+        Read-then-write across two round trips is the obvious way to write
+        this and it is wrong: both replicas read a free lease, both write, and
+        both proceed to announce every finding. Twelve threads against one row
+        is the cheapest way to make that failure show up.
+        """
+        import concurrent.futures
+
+        _fresh_postgres(pg_dsn).close()
+        holders = [f"pod-{i}/1" for i in range(12)]
+
+        def claim(holder):
+            db = store.PostgresStore(pg_dsn)
+            try:
+                return db.claim_lease(holder, at=2000)
+            finally:
+                db.close()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(claim, holders))
+
+        assert sum(results) == 1, (
+            f"{sum(results)} replicas believed they held the lease; "
+            "the claim is not atomic"
+        )
+
+
+class TestOneReplicaDoesNotFailAnothersWork:
+    """
+    `fail_interrupted` without an owner is correct for exactly one writer and
+    destructive for more than one: a pod restarting would close out its live
+    siblings' investigations, telling the caller their question was
+    interrupted by a restart that happened to a different process.
+    """
+
+    def test_an_owner_closes_out_only_its_own(self, pg_dsn):
+        db = _fresh_postgres(pg_dsn)
+        try:
+            db.create_job("mine", "q1", at=1, owner="pod-a")
+            db.create_job("theirs", "q2", at=2, owner="pod-b")
+
+            assert db.fail_interrupted(at=10, owner="pod-a") == 1
+
+            assert db.get_job("mine")["state"] == "failed"
+            assert db.get_job("theirs")["state"] == "queued", (
+                "a restarting replica failed a job belonging to a live one"
+            )
+        finally:
+            db.close()
+
+    def test_without_an_owner_it_still_closes_everything(self, pg_dsn):
+        # The single-replica and CLI paths must keep the behaviour they had.
+        db = _fresh_postgres(pg_dsn)
+        try:
+            db.create_job("a", "q", at=1, owner="pod-a")
+            db.create_job("b", "q", at=2, owner=None)
+            assert db.fail_interrupted(at=10) == 2
+        finally:
+            db.close()
+
+    def test_the_sqlite_twin_scopes_by_owner_too(self, tmp_path):
+        # Same contract, so the two paths cannot drift.
+        db = store.SqliteStore(str(tmp_path / "s.db"))
+        db.create_job("mine", "q1", at=1, owner="pod-a")
+        db.create_job("theirs", "q2", at=2, owner="pod-b")
+        assert db.fail_interrupted(at=10, owner="pod-a") == 1
+        assert db.get_job("theirs")["state"] == "queued"
+
+    def test_the_memory_twin_scopes_by_owner_too(self):
+        db = store.MemoryStore()
+        db.create_job("mine", "q1", at=1, owner="pod-a")
+        db.create_job("theirs", "q2", at=2, owner="pod-b")
+        assert db.fail_interrupted(at=10, owner="pod-a") == 1
+        assert db.get_job("theirs")["state"] == "queued"

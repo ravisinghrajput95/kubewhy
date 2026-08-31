@@ -32,19 +32,70 @@ one of each; nothing above it would change.
 
 ### What that means for availability
 
-There is no HA story here and none is claimed. A restart is an outage for the
-length of a pod restart, and in-flight investigations do not survive it.
+**The default is still one replica of each, and that is still the right
+default.** Nothing depends on kubewhy to stay up: it reads and explains, it
+changes nothing. A controller that is down for two minutes posts its findings
+two minutes later; a console that is down is a page someone reloads. No
+workload's health depends on kubewhy running.
 
-The thing that makes this acceptable is what kubewhy is: nothing depends on it
-to stay up. It reads and explains; it changes nothing. A controller that is
-down for two minutes posts its findings two minutes later. A console that is
-down is a page someone reloads. **No workload's health depends on kubewhy
-running**, which is the property that makes a single replica a reasonable
-trade rather than a risk to manage.
+**`sharedState.enabled` exists for when that stops being true.** It moves the
+state out of a per-pod SQLite file and into a Postgres database every replica
+reads, which is precisely what the single-replica refusal was protecting: not
+a limit of the design, but of the store. `store.py` named this seam from the
+start, and this is it being used rather than described.
 
-If that stops being true for you — if a diagnosis becoming unavailable is
-itself an incident — the honest answer is that kubewhy is not there yet, not
-that you should run two replicas.
+What it buys:
+
+| | One replica | `sharedState.enabled` |
+|---|---|---|
+| Controller restart | An outage for the length of the restart | A standby takes the lease, at most `ttl` (120s) later |
+| Controller rollout | `Recreate`: down, then up | `RollingUpdate`, because the lease stops the overlap double-posting |
+| Console restart | The page is down | Other replicas serve it |
+| Console history | Per pod | Shared; every replica shows the same sidebar |
+| Dedup and the hourly ceiling | Per pod, so two pods double the noise | One budget, shared |
+| `/ask/jobs` results | Lost with the pod | Survive, and are readable from any replica |
+
+**What it does not buy, and will not.**
+
+- **An in-flight investigation still dies with the pod running it.** The thread
+  is gone; nothing can resume it. The API marks its *own* interrupted jobs
+  failed at startup and tells the caller to ask again. It deliberately does not
+  touch other replicas' jobs — see below.
+- **Console session state is still per-pod.** The selected workload, the
+  filters, the answer on screen: a person who lands on a different replica
+  after a reconnect keeps their history and loses their place.
+- **The model is still the bottleneck.** More console replicas do not make an
+  investigation faster, and if they share one Ollama they contend for it.
+- **It is not a supported-in-production claim.** What is tested is in
+  VALIDATION.md; read that row before relying on this.
+
+**The failure this design had to avoid.** `fail_interrupted()` closed out every
+job left `queued` or `running` at startup. With one writer that is exactly
+right — the only process that could have owned them is the one that just died.
+With two it is destructive: a restarting pod would mark its live siblings'
+investigations `failed`, and the person polling one would be told their
+question was lost to a restart that happened to a different pod. Jobs now
+record the replica that created them, and a replica closes out only its own.
+Jobs owned by a replica that never returns are left to `purge_jobs`; a stale
+row that expires is better than a wrongly-failed live investigation.
+
+**Running it.** The DSN comes from a Secret, never a values file:
+
+```bash
+kubectl create secret generic kubewhy-state -n kubewhy \
+  --from-literal=dsn='postgresql://kubewhy:...@postgres.db.svc:5432/kubewhy'
+
+helm upgrade --install kubewhy deploy/chart -n kubewhy \
+  --set sharedState.enabled=true \
+  --set sharedState.existingSecret=kubewhy-state \
+  --set sharedState.replicas=2 \
+  --set ui.replicas=2
+```
+
+The database must exist and the user must be able to `CREATE TABLE`; kubewhy
+creates its own schema at startup. Postgres itself is yours to run and to make
+available — kubewhy's availability is now bounded by that database's, which is
+the trade this option makes.
 
 ## What a restart costs
 

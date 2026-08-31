@@ -759,3 +759,94 @@ class TestTheConsoleKeepsItsHistoryAcrossARestart:
     def test_without_persistence_the_console_gets_no_state_db(self):
         env = container_env(render("ui.enabled=true", "ui.exposureAcknowledged=true"), "ui")
         assert "TRIAGE_STATE_DB" not in env
+
+
+class TestSharedStateIsWhatUnlocksReplicas:
+    """
+    More than one replica was refused because the state was a SQLite file one
+    pod owned. These assert that the refusal lifts for exactly the reason it
+    existed -- a store both pods can read -- and not for any other.
+    """
+
+    HA = ("sharedState.enabled=true", "sharedState.existingSecret=kubewhy-state")
+    CONSOLE = ("ui.enabled=true", "ui.exposureAcknowledged=true")
+
+    def test_the_console_is_still_refused_more_than_one_by_default(self):
+        assert "sharedState.enabled=true" in refuses(
+            *self.CONSOLE, "ui.replicas=2"
+        ), "the refusal must name the way out, not just say no"
+
+    def test_the_console_may_scale_once_the_state_is_shared(self):
+        manifests = render(*self.HA, *self.CONSOLE, "ui.replicas=2")
+        assert "replicas: 2" in manifests
+
+    def test_enabling_shared_state_without_a_secret_is_refused(self):
+        # The DSN carries a password. Accepting it as a plain value would put
+        # it in git and in `helm get values`.
+        assert "existingSecret" in refuses("sharedState.enabled=true")
+
+    @staticmethod
+    def _state_entries(manifests, component=None):
+        """
+        Every TRIAGE_STATE_DB entry, `valueFrom` included.
+
+        `container_env` keeps only entries with a literal `value`, which is
+        the right default and drops exactly what these cases are about.
+        """
+        import yaml
+
+        found = []
+        for document in yaml.safe_load_all(manifests):
+            if not document or document.get("kind") != "Deployment":
+                continue
+            labels = document["spec"]["template"]["metadata"]["labels"]
+            if component and labels.get("app.kubernetes.io/component") != component:
+                continue
+            if not component and "app.kubernetes.io/component" in labels:
+                continue
+            container = document["spec"]["template"]["spec"]["containers"][0]
+            found += [item for item in container.get("env", [])
+                      if item["name"] == "TRIAGE_STATE_DB"]
+        return found
+
+    def test_the_dsn_comes_from_the_secret_not_a_value(self):
+        entries = self._state_entries(render(*self.HA))
+        assert len(entries) == 1
+        assert entries[0]["valueFrom"]["secretKeyRef"] == {
+            "name": "kubewhy-state", "key": "dsn"
+        }
+        assert "value" not in entries[0], "the DSN was rendered into the manifest"
+
+    def test_the_shared_dsn_wins_over_a_persistence_path(self):
+        # Both set is a real configuration -- someone turns on HA and leaves
+        # the PVC on. One env var can only have one value, and the name
+        # appearing twice would leave the winner to whichever kubelet reads
+        # last.
+        entries = self._state_entries(render(
+            *self.HA, "persistence.enabled=true", "podSecurityContext.fsGroup=1000"
+        ))
+        assert len(entries) == 1, (
+            f"TRIAGE_STATE_DB rendered {len(entries)} times; which one wins is "
+            "then an accident of ordering"
+        )
+        assert "valueFrom" in entries[0], (
+            "the per-pod volume path won; replicas would keep separate state "
+            "while believing it was shared"
+        )
+
+    def test_the_controller_stays_single_without_shared_state(self):
+        assert "replicas: 1" in render()
+
+    def test_the_controller_scales_only_with_shared_state(self):
+        assert "replicas: 2" in render(*self.HA, "sharedState.replicas=2")
+
+    def test_controller_replicas_are_ignored_without_shared_state(self):
+        # Asking for two controllers without a lease to arbitrate them would
+        # double every finding. The value is accepted and not honoured.
+        assert "replicas: 2" not in render("sharedState.replicas=2")
+
+    def test_the_rollout_strategy_follows_the_lease(self):
+        # Recreate exists to stop two controllers overlapping. Once the lease
+        # decides that, an overlap is safe and a rollout need not be an outage.
+        assert "type: Recreate" in render()
+        assert "type: RollingUpdate" in render(*self.HA)
