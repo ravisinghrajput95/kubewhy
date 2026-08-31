@@ -12,11 +12,18 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` tree clean and pushed, **1319 tests pass** (verified
-2026-08-31, 83s), **CI green**, tags through **v0.2.0**. Last substantive
-commit `c7ee74a`. Nothing running: no kind cluster, no GKE cluster, Docker
-quit, Ollama unloaded (`{"models":[]}`), GCP empty. The full teardown check at
-the bottom of this file passed line by line on 2026-08-31.**
+**State: `main` at `6284af0`, tree clean and pushed, **1319 tests pass**
+(verified 2026-08-31, 85s), **CI green on all six jobs**, tags through
+**v0.2.0**. Nothing running: no kind cluster, no GKE cluster, Ollama unloaded
+(`{"models":[]}`), GCP empty.**
+
+**Docker is UP and that is deliberate** — it hosts nine containers belonging to
+other projects on this machine (`mlops-project-*`, `ai-kubernetes-agent-*`,
+`k8sagent-soak-pg`). The teardown block at the bottom of this file says to quit
+Docker Desktop unconditionally; **do not**, without running `docker ps` first.
+Note also that `kind delete cluster` succeeded and the cluster came back when
+Docker Desktop next started, so re-check `kind get clusters` at the end rather
+than trusting the delete.
 
 **Read `docs/VALIDATION.md` before anything else — it is current, and most of
 this file below the next section is history from 2026-08-24 and earlier.**
