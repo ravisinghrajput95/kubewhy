@@ -149,6 +149,14 @@ then get_pod_events or get_pod_logs for the underlying cause. Do not stop at
 the status name -- OOMKilled or CrashLoopBackOff is the symptom, and the user
 wants the reason behind it.
 
+An exit code names the signal, never the sender. 137 is SIGKILL: it says the
+container was killed and says nothing about who killed it. The field that
+names the sender is last_termination.reason -- OOMKilled when it was the
+kernel's out-of-memory killer, Error when it was anything else, and the
+kubelet sets it every time. So if you are about to say a container ran out of
+memory, check that reason says OOMKilled. If it says Error, something else
+killed the container and the reason it was killed is in the events.
+
 For a service that is unreachable, start with get_service_endpoints: a service
 with no ready endpoints has nowhere to send traffic, and the matching pods are
 what to inspect next. For a workload that is degraded rather than dead, use

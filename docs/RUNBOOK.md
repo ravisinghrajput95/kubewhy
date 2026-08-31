@@ -157,20 +157,20 @@ cluster — every diagnosis is read fresh.
 Four things go wrong in different ways, and only one of them means the answer
 is wrong. Telling them apart is most of what this section is for.
 
-**The numbers below come from 2521 recorded runs in `results/`, and they are
+**The numbers below come from 2544 recorded runs in `results/`, and they are
 not a performance claim.** That corpus is a mixture of experiments — different
 models, prompt configurations, some deliberately degraded to measure the
 effect. It says what these failure modes look like when they occur, not how
 often kubewhy is right. For that, read [AI_EVALUATION.md](AI_EVALUATION.md),
 which is careful about what its numbers do and do not support.
 
-| Verdict | Share of 2521 runs | What it means |
+| Verdict | Share of 2544 runs | What it means |
 |---|---|---|
-| `grounded` | 1840 (73.0%) | Every claim traced to a tool result |
-| `partial` | 317 (12.6%) | Some claims traced, some not |
-| `insufficient_evidence` | 292 (11.6%) | Nothing here could be checked — often the **correct** answer |
-| `contradicted` | 39 (1.5%) | The evidence says otherwise |
-| `ungrounded` | 9 (0.4%) | Nothing traced |
+| `grounded` | 1844 (72.5%) | Every claim traced to a tool result |
+| `partial` | 322 (12.7%) | Some claims traced, some not |
+| `insufficient_evidence` | 292 (11.5%) | Nothing here could be checked — often the **correct** answer |
+| `contradicted` | 51 (2.0%) | The evidence says otherwise |
+| `ungrounded` | 11 (0.4%) | Nothing traced |
 
 ### The model is unreachable
 
@@ -204,9 +204,9 @@ it loudly. This is degraded, not down.
 **Symptom.** The answer carries `termination: deadline_exceeded` and reads as
 incomplete, because it is. The run was stopped while collecting evidence.
 
-**Measured, over 2477 recorded runs with a duration:** median **41.4s**, p95
-**176.2s**, p99 **272.4s**. The default `TRIAGE_INVESTIGATION_BUDGET` is 600s,
-which is roughly 2.2× the p99.
+**Measured, over 2500 recorded runs with a duration:** median **42.1s**, p95
+**182.7s**, p99 **295.7s**. The default `TRIAGE_INVESTIGATION_BUDGET` is 600s,
+which is roughly 2.0× the p99.
 
 Five runs exceeded 600s of wall clock. All five are in files from unattended
 overnight runs, and the cause was **the laptop sleeping**, not the model
@@ -242,7 +242,7 @@ a separate list rather than folded into `unknowns`, because "the tools did not
 say" and "the tools said otherwise" are different and only the second means the
 answer is wrong.
 
-**One caveat worth knowing before you escalate.** 23 of those 39 — **59%** —
+**One caveat worth knowing before you escalate.** 35 of those 51 — **69%** —
 come from a single scenario, `scoping_quiet_workload_beside_loud_one`, which is
 a **known open defect**: asked about a quiet workload beside a loud broken one,
 the run reads exit code 137 as proof of OOM and dismisses

@@ -41,7 +41,7 @@ and does not support. Four words are used and they mean specific things:
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
-| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, run on 5 modules; the rest of the codebase is unsurveyed |
+| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, run on 7 modules including both checker modules; 11 modules with test files are still unsurveyed |
 
 ## Defects found and fixed
 
@@ -464,6 +464,33 @@ a comment-stripped source file behind.
 | `audit.py` | 33/41 | **40/40** | A dead field, `emit()`'s documented idempotence, `duration_ms` and its rounding precision |
 | `redaction.py` | 6/6 | **6/6** | Nothing |
 | `targeting.py` | 64/74 | **69/74** | The service asymmetry — see SECURITY.md; five parser heuristics remain |
+| `grounding.py` | — | **93/118** | Surveyed 2026-08-30; 25 survivors, unreviewed |
+| `contradiction.py` | 75/117 | **76/117** | Surveyed 2026-08-30; see below |
+
+**The two checker modules were surveyed on 2026-08-30**, because this session
+had just found two defects in them and the question "what else is in there
+that no test would notice" was the obvious next one. `grounding.py` came back
+93 of 118. `contradiction.py` came back 75 of 117, and four new tests moved it
+to 76 — a deliberately small number, and the reason is worth stating: most of
+its survivors are guards that cannot change behaviour through the public API,
+because every caller checks `phrase in text` before calling the function whose
+`find() < 0` branch the mutant flips.
+
+The three that were real:
+
+- **`_asserted`'s `start < 0`.** As `<= 0` a claim opening the sentence reads
+  as not asserted — so an answer that leads with the wrong cause, the most
+  emphatic place to put one, would not be contradicted at all.
+- **The readiness default.** `found.get("ready", True)` decides what an
+  unseen container counts as; flipped, a pod with no readiness information
+  reads as unready.
+- **`_entity_present` skipping evidence that says "not found"**, without which
+  the absence rule contradicts a correct answer using the very tool result
+  that agrees with it.
+
+**41 survivors remain and are not claimed as reviewed.** The count is recorded
+so the next survey can tell a new survivor from an old one; a mutation score is
+not a quality score, and this project has said so since the harness landed.
 
 `targeting.py` is also the example of why the default test selection matters:
 run against `tests/test_targeting.py` alone it scored 64/74, and against its

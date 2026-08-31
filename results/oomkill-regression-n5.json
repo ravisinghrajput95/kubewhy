@@ -1,0 +1,407 @@
+[
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "think": true,
+  "passed": true,
+  "seconds": 134.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-08-30T15:21:09",
+  "load_before": 0.31,
+  "load_after": 0.55,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "memory-hog"
+   },
+   {
+    "name": "memory-hog-bc76968c6-s7lsd",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-s7lsd\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 19, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-s7lsd\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 19, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-s7lsd_demo(42aac314-2142-484e-ab2d-5e42596c526f)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod `memory-hog-bc76968c6-s7lsd` keeps restarting due to **out-of-memory (OOM) kills** (`OOMKilled` termination reason). Here's why:\n\n- **Memory limits are too low**: The container is limited to `64Mi` of memory, but the stress tool (`polinux/stress`) likely allocates more than this, triggering the kernel's OOM killer.\n- **Exit code 137 (SIGKILL)**: Confirms the container was forcibly terminated by the kernel for exceeding memory limits.\n- **CrashLoopBackOff**: The kubelet restarts the pod after a 5-minute delay, leading to repeated crashes.\n\n**Fix**: Increase the memory limit in the pod's resource configuration (e.g., set `memory: \"256Mi\"` or higher) to accommodate the application's needs.",
+  "answer": "The pod `memory-hog-bc76968c6-s7lsd` keeps restarting due to **out-of-memory (OOM) kills** (`OOMKilled` termination reason). Here's why:\n\n- **Memory limits are too low**: The container is limited to `64Mi` of memory, but the stress tool (`polinux/stress`) likely allocates more than this, triggering the kernel's OOM killer.\n- **Exit code 137 (SIGKILL)**: Confirms the container was forcibly terminated by the kernel for exceeding memory limits.\n- **CrashLoopBackOff**: The kubelet restarts the pod after a 5-minute delay, leading to repeated crashes.\n\n**Fix**: Increase the memory limit in the pod's resource configuration (e.g., set `memory: \"256Mi\"` or higher) to accommodate the application's needs.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 134659.7,
+   "tool_ms": 16.7,
+   "rounds": 3,
+   "round_ms": [
+    42529.0,
+    36360.3,
+    55770.4
+   ],
+   "slowest_round_ms": 55770.4,
+   "model_share": 1.0,
+   "wall_ms": 134677.8,
+   "unaccounted_ms": 1.4,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "6",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "76968",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "76968"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.reason",
+       "value": "oomkilled"
+      }
+     ]
+    },
+    {
+     "claim": "64",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.limits.memory",
+       "value": "64"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-s7lsd.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "5",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.requests.cpu",
+       "value": "5"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "824c3f5e154b",
+  "target": {
+   "kind": "workload",
+   "name": "memory-hog",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "think": true,
+  "passed": true,
+  "seconds": 149.4,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-08-30T15:23:24",
+  "load_before": 0.55,
+  "load_after": 0.56,
+  "low_power_mode": true,
+  "unverified": [
+   "memory leak"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "memory-hog"
+   },
+   {
+    "name": "memory-hog-bc76968c6-s7lsd",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-s7lsd\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 19, \"node\": \"aiops-test-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-s7lsd\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"aiops-test-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 19, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-s7lsd_demo(42aac314-2142-484e-ab2d-5e42596c526f)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod is restarting due to **OOMKilled** (Out-Of-Memory Killed) with exit code 137. Here's why:\n\n- **Memory limits are too low**: The container's memory limit is set to `64Mi`, but the `stress` image likely exceeds this limit during operation. Kubernetes kills the container when it exceeds its memory limit.\n- **No memory request/limit balance**: The memory request is `32Mi`, but the limit is `64Mi`. If the application uses more than `64Mi`, it will be terminated.\n- **CrashLoopBackOff**: The pod crashes, then Kubernetes waits 5m0s before retrying, explaining the restarts.\n\n**Fix**:  \n1. Increase the memory limit in the pod's spec (e.g., `memory: 256Mi`).  \n2. Monitor actual memory usage to ensure the new limit suffices.  \n3. Check for memory leaks in the application.  \n\nExample fix in deployment YAML:  \n```yaml\nresources:\n  limits:\n    memory: \"256Mi\"\n```",
+  "answer": "The pod is restarting due to **OOMKilled** (Out-Of-Memory Killed) with exit code 137. Here's why:\n\n- **Memory limits are too low**: The container's memory limit is set to `64Mi`, but the `stress` image likely exceeds this limit during operation. Kubernetes kills the container when it exceeds its memory limit.\n- **No memory request/limit balance**: The memory request is `32Mi`, but the limit is `64Mi`. If the application uses more than `64Mi`, it will be terminated.\n- **CrashLoopBackOff**: The pod crashes, then Kubernetes waits 5m0s before retrying, explaining the restarts.\n\n**Fix**:  \n1. Increase the memory limit in the pod's spec (e.g., `memory: 256Mi`).  \n2. Monitor actual memory usage to ensure the new limit suffices.  \n3. Check for [unverified: memory leaks] in the application.  \n\nExample fix in deployment YAML:  \n```yaml\nresources:\n  limits:\n    memory: \"256Mi\"\n```\n\n---\n**Evidence audit.**\n1 of 9 stated values could not be traced to any tool result for the workload they were stated about: `memory leak`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['memory leak'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 149355.2,
+   "tool_ms": 24.8,
+   "rounds": 3,
+   "round_ms": [
+    35916.8,
+    45759.7,
+    67678.7
+   ],
+   "slowest_round_ms": 67678.7,
+   "model_share": 1.0,
+   "wall_ms": 149383.9,
+   "unaccounted_ms": 3.9,
+   "slept_ms": 2.4
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.reason",
+       "value": "oomkilled"
+      }
+     ]
+    },
+    {
+     "claim": "32",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.requests.memory",
+       "value": "32"
+      }
+     ]
+    },
+    {
+     "claim": "64",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.limits.memory",
+       "value": "64"
+      }
+     ]
+    },
+    {
+     "claim": "64",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.limits.memory",
+       "value": "64"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-s7lsd.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-s7lsd.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "5",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.requests.cpu",
+       "value": "5"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "memory leak",
+     "kind": "cause"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "memory leaks"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "2f528d76e7bb",
+  "target": {
+   "kind": "workload",
+   "name": "memory-hog",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3",
+  "context": "kind-aiops-test",
+  "think": true,
+  "passed": false,
+  "seconds": 295.7,
+  "confidence": "ungrounded",
+  "model_resident": true,
+  "started_at": "2026-08-30T15:25:53",
+  "load_before": 0.56,
+  "load_after": 2.26,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [],
+  "arguments": [],
+  "evidence": [],
+  "draft": null,
+  "answer": "ERROR: Server disconnected without sending a response.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "missing ['oomkilled', 'out of memory', 'memory limit']",
+   "missing ['64mi', '64 mi', '64mb']",
+   "never called describe_pod",
+   "grounding verdict 'ungrounded', expected one of ['grounded', 'partial']"
+  ],
+  "notes": [],
+  "timing": null,
+  "rca": null,
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": null,
+  "target": null
+ }
+]

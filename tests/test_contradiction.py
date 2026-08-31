@@ -359,6 +359,69 @@ class TestTheOomSpellingsTheModelActuallyUses:
         assert grounding.check(answer, ev(oom))["contradictions"] == []
 
 
+class TestTheFactsMutationTestingFoundUntested:
+    """
+    Survivors from `evals/mutate.py contradiction.py`, 2026-08-30. Each one is
+    a mutation the suite did not notice, on a line whose behaviour is real and
+    reachable — the harness reports them as questions, and these were the ones
+    whose answer was "no test covers this".
+    """
+
+    def facts_for(self, doc):
+        import contradiction
+        return contradiction.facts([{"text": json.dumps(doc)}])
+
+    def test_one_unready_container_makes_the_whole_pod_unready(self):
+        """
+        `found["ready"] = found.get("ready", True) and state`. Swapping the
+        `and` for an `or` lets a single ready container mark a pod ready while
+        another is failing, which would silence `ready_vs_claimed_not_ready`
+        on exactly the pods it exists for. Nothing tested a pod with two
+        containers in different states.
+        """
+        mixed = {"pod": "p", "namespace": "demo", "status": "Running",
+                 "containers": {"a": {"ready": True}, "b": {"ready": False}}}
+
+        assert self.facts_for(mixed)["ready"] is False
+
+    def test_every_container_ready_makes_the_pod_ready(self):
+        """The control, so the test above cannot pass by always being False."""
+        both = {"pod": "p", "namespace": "demo", "status": "Running",
+                "containers": {"a": {"ready": True}, "b": {"ready": True}}}
+
+        assert self.facts_for(both)["ready"] is True
+
+    def test_a_claim_at_the_very_start_of_the_answer_still_counts(self):
+        """
+        `_asserted` guards with `start < 0`. As `start <= 0` a claim opening
+        the sentence reads as not asserted, so an answer that leads with the
+        wrong cause — the most emphatic place to put it — would not be
+        contradicted at all.
+        """
+        pod = ("describe_pod", {
+            "pod": "slow-starter-1", "namespace": "demo",
+            "status": "CrashLoopBackOff",
+            "containers": {"web": {"ready": False, "restarts": 5,
+                                   "last_termination": {"reason": "Error",
+                                                        "exit_code": 137}}}})
+        answer = "OOMKilled is why slow-starter-1 keeps restarting."
+
+        found = grounding.check(answer, ev(pod))["contradictions"]
+
+        assert found and found[0]["rule"] == "termination_reason_vs_memory_cause"
+
+    def test_the_evidence_saying_it_is_missing_is_not_presence(self):
+        """
+        `_entity_present` skips an entry whose text says the thing was not
+        found. Without it the absence rule contradicts a correct answer using
+        the very tool result that agrees with it.
+        """
+        pod = ("describe_pod", {"error": 'pods "ghost-pod" not found'})
+        answer = "The pod `ghost-pod` does not exist in the demo namespace."
+
+        assert grounding.check(answer, ev(pod))["contradictions"] == []
+
+
 class TestTheStatusContract:
     def test_the_four_statuses_are_distinguishable(self):
         """
