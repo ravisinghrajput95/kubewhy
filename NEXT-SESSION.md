@@ -12,12 +12,39 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `768170b`, tree clean and pushed, **1280 tests pass, CI
-green on all six jobs**, tags through **v0.2.0**. Nothing running: no kind
-cluster, no GKE cluster, Docker quit, Ollama stopped, GCP empty.**
+**State: `main` tree clean and pushed, **1280 tests pass** (verified
+2026-08-31, 83s), **CI green**, tags through **v0.2.0**. Last substantive
+commit `c7ee74a`. Nothing running: no kind cluster, no GKE cluster, Docker
+quit, Ollama unloaded (`{"models":[]}`), GCP empty. The full teardown check at
+the bottom of this file passed line by line on 2026-08-31.**
 
 **Read `docs/VALIDATION.md` before anything else — it is current, and most of
 this file below the next section is history from 2026-08-24 and earlier.**
+
+## Start here: what to pick up, in order
+
+Nothing below needs a cluster or a model except item 4, and nothing is blocked.
+
+1. **Review the 41 unreviewed mutation survivors, and survey the 11 modules
+   with test files that `evals/mutate.py` has never run against.** Pure local
+   compute -- no cluster, no model. The last mutation pass closed three real
+   gaps, so the hit rate is established. This is the likeliest place an
+   undiscovered defect is sitting. Run `evals/mutate.py --self-check` first;
+   `--tests` under-selects by default.
+2. **Add `pyproject.toml`, and ruff + mypy to CI.** The repo has 17k lines of
+   Python, 1280 tests, and **no linter, formatter or type checker anywhere** --
+   no ruff, no mypy, no pre-commit, nothing in the workflows. It is also not
+   pip-installable. This is the one structural gap left that is not blocked on
+   hardware, a cloud account, or someone else's incident data.
+3. **Slack audit trail** is the only audit row still NOT TESTED, and it needs a
+   workspace. If one is available, it closes the last surface.
+4. **The n=10 paragraph-removed experiment** on `insufficient_no_such_workload`
+   (defect 21, described below). Needs kind + Ollama back up, ~40 min of model
+   time, on mains power under `caffeinate -is`.
+
+Housekeeping: the defect sections in `docs/VALIDATION.md` are out of order --
+`### 21` sits above `### 20`.
+
 
 ## What changed on 2026-08-26 / 27 (25 commits)
 
@@ -63,15 +90,27 @@ Done and validated live:
 3. **EKS**, and the browser harness proper — `docs/E2E.md` now argues against
    the latter more than for it.
 
-## 2026-08-30/31: what was closed, what was not, and one run still going
+## 2026-08-30/31: what was closed, and what the regression run settled
 
-**A 145-run regression suite may still be running.** `results/regression-29-n5-after-fixes.json`,
-29 cases x 5 on kind + qwen3, launched to check this session's changes against
-the published `final-29-qwen3-n5.json` baseline. **Read it before anything
-else** -- the readiness policy, the contradiction re-ask, the OOM spelling fix
-and a system-prompt paragraph all landed since that baseline, and only 3 of 29
-cases were verified individually. If the file is absent or short, the run was
-interrupted; relaunch it. Compare with `evals/compare_paired.py`.
+**The 145-run regression suite is DONE. Nothing needs relaunching.**
+`results/regression-29-n5-after-fixes.json` completed at 14:02 on 2026-08-31:
+**145 records, 29 cases x 5, zero voids**, 3.9h of model time, committed in
+`6e2eea8` and analyzed there. An earlier draft of this handoff said it "may
+still be running" and told the next session to check on it -- it had been
+finished and committed for over an hour, and that sentence cost the following
+session its first ten minutes. **Trust `git log` over this file.**
+
+What it found, against the published `final-29-qwen3-n5.json` baseline:
+
+- **127/145 (88%) -> 134/145 (92%), paired sign test p=1.0000.** Six scenarios
+  up, six down, seventeen identical. **The headline gain is NOT established**
+  and is recorded as undetermined. Do not quote 92% as an improvement.
+- `never_ready_readiness_probe` **0/5 -> 5/5** (p=0.0079) -- the readiness
+  evidence policy landing, and the one clear win.
+- `insufficient_no_such_workload` **5/5 -> 2/5**, open. See below.
+- **Contradicted verdicts fell 9 -> 3** across the suite.
+- Both runs recorded `low_power_mode: True`, same model, thinking on, so the
+  arms are comparable on every axis the harness records.
 
 **Closed this round:**
 
@@ -102,14 +141,39 @@ interrupted; relaunch it. Compare with `evals/compare_paired.py`.
   is a corpus-authorship problem (Tier 1 item 2, needs your incident history),
   not a sample-size one. A tighter interval on 29 hand-built scenarios is a
   tighter interval on the wrong number. Do not let a big n flip this row.
-- **`scoping_quiet_workload_beside_loud_one` is still open.** Measured twice at
-  n=10: **3/10 [11-60] and 4/10 [17-69]**, p=0.5055 and p=0.2308 against the
-  0/5 baseline, p=1.0 against each other. The re-ask fires on 6 of 10 and two
-  of those pass. **The system prompt gained a paragraph on reading a
-  termination -- exit code names the signal, `last_termination.reason` names
-  the sender -- and it is measured as NO DETECTABLE EFFECT.** It is kept
-  because it is true, not because it worked. **Stop tuning the prompt against
-  this one case**; that is how this project has overfitted before.
+- **`scoping_quiet_workload_beside_loud_one` is still open.** Three arms under
+  current code: **3/10, 4/10, and 4/5** inside the regression suite. Pooled,
+  **11/25 (44%), Wilson 95% [27-63]** against a 0/5 baseline -- and **even
+  pooled it does not reach significance**: Fisher exact gives p=0.0816
+  one-sided, p=0.16 two-sided. 25 runs cannot separate "the change helped"
+  from "0/5 was an unlucky floor", and the three arms disagree more than their
+  intervals allow, which argues against pooling them at all. An earlier
+  write-up called this "a real improvement"; that claim was withdrawn in
+  `c7ee74a` and the row stays **open**. The system prompt's paragraph on
+  reading a termination -- exit code names the signal,
+  `last_termination.reason` names the sender -- is kept because it is true,
+  not because it is measured to work. **Stop tuning the prompt against this
+  one case**; that is how this project has overfitted before.
+
+- **`insufficient_no_such_workload` regressed 5/5 -> 2/5 and is open**
+  (defect 21). All five runs answered correctly that `payments-gateway` does
+  not exist; three then listed the neighbouring broken deployments with
+  unverified claims about each -- "likely crashing", "exceeding resource
+  limits" -- scoring `partial` where the case requires
+  `insufficient_evidence`. `reconciles`, `policies` and `nudges` are 0 on
+  those runs, so none of this round's mechanisms fired.
+  **Checker drift is ruled out**: replaying the published baseline through the
+  current checker (after `--self-check` passed 1650/1650) moves 2 of 140
+  records, both `contradicted -> grounded`, none into `partial`. The extra
+  `partial`s are the model's words changing, not the scoring. Answer length on
+  this case went **354 -> 804 chars mean (x2.27)** against **+7% suite-wide**,
+  so the growth sits exactly where there was nothing to find. Still unsettled
+  between "the system-prompt paragraph made it discursive" and "n=5 noise".
+  **The experiment: re-run this case at n=10 with the paragraph removed**
+  (`evals/ab_prompt.py` already slices it), paired against n=10 with it. Add a
+  counter asserting the paragraph is actually absent from the built prompt
+  BEFORE measuring -- otherwise "removed it, nothing changed" and "the removal
+  never took effect" are the same number.
 
 **Blocked by hardware or accounts, and saying otherwise would be a fake
 number:** real vLLM (Linux GPU), EKS (AWS), Slack audit trail (a workspace),
