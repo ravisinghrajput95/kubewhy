@@ -41,7 +41,7 @@ and does not support. Four words are used and they mean specific things:
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
-| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, run on 7 modules including both checker modules; 11 modules with test files are still unsurveyed |
+| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, 16 of 18 modules, 697 mutants, 508 killed (72.9%); 189 survivors unreviewed; `controller.py` and `ui.py` not surveyable until their tests stop needing a live cluster |
 
 ## Defects found and fixed
 
@@ -457,21 +457,112 @@ a comment-stripped source file behind.
 
 **What it found, in three modules written the same week:**
 
-| Module | Before | After | What survived |
+> **Every number in the first version of this table was measured with a broken
+> harness and has been re-measured.** See "The harness was scoring mutants it
+> never ran" below. The corrected figures are in the second table; the numbers
+> the repository published before 2026-08-31 were, in four modules, too
+> generous.
+
+| Module | Published | **Corrected** | Note |
 |---|---|---|---|
-| `identity.py` | 20/26 | **20/20** | Six mutants inside a `Principal.__eq__` that nothing ever called |
-| `limits.py` | 24/28 | **28/28** | The window boundary, `retry_after` clearing only one event, rounding down, sub-second truncation, and the window length itself |
-| `audit.py` | 33/41 | **40/40** | A dead field, `emit()`'s documented idempotence, `duration_ms` and its rounding precision |
-| `redaction.py` | 6/6 | **6/6** | Nothing |
-| `targeting.py` | 64/74 | **69/74** | The service asymmetry — see SECURITY.md; five parser heuristics remain |
-| `grounding.py` | — | **93/118** | Surveyed 2026-08-30; 25 survivors, unreviewed |
-| `contradiction.py` | 75/117 | **76/117** | Surveyed 2026-08-30; see below |
+| `identity.py` | 20/20 | **20/20** | unchanged |
+| `audit.py` | 33/41 → 40/40 | **40/40** | unchanged |
+| `redaction.py` | 6/6 | **6/6** | unchanged |
+| `limits.py` | 24/28 → **28/28** | **27/28** | the "perfect coverage" was a false kill |
+| `targeting.py` | 64/74 → **69/74** | **66/74** | 3 survivors were hidden |
+| `contradiction.py` | 75/117 → **76/117** | **74/117** | 2 hidden |
+| `grounding.py` | **93/118** | **92/118** | 1 hidden |
+
+**Seven real survivors were hidden inside published numbers**, in both checker
+modules and in `limits.py`, whose row in the table at the top of this file
+reads PROVEN. The `limits.py` survivor is line 140,
+`max(int(when + self.seconds - now) + 1, 1)` — mutating the `+ 1` to `+ 2`
+shifts every `Retry-After` header by a second and no test notices. The prose
+below claiming the boundary cases were closed was written against the wrong
+number: they were closed, but this constant never was.
+
+**The eleven modules that had never been surveyed at all**, measured
+2026-08-31 with the fixed harness:
+
+| Module | Killed | Survivors |
+|---|---|---|
+| `tool_schema.py` | 5/7 | 2, both equivalent — see below |
+| `mcp_server.py` | 1/2 | 1 |
+| `slack_socket.py` | 10/17 | 7 |
+| `telemetry.py` | 16/27 | 11 |
+| `podcache.py` | 7/18 | 11 |
+| `sinks.py` | 18/31 | 13 |
+| `store.py` | 18/30 | 12 |
+| `backends.py` | 19/37 | 18 |
+| `inference.py` | 89/125 | 36 |
+| `controller.py` | — | **not surveyable** |
+| `ui.py` | — | **not surveyable** |
+
+**`controller.py` and `ui.py` cannot be surveyed, and the reason is a defect,
+not a limitation.** Both baselines fail, so `mutate.py` refuses rather than
+reporting perfect coverage. `tests/test_controller.py` and `tests/test_ui.py`
+each reach a **real cluster** at the kubeconfig's current server and burn three
+15-second retries per call. They pass inside the full suite — 1280 in 83s with
+no cluster running — and hang when run alone, so something in another test
+module is installing the Kubernetes mock they depend on. The side effect is
+that mutation testing silently skips the two largest modules that have test
+files. **Fixing the isolation is a prerequisite for surveying them**, and the
+isolation bug is worth fixing on its own account.
+
+**Totals, 16 modules surveyed: 697 mutants, 508 killed, 189 survivors, a 72.9%
+kill rate.** The earlier note that "41 survivors remain and are NOT reviewed"
+was an artifact of both the broken harness and of surveying 7 modules. The real
+figure is 189, and they are still not reviewed.
+
+#### The harness was scoring mutants it never ran
+
+Found 2026-08-31, fixed in `2b8d58b`. `mutate.py` writes each mutant as
+`ast.unparse` output back to the same path. Two consequences meet: consecutive
+mutants differ by one character and are therefore **the same size**, and
+adjacent sites are written well inside the same second. CPython validates a
+cached `.pyc` against `(mtime-to-the-second, size)`, so the next run imported
+the **previous mutant's bytecode** and the tests never saw the new code.
+`-p no:cacheprovider` does not help; that is pytest's cache, not CPython's.
+
+**The error is not conservative.** Which way a verdict goes depends on what was
+cached:
+
+- A benign predecessor cached, lethal mutant follows → the tests pass → a
+  **false survivor**. Measured on `tool_schema.py`:
+  `doc.split("\n\n", 1)[0] -> [1]`, which two tests assert against directly.
+  Applied by hand it fails both.
+- A lethal predecessor cached, any mutant follows → the tests fail → a
+  **false kill**. This is the one that manufactured coverage:
+  `limits.py` read 28/28 with the bug and 27/28 without it.
+
+The fix is `PYTHONDONTWRITEBYTECODE=1` in the subprocess environment — with no
+`.pyc` written there is nothing stale to reuse. Verified in both directions by
+reintroducing the bug in a throwaway repository copy.
+
+**The self-check needed three attempts to see it, and that is the part worth
+carrying.** Version one let the clock run: `limits.py`'s suite is slow enough
+that the two writes landed in different seconds, so it **passed against the
+exact bug it was written to catch**. Version two forced the timestamp but made
+both writes lethal, so the stale bytecode failed the tests too and it passed
+either way. Only a green baseline followed by a lethal same-size mutant at a
+forced identical mtime actually goes red when the bug is present. A counter
+that cannot see the mechanism is worse than no counter, because it reads as
+evidence.
+
+**`tool_schema.py`'s two remaining survivors are equivalent mutants, not
+gaps.** `doc.split("\n\n", 1)` → `split("\n\n", 2)` cannot change a `[0]`
+subscript; and `name or func.__name__` → `and` is undetectable while the
+registry key and `__name__` match, which is exactly what that line's comment
+says it is guarding against for the day they diverge.
 
 **The two checker modules were surveyed on 2026-08-30**, because this session
 had just found two defects in them and the question "what else is in there
 that no test would notice" was the obvious next one. `grounding.py` came back
-93 of 118. `contradiction.py` came back 75 of 117, and four new tests moved it
-to 76 — a deliberately small number, and the reason is worth stating: most of
+93 of 118 and `contradiction.py` 75 of 117, and four new tests moved the latter
+to 76 — **all three of those readings were taken with the broken harness and
+are superseded by 92/118 and 74/117 above**. The four tests were real and are
+kept; the movement they were credited with is not measurable. The reason so few
+were added is still worth stating: most of
 its survivors are guards that cannot change behaviour through the public API,
 because every caller checks `phrase in text` before calling the function whose
 `find() < 0` branch the mutant flips.
@@ -488,9 +579,12 @@ The three that were real:
   the absence rule contradicts a correct answer using the very tool result
   that agrees with it.
 
-**41 survivors remain and are not claimed as reviewed.** The count is recorded
-so the next survey can tell a new survivor from an old one; a mutation score is
-not a quality score, and this project has said so since the harness landed.
+**189 survivors remain and are not claimed as reviewed** — the figure was 41
+when only 7 modules had been surveyed and the harness was miscounting both
+ways. The count is recorded so the next survey can tell a new survivor from an
+old one; a mutation score is not a quality score, and this project has said so
+since the harness landed. `limits.py:140` is the standing proof that a real gap
+hides among them: it sat inside a module recorded as 28/28.
 
 `targeting.py` is also the example of why the default test selection matters:
 run against `tests/test_targeting.py` alone it scored 64/74, and against its
@@ -510,6 +604,15 @@ actually changed and that the named operator is the one that moved.
 
 That is the third harness in this document to report something it had not
 earned, and the second to do so while looking completely healthy.
+
+**`mutate.py` has now done it twice.** The site-indexing bug above and the
+stale-bytecode bug documented earlier on this page are independent defects in
+the same 400-line tool, both silent, both found only by reading a specific
+survivor and refusing to accept it. The pattern this project keeps rediscovering
+is that a measurement harness fails in the direction of looking healthy, and
+that the only reliable detector is a result that does not make sense on its own
+terms — `limits.py` going *down* from a published 28/28 is what exposed the
+second one.
 
 The `identity.py` one was the most useful and the least expected. Nothing in
 the project compares two Principals, so `__eq__` was unused surface — and

@@ -23,22 +23,51 @@ this file below the next section is history from 2026-08-24 and earlier.**
 
 ## Start here: what to pick up, in order
 
-Nothing below needs a cluster or a model except item 4, and nothing is blocked.
+Nothing below needs a cluster or a model except item 5, and nothing is blocked.
 
-1. **Review the 41 unreviewed mutation survivors, and survey the 11 modules
-   with test files that `evals/mutate.py` has never run against.** Pure local
-   compute -- no cluster, no model. The last mutation pass closed three real
-   gaps, so the hit rate is established. This is the likeliest place an
-   undiscovered defect is sitting. Run `evals/mutate.py --self-check` first;
-   `--tests` under-selects by default.
-2. **Add `pyproject.toml`, and ruff + mypy to CI.** The repo has 17k lines of
+1. **Review the 189 unreviewed mutation survivors.** The survey itself is now
+   DONE -- 16 of 18 modules, 697 mutants, 508 killed (72.9%), measured
+   2026-08-31 with a fixed harness. Pure local compute, no cluster, no model.
+   Start with `limits.py:140`, the standing proof that real gaps hide in this
+   list: the `+ 1` in `max(int(when + self.seconds - now) + 1, 1)` shifts every
+   `Retry-After` by a second and nothing catches it, inside a module the docs
+   recorded as 28/28. `backends.py` (18 survivors of 37), `inference.py` (36 of
+   125) and `contradiction.py` (43 of 117) are the densest. `--tests`
+   under-selects by default.
+2. **Make `tests/test_controller.py` and `tests/test_ui.py` self-contained.**
+   Both reach a REAL cluster -- whatever `current-context` names -- and hang
+   when run alone, while passing inside the full suite, so another test module
+   is installing the Kubernetes mock they rely on.
+
+   What is measured: run alone, `tests/test_ui.py` exceeded 120s and was
+   killed, and `mutate.py` refused both modules with "the baseline is already
+   failing". The failing test reaches `127.0.0.1:55807` -- the deleted
+   `kind-aiops-test` -- with three 15-second read timeouts per call.
+   `kind delete cluster` leaves its context behind, so `current-context` still
+   names a cluster that does not exist; re-asserting `kubectl config
+   use-context` does not help, because the stale entry IS the current context.
+
+   The consequence that matters: **mutation testing silently skips the two
+   largest modules that have test files.** Fixing the isolation unblocks them.
+
+   **Unexplained, and worth a look before trusting any suite timing:** the full
+   suite ran 1280 passed in 83s earlier the same day and over six minutes
+   later, both green. `tests/test_mutate.py` was ruled out by measurement
+   (3.3s). `--durations` puts the cost in `tests/test_agent_loop.py` --
+   `test_no_nudge_without_rounds_left_to_use_it` alone took **78s** and
+   `test_the_run_is_sent_back_and_the_tool_gets_called` **31s**, both of which
+   mock `ollama.chat` and should not be slow. A first guess that the variance
+   came from the dead cluster's port state did not survive contact with the
+   durations output. The suite is stable in result and unstable in runtime, so
+   nothing draws attention to it.
+3. **Add `pyproject.toml`, and ruff + mypy to CI.** The repo has 17k lines of
    Python, 1280 tests, and **no linter, formatter or type checker anywhere** --
    no ruff, no mypy, no pre-commit, nothing in the workflows. It is also not
    pip-installable. This is the one structural gap left that is not blocked on
    hardware, a cloud account, or someone else's incident data.
-3. **Slack audit trail** is the only audit row still NOT TESTED, and it needs a
+4. **Slack audit trail** is the only audit row still NOT TESTED, and it needs a
    workspace. If one is available, it closes the last surface.
-4. **The n=10 paragraph-removed experiment** on `insufficient_no_such_workload`
+5. **The n=10 paragraph-removed experiment** on `insufficient_no_such_workload`
    (defect 21, described below). Needs kind + Ollama back up, ~40 min of model
    time, on mains power under `caffeinate -is`.
 
@@ -123,8 +152,10 @@ What it found, against the published `final-29-qwen3-n5.json` baseline:
   console, not the REST API, and the ceiling guards the API. The console
   reaches `agent.stream()` directly and never passes `budgeted()`.**
 - **Mutation testing 5 -> 7 modules.** `grounding.py` 93/118,
-  `contradiction.py` 76/117. Three real gaps closed; **41 survivors remain and
-  are NOT reviewed.** 11 modules with test files are still unsurveyed.
+  `contradiction.py` 76/117. Three real gaps closed. **Every number in this
+  bullet was measured with a broken harness and is superseded** -- see
+  `docs/VALIDATION.md`, "The harness was scoring mutants it never ran".
+  Corrected: 92/118 and 74/117, 16 of 18 modules surveyed, **189 survivors**.
 - **The fixture sweep.** All 21 long-lived containers now loop instead of
   `sleep 3600`. Proven at a watchable scale: `sleep 5` took 3 restarts in 90s
   at exit code 0, the loop took 0.
