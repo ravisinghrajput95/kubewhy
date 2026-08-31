@@ -12,7 +12,7 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `fe6c0c4`, tree clean and pushed, **1272 tests pass, CI
+**State: `main` at `768170b`, tree clean and pushed, **1280 tests pass, CI
 green on all six jobs**, tags through **v0.2.0**. Nothing running: no kind
 cluster, no GKE cluster, Docker quit, Ollama stopped, GCP empty.**
 
@@ -62,6 +62,59 @@ Done and validated live:
    failure); needs a Linux GPU host.
 3. **EKS**, and the browser harness proper — `docs/E2E.md` now argues against
    the latter more than for it.
+
+## 2026-08-30/31: what was closed, what was not, and one run still going
+
+**A 145-run regression suite may still be running.** `results/regression-29-n5-after-fixes.json`,
+29 cases x 5 on kind + qwen3, launched to check this session's changes against
+the published `final-29-qwen3-n5.json` baseline. **Read it before anything
+else** -- the readiness policy, the contradiction re-ask, the OOM spelling fix
+and a system-prompt paragraph all landed since that baseline, and only 3 of 29
+cases were verified individually. If the file is absent or short, the run was
+interrupted; relaunch it. Compare with `evals/compare_paired.py`.
+
+**Closed this round:**
+
+- **Rate limiting -> PROVEN.** Ceiling of 3, five real `/ask` requests: 200,
+  200, 200, 429, 429 with `Retry-After: 3156`. The three runs took 444s and
+  3600-444 = 3156, so the header reports when the window frees, not the window
+  length. A 503 still spends the allowance -- deliberate, and it means an
+  outage burns a caller's quota. **The old note asked for a loop "in a
+  cluster" and that cannot exist: the chart deploys the controller and the
+  console, not the REST API, and the ceiling guards the API. The console
+  reaches `agent.stream()` directly and never passes `budgeted()`.**
+- **Mutation testing 5 -> 7 modules.** `grounding.py` 93/118,
+  `contradiction.py` 76/117. Three real gaps closed; **41 survivors remain and
+  are NOT reviewed.** 11 modules with test files are still unsurveyed.
+- **The fixture sweep.** All 21 long-lived containers now loop instead of
+  `sleep 3600`. Proven at a watchable scale: `sleep 5` took 3 restarts in 90s
+  at exit code 0, the loop took 0.
+- **A harness defect the long run depends on.** `run_eval` scored a provider
+  blackout as a wrong answer -- `oomkill_root_cause` read 2/3 for a case that
+  was 2/2 and a blip, because httpx raises `RemoteProtocolError` and the guard
+  caught only `ConnectionError`. Such runs are VOID now: excluded, printed,
+  and reported with the real n.
+
+**NOT closed, and one of them is not closable by more work here:**
+
+- **Generalized diagnostic accuracy stays NOT TESTED, and raising n will not
+  change that.** The row says "one cluster, one prompt configuration" -- that
+  is a corpus-authorship problem (Tier 1 item 2, needs your incident history),
+  not a sample-size one. A tighter interval on 29 hand-built scenarios is a
+  tighter interval on the wrong number. Do not let a big n flip this row.
+- **`scoping_quiet_workload_beside_loud_one` is still open.** Measured twice at
+  n=10: **3/10 [11-60] and 4/10 [17-69]**, p=0.5055 and p=0.2308 against the
+  0/5 baseline, p=1.0 against each other. The re-ask fires on 6 of 10 and two
+  of those pass. **The system prompt gained a paragraph on reading a
+  termination -- exit code names the signal, `last_termination.reason` names
+  the sender -- and it is measured as NO DETECTABLE EFFECT.** It is kept
+  because it is true, not because it worked. **Stop tuning the prompt against
+  this one case**; that is how this project has overfitted before.
+
+**Blocked by hardware or accounts, and saying otherwise would be a fake
+number:** real vLLM (Linux GPU), EKS (AWS), Slack audit trail (a workspace),
+AKS with AAD, the external token budget against a billed provider (the key is
+revoked), and the incident-history corpus (your data).
 
 **Both of those defects were worked on 2026-08-28. One is fixed, one is not,
 and the investigation found two checker defects on the way.**
