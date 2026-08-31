@@ -38,6 +38,49 @@ def _satisfied(group, text):
     return any(term.lower() in text for term in group)
 
 
+# Transport failures that mean the provider never answered. Matched on the
+# recorded answer text, because that is what the record keeps -- the exception
+# object is long gone by the time anyone reads results/.
+#
+# Deliberately narrow, and anchored on the "ERROR: " prefix this harness itself
+# writes. A wrong ANSWER that happens to contain the word "disconnected" is a
+# real failure and must stay scored; only a run that produced no answer at all
+# is void. The three phrases are httpx's, from a provider that accepted the
+# connection and then went away mid-request.
+_PROVIDER_GONE = (
+    "server disconnected",
+    "connection reset",
+    "remoteprotocolerror",
+    "failed to connect to ollama",
+    "connection refused",
+    "read timed out",
+)
+
+
+def provider_failed(result):
+    """
+    Why this run should be VOID rather than scored, or None.
+
+    A run is void when the harness's own error path produced the answer AND no
+    tool was ever called. Both halves matter: the prefix says this text came
+    from `except Exception` rather than from a model, and the empty trace says
+    the run did not get far enough to have done anything worth grading. A run
+    that called four tools and then lost the connection on its last round has
+    still demonstrated most of what the case measures, and voiding it would
+    quietly shrink n for a run that mostly happened.
+    """
+    answer = str(result.get("answer") or "")
+    if not answer.startswith("ERROR: "):
+        return None
+    if result.get("tool_calls"):
+        return None
+    lowered = answer.lower()
+    for phrase in _PROVIDER_GONE:
+        if phrase in lowered:
+            return answer[7:][:80]
+    return None
+
+
 def grade(case, result):
     """
     Return (passed, [reasons it failed], [notes]).
@@ -325,7 +368,7 @@ def main():
         f"think={'on' if agent.THINK else 'off'}\n"
     )
 
-    total_passes = total_runs = 0
+    total_passes = total_runs = voids = 0
     ungrounded = 0
     # The metric that matters: a right answer resting entirely on measurement.
     # `score` alone cannot separate that from a right answer carrying an
@@ -379,6 +422,43 @@ def main():
             except Exception as exc:
                 result = {"answer": f"ERROR: {exc}", "tool_calls": [], "confidence": "ungrounded"}
             elapsed += time.time() - started
+
+            # A run the provider never answered is VOID, not failed, and this
+            # is the second time that distinction has had to be made in this
+            # repo -- probe_evidence_read.py voids a capture that came back
+            # empty for the same reason. Scoring "nothing ran" as a wrong
+            # answer reports a plausible-looking low number for an outage.
+            #
+            # The ConnectionError branch above already aborts the suite when
+            # the provider is down at the start. It is deliberately not
+            # widened to cover this: a transport error mid-run is usually one
+            # blip in an unattended run of hundreds, and aborting six hours of
+            # work over it loses far more than it protects. Voiding the run
+            # keeps the rest.
+            #
+            # Measured 2026-08-30: `oomkill_root_cause` recorded 2 passes and
+            # one `passed: False` whose answer was the string "ERROR: Server
+            # disconnected without sending a response" with no tool calls at
+            # all. That scored 2/3 for a case that was really 2/2 and a blip.
+            # httpx raises RemoteProtocolError there, which is not a
+            # ConnectionError, so it fell past the guard written to catch
+            # exactly this.
+            void_reason = provider_failed(result)
+            if void_reason:
+                voids += 1
+                print(f"  r{round_index + 1:<3} {case['name']:32} "
+                      f"VOID  {void_reason}", flush=True)
+                records.append({
+                    "case": case["name"], "model": args.model,
+                    "void": True, "void_reason": void_reason,
+                    "answer": result.get("answer", ""),
+                    "seconds": round(elapsed, 1),
+                    "started_at": began_at,
+                })
+                if args.json:
+                    with open(args.json, "w") as fh:
+                        json.dump(records, fh, indent=1)
+                continue
 
             ok, why, notes = grade(case, result)
             passes += ok
@@ -606,6 +686,14 @@ def main():
 
     rate = total_passes / total_runs * 100 if total_runs else 0
     print(f"\nscore: {total_passes}/{total_runs} ({rate:.0f}%)")
+    if voids:
+        # Loud, and separate from the score. A run the provider never answered
+        # is excluded from the denominator, so the reader has to be told how
+        # many there were -- a 60-run suite reporting 40 is a different claim
+        # from one reporting 60, and silently shrinking n is how a sample
+        # stops meaning what its interval says.
+        print(f"VOID: {voids} run(s) excluded -- the provider did not answer. "
+              f"n is {total_runs}, not {total_runs + voids}.")
     print(
         f"fully grounded and correct: {clean}/{total_runs} "
         f"({clean / total_runs * 100:.0f}%)" if total_runs else ""

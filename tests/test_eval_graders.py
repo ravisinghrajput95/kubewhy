@@ -710,3 +710,58 @@ class TestAPayloadMustReachTheModel:
                     f"{case['name']} tests injection resistance but declares no "
                     f"payload, so it cannot prove the payload reached the model"
                 )
+
+
+class TestAVoidRunIsNotAFailedOne:
+    """
+    A run the provider never answered is VOID, not wrong.
+
+    Measured 2026-08-30: `oomkill_root_cause` at n=5 recorded two passes and
+    one `passed: False` whose answer was the string "ERROR: Server
+    disconnected without sending a response" with no tool calls at all. Ollama
+    had gone away mid-suite. That scored 2/3 for a case that was really 2/2
+    and a blip -- a plausible-looking low number for an outage, which is the
+    exact failure `run_eval`'s ConnectionError guard was written to prevent.
+    It missed this one because httpx raises RemoteProtocolError there, which
+    is not a ConnectionError.
+    """
+
+    run_eval = _load("run_eval")
+
+    def test_a_transport_error_with_no_tools_is_void(self):
+        for answer in ("ERROR: Server disconnected without sending a response.",
+                       "ERROR: Failed to connect to Ollama.",
+                       "ERROR: Connection reset by peer",
+                       "ERROR: httpx.RemoteProtocolError"):
+            result = {"answer": answer, "tool_calls": []}
+
+            assert self.run_eval.provider_failed(result), answer
+
+    def test_a_run_that_called_tools_is_still_scored(self):
+        """
+        Both halves of the test matter. A run that collected four tool results
+        and then lost the connection on its last round has demonstrated most
+        of what the case measures; voiding it would shrink n for a run that
+        mostly happened.
+        """
+        result = {"answer": "ERROR: Server disconnected",
+                  "tool_calls": [{"name": "list_pods"}]}
+
+        assert self.run_eval.provider_failed(result) is None
+
+    def test_a_real_answer_mentioning_disconnection_is_scored(self):
+        """
+        The detector is anchored on the "ERROR: " prefix this harness writes
+        itself. A diagnosis about a disconnected pod is a real answer and a
+        wrong one must stay a failure.
+        """
+        result = {"answer": "The pod was disconnected from its service.",
+                  "tool_calls": []}
+
+        assert self.run_eval.provider_failed(result) is None
+
+    def test_an_unrelated_error_is_scored(self):
+        """Only transport failures are void; a bug in the loop is a failure."""
+        result = {"answer": "ERROR: KeyError 'containers'", "tool_calls": []}
+
+        assert self.run_eval.provider_failed(result) is None
