@@ -200,10 +200,20 @@ def working_copy(into):
 
 def run_tests(where, tests, timeout=300):
     """True if the suite passed. -x, because a killed mutant needs no more."""
+    # PYTHONDONTWRITEBYTECODE is not tidiness, it is correctness. CPython
+    # validates a cached .pyc against (mtime-to-the-second, size) of the
+    # source. Every mutant here is `ast.unparse` output written back to the
+    # same path, so consecutive mutants differ by one character and are the
+    # SAME SIZE -- and adjacent sites are written well inside the same second.
+    # The second mutant then runs against the first one's bytecode, the tests
+    # pass, and it is reported as a survivor it never was. Measured on
+    # tool_schema.py: 3 survivors with caching, 2 without, and the phantom was
+    # `doc.split(...)[0] -> [1]`, which two tests assert against directly.
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     out = subprocess.run(
         [sys.executable, "-m", "pytest", *tests, "-x", "-q",
          "-p", "no:cacheprovider", "--no-header"],
-        cwd=where, capture_output=True, text=True, timeout=timeout,
+        cwd=where, capture_output=True, text=True, timeout=timeout, env=env,
     )
     return out.returncode == 0, out.stdout[-2000:]
 
@@ -296,17 +306,38 @@ def self_check():
             raise SystemExit(f"baseline is red before any mutation:\n{output}")
 
         # DEFAULT_PER_HOUR is asserted by name; changing it must fail.
+        #
+        # The mutant is written at the SAME SIZE and forced to the SAME
+        # mtime-to-the-second as the green baseline that just ran. That is not
+        # incidental, it is the whole test. CPython validates a cached .pyc
+        # against (mtime-seconds, size); `ast.unparse` output written back to
+        # one path makes every mutant the same size as its neighbour, and the
+        # real loop writes adjacent sites well inside one second. When that
+        # bites, the tests re-run the PREVIOUS code, pass, and the mutant is
+        # scored a survivor it never was -- silently, and only for the
+        # single-character mutations that make up most of the corpus.
+        #
+        # Two earlier versions of this check could not see that bug. The first
+        # let the clock run, and limits.py's suite is slow enough that the two
+        # writes landed in different seconds. The second forced the timestamp
+        # but made both writes lethal, so the stale bytecode failed the tests
+        # too and the check passed either way. It has to be green-then-lethal.
+        stamp = os.stat(target).st_mtime
         broken = source.replace("DEFAULT_PER_HOUR = 60", "DEFAULT_PER_HOUR = 61")
         if broken == source:
             raise SystemExit("self-check cannot find its landmark in limits.py")
+        if len(broken) != len(source):
+            raise SystemExit("self-check needs its mutant the size of the source")
         open(target, "w", encoding="utf-8").write(broken)
+        os.utime(target, (stamp, stamp))
         passed, _ = run_tests(where, tests)
 
     if passed:
         raise SystemExit(
             "self-check FAILED: the tests passed against a deliberately broken "
             "limits.py. The harness is not running the code it thinks it is.")
-    print("self-check passed: a known-lethal mutation was killed")
+    print("self-check passed: a known-lethal mutation was killed, written at "
+          "the size and timestamp that stale bytecode would have hidden")
     return 0
 
 
