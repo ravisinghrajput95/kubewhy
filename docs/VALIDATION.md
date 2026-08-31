@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1272 passing, no cluster or model required |
+| Automated test suite | **PROVEN** | 1280 passing, no cluster or model required |
 | Grounding replay | **PROVEN** | 1489 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -719,6 +719,59 @@ OOMKilled if that were the cause" — withdrew the claim, and reached SIGKILL
 plus the liveness probe. Four runs kept the claim anyway. **One of five is
 not a fix**, the interval is Wilson 95% [4-62], and p=1.0 says the sample
 cannot distinguish it from the baseline. The case stays open.
+
+### 21. The full-suite regression run, and what it changed about defect 19
+
+**145 runs, 29 cases at n=5**, on kind + qwen3, directly comparable to the
+published `final-29-qwen3-n5.json`. Run because the readiness policy, the
+contradiction re-ask, the OOM spelling fix and a system-prompt paragraph all
+landed after that baseline while only 3 of 29 cases had been checked
+individually. Zero void runs.
+
+| | before | after |
+|---|---|---|
+| Suite pass rate | 127/145 (88%) [81-92] | **134/145 (92%) [87-96]** |
+| Paired sign test | — | **p = 1.0000, UNDETERMINED** |
+| Contradicted verdicts | 9 | **3** |
+| Evidence-supported claims | 570 | 589 |
+| Wrong-target rate | 0.7% | 0.7% |
+| Median / p95 duration | 73s / 188s | 83s / 225s |
+
+**The headline improvement is not established.** Six scenarios moved up, six
+moved down, seventeen were identical. A four-point gain on 145 runs is what
+this suite produces by chance, and the paired test says so.
+
+Two scenarios reached the 5-versus-5 floor:
+
+| Scenario | before | after | Fisher p |
+|---|---|---|---|
+| `never_ready_readiness_probe` | 0/5 | **5/5** | 0.0079 |
+| `scoping_quiet_workload_beside_loud_one` | 0/5 | **4/5** | 0.0476 |
+| `insufficient_no_such_workload` | 5/5 | **2/5** | 0.1667 |
+
+**Neither survives Bonferroni** for 29 comparisons (p < 0.0017), and at 5
+against 5 the design cannot reach it — 0.0079 is the floor.
+
+**`insufficient_no_such_workload` dropping 5/5 to 2/5 is the finding to carry
+forward.** It is not significant and it is the largest single move in the run,
+so it is recorded rather than explained away. Three runs answered correctly
+that `payments-gateway` does not exist and then went on to list the
+neighbouring broken deployments with unverified claims about each — "likely
+crashing", "exceeding resource limits" — which scored `partial` where the case
+requires `insufficient_evidence`. **None of this session's mechanisms fired on
+those runs**: `reconciles`, `policies` and `nudges` are all 0. So either the
+system-prompt paragraph made the model more discursive about terminations it
+was not asked about, or this is n=5 noise. **The next session should settle it
+by re-running that case at n=10 with the paragraph removed**, and not by
+reasoning about it.
+
+**Defect 19's number is superseded.** Pooling every measurement of the scoping
+case under current code — 3/10, 4/10, and 4/5 inside this suite — gives
+**11/25 (44%), Wilson 95% [27-63]**, against a 0/5 baseline. That is a real
+improvement on a case that used to fail every time, and it is still a case
+that gets the wrong answer more often than not. The three arms disagree more
+than their intervals suggest they should, which is itself a reason to distrust
+any single n=5 reading of it.
 
 ### 20. Rate limiting, and what "in a cluster" could not mean
 
