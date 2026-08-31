@@ -20,7 +20,7 @@ and does not support. Four words are used and they mean specific things:
 | Bounded investigation deadline | **PROVEN** | 38 tests incl. fallback-cannot-reset |
 | Security regression (UI) | **PROVEN** | credentials absent from page, no client-side calls |
 | Console authentication | **PROVEN** | kind + real OIDC issuer; console unreachable from another pod |
-| Rate limiting | **PARTIALLY PROVEN** | unit and API tests; never run against a real loop in a cluster |
+| Rate limiting | **PROVEN** | real loop against the real API: 3 investigations at a ceiling of 3, then 429 with an accurate `Retry-After` |
 | External token budget | **PARTIALLY PROVEN** | charged through the real gateway with a stub provider; no hosted provider was billed |
 | Forged identity header | **PROVEN** | overwritten by the proxy, measured with a session held |
 | Per-user authorization | **NOT TESTED** | deliberately not implemented — see SECURITY.md |
@@ -719,6 +719,45 @@ OOMKilled if that were the cause" — withdrew the claim, and reached SIGKILL
 plus the liveness probe. Four runs kept the claim anyway. **One of five is
 not a fix**, the interval is Wilson 95% [4-62], and p=1.0 says the sample
 cannot distinguish it from the baseline. The case stays open.
+
+### 20. Rate limiting, and what "in a cluster" could not mean
+
+This row read PARTIALLY PROVEN with the note "never run against a real loop in
+a cluster" from the day the limiter shipped. Closing it turned out to require
+correcting the note rather than running the test it asked for.
+
+**What was measured, 2026-08-30.** The real API process, ceiling set to 3 per
+hour, five real `/ask` requests driven against a live kind cluster with Ollama
+reachable:
+
+| Request | Result | Duration |
+|---|---|---|
+| 1 | **200** | 106s |
+| 2 | **200** | 175s |
+| 3 | **200** | 163s |
+| 4 | **429**, `Retry-After: 3156` | 0s |
+| 5 | **429**, `Retry-After: 3156` | 0s |
+
+**3156 is the part worth keeping.** The three investigations took 444 seconds
+between them, and 3600 − 444 = 3156. The header reports *when the window
+frees*, not the window length, which is what the code comment claims and what
+a caller told to wait a flat hour would have no way to distinguish. That is
+the property the unit tests could assert and only a real loop could confirm.
+
+A separate run with the provider down established that a **503 still spends
+the allowance** — the ceiling is charged in the dependency, before the
+handler. That is deliberate and it is the only thing pacing retries while the
+provider is unreachable, but it means an outage consumes a caller's quota.
+
+**Why "in a cluster" was the wrong requirement.** The chart deploys the
+controller and the console. It does not deploy the REST API, and the limiter
+guards the model-driving endpoints on that API — the console reaches
+`agent.stream()` directly and never passes through `budgeted`. So there is no
+in-cluster surface for this ceiling to be tested on until the chart grows one,
+and the original note asked for evidence that could not exist. `TRIAGE_MAX_
+INVESTIGATIONS_PER_HOUR` and `TRIAGE_MAX_EXTERNAL_TOKENS_PER_HOUR` are also
+absent from the chart's values for the same reason; the README documents them
+as environment variables, which is what they are.
 
 ## What the `vllm` provider has and has not been run against
 
