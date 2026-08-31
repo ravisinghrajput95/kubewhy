@@ -765,13 +765,27 @@ was not asked about, or this is n=5 noise. **The next session should settle it
 by re-running that case at n=10 with the paragraph removed**, and not by
 reasoning about it.
 
+A third explanation — that the grounding checker itself got stricter about
+`partial` between the two runs — was tested and **ruled out**, 2026-08-31.
+Replaying the published baseline through the current checker
+(`evals/replay_grounding.py results/final-29-qwen3-n5.json`, after
+`--self-check` passed 1650/1650) moves **2 of 140 records, both
+`contradicted` -> `grounded`**, and none into `partial`. The extra `partial`
+verdicts are changes in what the model wrote, not in how it was scored. What
+did change on this case is answer length, **354 -> 804 characters mean, x2.27**
+— against **+7% across the suite as a whole** — so the added text is
+concentrated exactly where there was nothing to find.
+
 **Defect 19's number is superseded.** Pooling every measurement of the scoping
 case under current code — 3/10, 4/10, and 4/5 inside this suite — gives
-**11/25 (44%), Wilson 95% [27-63]**, against a 0/5 baseline. That is a real
-improvement on a case that used to fail every time, and it is still a case
-that gets the wrong answer more often than not. The three arms disagree more
-than their intervals suggest they should, which is itself a reason to distrust
-any single n=5 reading of it.
+**11/25 (44%), Wilson 95% [27-63]**, against a 0/5 baseline. **Even pooled,
+that does not reach significance**: Fisher exact against 0/5 gives p=0.0816
+one-sided, p=0.16 two-sided. The case moved off zero and is still wrong more
+often than right, and the honest summary is that 25 runs cannot separate "the
+change helped" from "0/5 was an unlucky floor". The three arms — 3/10, 4/10,
+4/5 — disagree more than their intervals suggest they should, which is a
+reason to distrust any single n=5 reading and a reason to distrust the pool.
+The row stays **open**.
 
 ### 20. Rate limiting, and what "in a cluster" could not mean
 
