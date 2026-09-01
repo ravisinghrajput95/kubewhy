@@ -124,6 +124,33 @@ class TestThinkingIsReportedNotAssumed:
             with pytest.raises(ollama_mod.ResponseError):
                 backends.get().chat("nope", [], [], True)
 
+    def test_an_unrelated_error_is_not_even_retried(self):
+        """
+        The case above passes whether the guard is right or wrong.
+
+        `side_effect` is a single exception, so it is raised again on a
+        retry -- which means the assertion holds even when the fallback fires
+        on an error it has no business handling. Mutation testing found it:
+        relaxing `think and "does not support thinking" in str(exc)` to `or`
+        survived, and that mutant swallows *every* ResponseError and silently
+        re-asks without thinking.
+
+        Giving the retry something to succeed with is what makes the two
+        distinguishable, and the call count is what names the difference.
+        """
+        import ollama as ollama_mod
+
+        client = MagicMock()
+        client.chat.side_effect = [
+            ollama_mod.ResponseError("model not found"),
+            ollama_reply(content="a retry that should never have happened"),
+        ]
+        with patch("backends.ollama.Client", return_value=client):
+            with pytest.raises(ollama_mod.ResponseError):
+                backends.get().chat("nope", [], [], True)
+
+        assert client.chat.call_count == 1
+
 
 class TestTheBackendOwnsTheWireShape:
     """

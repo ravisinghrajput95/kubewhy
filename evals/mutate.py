@@ -406,12 +406,21 @@ def main(argv=None):
         print(report(result))
         results.append(result)
         worst = max(worst, len(result["survivors"]))
+        # Written after every module, not once at the end. A survey over the
+        # whole repository takes about an hour, and one that is interrupted
+        # at 55 minutes used to leave nothing at all -- which is how the
+        # 2026-09-01 run lost sixteen modules of finished work.
+        _write(args.json_path, results)
 
-    if args.json_path:
-        with open(args.json_path, "w", encoding="utf-8") as handle:
-            json.dump(results, handle, indent=2)
-        print(f"wrote {args.json_path}")
+    _write(args.json_path, results)
     return 0
+
+
+def _write(path, results):
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(results, handle, indent=2)
 
 
 if __name__ == "__main__":
