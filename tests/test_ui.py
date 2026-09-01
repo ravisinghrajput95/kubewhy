@@ -12,6 +12,7 @@ nothing is wrong during an incident.
 """
 
 import os
+import re
 import sys
 from unittest.mock import patch
 
@@ -287,10 +288,23 @@ class TestSearchCoversTheClusterNotJustThePage:
 
     @staticmethod
     def scanner(elsewhere=None):
-        """Page scan returns FINDINGS; a by-name lookup returns `elsewhere`."""
+        """
+        Page scan returns FINDINGS; a by-name lookup returns `elsewhere`.
+
+        The fake honours only_unhealthy, because that flag is the whole
+        mechanism here. The real scan_cluster(only_unhealthy=True) never
+        reports a healthy workload, so a lookup that forgot to pass False
+        would answer "no workload named billing exists in this cluster" about
+        a workload that is running fine -- the exact confusion this class
+        exists to prevent. A fake that ignored the flag could not tell the
+        two apart, and did not: the flipped flag survived mutation testing.
+        """
         def fake(only_unhealthy=True, limit=20, namespaces="", workload=""):
             if workload:
-                return elsewhere or {
+                found = dict(elsewhere or {})
+                if only_unhealthy:
+                    found = {k: v for k, v in found.items() if v.get("fault")}
+                return found or {
                     "result": f"no workload named {workload} exists in this cluster"
                 }
             return dict(FINDINGS)
@@ -319,6 +333,18 @@ class TestSearchCoversTheClusterNotJustThePage:
             filter_box.set_value(term).run()
         return app
 
+    def test_a_namespace_matches_even_though_no_pod_name_does(self):
+        """
+        Either half of the row matches: the workload key or the example pod.
+        Requiring both would drop every search for a namespace, since a pod
+        name does not contain the namespace it runs in.
+        """
+        app = self._search(self.scanner(), "demo")
+
+        assert list(app.dataframe[0].value["workload"]) == ["demo/memory-hog"]
+        assert not any("found by asking" in c.value for c in app.caption), \
+            "a row that was on the page was not matched locally"
+
     def test_a_name_already_on_the_page_is_filtered_locally(self):
         app = self._search(self.scanner(), "memory-hog")
 
@@ -328,6 +354,11 @@ class TestSearchCoversTheClusterNotJustThePage:
         assert not any("found by asking" in c.value for c in app.caption)
 
     def test_a_workload_outside_the_page_is_found_in_the_cluster(self):
+        """
+        And it is healthy, deliberately. A workload with something wrong with
+        it would come back from either kind of scan; only a healthy one proves
+        the lookup asked for every workload rather than the unhealthy ones.
+        """
         elsewhere = {
             "prod/billing": {
                 "status": "Running", "pods": 2,
@@ -338,6 +369,28 @@ class TestSearchCoversTheClusterNotJustThePage:
 
         assert list(app.dataframe[0].value["workload"]) == ["prod/billing"]
         assert any("found by asking" in c.value for c in app.caption)
+
+    def test_the_by_name_lookup_asks_for_healthy_workloads_too(self):
+        """
+        The flag itself, at the call. The test above asserts the consequence;
+        this one names the cause, so a failure says which of the two broke.
+        """
+        elsewhere = {"prod/billing": {"status": "Running", "pods": 2,
+                                      "example": "billing-7d9f-abcde",
+                                      "fault": None}}
+        calls = []
+
+        def recording(only_unhealthy=True, limit=20, namespaces="", workload=""):
+            calls.append({"only_unhealthy": only_unhealthy, "workload": workload})
+            return self.scanner(elsewhere)(only_unhealthy, limit, namespaces, workload)
+
+        self._search(recording, "billing")
+        by_name = [c for c in calls if c["workload"]]
+
+        assert by_name, "no by-name lookup happened"
+        assert all(c["only_unhealthy"] is False for c in by_name)
+        # The page scan is the other way round, and stays that way.
+        assert all(c["only_unhealthy"] is True for c in calls if not c["workload"])
 
     def test_a_workload_that_does_not_exist_is_reported_as_absent(self):
         """
@@ -821,3 +874,466 @@ class TestTheUiDisplaysTheBackendsGroundingNotItsOwn:
         assert "**Observed** · 2" in body
         assert "**Inferred** · 1" in body
         assert "**Unknown** · 3" in body
+
+
+# --- markup reaches the reader as markup --------------------------------------
+
+MARKUP = re.compile(r"<[a-zA-Z/][^>]*>")
+
+
+def painted(app):
+    """Every rendered markdown element that carries a tag."""
+    return [m for m in app.markdown if MARKUP.search(str(m.value))]
+
+
+class TestRenderedMarkupIsRenderedAsMarkup:
+    """
+    The console writes its own HTML for the strip, the header, the claim
+    columns and the next step. `st.markdown` renders that only because the
+    call passes `unsafe_allow_html=True`; without it the reader gets visible
+    angle brackets, which is defect 16 exactly -- it shipped once, in the red
+    box announcing a contradiction.
+
+    `test_ui_markup.py` says AppTest reads the string submitted rather than the
+    text painted, and for `st.error` that is true and unfixable: it has no such
+    flag, and the escaping happens in the browser. For `st.markdown` it is not.
+    `allow_html` is a field on the markdown proto, so the element tree records
+    which of the two a call asked for, and these assert on it. Verified on
+    streamlit 1.61.1 against a two-line app: `proto.allow_html` came back True
+    for the call that passed the flag and False for the one that did not.
+
+    Mutation testing is why these exist. All eleven `unsafe_allow_html=True`
+    in ui.py were flipped to False and the suite stayed green -- 43 tests over
+    this element tree, none of which looked at the flag.
+    """
+
+    def _assert_nothing_is_escaped(self, app):
+        rendered = painted(app)
+        # The counter. A run that painted no markup would satisfy the real
+        # assertion below vacuously, and so would a walk that stopped finding
+        # markdown elements.
+        assert rendered, "this run rendered no markup, so it proves nothing"
+
+        escaped = [str(m.value)[:70] for m in rendered if not m.proto.allow_html]
+
+        assert not escaped, (
+            "rendered as visible angle brackets rather than as markup:\n  "
+            + "\n  ".join(escaped)
+        )
+
+    def test_the_findings_page(self):
+        self._assert_nothing_is_escaped(run(FINDINGS))
+
+    def test_a_finished_investigation(self):
+        self._assert_nothing_is_escaped(render_answer(ANSWER))
+
+    def test_a_contradicted_answer(self):
+        """The verdict the defect shipped on."""
+        self._assert_nothing_is_escaped(render_answer(
+            {**ANSWER, "confidence": "contradicted",
+             "contradictions": [{"claim": "application error",
+                                 "measured": "last_termination.reason = oomkilled",
+                                 "rule": "imposed_termination_vs_application_cause"}]}))
+
+    def test_an_answer_with_a_next_step(self):
+        """A panel the other runs deliberately do not render."""
+        self._assert_nothing_is_escaped(render_answer(
+            {**ANSWER,
+             "question": "why is crasher-x failing?",
+             "tool_calls": [{"name": "describe_pod",
+                             "arguments": {"name": "crasher-x",
+                                           "namespace": "demo"}}],
+             "evidence": [{"id": "tool-1", "tool": "describe_pod",
+                           "result": '{"pod": "crasher-x", "namespace": "demo",'
+                                     '"status": "CrashLoopBackOff",'
+                                     '"containers": {"c": {"last_termination":'
+                                     '{"reason": "Error", "exit_code": 1}}}}'}]}))
+
+    def test_the_instrument_can_tell_the_two_apart(self, tmp_path):
+        """
+        The four tests above are worth having only if `allow_html` really
+        distinguishes a rendered tag from an escaped one. Pinned here against
+        a two-line app rather than against ui.py, so a Streamlit release that
+        stopped recording the flag fails this one test instead of turning the
+        other four silently green.
+        """
+        app_file = tmp_path / "two_markdowns.py"
+        app_file.write_text(
+            "import streamlit as st\n"
+            "st.markdown(\"<span class='a'>rendered</span>\", "
+            "unsafe_allow_html=True)\n"
+            "st.markdown(\"<span class='b'>escaped</span>\")\n",
+            encoding="utf-8",
+        )
+        app = AppTest.from_file(str(app_file), default_timeout=30).run()
+
+        assert [m.proto.allow_html for m in app.markdown] == [True, False]
+        # Both submitted the same shape of string, which is the point: the
+        # value cannot tell them apart and the flag can.
+        assert all(MARKUP.search(m.value) for m in app.markdown)
+
+
+# --- choosing a pod within a workload ----------------------------------------
+#
+# A Deployment is its replicas, and everything below the workload selector is
+# about one pod: the detail, the events, the logs and the container inside
+# them. Nothing in this file exercised any of it before 2026-09-01 -- mutation
+# testing flipped the pod comparison, the replica-count guard, the container
+# guard and the vanished-workload guard, and the suite stayed green through
+# all of them.
+
+REPLICAS = [
+    {"pod": "payments-api-1", "status": "ImagePullBackOff", "ready": False,
+     "containers": ["api", "proxy"]},
+    {"pod": "payments-api-2", "status": "Running", "ready": True,
+     "containers": ["api", "proxy"]},
+    {"pod": "payments-api-3", "status": "CrashLoopBackOff", "ready": False,
+     "containers": ["api"]},
+]
+
+
+def run_workload(pods, choice="staging/payments-api", findings=None, pick=None):
+    """
+    The app with a workload selected and `workload_pods` stubbed.
+
+    `pick` selects a pod from the replica radio by label and reruns, which is
+    what a person does; the selection has to survive that rerun to be worth
+    anything.
+    """
+    import streamlit as st
+
+    st.cache_data.clear()
+    with patch.object(k8s, "scan_cluster",
+                      return_value=dict(FINDINGS if findings is None else findings)), \
+         patch.object(k8s, "list_nodes", return_value={}), \
+         patch.object(k8s, "workload_pods", return_value=pods), \
+         patch.object(k8s, "describe_pod", return_value={"pod": "x", "containers": {}}), \
+         patch.object(k8s, "get_pod_events", return_value={"pod": "x", "events": []}), \
+         patch.object(k8s, "get_pod_logs",
+                      return_value={"pod": "x", "source": "current", "logs": "boom"}):
+        app = AppTest.from_file(UI, default_timeout=60)
+        app.session_state["workload_choice"] = choice
+        app.run()
+        if pick is not None:
+            next(r for r in app.radio if "pods in this workload" in r.label) \
+                .set_value(pick).run()
+    assert not app.exception, [str(e.value) for e in app.exception]
+    return app
+
+
+def pod_picker(app):
+    return next((r for r in app.radio if "pods in this workload" in r.label), None)
+
+
+def container_picker(app):
+    return next((r for r in app.radio if r.label == "Container"), None)
+
+
+def health_note(app):
+    return [i.value for i in app.info if "Running and ready" in i.value]
+
+
+class TestChoosingBetweenReplicas:
+    """
+    Three replicas can fail for three reasons, so the page offers all of them
+    rather than the one the scan named as an example.
+    """
+
+    def test_every_pod_is_offered(self):
+        picker = pod_picker(run_workload(REPLICAS))
+
+        assert picker is not None, "no pod picker for a three-replica workload"
+        assert len(picker.options) == 3
+        assert all(pod["pod"] in " ".join(picker.options) for pod in REPLICAS)
+
+    def test_two_replicas_still_get_a_choice(self):
+        """Two is the smallest number that is not one, and the boundary the
+        guard is written at."""
+        assert pod_picker(run_workload(REPLICAS[:2])) is not None
+
+    def test_one_replica_is_not_a_choice(self):
+        """A radio with a single option is a decision nobody has to make."""
+        assert pod_picker(run_workload(REPLICAS[:1])) is None
+
+    def test_the_picked_pod_is_the_one_handed_to_the_ask_panel(self):
+        """
+        The Ask panel has no other idea what "the selected workload" means, so
+        a pod chosen here and a pod investigated there must be the same one.
+        """
+        app = run_workload(REPLICAS,
+                           pick="payments-api-3  —  CrashLoopBackOff  (not ready)")
+
+        assert app.session_state["subject"]["pod"] == "payments-api-3"
+        assert app.session_state["subject"]["workload"] == "staging/payments-api"
+
+    def test_a_pod_that_is_not_ready_says_so_in_its_label(self):
+        picker = pod_picker(run_workload(REPLICAS))
+
+        assert "payments-api-2  —  Running" in picker.options
+        assert "payments-api-1  —  ImagePullBackOff  (not ready)" in picker.options
+
+    def test_a_workload_whose_pods_cannot_be_read_still_renders(self):
+        """
+        The collectors return {"error": ...} rather than raising, and the page
+        has to survive that: no picker, no crash, and the example pod from the
+        scan is still the subject.
+        """
+        app = run_workload({"error": "kubernetes API error 403: forbidden"})
+
+        assert pod_picker(app) is None
+        assert app.session_state["subject"]["pod"] == \
+            FINDINGS["staging/payments-api"]["example"]
+
+
+class TestTheContainerPickerFollowsThePod:
+    """
+    Sidecars make "the pod's logs" ambiguous, and picking silently shows the
+    proxy while the app is what broke.
+    """
+
+    def test_a_multi_container_pod_offers_a_choice(self):
+        picker = container_picker(run_workload(REPLICAS))
+
+        assert picker is not None
+        assert list(picker.options) == ["api", "proxy"]
+
+    def test_a_single_container_pod_does_not(self):
+        app = run_workload(REPLICAS,
+                           pick="payments-api-3  —  CrashLoopBackOff  (not ready)")
+
+        assert container_picker(app) is None
+
+    def test_the_containers_are_the_selected_pods_own(self):
+        """
+        Not another pod's. With one replica the containers come from the entry
+        that matches the example pod by name, and matching the wrong one shows
+        a container list belonging to something else.
+        """
+        pods = [{"pod": FINDINGS["demo/memory-hog"]["example"], "status": "OOMKilled",
+                 "ready": False, "containers": ["hog", "logshipper"]}]
+        picker = container_picker(run_workload(pods, choice="demo/memory-hog",
+                                               findings=FINDINGS))
+
+        assert picker is not None, "the matching pod's containers were not found"
+        assert list(picker.options) == ["hog", "logshipper"]
+
+    def test_a_pod_the_scan_named_but_the_lookup_does_not_know(self):
+        """No match, so no container list -- rather than the first pod's."""
+        pods = [{"pod": "someone-elses-pod", "status": "Running", "ready": True,
+                 "containers": ["a", "b"]}]
+
+        assert container_picker(run_workload(pods, choice="demo/memory-hog")) is None
+
+
+class TestEventsAreDatedAgainstTheCurrentState:
+    """
+    Events are history. A pod that waited on a taint keeps that warning for
+    life, and a page that shows it without saying so presents a resolved
+    problem as a current one.
+    """
+
+    def test_a_running_ready_pod_is_marked_as_healthy_now(self):
+        app = run_workload(REPLICAS, pick="payments-api-2  —  Running")
+
+        assert health_note(app), "no note on a pod that is healthy right now"
+        assert "payments-api-2" in health_note(app)[0]
+
+    def test_a_pod_that_is_still_broken_gets_no_such_note(self):
+        assert not health_note(run_workload(REPLICAS))
+
+    def test_running_but_not_ready_is_not_healthy(self):
+        """
+        Both halves are required. A pod stuck in a readiness probe failure is
+        Running and is not serving traffic.
+        """
+        pods = [{"pod": "payments-api-1", "status": "Running", "ready": False,
+                 "containers": ["api", "proxy"]},
+                {"pod": "payments-api-2", "status": "Running", "ready": True,
+                 "containers": ["api"]}]
+
+        assert not health_note(run_workload(pods, pick="payments-api-1  —  Running  (not ready)"))
+
+    def test_pods_that_cannot_be_read_are_not_assumed_healthy(self):
+        assert not health_note(run_workload({"error": "cluster unreachable"}))
+
+
+class TestAWorkloadThatLeavesTheScan:
+    """
+    `only_unhealthy` hides a workload the moment it recovers, and a CronJob's
+    workload disappears every time its pods complete. Falling back to index 0
+    then retargets the investigation to an unrelated workload without saying a
+    word -- measured, demo/nightly-sync -> demo/bad-image, and the next
+    Diagnose would have investigated a workload nobody chose.
+    """
+
+    GONE = "demo/nightly-sync"
+
+    def test_it_stays_selected(self):
+        app = run_workload(REPLICAS, choice=self.GONE)
+        workload = next(s for s in app.selectbox if s.label == "Workload")
+
+        assert workload.value == self.GONE
+        assert workload.options[0] == self.GONE
+
+    def test_it_does_not_silently_become_another_workload(self):
+        """The failure this guard was written for: a target nobody chose."""
+        app = run_workload(REPLICAS, choice=self.GONE)
+
+        assert "subject" not in app.session_state or \
+            app.session_state["subject"]["workload"] != "staging/payments-api"
+
+    def test_the_page_says_what_happened(self):
+        app = run_workload(REPLICAS, choice=self.GONE)
+
+        assert any(self.GONE in w.value and "no longer in the scan" in w.value
+                   for w in app.warning)
+
+    def test_a_workload_still_in_the_scan_is_not_announced_as_gone(self):
+        """The counter. A warning on the ordinary case is a warning nobody
+        reads by the second incident."""
+        app = run_workload(REPLICAS)
+
+        assert not any("no longer in the scan" in w.value for w in app.warning)
+
+
+class TestTheClaimColumnsSayWhenTheyAreEmpty:
+    """
+    Three columns, and an empty one has to read as empty rather than as a
+    column that failed to render. The inverse matters as much: "— none —"
+    under a list of claims is a page contradicting itself.
+    """
+
+    EMPTY = {"observations": [], "inferences": [], "unknowns": [],
+             "contradictions": [], "corrections": []}
+
+    def test_an_empty_run_says_so_in_every_column(self):
+        app = render_answer({**ANSWER, "rca": self.EMPTY})
+
+        assert len([c for c in app.caption if c.value == "— none —"]) == 3
+
+    def test_a_full_run_says_it_in_none_of_them(self):
+        app = render_answer(ANSWER)
+
+        assert not [c for c in app.caption if c.value == "— none —"]
+
+
+class TestTheTimelineIsTheCallsInOrder:
+    """
+    The timeline is the run's audit trail on screen: which tool, with which
+    arguments, in which order. Nothing asserted on it before 2026-09-01.
+    """
+
+    def test_the_calls_are_numbered_from_one(self):
+        rows = render_answer(ANSWER).dataframe[0].value
+
+        assert list(rows["#"]) == [1, 2]
+        assert list(rows["tool"]) == ["list_pods", "describe_pod"]
+
+    def test_the_arguments_are_the_ones_the_tool_was_called_with(self):
+        """
+        A timeline that showed the tool but not what it was pointed at cannot
+        answer the question it exists for -- which pod was actually read.
+        """
+        rows = render_answer(ANSWER).dataframe[0].value
+
+        assert rows["arguments"][0] == "namespace=demo"
+        assert "memory-hog-x" in rows["arguments"][1]
+
+    def test_a_call_with_no_arguments_is_marked_rather_than_blank(self):
+        answer = {**ANSWER,
+                  "tool_calls": [{"name": "get_system_info", "arguments": {}}]}
+        rows = render_answer(answer).dataframe[0].value
+
+        assert list(rows["arguments"]) == ["—"]
+
+
+class TestAGroundedAnswerWithNothingToCheck:
+    """
+    `grounded` means no claim contradicted the evidence, which is also what it
+    means when there was no claim to check. Saying so is the difference
+    between a verdict and a green badge that means nothing.
+    """
+
+    def test_it_says_there_was_nothing_to_verify(self):
+        app = render_answer({**ANSWER, "confidence": "grounded", "checked": 0})
+
+        assert any("nothing to verify" in i.value for i in app.info)
+
+    def test_an_answer_that_was_checked_does_not(self):
+        """The counter: the note is about the absence of checkable claims,
+        not about the verdict."""
+        app = render_answer({**ANSWER, "confidence": "grounded", "checked": 3})
+
+        assert not any("nothing to verify" in i.value for i in app.info)
+
+    def test_a_contradicted_answer_does_not_get_it_either(self):
+        app = render_answer({**ANSWER, "confidence": "contradicted", "checked": 0,
+                             "contradictions": [{"claim": "a", "measured": "b",
+                                                 "rule": "r"}]})
+
+        assert not any("nothing to verify" in i.value for i in app.info)
+
+
+class TestTheHistoryListIsReadableAtAnyQuestionLength:
+    """
+    The sidebar buttons are the history. A question longer than the button is
+    the ordinary case -- people type sentences -- and the label has to stay a
+    label rather than taking the sidebar or the page down with it.
+    """
+
+    LONG = ("why did the payments-api deployment in staging start failing its "
+            "readiness probe after the config change this morning?")
+
+    def test_a_long_question_is_shortened_rather_than_dropped(self):
+        seen = []
+        app = run_form(seen, question=self.LONG)
+        labels = [b.label for b in app.button]
+
+        assert any("…" in label for label in labels), "nothing was truncated"
+        # Still the question that was asked, just less of it: the label is a
+        # timestamp, two spaces, then a prefix of what was typed.
+        shortened = next(label for label in labels if "…" in label)
+        question_part = shortened.split("  ", 1)[-1]
+
+        assert question_part.endswith("…")
+        assert self.LONG.startswith(question_part[:-1])
+        assert len(question_part) < len(self.LONG)
+
+    def test_a_short_question_is_shown_whole(self):
+        seen = []
+        app = run_form(seen, question="why is it restarting?")
+        labels = [b.label for b in app.button]
+
+        assert any(label.endswith("why is it restarting?") for label in labels)
+
+
+class TestTheAskPanelBeforeAnythingIsAsked:
+    """
+    The form is on screen from the first render, and everything it says has to
+    be about what the reader just did rather than about what they have not
+    done yet.
+    """
+
+    def test_the_placeholder_warning_waits_for_a_click(self):
+        """
+        "Type a question" on a page nobody has submitted is an error message
+        for something that has not happened. It is shown when Diagnose is
+        clicked with an empty box and no workload selected, and only then.
+        """
+        app = run(FINDINGS)
+
+        assert not any("grey text is a placeholder" in w.value for w in app.warning)
+
+    def test_an_unscoped_question_runs_with_nothing_selected(self):
+        """
+        No workload selected is a legitimate state -- it is the whole cluster
+        -- and the question still has to reach the agent. The scoping branch
+        must not be entered without a subject to scope to.
+        """
+        seen = []
+        app = run_form(seen, question="what is wrong with this cluster?",
+                       scan={"result": "no unhealthy workloads"})
+
+        assert seen == ["what is wrong with this cluster?"], \
+            "the question did not reach the agent unscoped"
+        assert not app.exception, [str(e.value) for e in app.exception]
