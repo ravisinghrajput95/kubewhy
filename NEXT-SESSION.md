@@ -7,8 +7,10 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at `5f93602`, tree clean and pushed, 1405 tests pass (47s),
-CI green, tags through v0.2.0. Nothing of this project is running.**
+**State: `main` at the 2026-09-01 evening head — `git log --oneline -1`, which
+is the authority, not this line — tree clean and pushed, 1405 tests pass
+(47s), CI green on the last code commit, tags through v0.2.0. Nothing of this
+project is running: no survey, no kind cluster, no containers.**
 
 **Read `docs/VALIDATION.md` first — defects 25 and 26 are the whole of the
 2026-09-01 evening session — then "Pick up, in order" below. Everything under
