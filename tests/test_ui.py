@@ -1119,11 +1119,17 @@ class TestTheContainerPickerFollowsThePod:
         assert list(picker.options) == ["hog", "logshipper"]
 
     def test_a_pod_the_scan_named_but_the_lookup_does_not_know(self):
-        """No match, so no container list -- rather than the first pod's."""
+        """
+        No match, so no container list -- rather than the first pod's. And no
+        health claim either: the one pod that was found is Running and ready,
+        and it is not the pod on screen.
+        """
         pods = [{"pod": "someone-elses-pod", "status": "Running", "ready": True,
                  "containers": ["a", "b"]}]
+        app = run_workload(pods, choice="demo/memory-hog")
 
-        assert container_picker(run_workload(pods, choice="demo/memory-hog")) is None
+        assert container_picker(app) is None
+        assert not health_note(app)
 
 
 class TestEventsAreDatedAgainstTheCurrentState:
@@ -1681,3 +1687,77 @@ class TestAContextThatCannotBeBound:
 
         picker = next(s for s in app.selectbox if s.label == "Context")
         assert picker.value == "broken"
+
+
+class TestAHistoryEntryThatCannotBeReplayed:
+    """
+    The sidebar lists finished investigations and reopens one when clicked.
+    The row and the result come from two different reads of the store, and the
+    second can come back empty -- a job that was written but never completed,
+    or a store trimmed between the two. Clicking it must do nothing rather
+    than take the page down.
+    """
+
+    class Store:
+        """A store with one listed job whose result is not there."""
+
+        def __init__(self):
+            self.rows = [{"id": "job-1", "question": "why did it restart?",
+                          "created_at": 1756700000.0, "status": "done"}]
+
+        def list_jobs(self, limit=12):
+            return list(self.rows)
+
+        def get_job(self, job_id):
+            return None
+
+        def create_job(self, *args, **kwargs):
+            pass
+
+        def update_job(self, *args, **kwargs):
+            pass
+
+    def _click_the_history_button(self):
+        import store as store_mod
+        import streamlit as st
+
+        st.cache_data.clear()
+        # _history() is a cache_resource, shared for the life of the process,
+        # so an earlier test's real store would still be handed back here.
+        st.cache_resource.clear()
+        with patch.object(k8s, "scan_cluster", return_value={"result": "ok"}), \
+             patch.object(k8s, "list_nodes", return_value={}), \
+             patch.object(store_mod, "build", lambda *a, **k: self.Store()):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.run()
+            entry = next(b for b in app.button
+                         if "why did it restart?" in b.label)
+            entry.click().run()
+        st.cache_resource.clear()
+        return app
+
+    def test_the_page_survives_the_click(self):
+        app = self._click_the_history_button()
+
+        assert not app.exception, [str(e.value) for e in app.exception]
+
+    def test_and_shows_no_investigation(self):
+        """The counter: surviving by rendering someone else's answer would
+        also produce no exception."""
+        app = self._click_the_history_button()
+
+        assert "answer" not in app.session_state or \
+            app.session_state["answer"] is None
+
+
+class TestTheQuestionStaysInTheBox:
+    def test_asking_does_not_empty_the_field(self):
+        """
+        A question you cannot see is a question you cannot edit and re-ask,
+        and re-asking a slightly different question is most of what this
+        console is for.
+        """
+        seen = []
+        app = run_form(seen, question="why does it restart?")
+
+        assert app.text_input[0].value == "why does it restart?"
