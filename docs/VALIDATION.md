@@ -477,11 +477,16 @@ a comment-stripped source file behind.
 
 **Seven real survivors were hidden inside published numbers**, in both checker
 modules and in `limits.py`, whose row in the table at the top of this file
-reads PROVEN. The `limits.py` survivor is line 140,
-`max(int(when + self.seconds - now) + 1, 1)` — mutating the `+ 1` to `+ 2`
-shifts every `Retry-After` header by a second and no test notices. The prose
-below claiming the boundary cases were closed was written against the wrong
-number: they were closed, but this constant never was.
+reads PROVEN.
+
+> **The `limits.py` survivor was described wrongly here, and the description
+> was load-bearing.** Corrected 2026-09-01 — see "limits.py:140 is an
+> equivalent mutant" below. The text said the survivor was the `+ 1` in
+> `max(int(when + self.seconds - now) + 1, 1)` and that mutating it "shifts
+> every `Retry-After` header by a second and no test notices". Both halves are
+> false: that expression is line **139**, and its `+ 1` is **killed** by three
+> tests that pin the value exactly. The survivor is the floor on line **140**,
+> a different statement.
 
 **The eleven modules that had never been surveyed at all**, measured
 2026-08-31 with the fixed harness:
@@ -581,12 +586,57 @@ The three that were real:
   the absence rule contradicts a correct answer using the very tool result
   that agrees with it.
 
-**189 survivors remain and are not claimed as reviewed** — the figure was 41
-when only 7 modules had been surveyed and the harness was miscounting both
-ways. The count is recorded so the next survey can tell a new survivor from an
-old one; a mutation score is not a quality score, and this project has said so
-since the harness landed. `limits.py:140` is the standing proof that a real gap
-hides among them: it sat inside a module recorded as 28/28.
+**189 survivors were recorded as a count, and the list itself was not kept** —
+the figure was 41 when only 7 modules had been surveyed and the harness was
+miscounting both ways. A mutation score is not a quality score, and this
+project has said so since the harness landed.
+
+Reviewing them needs the list, not the number, so `mutate.py` now takes
+`--json` and writes one. It also takes `--sites`, which is what makes a second
+pass possible: pass 1 runs the narrow default suite, pass 2 re-runs *only pass
+1's survivors* against every suite that exercises the module. A pass 1 survivor
+that dies in pass 2 was never a gap — it was test selection, and `targeting.py`
+is the standing example (64/74 narrow, 67/74 broad, no test written in
+between). Two tests pin the property the second pass depends on: that a site
+index names the same mutation in both passes. Both were confirmed red against
+a filter-then-number implementation before being kept.
+
+#### `limits.py:140` is an equivalent mutant, not the standing proof
+
+This one survivor was carrying an argument — it was cited in the handoff and
+above as proof that a real gap hides among the 189, on the strength of having
+turned up inside a module the docs recorded as 28/28. Reviewed 2026-09-01, it
+does not support that.
+
+The survivor is site 24, `return max(int(self.seconds), 1)` → `max(..., 2)`:
+the **fallback return after the loop**, not the round-up. Three facts settle
+it:
+
+- The round-up on line 139 is site 21, and it is **killed**
+  (`mutate.py limits.py --sites 21` → 1 mutant, 1 killed). Three tests pin the
+  value exactly — `== 2` at `seconds=1`, `== 11`, and `== 1` on a fractional
+  remainder. The claim that "no test notices" was about the wrong site.
+- Line 140 is reached only when the loop over every event never sees
+  `running < limit`. Since `running` reaches 0, that requires `limit <= 0`.
+- `limit <= 0` cannot arrive through the public API. `_int` raises on a
+  negative (`use 0 for unlimited`), and both call sites in `check()` are
+  gated on `if ceiling:` and `if budget:`, so 0 never reaches `retry_after`
+  either.
+
+Confirmed by search rather than by argument, which is this document's own
+standard: 200,000 random trials over `seconds ∈ {0.5, 1, 1.5, 2, 3, 10, 100,
+3600}`, `limit ∈ {-2 … 5}`, zero to four events with random amounts and a
+random `now`, comparing the original and the mutant. **32,237 inputs separated
+them and every one had `limit <= 0`; none had `limit >= 1`.** The floor also
+only bites when `int(self.seconds) < 2`, against a `WINDOW_SECONDS` of 3600.
+
+It belongs in the same category the harness already documents — a defensive
+branch nothing can reach — and no test was written for it, deliberately.
+
+**What this does not establish.** One of 189 is reviewed. It says nothing about
+the other 188, and the reason the review is worth doing is unchanged: the
+survivors were never read. What it does remove is the specific claim that a
+real gap had already been demonstrated among them.
 
 `targeting.py` is also the example of why the default test selection matters:
 run against `tests/test_targeting.py` alone it scored 64/74, and against its

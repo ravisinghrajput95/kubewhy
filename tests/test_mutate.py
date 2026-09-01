@@ -224,3 +224,63 @@ class TestTheLabelMatchesTheChange:
                              f"line reads {lines[changed[0]].strip()!r}")
 
         assert not wrong, "\n".join(wrong[:8])
+
+
+class TestASecondPassCanNameTheSameMutation:
+    """
+    Reviewing survivors takes two passes, and they have to agree on what a
+    survivor *is*.
+
+    Pass 1 runs the narrow default suite and produces a list. Pass 2 re-runs
+    only those sites against every suite that exercises the module, to
+    separate a real gap from test selection -- `targeting.py` scored 64/74
+    narrow and 67/74 broad with no test written in between.
+
+    That only works if a site index means the same mutation in both passes.
+    If `--sites` renumbered, pass 2 would test different mutants and report
+    the answer with total confidence.
+    """
+
+    def test_run_mutates_the_sites_it_was_asked_for(self, monkeypatch):
+        """
+        End to end through run(), reading what actually landed on disk.
+
+        The suite is stubbed green so every mutant survives and is reported;
+        what is asserted is the *content* written to the target file, which is
+        the only thing that proves site 24 was the mutation applied.
+        """
+        source = open(os.path.join(ROOT, "limits.py"), encoding="utf-8").read()
+        expected = {index: mutate.mutate(source, index) for index in (3, 24)}
+
+        seen = []
+
+        def stub(where, tests, timeout=300):
+            seen.append(open(os.path.join(where, "limits.py"),
+                             encoding="utf-8").read())
+            return True, ""
+
+        monkeypatch.setattr(mutate, "run_tests", stub)
+        result = mutate.run("limits.py", ["tests/test_limits.py"], only=[3, 24])
+
+        # seen[0] is the unmutated baseline run; then one per requested site.
+        assert seen[0] == source
+        assert seen[1:] == [expected[3], expected[24]]
+        assert [s["index"] for s in result["survivors"]] == [3, 24]
+
+    def test_filtering_does_not_renumber_the_sites(self):
+        """
+        The property directly: run() tags every site with its index *before*
+        applying `only`, so asking for site 24 mutates site 24 of the full
+        enumeration and not the 24th of what survived the filter.
+        """
+        source = open(os.path.join(ROOT, "limits.py"), encoding="utf-8").read()
+        found = mutate.sites(source)
+        for index, site in enumerate(found):
+            site["index"] = index
+
+        wanted = {3, 24}
+        filtered = [s for s in found if s["index"] in wanted]
+
+        assert [s["index"] for s in filtered] == [3, 24]
+        assert filtered[1]["line"] == found[24]["line"]
+        assert filtered[1]["what"] == found[24]["what"]

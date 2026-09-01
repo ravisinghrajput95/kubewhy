@@ -36,12 +36,20 @@ Postgres; item 6 needs kind plus Ollama. Nothing is blocked.
 1. **Review the 189 unreviewed mutation survivors.** The survey itself is now
    DONE -- 16 of 18 modules, 697 mutants, 508 killed (72.9%), measured
    2026-08-31 with a fixed harness. Pure local compute, no cluster, no model.
-   Start with `limits.py:140`, the standing proof that real gaps hide in this
-   list: the `+ 1` in `max(int(when + self.seconds - now) + 1, 1)` shifts every
-   `Retry-After` by a second and nothing catches it, inside a module the docs
-   recorded as 28/28. `backends.py` (18 survivors of 37), `inference.py` (36 of
-   125) and `contradiction.py` (43 of 117) are the densest. `--tests`
-   under-selects by default.
+   `backends.py` (18 survivors of 37), `inference.py` (36 of 125) and
+   `contradiction.py` (43 of 117) are the densest. `--tests` under-selects by
+   default.
+
+   **`limits.py:140` is no longer the example to start with; it was reviewed
+   on 2026-09-01 and is an equivalent mutant.** The description here and in
+   `VALIDATION.md` was wrong in both halves: the survivor is line 140's
+   fallback floor `max(int(self.seconds), 1)`, not line 139's round-up, and
+   the round-up is *killed* by three tests that pin the value exactly. Line
+   140 is reachable only with `limit <= 0`, which `_int` and both `check()`
+   call sites make impossible -- 200,000 random trials produced 32,237
+   separating inputs and not one had `limit >= 1`. Full working in
+   `VALIDATION.md`. **Nothing has yet demonstrated a real gap among the 189**;
+   that is what the review is for.
 2. **Make `tests/test_controller.py` and `tests/test_ui.py` self-contained.**
    Both reach a REAL cluster -- whatever `current-context` names -- and hang
    when run alone, while passing inside the full suite, so another test module

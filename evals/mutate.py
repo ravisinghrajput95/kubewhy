@@ -48,6 +48,7 @@ before a single mutation is applied.
 
 import argparse
 import ast
+import json
 import copy
 import glob
 import os
@@ -224,11 +225,29 @@ def default_tests(module):
     return [name] if os.path.exists(os.path.join(ROOT, name)) else []
 
 
-def run(module, tests, limit=None, verbose=False):
+def run(module, tests, limit=None, verbose=False, only=None):
+    """
+    Mutate `module`, run `tests` against each mutant, report the survivors.
+
+    `only` is a list of site indices, which is what makes a second pass
+    possible: pass 1 finds survivors against the narrow default suite, pass 2
+    re-runs *just those indices* against every suite that exercises the module.
+    A survivor of pass 1 that dies in pass 2 was never a gap -- it was test
+    selection, which is the `targeting.py` lesson (64/74 narrow, 67/74 broad,
+    with no test written in between).
+    """
     source = open(os.path.join(ROOT, module), encoding="utf-8").read()
     found = sites(source)
     if limit:
         found = found[:limit]
+    # Indices are recorded before any filtering: a site's identity is its
+    # position in the full enumeration, so pass 2 can name the same mutation
+    # pass 1 found. Filtering first would renumber them.
+    for index, site in enumerate(found):
+        site["index"] = index
+    if only is not None:
+        wanted = set(only)
+        found = [site for site in found if site["index"] in wanted]
 
     with tempfile.TemporaryDirectory(prefix="kubewhy-mutate-") as tmp:
         where = working_copy(os.path.join(tmp, "repo"))
@@ -241,7 +260,8 @@ def run(module, tests, limit=None, verbose=False):
                 f"killed and the run would report perfect coverage:\n{output}")
 
         survivors, killed, skipped = [], 0, 0
-        for index, site in enumerate(found):
+        for site in found:
+            index = site["index"]
             mutant = mutate(source, index)
             if mutant is None:
                 skipped += 1
@@ -350,6 +370,12 @@ def main(argv=None):
     parser.add_argument("--all", action="store_true",
                         help="every top-level module that has a matching test file")
     parser.add_argument("--self-check", action="store_true")
+    parser.add_argument("--json", dest="json_path",
+                        help="write the survivor list to this path. The counts "
+                             "alone are not reviewable: 189 survivors were "
+                             "recorded as a number and the list was lost")
+    parser.add_argument("--sites", help="only these site indices, comma-separated "
+                                        "(a second pass over pass 1's survivors)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -364,15 +390,27 @@ def main(argv=None):
     if not modules:
         parser.error("name a module, or pass --all")
 
-    worst = 0
+    only = None
+    if args.sites:
+        only = [int(n) for n in args.sites.split(",") if n.strip()]
+        if len(modules) != 1:
+            parser.error("--sites names indices in one module; pass exactly one")
+
+    worst, results = 0, []
     for module in modules:
         tests = args.tests or default_tests(module)
         if not tests:
             print(f"{module}: no test file found; name one with --tests")
             continue
-        result = run(module, tests, args.limit, args.verbose)
+        result = run(module, tests, args.limit, args.verbose, only)
         print(report(result))
+        results.append(result)
         worst = max(worst, len(result["survivors"]))
+
+    if args.json_path:
+        with open(args.json_path, "w", encoding="utf-8") as handle:
+            json.dump(results, handle, indent=2)
+        print(f"wrote {args.json_path}")
     return 0
 
 
