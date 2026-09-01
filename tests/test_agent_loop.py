@@ -29,6 +29,16 @@ HEALTHY_STUB = {
                                  "status": "Running"},
 }
 
+# A host with nothing wrong with it. The real get_system_info blocks for a
+# second inside psutil.cpu_percent(interval=1), so a test that drives it once
+# per round costs a second per round for a reading it never looks at: the
+# three MAX_ROUNDS cases below were 8s each, 24s of an 83s suite. Use this
+# wherever the tool is only a vehicle for taking another round.
+HOST_STUB = {
+    "get_system_info": lambda: {"cpu": 3.4, "memory": 41.2,
+                                "disk": 12.0, "user": "tester"},
+}
+
 
 def tool_call(name, arguments):
     return SimpleNamespace(function=SimpleNamespace(name=name, arguments=arguments))
@@ -124,7 +134,7 @@ class TestAskLoop:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="cpu is low"),
         ]
-        with mock_chat(side_effect=responses):
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(side_effect=responses):
             result = agent.ask("is the cpu busy?")
 
         assert result["answer"] == "cpu is low"
@@ -135,7 +145,7 @@ class TestAskLoop:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="done"),
         ]
-        with mock_chat(side_effect=responses) as chat:
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(side_effect=responses) as chat:
             agent.ask("q")
 
         sent = chat.call_args.kwargs["messages"]
@@ -161,7 +171,7 @@ class TestAskLoop:
     def test_runaway_loop_is_stopped(self):
         """A model that never stops calling tools must not hang forever."""
         forever = reply(calls=[tool_call("get_system_info", {})])
-        with mock_chat(return_value=forever) as chat:
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(return_value=forever) as chat:
             result = agent.ask("q")
 
         assert "Gave up" in result["answer"]
@@ -178,7 +188,7 @@ class TestAskLoop:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="cpu is fine"),
         ]
-        with mock_chat(side_effect=responses):
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(side_effect=responses):
             result = agent.ask("q")
 
         assert result["confidence"] in {
@@ -293,7 +303,7 @@ class TestStream:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="cpu is low"),
         ]
-        with mock_chat(side_effect=responses):
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(side_effect=responses):
             events = list(agent.stream("q"))
 
         kinds = [event["type"] for event in events]
@@ -305,7 +315,9 @@ class TestStream:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="done"),
         ]
-        with patch.dict(agent.TOOLS, HEALTHY_STUB), mock_chat(side_effect=responses):
+        with patch.dict(agent.TOOLS, HEALTHY_STUB | HOST_STUB), mock_chat(
+            side_effect=responses
+        ):
             events = list(agent.stream("q"))
 
         assert [event["type"] for event in events].count("answer") == 1
@@ -323,7 +335,7 @@ class TestStream:
             reply(calls=[tool_call("get_system_info", {})]),
             reply(content="ok"),
         ]
-        with mock_chat(side_effect=responses):
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(side_effect=responses):
             events = list(agent.stream("q"))
 
         result = next(e for e in events if e["type"] == "tool_result")
@@ -345,7 +357,9 @@ class TestStream:
         assert events[-1]["answer"] == "recovered"
 
     def test_runaway_loop_still_terminates_with_an_answer(self):
-        with mock_chat(return_value=reply(calls=[tool_call("get_system_info", {})])):
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(
+            return_value=reply(calls=[tool_call("get_system_info", {})])
+        ):
             events = list(agent.stream("q"))
 
         assert events[-1]["type"] == "answer"
@@ -353,7 +367,7 @@ class TestStream:
 
     @staticmethod
     def _drain(func):
-        with mock_chat(
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(
             side_effect=[
                 reply(calls=[tool_call("get_system_info", {})]),
                 reply(content="cpu is low"),
@@ -378,18 +392,17 @@ class TestStream:
 
         # Everything except the measured fields must be equal. Timing is
         # measured, so two runs of the same mocked chain legitimately differ
-        # by a few microseconds. So is evidence: mock_chat replaces the model,
-        # not the tools, and get_system_info really does read this host's CPU,
-        # which moves between the two drains. Comparing either by value would
-        # make this test flaky for the fields that are supposed to vary, and
-        # the set comparison above is what actually catches drift. Evidence
-        # is pinned by value in TestEvidenceIsReturnedOnRequest.
+        # by a few microseconds. Evidence used to be ignored for the same
+        # reason -- mock_chat replaces the model, not the tools, and the real
+        # get_system_info reads this host's CPU, which moves between the two
+        # drains -- but _drain now stubs that tool, so evidence is fixed and
+        # is compared by value here.
         #
-        # run_id joins them for the same reason and a stronger one: it is
-        # minted per investigation, so two drains of the same chain *must*
-        # differ. Equal run_ids here would mean the identity was not per-run,
-        # which is the whole point of having one.
-        ignore = {"type", "timing", "evidence", "run_id"}
+        # run_id is ignored for a stronger reason: it is minted per
+        # investigation, so two drains of the same chain *must* differ. Equal
+        # run_ids here would mean the identity was not per-run, which is the
+        # whole point of having one.
+        ignore = {"type", "timing", "run_id"}
         assert {k: v for k, v in asked.items() if k not in ignore} == {
             k: v for k, v in streamed.items() if k not in ignore
         }
@@ -583,7 +596,7 @@ class TestEvidenceIsReturnedOnRequest:
         checkable in it; annotate() left that untouched, the draft and the
         answer were the same string, and the test passed while the field it
         was guarding did not work on any real run."""
-        with mock_chat(
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(
             side_effect=[
                 reply(calls=[tool_call("get_system_info", {})]),
                 reply(content="cpu is at 99.9% and has been for 47 minutes"),
@@ -1316,7 +1329,7 @@ class TestTimingAttribution:
                 return reply(content="done")
             return reply(calls=[tool_call("get_system_info", {})])
 
-        with mock_chat(side_effect=chat):
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(side_effect=chat):
             result = agent.ask("q")
 
         t = result["timing"]
@@ -1329,7 +1342,7 @@ class TestTimingAttribution:
 
     def test_giving_up_still_reports_timing(self):
         """A run that exhausts MAX_ROUNDS is exactly one worth timing."""
-        with mock_chat(
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(
             return_value=reply(calls=[tool_call("get_system_info", {})])
         ):
             result = agent.ask("q")

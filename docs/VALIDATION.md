@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1335 passing; no cluster or model, and a real Postgres for the shared-state cases. A fixture now makes reaching a cluster impossible rather than merely unintended — see defect 24 |
+| Automated test suite | **PROVEN** | 1336 passing, 24 skipped, in 41s; no cluster or model, and a real Postgres for the shared-state cases. A fixture now makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | 1489 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -1199,6 +1199,45 @@ a run in which the fixture is installed for every test.
 `test_controller.py` runs in 7.0s and `test_ui.py` in 5.5s, both pass alone,
 and neither changes with a kubeconfig present — their time is deliberate
 sleeps in the run-path tests. Both modules were surveyed on 2026-09-01.
+
+### 25. Half the suite's wall clock was one blocking CPU sample
+
+**Problem.** The suite took 84s of wall clock for 15s of CPU. Twelve tests in
+`tests/test_agent_loop.py` used `get_system_info` as the tool a mocked model
+asks for — a vehicle for taking another round, never a result any assertion
+reads — and dispatched the real one. `routers/system_info.py` calls
+`psutil.cpu_percent(interval=1)`, which blocks for a second by design:
+`interval=None` returns 0.0 on a first call, so the second is what makes the
+reading meaningful in production.
+
+**Cost**, measured on one machine (`pytest --durations`): three MAX_ROUNDS
+cases at 8 rounds each paid 8.04s, 8.04s and 8.03s. The other nine paid one
+second per round they drove.
+
+**Fix.** A `HOST_STUB` beside the existing `HEALTHY_STUB`, applied with
+`patch.dict(agent.TOOLS, ...)` in the twelve. `routers/system_info.py` is
+unchanged — the interval is right for the product and wrong only for a test
+that never looks at the number.
+
+**Measured**, same machine, full suite:
+
+| | wall | user CPU |
+|---|---|---|
+| before | 83.7s | 15.4s |
+| the three MAX_ROUNDS cases stubbed | 59.4s | 15.3s |
+| all twelve stubbed | 41.8s | 15.6s |
+
+1336 passing at every step. Two tests keep the real tool deliberately —
+`_run_tool` dispatching it, and `_run_tool` rejecting a bogus argument — since
+those are the cases that prove the tool is wired at all.
+
+**One test got stronger, not just faster.** `test_ask_matches_the_streams_answer`
+compares two drains of the same mocked chain field by field, and `evidence`
+was excluded by name because the real `get_system_info` reads a CPU that moves
+between the drains. With the tool stubbed the evidence is fixed, so it is now
+compared by value. Confirmed live rather than assumed: a stub returning
+`{"cpu": next(counter)}` fails the test on the evidence field, so the
+comparison is not vacuous.
 
 ## What the `vllm` provider has and has not been run against
 
