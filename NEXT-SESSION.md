@@ -86,10 +86,18 @@ on the markdown proto. Verified on streamlit 1.61.1 against a two-line app.
 ## Environment
 
 - `.venv/bin/python` for everything.
-- **Docker Desktop is UP with two containers running, and they are not this
-  project's**: `mlops-project-mlflow-1` and `mlops-project-postgres-1`, both
-  started around 22:20 on 2026-09-01. They were left alone. `docker ps` before
-  assuming anything, and do not quit Docker Desktop unconditionally.
+- **Docker Desktop is UP with 0 containers and 38 images.**
+- **Something on this machine removes containers, and it has now been seen
+  twice.** At 23:24 on 2026-09-01 `docker ps` showed `mlops-project-mlflow-1`
+  and `mlops-project-postgres-1`, both "Up About an hour (healthy)". At 23:36
+  `docker info` reported `containers=0` — removed, not stopped, since
+  `docker ps -a` was empty too. Same daemon and same context both times
+  (`desktop-linux`, `docker-desktop`), and the image count went 32 -> 38 over
+  the day, so it is not a daemon swap or a prune of everything. No docker
+  command other than `ps`, `info`, `images` and `context` was run from that
+  session. The previous handoff recorded the same thing about nine other
+  containers. **Do not conclude you deleted something, and do not rely on a
+  container you started still being there.**
 - No kind cluster. `~/.kube/config` has **no current-context** — and it is
   rewritten by something else on this machine mid-session, so re-check rather
   than trusting that.
