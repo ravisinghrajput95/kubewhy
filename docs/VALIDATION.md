@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1319 passing; no cluster or model, and a real Postgres for the shared-state cases |
+| Automated test suite | **PROVEN** | 1335 passing; no cluster or model, and a real Postgres for the shared-state cases. A fixture now makes reaching a cluster impossible rather than merely unintended — see defect 24 |
 | Grounding replay | **PROVEN** | 1489 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -27,7 +27,7 @@ and does not support. Four words are used and they mean specific things:
 | Audit trail (CLI, REST) | **PROVEN** | live runs; evidence absent from the record |
 | Audit trail (console) | **PROVEN** | live run through a browser against a real cluster |
 | Audit trail (controller) | **PROVEN** | live unprompted run, attributed to controller/system |
-| Audit trail (Slack) | **NOT TESTED** | unit tests only; needs a workspace |
+| Audit trail (Slack) | **NOT TESTED** | needs a workspace. The unit tests were also not evidence: they mocked the sink, and the surface could not deliver an answer at all until 2026-09-01 — see defect 23 |
 | Restart-interrupted jobs | **PROVEN** | SIGKILL mid-run, restarted against the same state file |
 | Shared state (Postgres) | **PARTIALLY PROVEN** | full store contract + lease race against a real Postgres 17; never run as two replicas in a cluster |
 | High availability | **NOT TESTED** | no failover observed; the lease and the owner-scoped restart sweep are unit-proven, the behaviour they enable is not |
@@ -43,7 +43,7 @@ and does not support. Four words are used and they mean specific things:
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
-| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, 16 of 18 modules, 697 mutants, 508 killed (72.9%); 189 survivors unreviewed; `controller.py` and `ui.py` not surveyable until their tests stop needing a live cluster |
+| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, all 18 modules, 974 mutants, 649 killed (66.6%); survivor list kept in `results/mutation/survivors-2026-09-01.json`. Six modules reviewed and closed, 325 survivors still unread. The narrow default over-counts: `backends.py` reads 18 survivors alone and 11 against the suites that actually exercise it |
 
 ## Defects found and fixed
 
@@ -488,38 +488,97 @@ reads PROVEN.
 > tests that pin the value exactly. The survivor is the floor on line **140**,
 > a different statement.
 
-**The eleven modules that had never been surveyed at all**, measured
-2026-08-31 with the fixed harness:
+**Every module, measured 2026-09-01.** The list itself is kept this time, in
+`results/mutation/survivors-2026-09-01.json` — the previous survey recorded
+counts and threw the survivors away, which is why 189 of them sat unreviewed
+for a day: there was nothing to read.
 
-| Module | Killed | Survivors |
-|---|---|---|
-| `tool_schema.py` | 5/7 | 2, both equivalent — see below |
-| `mcp_server.py` | 1/2 | 1 |
-| `slack_socket.py` | 10/17 | 7 |
-| `telemetry.py` | 16/27 | 11 |
-| `podcache.py` | 7/18 | 11 |
-| `sinks.py` | 18/31 | 13 |
-| `store.py` | 18/30 | 12 |
-| `backends.py` | 19/37 | 18 |
-| `inference.py` | 89/125 | 36 |
-| `controller.py` | — | **not surveyable** |
-| `ui.py` | — | **not surveyable** |
+| Module | 2026-08-31 | **2026-09-01** | Survivors |
+|---|---|---|---|
+| `identity.py` | 20/20 | 20/20 | 0 |
+| `audit.py` | 40/40 | 40/40 | 0 |
+| `redaction.py` | 6/6 | 6/6 | 0 |
+| `mcp_server.py` | 1/2 | **2/2** | 0 — reviewed |
+| `limits.py` | 27/28 | 27/28 | 1 — reviewed, equivalent |
+| `slack_socket.py` | 10/17 | **15/17** | 2 — reviewed |
+| `tool_schema.py` | 5/7 | 5/7 | 2 — reviewed, both equivalent |
+| `podcache.py` | 7/18 | **15/18** | 3 — reviewed |
+| `sinks.py` | 18/31 | **27/31** | 4 — reviewed |
+| `targeting.py` | 66/74 | 66/74 | 8 narrow, **5 broad** |
+| `telemetry.py` | 16/27 | 16/27 | 11 |
+| `backends.py` | 19/37 | 20/37 | 17 narrow, **10 broad** |
+| `store.py` | 18/30 | 25/51 | 26 |
+| `grounding.py` | 92/118 | 92/118 | 26 |
+| `inference.py` | 89/125 | 89/125 | 36 |
+| `contradiction.py` | 74/117 | 74/117 | 43 |
+| `controller.py` | *not surveyable* | **52/89** | 37 |
+| `ui.py` | *not surveyable* | **58/167** | 109 |
 
-**`controller.py` and `ui.py` cannot be surveyed, and the reason is a defect,
-not a limitation.** Both baselines fail, so `mutate.py` refuses rather than
-reporting perfect coverage. `tests/test_controller.py` and `tests/test_ui.py`
-each reach a **real cluster** at the kubeconfig's current server and burn three
-15-second retries per call. They pass inside the full suite — 1280 in 83s with
-no cluster running — and hang when run alone, so something in another test
-module is installing the Kubernetes mock they depend on. The side effect is
-that mutation testing silently skips the two largest modules that have test
-files. **Fixing the isolation is a prerequisite for surveying them**, and the
-isolation bug is worth fixing on its own account.
+**Three corrections to the figure that was published as 189.**
 
-**Totals, 16 modules surveyed: 697 mutants, 508 killed, 189 survivors, a 72.9%
-kill rate.** The earlier note that "41 survivors remain and are NOT reviewed"
-was an artifact of both the broken harness and of surveying 7 modules. The real
-figure is 189, and they are still not reviewed.
+*`store.py` had grown.* It was surveyed at 30 mutants and has 51; the
+shared-state work in `6284af0` landed after the survey. That alone is +14
+survivors, and it is the reason a count is not a durable record — the next
+survey cannot tell a new survivor from an old one without the list.
+
+*`controller.py` and `ui.py` are surveyable, and were surveyed.* The claim
+that they were not is in the row above and does not reproduce: both suites
+pass alone, in 7.0s and 5.5s, with a kubeconfig present and without, and
+their runtime is deliberate sleeps in the run-path tests rather than I/O.
+Together they are **256 mutants and 146 survivors** that the previous total
+excluded entirely. `ui.py` at 58/167 is the least-covered module in the
+project by a wide margin.
+
+These two are also the only modules whose survey does not reproduce exactly.
+Two runs on the same machine gave `controller.py` 51/89 and 52/89, and
+`ui.py` 59/167 and 58/167 — one mutant each way, and the totals identical at
+110 killed across the pair. `tests/test_controller.py` drives real threads
+and second-long sleeps, so a mutant that changes timing can land either side
+of a join; that is the likely cause and it has not been chased down. Treat
+these two rows as ±1, and do not read a one-mutant movement in them as a
+result.
+
+*The narrow default over-counts.* `--tests` defaults to
+`tests/test_<module>.py`, and a survivor found that way is an upper bound.
+Measured: `backends.py` reads 18 survivors alone and **11** once
+`tests/test_inference.py` is included, because `_model_check` is tested
+there and not in its own file — seven of the eight survivors in that one
+function are test selection, not coverage. `targeting.py` goes 8 to 5 the
+same way. `mutate.py --sites` exists to make that second pass cheap.
+
+**Totals across all 18 modules, 2026-09-01: 974 mutants, 649 killed, 325
+survivors** — against the 697/508/189 published the day before. The kill rate
+is 66.6%, not 72.9%, and the unreviewed surface is roughly **1.7x** what the
+previous figure said.
+
+**What has been reviewed.** Six modules are closed: `limits.py`,
+`tool_schema.py`, `mcp_server.py`, `slack_socket.py`, `podcache.py` and
+`sinks.py`. That review found **one shipped defect** — Slack could not answer
+any question at all, defect 23 — and 24 real gaps now covered by tests. Every
+survivor left in those six is classified equivalent, and the classifications
+are stated rather than assumed: tuning constants with no behavioural contract
+(a reconnect period, three HTTP timeouts, a backoff, a character margin), one
+`split(sep, 1)` that cannot change a `[0]` subscript, one float-exact
+boundary nothing reaches, and one defensive branch the public API cannot
+enter.
+
+**325 survivors remain and are not claimed as reviewed.**
+
+*Provenance of the JSON.* Produced by
+`evals/mutate.py <18 modules> --json results/mutation/survivors-2026-09-01.json`
+at the 2026-09-01 head, with the default narrow test selection — so the
+survivor lists in it are upper bounds, per the point above. `backends.py`'s
+entry was re-run and spliced after the test added to it that day, so every
+entry matches the same commit. Two surveys writing to one path is how that
+came to need saying: the earlier run finished last and overwrote the later
+one, which is worth knowing before pointing two of these at the same file.
+
+It lives in `results/mutation/` rather than `results/` because
+`tests/test_documented_measurements.py` reads every `results/*.json` as
+recorded eval runs, and a survivor list dropped in beside them inflated the
+corpus from 2689 runs to 2707. The glob is not recursive, so a subdirectory
+keeps the two kinds of data apart. The test caught it immediately, which is
+what it is for.
 
 #### The harness was scoring mutants it never ran
 
@@ -875,6 +934,45 @@ plus the liveness probe. Four runs kept the claim anyway. **One of five is
 not a fix**, the interval is Wilson 95% [4-62], and p=1.0 says the sample
 cannot distinguish it from the baseline. The case stays open.
 
+### 20. Rate limiting, and what "in a cluster" could not mean
+
+This row read PARTIALLY PROVEN with the note "never run against a real loop in
+a cluster" from the day the limiter shipped. Closing it turned out to require
+correcting the note rather than running the test it asked for.
+
+**What was measured, 2026-08-30.** The real API process, ceiling set to 3 per
+hour, five real `/ask` requests driven against a live kind cluster with Ollama
+reachable:
+
+| Request | Result | Duration |
+|---|---|---|
+| 1 | **200** | 106s |
+| 2 | **200** | 175s |
+| 3 | **200** | 163s |
+| 4 | **429**, `Retry-After: 3156` | 0s |
+| 5 | **429**, `Retry-After: 3156` | 0s |
+
+**3156 is the part worth keeping.** The three investigations took 444 seconds
+between them, and 3600 − 444 = 3156. The header reports *when the window
+frees*, not the window length, which is what the code comment claims and what
+a caller told to wait a flat hour would have no way to distinguish. That is
+the property the unit tests could assert and only a real loop could confirm.
+
+A separate run with the provider down established that a **503 still spends
+the allowance** — the ceiling is charged in the dependency, before the
+handler. That is deliberate and it is the only thing pacing retries while the
+provider is unreachable, but it means an outage consumes a caller's quota.
+
+**Why "in a cluster" was the wrong requirement.** The chart deploys the
+controller and the console. It does not deploy the REST API, and the limiter
+guards the model-driving endpoints on that API — the console reaches
+`agent.stream()` directly and never passes through `budgeted`. So there is no
+in-cluster surface for this ceiling to be tested on until the chart grows one,
+and the original note asked for evidence that could not exist. `TRIAGE_MAX_
+INVESTIGATIONS_PER_HOUR` and `TRIAGE_MAX_EXTERNAL_TOKENS_PER_HOUR` are also
+absent from the chart's values for the same reason; the README documents them
+as environment variables, which is what they are.
+
 ### 21. The full-suite regression run, and what it changed about defect 19
 
 **145 runs, 29 cases at n=5**, on kind + qwen3, directly comparable to the
@@ -1000,44 +1098,107 @@ that the mechanism is tested and the behaviour it enables is not, which is why
 the availability row reads NOT TESTED rather than borrowing the store's
 evidence.
 
-### 20. Rate limiting, and what "in a cluster" could not mean
+### 23. Slack could not answer at all, and the tests could not see it
 
-This row read PARTIALLY PROVEN with the note "never run against a real loop in
-a cluster" from the day the limiter shipped. Closing it turned out to require
-correcting the note rather than running the test it asked for.
+**Problem.** Every question asked in Slack raised `KeyError: 'replicas'`
+instead of posting an answer. The socket was acknowledged, the investigation
+ran to completion, and nothing came back.
 
-**What was measured, 2026-08-30.** The real API process, ceiling set to 3 per
-hour, five real `/ask` requests driven against a live kind cluster with Ollama
-reachable:
+**Detection.** Reading a mutation survivor. `slack_socket.py:77` set
+`"pods": 0` and mutating the constant to `1` survived, which meant *nothing
+consumed that key* — and the reason nothing consumed it is that no writer in
+`sinks.py` reads `pods`. They all read `finding["replicas"]`, by subscript.
+The mutant was harmless because the line was already wrong.
 
-| Request | Result | Duration |
-|---|---|---|
-| 1 | **200** | 106s |
-| 2 | **200** | 175s |
-| 3 | **200** | 163s |
-| 4 | **429**, `Retry-After: 3156` | 0s |
-| 5 | **429**, `Retry-After: 3156` | 0s |
+**Root cause.** Two producers of the same finding shape and no agreement on
+it. `controller.py` supplies `replicas`; `slack_socket.py` supplied `pods`.
+`sinks.py` subscripts, so a missing key is an exception at delivery rather
+than a blank field, and `answer()` runs on the thread `handle()` spawns —
+where the traceback goes to the thread excepthook and the person who asked
+sees nothing.
 
-**3156 is the part worth keeping.** The three investigations took 444 seconds
-between them, and 3600 − 444 = 3156. The header reports *when the window
-frees*, not the window length, which is what the code comment claims and what
-a caller told to wait a flat hour would have no way to distinguish. That is
-the property the unit tests could assert and only a real loop could confirm.
+**Why no existing test could see it.** `tests/test_slack_socket.py` never
+imported `sinks`. Every case either patched `answer` out or patched
+`sinks.build` to a `MagicMock`, so the finding was built and never consumed.
+A mock accepts any shape, which is exactly what made the suite agree with
+code that could not work.
 
-A separate run with the provider down established that a **503 still spends
-the allowance** — the ceiling is charged in the dependency, before the
-handler. That is deliberate and it is the only thing pacing retries while the
-provider is unreachable, but it means an outage consumes a caller's quota.
+**Fix.** `"replicas": 1` — one, not zero, because the count is only announced
+above one and a question asked in a channel has no replica count to report.
 
-**Why "in a cluster" was the wrong requirement.** The chart deploys the
-controller and the console. It does not deploy the REST API, and the limiter
-guards the model-driving endpoints on that API — the console reaches
-`agent.stream()` directly and never passes through `budgeted`. So there is no
-in-cluster surface for this ceiling to be tested on until the chart grows one,
-and the original note asked for evidence that could not exist. `TRIAGE_MAX_
-INVESTIGATIONS_PER_HOUR` and `TRIAGE_MAX_EXTERNAL_TOKENS_PER_HOUR` are also
-absent from the chart's values for the same reason; the README documents them
-as environment variables, which is what they are.
+**Regression evidence.** The new cases go through a real `sinks.StdoutSink`,
+because a mock would pass again. One of them asserts the finding carries
+every key `sinks` subscripts, which is the general form rather than this
+instance. Reproduced before the fix and after it.
+
+**Three more survivors on the same path**, each an `or` fallback that
+discards the real value when flipped to `and`: the audit actor becomes
+`unknown-slack-user` for every Slack investigation — the join key the audit
+trail exists to provide — replies go to the configured default channel
+instead of the one that asked, and a reply starts a new thread instead of
+landing in the thread of the question. Each now has a case, and a
+counter-case keeping the fallback reachable.
+
+**What this says about the Slack row in the table above.** It read
+*Audit trail (Slack): NOT TESTED — unit tests only; needs a workspace*. The
+workspace was never the only thing missing. The surface had unit tests that
+could not fail, and it did not work.
+
+### 24. The test suite read whatever cluster the developer had
+
+**Problem.** Parts of the suite dispatched real Kubernetes reads. What that
+cost depended on `~/.kube/config`, which is not in the repository, so the
+same commit ran in 0.6s or 78s or seven minutes on different machines — and
+on a machine whose `current-context` names a cluster that *works*, the tests
+read it.
+
+**Detection.** Chasing the "unexplained" suite-runtime variance recorded in
+the handoff: 1280 passing in 83s and, later the same day, over six minutes,
+both green.
+
+**Root cause.** Most of `tests/test_agent_loop.py` stubs the tools with
+`patch.dict(agent.TOOLS, ...)`. The runaway-loop and nudge cases do not, so
+`agent.ask` dispatched the real tool once per round, up to `MAX_ROUNDS`.
+
+**Measured**, one machine, one test (`test_no_nudge_without_rounds_left_to_use_it`,
+seven rounds):
+
+| `current-context` | time |
+|---|---|
+| unset | 0.56s |
+| a port that refuses | 0.58s |
+| an unroutable address | **7m 00.6s** |
+| unroutable, with the fixture | 0.57s |
+
+A refused connection is instant, which is why this stayed invisible on a
+laptop with a stopped kind cluster. An unroutable address is the same
+configuration behind a firewall. The handoff's 78s against a dead kind node
+is the same failure, milder.
+
+**Not hypothetical that the machine moves underneath a run.** During the
+session that fixed this, `~/.kube/config` was rewritten by another process:
+`current-context` was unset at 09:06 and named `kind-aiops-test` by 09:14,
+turning a fast module into a slow one halfway through the session.
+
+**Fix.** An autouse fixture in `tests/conftest.py` replaces
+`routers.k8s_pods_info._build_bundle` with a bundle that *builds and cannot
+connect*. That is the shape the real code has — `new_client_from_config`
+opens no socket — so the failure lands on the call, where every tool already
+handles it.
+
+**Two things that had to be measured rather than reasoned about.** Refusing
+at *build* time instead moves the exception to a line nothing expects, and
+three AppTest cases in `test_investigation_identity.py` then time out at 60s
+each: 20 passed in 3.7s became 3 failed in 237s. And clearing the bundle
+cache per test does the same thing, so it is cleared once for the session —
+which still closes the hole, because nothing can cache a real bundle during
+a run in which the fixture is installed for every test.
+
+**What it did not explain.** The handoff attributes `controller.py` and
+`ui.py` being unsurveyable to this same cause. That does not reproduce:
+`test_controller.py` runs in 7.0s and `test_ui.py` in 5.5s, both pass alone,
+and neither changes with a kubeconfig present — their time is deliberate
+sleeps in the run-path tests. Both modules were surveyed on 2026-09-01.
 
 ## What the `vllm` provider has and has not been run against
 

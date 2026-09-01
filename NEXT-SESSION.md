@@ -12,18 +12,22 @@ product** — a workstation, this cluster, or a hosted API. The default is still
 local and still keeps everything on your network, and that default is enforced
 rather than documented. See `docs/INFERENCE.md`.
 
-**State: `main` at `6284af0`, tree clean and pushed, **1319 tests pass**
-(verified 2026-08-31, 85s), **CI green on all six jobs**, tags through
-**v0.2.0**. Nothing running: no kind cluster, no GKE cluster, Ollama unloaded
-(`{"models":[]}`), GCP empty.**
+**State: `main` at the 2026-09-01 head, tree clean and pushed, **1336 tests
+pass** (83s), **CI green**, tags through **v0.2.0**. Nothing running: Docker
+is DOWN, no kind cluster, no GKE cluster, Ollama unloaded, GCP empty.**
 
-**Docker is UP and that is deliberate** — it hosts nine containers belonging to
-other projects on this machine (`mlops-project-*`, `ai-kubernetes-agent-*`,
-`k8sagent-soak-pg`). The teardown block at the bottom of this file says to quit
+**Docker was down for the whole 2026-09-01 session** — the nine containers
+from other projects (`mlops-project-*`, `ai-kubernetes-agent-*`,
+`k8sagent-soak-pg`) are stopped, not deleted, and come back with Docker
+Desktop. The teardown block at the bottom of this file still says to quit
 Docker Desktop unconditionally; **do not**, without running `docker ps` first.
-Note also that `kind delete cluster` succeeded and the cluster came back when
-Docker Desktop next started, so re-check `kind get clusters` at the end rather
-than trusting the delete.
+
+**`~/.kube/config` is rewritten by something else on this machine, mid-session.**
+Measured on 2026-09-01: `current-context` was unset at 09:06 and named
+`kind-aiops-test` — a cluster that does not exist — by 09:14, with Docker
+down the whole time. Do not assume the kubeconfig you checked at the start is
+the one you have now. The test suite no longer cares (defect 24), but
+anything else you measure might.
 
 **Read `docs/VALIDATION.md` before anything else — it is current, and most of
 this file below the next section is history from 2026-08-24 and earlier.**
@@ -33,49 +37,89 @@ this file below the next section is history from 2026-08-24 and earlier.**
 Items 1, 2 and 4 need no cluster and no model. Item 3 needs kind plus a
 Postgres; item 6 needs kind plus Ollama. Nothing is blocked.
 
-1. **Review the 189 unreviewed mutation survivors.** The survey itself is now
-   DONE -- 16 of 18 modules, 697 mutants, 508 killed (72.9%), measured
-   2026-08-31 with a fixed harness. Pure local compute, no cluster, no model.
-   `backends.py` (18 survivors of 37), `inference.py` (36 of 125) and
-   `contradiction.py` (43 of 117) are the densest. `--tests` under-selects by
-   default.
+1. **Continue the mutation-survivor review.** The list itself is now kept:
+   `results/mutation/survivors-2026-09-01.json`, written by
+   `mutate.py --json`. The previous handoff's 189 was a count with no list
+   behind it, and it was wrong twice over -- `store.py` had grown 21 sites
+   since the survey, and `controller.py` and `ui.py` were excluded as
+   "not surveyable" when they are not. See `docs/VALIDATION.md` for the
+   corrected table.
 
-   **`limits.py:140` is no longer the example to start with; it was reviewed
-   on 2026-09-01 and is an equivalent mutant.** The description here and in
-   `VALIDATION.md` was wrong in both halves: the survivor is line 140's
-   fallback floor `max(int(self.seconds), 1)`, not line 139's round-up, and
-   the round-up is *killed* by three tests that pin the value exactly. Line
-   140 is reachable only with `limit <= 0`, which `_int` and both `check()`
-   call sites make impossible -- 200,000 random trials produced 32,237
-   separating inputs and not one had `limit >= 1`. Full working in
-   `VALIDATION.md`. **Nothing has yet demonstrated a real gap among the 189**;
-   that is what the review is for.
-2. **Make `tests/test_controller.py` and `tests/test_ui.py` self-contained.**
-   Both reach a REAL cluster -- whatever `current-context` names -- and hang
-   when run alone, while passing inside the full suite, so another test module
-   is installing the Kubernetes mock they rely on.
+   **Run pass 2 before reading any survivor.** `mutate.py --sites` re-runs a
+   chosen subset against a wider suite, and the narrow default materially
+   over-counts: `backends.py` reads 18 survivors against
+   `tests/test_backends.py` alone and **11** once `tests/test_inference.py`
+   is added, because `_model_check` is tested there and not in its own file.
+   `targeting.py` goes 8 -> 5 the same way. A survivor found narrowly is an
+   upper bound, not a gap.
 
-   What is measured: run alone, `tests/test_ui.py` exceeded 120s and was
-   killed, and `mutate.py` refused both modules with "the baseline is already
-   failing". The failing test reaches `127.0.0.1:55807` -- the deleted
-   `kind-aiops-test` -- with three 15-second read timeouts per call.
-   `kind delete cluster` leaves its context behind, so `current-context` still
-   names a cluster that does not exist; re-asserting `kubectl config
-   use-context` does not help, because the stale entry IS the current context.
+   The broad test sets, derived by grepping `tests/` for each module name and
+   worth keeping rather than re-deriving:
 
-   The consequence that matters: **mutation testing silently skips the two
-   largest modules that have test files.** Fixing the isolation unblocks them.
+   | module | add to `tests/test_<module>.py` |
+   |---|---|
+   | `backends.py` | `test_agent_loop`, `test_investigation_identity`, `test_inference` |
+   | `contradiction.py` | `test_agent_loop`, `test_grounding`, `test_replay_grounding` |
+   | `grounding.py` | `test_agent_loop`, `test_audit`, `test_contradiction`, `test_eval_graders`, `test_inference`, `test_redaction`, `test_replay_grounding`, `test_ui` |
+   | `inference.py` | `test_api`, `test_audit`, `test_agent_loop`, `test_chart`, `test_controller`, `test_redaction`, `test_ui_security` |
+   | `limits.py` | `test_api`, `test_grounding`, `test_inference` |
+   | `store.py` | `test_controller`, `test_chart` |
+   | `targeting.py` | `test_investigation_identity` |
+   | `telemetry.py` | `test_audit`, `test_inference` |
+   | `audit.py` | `test_api`, `test_evidence_read` |
+   | `identity.py` | `test_investigation_identity`, `test_limits` |
+   | `redaction.py` | `test_inference`, `test_ui_security` |
 
-   **Unexplained, and worth a look before trusting any suite timing:** the full
-   suite ran 1280 passed in 83s earlier the same day and over six minutes
-   later, both green. `tests/test_mutate.py` was ruled out by measurement
-   (3.3s). `--durations` puts the cost in `tests/test_agent_loop.py` --
-   `test_no_nudge_without_rounds_left_to_use_it` alone took **78s** and
-   `test_the_run_is_sent_back_and_the_tool_gets_called` **31s**, both of which
-   mock `ollama.chat` and should not be slow. A first guess that the variance
-   came from the dead cluster's port state did not survive contact with the
-   durations output. The suite is stable in result and unstable in runtime, so
-   nothing draws attention to it.
+   `sinks.py`, `podcache.py`, `slack_socket.py`, `tool_schema.py` and
+   `mcp_server.py` are exercised only by their own suite, so pass 2 cannot
+   move them. **Do not put `tests/test_mutate.py` in a broad set** -- it
+   re-derives mutation sites from whatever source is on disk, so a "kill"
+   from it says nothing about the module's behaviour.
+
+   **Reviewed and closed on 2026-09-01**, with the reasoning in
+   `VALIDATION.md`: `limits.py` (1 survivor, equivalent), `tool_schema.py`
+   (2, equivalent, already documented), `mcp_server.py` (now 2/2),
+   `slack_socket.py` (10/17 -> 15/17), `podcache.py` (7/18 -> 15/18),
+   `sinks.py` (18/31 -> 27/31). Every remaining survivor in those five is
+   classified as equivalent -- tuning constants with no behavioural contract,
+   and one float-exact boundary nothing reaches.
+
+   **Left to read, densest first:** `ui.py` (108), `contradiction.py` (43),
+   `controller.py` (38), `inference.py` (36), `store.py` (26),
+   `grounding.py` (26), `telemetry.py` (11), `backends.py` (10 after pass 2,
+   with a preliminary read below), `targeting.py` (5 after pass 2).
+
+   `backends.py`'s ten, read but not yet acted on: `62` `KEEP_ALIVE`,
+   `175`/`319` `timeout or TIMEOUT` and `243`/`409` `timeout=5` are all
+   untested configuration defaults; `266`/`267`/`268` are the listing
+   normalisation that accepts both object-shaped and dict-shaped provider
+   responses, and only one shape is covered; `438` `.get("data") or []`
+   crashes on a provider that omits the key; `113` `split(":", 1)` -> `2`
+   cannot change a `[0]` subscript and is equivalent.
+
+2. **`ui.py` is the least-tested module in the project: 59 of 167 mutants
+   killed, 35%.** It was never surveyed before 2026-09-01 because the
+   previous handoff recorded it as unsurveyable. `tests/test_ui.py` has 43
+   tests over the Streamlit element tree, and `AppTest` sees the submitted
+   string rather than the rendered page, which is the documented reason
+   appearance defects are invisible to it (defect 16). Worth deciding
+   whether the answer is more tests or fewer claims.
+
+   **`tests/test_controller.py` and `tests/test_ui.py` are already
+   self-contained** -- the previous item 2 here asked for that and it does
+   not reproduce. Both pass alone, in 7.0s and 5.5s, with a kubeconfig
+   present and without; their time is deliberate sleeps in the run-path
+   tests, not I/O. The module that really reached a cluster was
+   `tests/test_agent_loop.py`, now fixed (defect 24) and measured at 7
+   minutes for a single test against an unroutable server.
+
+   **The suite's remaining slow spot is not I/O either.**
+   `routers/system_info.py:get_system_info` calls
+   `psutil.cpu_percent(interval=1)`, which blocks for a second, and the three
+   runaway-loop tests drive it once per round for 8 rounds -- 8s each, about
+   30s of the 83s suite. Stubbing it in those tests is an easy win nobody has
+   taken.
+
 3. **Run HA as two replicas in a cluster, which nothing has done yet.**
    `sharedState.enabled` shipped with the store contract, the lease race and
    the chart guards all proven -- against a real Postgres 17, including a
@@ -97,6 +141,16 @@ Postgres; item 6 needs kind plus Ollama. Nothing is blocked.
    hardware, a cloud account, or someone else's incident data.
 5. **Slack audit trail** is the only audit row still NOT TESTED, and it needs a
    workspace. If one is available, it closes the last surface.
+
+   Worth more than it was. On 2026-09-01 the Slack surface turned out not to
+   work at all: `answer()` built its finding with a `"pods"` key while every
+   writer in `sinks.py` subscripts `finding["replicas"]`, so every question
+   raised `KeyError: 'replicas'` on the answering thread and nothing was ever
+   posted back. Fixed, with regression cases that go through a real
+   `StdoutSink` rather than a mock -- the old cases all mocked the sink,
+   which is why a suite full of green tests sat on top of a surface that
+   could not deliver a message. Defect 23. A workspace would now be
+   confirming something that has at least been shown to work in process.
 6. **The n=10 paragraph-removed experiment** on `insufficient_no_such_workload`
    (defect 21, described below). Needs kind + Ollama back up, ~40 min of model
    time, on mains power under `caffeinate -is`.
