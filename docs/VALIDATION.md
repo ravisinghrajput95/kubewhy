@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1336 passing, 24 skipped, in 41s; no cluster or model, and a real Postgres for the shared-state cases. A fixture now makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1405 passing, 24 skipped, in 48s; no cluster or model, and a real Postgres for the shared-state cases. A fixture now makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | 1489 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -512,7 +512,7 @@ for a day: there was nothing to read.
 | `inference.py` | 89/125 | 89/125 | 36 |
 | `contradiction.py` | 74/117 | 74/117 | 43 |
 | `controller.py` | *not surveyable* | **52/89** | 37 |
-| `ui.py` | *not surveyable* | **58/167** | 109 |
+| `ui.py` | *not surveyable* | **58/167** | 109 narrow, 101 broad, **66 after pass 3** — see defect 26 |
 
 **Three corrections to the figure that was published as 189.**
 
@@ -526,8 +526,8 @@ that they were not is in the row above and does not reproduce: both suites
 pass alone, in 7.0s and 5.5s, with a kubeconfig present and without, and
 their runtime is deliberate sleeps in the run-path tests rather than I/O.
 Together they are **256 mutants and 146 survivors** that the previous total
-excluded entirely. `ui.py` at 58/167 is the least-covered module in the
-project by a wide margin.
+excluded entirely. `ui.py` at 58/167 was the least-covered module in
+the project by a wide margin; defect 26 is the review that followed.
 
 These two are also the only modules whose survey does not reproduce exactly.
 Two runs on the same machine gave `controller.py` 51/89 and 52/89, and
@@ -551,9 +551,20 @@ survivors** — against the 697/508/189 published the day before. The kill rate
 is 66.6%, not 72.9%, and the unreviewed surface is roughly **1.7x** what the
 previous figure said.
 
+**That total is the narrow-default measurement, and `ui.py` has moved since.**
+The `ui.py` review (defect 26) took it from 58 killed to **101 of 167** as
+measured, against a five-file test set rather than the default one. Carrying
+that row forward gives **692 killed and 282 survivors** — but the number
+mixes measurement bases, in the same way the `targeting.py` and `backends.py`
+broad figures do, so it is stated here rather than substituted above. Do not
+compare it against a future narrow-default total. Four more batches of ui.py
+tests are unmeasured on top of it.
+
 **What has been reviewed.** Six modules are closed: `limits.py`,
 `tool_schema.py`, `mcp_server.py`, `slack_socket.py`, `podcache.py` and
-`sinks.py`. That review found **one shipped defect** — Slack could not answer
+`sinks.py`. `ui.py` is reviewed but not closed — 66 survivors measured, every
+one of them classified, and tests written against most of the classified-open
+ones that have not been re-surveyed yet. See defect 26. That review found **one shipped defect** — Slack could not answer
 any question at all, defect 23 — and 24 real gaps now covered by tests. Every
 survivor left in those six is classified equivalent, and the classifications
 are stated rather than assumed: tuning constants with no behavioural contract
@@ -1238,6 +1249,129 @@ between the drains. With the tool stubbed the evidence is fixed, so it is now
 compared by value. Confirmed live rather than assumed: a stub returning
 `{"cpu": next(counter)}` fails the test on the evidence field, so the
 comparison is not vacuous.
+
+### 26. The console, read one survivor at a time
+
+`ui.py` is the least-tested module in the project and the last one surveyed:
+167 mutants, **58 killed against `tests/test_ui.py` alone, 35%**. It was
+excluded from earlier surveys as "not surveyable", which was wrong.
+
+**Pass 2 first, as always.** Against the wider set — `test_ui_auth`,
+`test_ui_security`, `test_ui_markup` and `test_investigation_identity` —
+eight more die: both `_caller()` sites, and the whole vanished-workload
+guard, which `test_investigation_identity.py` was already driving. A narrow
+survivor count is an upper bound, again.
+
+| | killed / 167 | survivors | |
+|---|---|---|---|
+| pass 1, `tests/test_ui.py` alone | 58 | 109 | 35% |
+| pass 2, the wider set | 66 | 101 | 40% |
+| pass 3, after the first three batches of tests | **101** | **66** | 60% |
+| after batches 4-7 | **not measured** | | |
+
+The survivor lists are kept: `results/mutation/ui-pass2-2026-09-01.json` and
+`ui-pass3-after-2026-09-01.json`.
+
+**The last row is honest about what it is.** Four more batches of tests
+landed after pass 3 — the header chips, the timing caption, the context
+picker, the claim columns, the history click and the recommendation's inputs,
+33 tests in all — and the survey that would have measured them was stopped
+before it finished. Nothing here claims a kill for them. They are written
+against named survivors, each named below, and the next session should run a
+**full** `ui.py` survey rather than a `--sites` pass: the defect fixed below
+changed the file, so every site index after it has moved and the numbers in
+this table cannot be indexed into any more.
+
+**What they were, mostly: regions of the page nothing drove at all.**
+
+*Markup, eleven survivors.* Every `unsafe_allow_html=True` in `ui.py` can be
+flipped to `False` without a test noticing. That is defect 16 exactly — the
+one that shipped, printing `<span class='kw-dim'>` as visible angle brackets
+in the red box announcing a contradiction. Two checks now: a static one
+beside the existing `st.error` scan, and a rendered one.
+
+The rendered one corrects something this document asserted too broadly.
+`test_ui_markup.py` said AppTest reads the string submitted rather than the
+text painted, "and no assertion over the element tree can ever distinguish
+those". True for `st.error`, which has no such flag and escapes in the
+browser. False for `st.markdown`: `allow_html` is a field on the markdown
+proto, so the tree records which of the two the call asked for. Verified on
+streamlit 1.61.1 against a two-line app — `proto.allow_html` came back True
+for the call that passed the flag and False for the one that did not.
+
+The eleventh site is not an `st.markdown` at all: it is the `write()` of the
+`st.status` panel a run streams its progress into. A check written for
+`st.markdown` covered ten of eleven, so the static check asks the wider
+question — no call in this file is told to escape its own markup — and was
+verified against all eleven, each mutated by `mutate.py` itself.
+
+*Choosing a pod within a workload, fourteen survivors and no tests at all.*
+The replica picker, the container picker, the "Running and ready now" note
+that dates events against the current state, and the guard that keeps a
+workload selected after it leaves the scan. Everything below the workload
+selector is about one pod, and the module comments describe measured defects
+— `demo/nightly-sync -> demo/bad-image` — with nothing behind them.
+
+*A fake that ignored the flag under test.* The by-name search lookup passes
+`only_unhealthy=False` so it can answer about a healthy workload, which is
+the only thing that distinguishes "not on this page" from "not in this
+cluster". `TestSearchCoversTheClusterNotJustThePage`'s scanner accepted the
+argument and ignored it, so the flipped flag was invisible. It honours it
+now, and a second test asserts the flag at the call.
+
+*Nine survivors in one f-string* — the timing caption under the timeline,
+both divisors, both timing defaults and all three re-ask counts. Two cases
+pin it, one supplying every key and one supplying none, because a case that
+supplies every field cannot see a default. (Batch 5, so unmeasured: see the
+table's last row.)
+
+**Six of those nine are equivalent, and the arithmetic says so.** `%.1f`
+rounds the mutation away for every duration the page renders: 8400/1000 and
+8400/1001 both print `8.4s`, and a default of 0 or 1 millisecond both print
+`0.0s`. The three default mutants can never be distinguished — the default
+is a constant, and 1ms renders as 0.0s for any format this page uses. The
+three divisors can: 500500ms is `500.5s` and `500.0s` under the two, so a
+test with an eight-minute investigation kills them, and the console does
+report a measured duration.
+
+**A defect the tests found while being written.** `list_contexts()` reads the
+kubeconfig; `_build_bundle()` builds a client. A context can be in the first
+and fail the second — a cluster entry whose cert file was removed, a
+malformed user — and `active_context()` then reports `"unavailable"` for it
+for as long as the process lives, deliberately, because a caller asking which
+cluster it is on must not raise.
+
+The picker compared the chosen context against that. Choosing such a context
+set the session state, bound it and called `st.rerun()`; the next run read
+`"unavailable"` again, found it still different, and reran. **The console
+spun instead of rendering**, and the picker snapped back to the first entry
+on every pass — a session that asked for the third context reading the first.
+Measured: both regression tests fail on the 60s AppTest script timeout before
+the fix, on an assertion after it. It now compares against what the session
+asked for, falling back to what the client reports.
+
+**What is left, and why.**
+
+These classifications are read off the **pass 3** survivor list, which is a
+real measurement; where a test has since been written against one it is
+called out as unmeasured.
+
+*Not visible to this instrument, measured rather than assumed.* The
+`st.status` panel the run streams into does not appear in AppTest's element
+tree at all: a run yielding two `tool_call` and two `tool_result` events
+produced zero elements in `app.status` and no markdown carrying the `↳` the
+code writes. The progress label's counter, its elapsed time and the panel's
+expanded state are unreachable without a browser. Same for the rendering
+flags with no element-tree consequence — `show_spinner` on seven cache
+decorators, `hide_index` on four dataframes, `horizontal` on two radios.
+
+*Equivalent, with the reason.* The three timing defaults above.
+`rest.split(":", 1)[0]` -> `2`, where maxsplit cannot change element 0. The
+header's `except` branch, reachable only if `active_context()` raises, which
+it catches everything to avoid. And the display budgets — the cache TTL, the
+history length, the citation and claim caps, the label truncation, the four
+slider bounds — constants with no behavioural contract, where a test would
+freeze a layout decision rather than protect a behaviour.
 
 ## What the `vllm` provider has and has not been run against
 
