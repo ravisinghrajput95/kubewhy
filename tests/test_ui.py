@@ -1761,3 +1761,40 @@ class TestTheQuestionStaysInTheBox:
         app = run_form(seen, question="why does it restart?")
 
         assert app.text_input[0].value == "why does it restart?"
+
+
+class TestEachClaimIsInItsOwnColumn:
+    """
+    Three columns, and which one a claim lands in is the whole classification:
+    observed means a tool said it, inferred means the run reasoned to it, and
+    unknown means it was stated and not supported. A claim in the wrong column
+    is a claim relabelled.
+
+    Assertable because AppTest's Column is a block with its own children, so
+    the tree records membership rather than only order.
+    """
+
+    def test_there_are_three_of_them(self):
+        assert len(render_answer(ANSWER).columns) == 3
+
+    def test_each_column_holds_its_own_heading_and_claims(self):
+        columns = render_answer(ANSWER).columns
+        text = [" ".join(str(m.value) for m in column.markdown)
+                for column in columns]
+
+        assert "**Observed**" in text[0] and "oomkilled" in text[0]
+        assert "**Inferred**" in text[1] and "memory leak" in text[1]
+        assert "**Unknown**" in text[2] and "512" in text[2]
+
+    def test_no_column_holds_another_ones_claims(self):
+        """
+        The counter for the assertion above, which two columns rendering into
+        one would still satisfy for whichever of them came first.
+        """
+        columns = render_answer(ANSWER).columns
+        text = [" ".join(str(m.value) for m in column.markdown)
+                for column in columns]
+
+        assert "memory leak" not in text[0] and "512" not in text[0]
+        assert "oomkilled" not in text[1] and "512" not in text[1]
+        assert "oomkilled" not in text[2] and "memory leak" not in text[2]
