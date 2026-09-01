@@ -74,7 +74,12 @@ def answer(question, channel, thread_ts, user=""):
         {
             "workload": question[:80],
             "namespace": "",
-            "pods": 0,
+            # "replicas", not "pods": every writer in sinks.py reads this key
+            # by subscript, so the wrong name raised KeyError('replicas') on
+            # the answering thread and no Slack question was ever answered.
+            # One, not zero -- the count is only announced above one, and a
+            # question asked in a channel has no replica count to report.
+            "replicas": 1,
             "status": "",
             "diagnosis": result["answer"],
             "confidence": result.get("confidence", "ungrounded"),
