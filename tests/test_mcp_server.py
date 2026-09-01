@@ -111,3 +111,33 @@ class TestVersionIsReported:
 
         assert app == __version__, f"Chart appVersion {app} != version.py {__version__}"
         assert ver == __version__, f"Chart version {ver} != version.py {__version__}"
+
+
+class TestTheDocumentedPort:
+    """
+    The HTTP default is a published contract: README tells the reader
+    `--http` serves "streamable HTTP on :8765", and an MCP client is
+    configured against that number by hand.
+
+    It cannot be reached by importing this module -- argparse is set up under
+    `if __name__ == "__main__":`, which is why mutating the default survived
+    and why no behavioural test can kill it. So this checks the two places
+    the number is written still agree, in the same shape as
+    `test_the_chart_agrees_with_the_package` above.
+    """
+
+    def test_the_readme_and_the_default_agree(self):
+        import os
+        import re
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        source = open(os.path.join(root, "mcp_server.py"), encoding="utf-8").read()
+        readme = open(os.path.join(root, "README.md"), encoding="utf-8").read()
+
+        default = re.search(r'"--port",\s*type=int,\s*default=(\d+)', source)
+        assert default, "the --port default is no longer where this test looks"
+
+        documented = re.search(r"streamable HTTP on :(\d+)", readme)
+        assert documented, "README no longer states the HTTP port"
+
+        assert default.group(1) == documented.group(1)

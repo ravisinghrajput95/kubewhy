@@ -218,3 +218,148 @@ class TestSlackApiSink:
     def test_a_token_without_a_channel_falls_back_rather_than_guessing(self):
         built = sinks.build("slack", token="xoxb-not-a-real-token", channel="")
         assert isinstance(built, sinks.StdoutSink)
+
+
+class TestTheReplicaCountBoundary:
+    """
+    `replicas > 1` decides whether a finding says how many pods are affected,
+    and the Slack blocks and the text sink each make that call separately.
+
+    Mutation testing found the boundary open in three places at once. The
+    existing case pairs one pod against three and never asks about **two**, so
+    relaxing `> 1` to `> 2` survived in both writers -- a two-pod incident
+    would have been reported as if it were one. `>` to `>=` survived in
+    `_blocks` as well, which had no case asserting that a single pod stays
+    quiet; only `format_text` did.
+    """
+
+    def test_two_pods_are_named_in_the_text_sink(self):
+        assert "2 pods" in sinks.format_text(finding(replicas=2))
+
+    def test_two_pods_are_named_in_the_slack_header(self):
+        blocks = sinks.SlackSink("https://x.invalid")._blocks(finding(replicas=2))
+
+        assert "2 pods affected" in blocks["blocks"][0]["text"]["text"]
+
+    def test_one_pod_is_not_announced_as_several_in_the_slack_header(self):
+        blocks = sinks.SlackSink("https://x.invalid")._blocks(finding(replicas=1))
+
+        assert "pods affected" not in blocks["blocks"][0]["text"]["text"]
+
+
+class TestTheScopeIsTheWorkloadWhenThereIsOne:
+    """
+    `workload or pod` -- the workload is the name an operator recognises, and
+    the pod is the fallback for a bare pod with no owner.
+
+    The existing case only covers the fallback, so swapping `or` for `and` in
+    `format_text` survived: every finding would have been labelled with the
+    replica hash instead of the workload, which is the name nobody greps for.
+    The fixture's workload is a prefix of its pod name, so this uses two names
+    that cannot be confused for one another.
+    """
+
+    def test_the_text_sink_names_the_workload_not_the_pod(self):
+        text = sinks.format_text(
+            finding(workload="checkout", pod="nightly-sync-7f9c2")
+        )
+
+        assert "checkout" in text
+        assert "nightly-sync-7f9c2" not in text
+
+
+class TestASuccessfulDeliveryIsSilent:
+    """
+    The 200 branch had no test, only the failure branch.
+
+    Two separate mutants therefore survived on `response.status != 200`:
+    reading the comparison against 201, and inverting it to `==`. Either turns
+    every delivered message into a `slack_rejected` warning, which is the log
+    line an operator would use to decide delivery is broken.
+    """
+
+    def _response(self, status):
+        response = MagicMock()
+        response.status = status
+        response.__enter__ = lambda self: response
+        response.__exit__ = lambda *a: False
+        return response
+
+    def test_a_200_is_not_logged_as_a_rejection(self, caplog):
+        sink = sinks.SlackSink("https://hooks.example.invalid/x")
+
+        with caplog.at_level("WARNING"):
+            with patch("urllib.request.urlopen", return_value=self._response(200)):
+                sink.send(finding())
+
+        assert "slack_rejected" not in caplog.text
+
+    def test_a_500_still_is(self, caplog):
+        """The counter for the test above: it must be able to see a rejection."""
+        sink = sinks.SlackSink("https://hooks.example.invalid/x")
+
+        with caplog.at_level("WARNING"):
+            with patch("urllib.request.urlopen", return_value=self._response(500)):
+                sink.send(finding())
+
+        assert "slack_rejected" in caplog.text
+
+
+class TestATokenWithoutAChannelDoesNotBorrowTheWebhook:
+    """
+    `if token and not channel` is reached only after `token and channel` has
+    already returned, so dropping the `not` looks harmless -- and against the
+    existing case it is, because that case configures no webhook and lands on
+    stdout either way.
+
+    With a webhook also configured the two diverge: the documented behaviour
+    is to fall back to stdout rather than guess where the operator meant the
+    message to go, and the mutant posts it to the webhook instead.
+    """
+
+    def test_it_falls_back_to_stdout_rather_than_to_the_webhook(self):
+        built = sinks.build(
+            "slack",
+            webhook_url="https://hooks.slack.com/services/x",
+            token="xoxb-not-a-real-token",
+            channel="",
+        )
+
+        assert isinstance(built, sinks.StdoutSink)
+
+
+class TestTheTruncationBoundary:
+    """
+    `len(text) <= limit` returns the text untouched. Tightened to `<`, a
+    message of exactly the limit gains a "truncated" marker while losing
+    nothing, which tells the reader to go and find a rest that does not exist.
+    """
+
+    def test_a_message_of_exactly_the_limit_is_untouched(self):
+        text = "x" * 200
+
+        assert sinks._fit(text, limit=200) == text
+
+    def test_one_character_more_is_truncated(self):
+        text = "x" * 201
+
+        assert sinks._fit(text, limit=200) != text
+        assert "truncated" in sinks._fit(text, limit=200)
+
+
+class TestTheStdoutSinkFlushes:
+    """
+    `flush=True` is not decoration. The controller runs unattended in a
+    container, where stdout is a pipe rather than a terminal and therefore
+    block-buffered: without the flush a finding sits in a 4KB buffer until
+    enough of them accumulate, and is lost outright if the pod is killed
+    first. That is the whole delivery guarantee of this sink.
+
+    Nothing asserted it, so dropping the flag survived.
+    """
+
+    def test_a_finding_is_written_through_rather_than_buffered(self):
+        with patch("builtins.print") as printed:
+            sinks.StdoutSink().send(finding())
+
+        assert printed.call_args.kwargs.get("flush") is True
