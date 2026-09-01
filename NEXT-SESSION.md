@@ -7,157 +7,119 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**Where inference happens is configuration now, not a property of the
-product** — a workstation, this cluster, or a hosted API. The default is still
-local and still keeps everything on your network, and that default is enforced
-rather than documented. See `docs/INFERENCE.md`.
+**State: `main` at `5f93602`, tree clean and pushed, 1405 tests pass (47s),
+CI green, tags through v0.2.0. Nothing of this project is running.**
 
-**State: `main` at the 2026-09-01 head, tree clean and pushed, **1336 tests
-pass** (83s), **CI green**, tags through **v0.2.0**. Nothing running: Docker
-is DOWN, no kind cluster, no GKE cluster, Ollama unloaded, GCP empty.**
+**Read `docs/VALIDATION.md` first — defects 25 and 26 are the whole of the
+2026-09-01 evening session — then "Pick up, in order" below. Everything under
+"What changed on 2026-08-26 / 27" is history.**
 
-**Docker was down for the whole 2026-09-01 session** — the nine containers
-from other projects (`mlops-project-*`, `ai-kubernetes-agent-*`,
-`k8sagent-soak-pg`) are stopped, not deleted, and come back with Docker
-Desktop. The teardown block at the bottom of this file still says to quit
-Docker Desktop unconditionally; **do not**, without running `docker ps` first.
+## What landed on 2026-09-01 (evening)
 
-**`~/.kube/config` is rewritten by something else on this machine, mid-session.**
-Measured on 2026-09-01: `current-context` was unset at 09:06 and named
-`kind-aiops-test` — a cluster that does not exist — by 09:14, with Docker
-down the whole time. Do not assume the kubeconfig you checked at the start is
-the one you have now. The test suite no longer cares (defect 24), but
-anything else you measure might.
+**The suite is half as slow, and the reason was not I/O.** 83.7s of wall clock
+for 15.4s of CPU. Twelve tests in `test_agent_loop.py` used `get_system_info`
+as the tool a mocked model asks for and dispatched the real one;
+`psutil.cpu_percent(interval=1)` blocks for a second by design. A `HOST_STUB`
+beside the existing `HEALTHY_STUB` took the suite to 41.8s. Defect 25.
 
-**Read `docs/VALIDATION.md` before anything else — it is current, and most of
-this file below the next section is history from 2026-08-24 and earlier.**
+**`ui.py` was reviewed, survivor by survivor: 58 killed of 167 -> 66 broad ->
+101 measured after three batches of tests, then 33 more tests that are not
+measured.** Defect 26 has the table and the classifications. Sixty-nine new
+tests over the console: `test_ui.py` 43 -> 108, `test_ui_markup.py` 4 -> 8.
 
-## Start here: what to pick up, in order
+**A shipped defect: the console spun instead of rendering.** A context that is
+in the kubeconfig but cannot be built reports as `"unavailable"` from
+`active_context()` forever, by design. The picker compared the chosen context
+against that, so choosing one bound it, called `st.rerun()`, read
+`"unavailable"` again and reran — and the picker snapped back to the first
+entry each pass, so a session that asked for the third context read the
+first. Found while writing a test for the picker's starting index. Both
+regression tests fail on the 60s AppTest script timeout before the fix.
 
-Items 1, 2 and 4 need no cluster and no model. Item 3 needs kind plus a
-Postgres; item 6 needs kind plus Ollama. Nothing is blocked.
+**A claim in this project's own docs was too broad and is corrected.**
+`test_ui_markup.py` said AppTest reads the string submitted rather than the
+text painted and that no assertion over the element tree can ever distinguish
+those. True for `st.error`. False for `st.markdown`: `allow_html` is a field
+on the markdown proto. Verified on streamlit 1.61.1 against a two-line app.
 
-1. **Continue the mutation-survivor review.** The list itself is now kept:
-   `results/mutation/survivors-2026-09-01.json`, written by
-   `mutate.py --json`. The previous handoff's 189 was a count with no list
-   behind it, and it was wrong twice over -- `store.py` had grown 21 sites
-   since the survey, and `controller.py` and `ui.py` were excluded as
-   "not surveyable" when they are not. See `docs/VALIDATION.md` for the
-   corrected table.
+## Do not let these be misreported
 
-   **Run pass 2 before reading any survivor.** `mutate.py --sites` re-runs a
-   chosen subset against a wider suite, and the narrow default materially
-   over-counts: `backends.py` reads 18 survivors against
-   `tests/test_backends.py` alone and **11** once `tests/test_inference.py`
-   is added, because `_model_check` is tested there and not in its own file.
-   `targeting.py` goes 8 -> 5 the same way. A survivor found narrowly is an
-   upper bound, not a gap.
+1. **The last four batches of ui.py tests have no kill measurement.** The
+   survey was stopped mid-run. Run a **full** `ui.py` survey, not `--sites`:
+   the context fix changed the file and every site index after it moved.
+2. **692 killed / 282 survivors mixes measurement bases.** It carries the
+   ui.py broad row into a narrow-default total. Do not compare it against a
+   future narrow total.
+3. **Six ui.py timing survivors are equivalent, and three are not.** `%.1f`
+   rounds 8400/1000 and 8400/1001 to the same `8.4s`; the three *default*
+   mutants can never be distinguished, the three *divisors* can, with a
+   500500ms run.
+4. **`st.status` is invisible to AppTest.** Measured: a run yielding two
+   `tool_call` and two `tool_result` events produced zero elements in
+   `app.status`. The progress counter and elapsed time need a browser.
+5. `limits.py:140` is an equivalent mutant, not "the standing proof".
+6. Generalized diagnostic accuracy stays NOT TESTED.
+7. HA is still NOT TESTED — the mechanism is proven, the behaviour is not.
 
-   The broad test sets, derived by grepping `tests/` for each module name and
-   worth keeping rather than re-deriving:
+## Pick up, in order
 
-   | module | add to `tests/test_<module>.py` |
-   |---|---|
-   | `backends.py` | `test_agent_loop`, `test_investigation_identity`, `test_inference` |
-   | `contradiction.py` | `test_agent_loop`, `test_grounding`, `test_replay_grounding` |
-   | `grounding.py` | `test_agent_loop`, `test_audit`, `test_contradiction`, `test_eval_graders`, `test_inference`, `test_redaction`, `test_replay_grounding`, `test_ui` |
-   | `inference.py` | `test_api`, `test_audit`, `test_agent_loop`, `test_chart`, `test_controller`, `test_redaction`, `test_ui_security` |
-   | `limits.py` | `test_api`, `test_grounding`, `test_inference` |
-   | `store.py` | `test_controller`, `test_chart` |
-   | `targeting.py` | `test_investigation_identity` |
-   | `telemetry.py` | `test_audit`, `test_inference` |
-   | `audit.py` | `test_api`, `test_evidence_read` |
-   | `identity.py` | `test_investigation_identity`, `test_limits` |
-   | `redaction.py` | `test_inference`, `test_ui_security` |
+1. **Re-survey `ui.py` and finish the review.** Full survey, five-file test
+   set: `--tests tests/test_ui.py tests/test_ui_auth.py tests/test_ui_markup.py
+   tests/test_ui_security.py tests/test_investigation_identity.py`. ~35
+   minutes. Then read whatever is left against the classifications in defect
+   26 — most of the remainder should be the equivalent and
+   not-visible-to-AppTest sets named there.
+2. **Keep reviewing survivors elsewhere.** Densest now: `contradiction.py`
+   (43), `controller.py` (37), `inference.py` (36), `store.py` (26),
+   `grounding.py` (26), `telemetry.py` (11), `backends.py` (10 after pass 2),
+   `targeting.py` (5 after pass 2). Broad test sets are tabled below; **do
+   not** put `test_mutate.py` in one. `contradiction.py`'s 43 are read and
+   listed in `results/mutation/survivors-2026-09-01.json`; its broad set is
+   `test_agent_loop`, `test_grounding`, `test_replay_grounding`, and pass 2
+   should be run before reading any of them.
+3. **Run HA as two replicas.** kind + Postgres, `sharedState.replicas=2`, kill
+   the lease holder, time takeover against 120s ttl + 15s poll.
+4. **`pyproject.toml` + ruff + mypy.** 17k lines, zero static analysis.
+5. Slack audit trail (needs a workspace).
+6. The n=10 `insufficient_no_such_workload` rerun; build the counter first.
 
-   `sinks.py`, `podcache.py`, `slack_socket.py`, `tool_schema.py` and
-   `mcp_server.py` are exercised only by their own suite, so pass 2 cannot
-   move them. **Do not put `tests/test_mutate.py` in a broad set** -- it
-   re-derives mutation sites from whatever source is on disk, so a "kill"
-   from it says nothing about the module's behaviour.
+## Environment
 
-   **Reviewed and closed on 2026-09-01**, with the reasoning in
-   `VALIDATION.md`: `limits.py` (1 survivor, equivalent), `tool_schema.py`
-   (2, equivalent, already documented), `mcp_server.py` (now 2/2),
-   `slack_socket.py` (10/17 -> 15/17), `podcache.py` (7/18 -> 15/18),
-   `sinks.py` (18/31 -> 27/31). Every remaining survivor in those five is
-   classified as equivalent -- tuning constants with no behavioural contract,
-   and one float-exact boundary nothing reaches.
+- `.venv/bin/python` for everything.
+- **Docker Desktop is UP with two containers running, and they are not this
+  project's**: `mlops-project-mlflow-1` and `mlops-project-postgres-1`, both
+  started around 22:20 on 2026-09-01. They were left alone. `docker ps` before
+  assuming anything, and do not quit Docker Desktop unconditionally.
+- No kind cluster. `~/.kube/config` has **no current-context** — and it is
+  rewritten by something else on this machine mid-session, so re-check rather
+  than trusting that.
+- Postgres for shared-state tests (without it 17 store cases skip silently):
+  `docker run -d --name kubewhy-ha-pg -e POSTGRES_PASSWORD=kubewhy
+   -e POSTGRES_DB=kubewhy -p 55432:5432 postgres:17-alpine`
+  then `TRIAGE_TEST_PG_DSN=postgresql://postgres:kubewhy@127.0.0.1:55432/kubewhy`.
+- `OPENAI_API_KEY` in `.env` was revoked 2026-08-24.
+- **Checking on background jobs: use `ps ax`, not `ps`.** A full 18-module
+  survey takes ~60 minutes; one module with a five-file test set takes ~35.
+- Never point two surveys at one `--json` path.
 
-   **Left to read, densest first:** `ui.py` (108), `contradiction.py` (43),
-   `controller.py` (38), `inference.py` (36), `store.py` (26),
-   `grounding.py` (26), `telemetry.py` (11), `backends.py` (10 after pass 2,
-   with a preliminary read below), `targeting.py` (5 after pass 2).
+## Work style
 
-   `backends.py`'s ten, read but not yet acted on: `62` `KEEP_ALIVE`,
-   `175`/`319` `timeout or TIMEOUT` and `243`/`409` `timeout=5` are all
-   untested configuration defaults; `266`/`267`/`268` are the listing
-   normalisation that accepts both object-shaped and dict-shaped provider
-   responses, and only one shape is covered; `438` `.get("data") or []`
-   crashes on a provider that omits the key; `113` `split(":", 1)` -> `2`
-   cannot change a `[0]` subscript and is equivalent.
+Verify against real systems; state the measurement method and sample size in the
+same sentence as any number. **Before diagnosing the model, check the harness is
+exercising what you think.** Run `evals/replay_grounding.py --self-check` and
+`evals/mutate.py --self-check` first. **Add a counter for any mechanism you test
+before measuring it**, and prove it fails when the mechanism is absent — that is
+what caught a vacuous evidence comparison and a markup check that was only
+looking at ten of eleven call sites this session. Check CI after pushing
+(`gh run list --limit 1`). Commit each piece once tested, and push.
 
-2. **`ui.py` is the least-tested module in the project: 59 of 167 mutants
-   killed, 35%.** It was never surveyed before 2026-09-01 because the
-   previous handoff recorded it as unsurveyable. `tests/test_ui.py` has 43
-   tests over the Streamlit element tree, and `AppTest` sees the submitted
-   string rather than the rendered page, which is the documented reason
-   appearance defects are invisible to it (defect 16). Worth deciding
-   whether the answer is more tests or fewer claims.
+No commit trailers of any kind. Do not claim functionality is implemented unless
+it exists and has been tested — `docs/RELEASE_CHECKLIST.md` greps for the phrase.
 
-   **`tests/test_controller.py` and `tests/test_ui.py` are already
-   self-contained** -- the previous item 2 here asked for that and it does
-   not reproduce. Both pass alone, in 7.0s and 5.5s, with a kubeconfig
-   present and without; their time is deliberate sleeps in the run-path
-   tests, not I/O. The module that really reached a cluster was
-   `tests/test_agent_loop.py`, now fixed (defect 24) and measured at 7
-   minutes for a single test against an unroutable server.
+## Blocked
 
-   **The suite's remaining slow spot is not I/O either.**
-   `routers/system_info.py:get_system_info` calls
-   `psutil.cpu_percent(interval=1)`, which blocks for a second, and the three
-   runaway-loop tests drive it once per round for 8 rounds -- 8s each, about
-   30s of the 83s suite. Stubbing it in those tests is an easy win nobody has
-   taken.
-
-3. **Run HA as two replicas in a cluster, which nothing has done yet.**
-   `sharedState.enabled` shipped with the store contract, the lease race and
-   the chart guards all proven -- against a real Postgres 17, including a
-   12-thread race that the obvious wrong implementation fails 5/12. What has
-   never happened is two replicas running. `docs/VALIDATION.md` records
-   **High availability: NOT TESTED** for exactly that reason, and the store's
-   evidence is deliberately not lent to the availability row.
-
-   The experiment: kind, a Postgres, `sharedState.replicas=2`, then kill the
-   lease holder and time the takeover -- it should be at most the 120s ttl
-   plus one 15s poll. Watch for the standby sitting in CrashLoopBackOff, which
-   is the failure `wait_for_lease()` was written to prevent and which no unit
-   test can rule out in a real kubelet. Then a `RollingUpdate` with findings
-   flowing, checking nothing is posted twice.
-4. **Add `pyproject.toml`, and ruff + mypy to CI.** The repo has 17k lines of
-   Python, 1319 tests, and **no linter, formatter or type checker anywhere** --
-   no ruff, no mypy, no pre-commit, nothing in the workflows. It is also not
-   pip-installable. This is the one structural gap left that is not blocked on
-   hardware, a cloud account, or someone else's incident data.
-5. **Slack audit trail** is the only audit row still NOT TESTED, and it needs a
-   workspace. If one is available, it closes the last surface.
-
-   Worth more than it was. On 2026-09-01 the Slack surface turned out not to
-   work at all: `answer()` built its finding with a `"pods"` key while every
-   writer in `sinks.py` subscripts `finding["replicas"]`, so every question
-   raised `KeyError: 'replicas'` on the answering thread and nothing was ever
-   posted back. Fixed, with regression cases that go through a real
-   `StdoutSink` rather than a mock -- the old cases all mocked the sink,
-   which is why a suite full of green tests sat on top of a surface that
-   could not deliver a message. Defect 23. A workspace would now be
-   confirming something that has at least been shown to work in process.
-6. **The n=10 paragraph-removed experiment** on `insufficient_no_such_workload`
-   (defect 21, described below). Needs kind + Ollama back up, ~40 min of model
-   time, on mains power under `caffeinate -is`.
-
-Housekeeping: the defect sections in `docs/VALIDATION.md` are out of order --
-`### 21` sits above `### 20`.
-
+Real vLLM (Linux GPU host), EKS, Slack workspace, AKS with AAD, external token
+budget against a billed provider, incident-history corpus.
 
 ## What changed on 2026-08-26 / 27 (25 commits)
 
