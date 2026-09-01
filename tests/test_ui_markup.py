@@ -21,7 +21,8 @@ widget that *does* render it, with the flag that renders it turned off.
 `st.markdown(x, unsafe_allow_html=False)` escapes exactly as `st.error` does
 and reaches the reader as the same visible angle brackets. Mutation testing
 found all eleven of ui.py's `unsafe_allow_html=True` flipped to False without
-a single test noticing. `TestMarkupIsNotHandedToAWidgetToldToEscapeIt` below
+a single test noticing -- ten `st.markdown` calls and one `write` on the
+st.status panel. `TestMarkupIsNotHandedToAWidgetToldToEscapeIt` below
 is the static half; `TestRenderedMarkupIsRenderedAsMarkup` in `test_ui.py` is
 the rendered half, and it is possible because the element tree *can* see this
 one -- `allow_html` is a field on the markdown proto, unlike `st.error`, which
@@ -122,6 +123,23 @@ def markdown_calls(path):
         yield node.lineno, node, ast.get_source_segment(source, node) or ""
 
 
+def html_calls(path):
+    """
+    (line, call node) for every call that passes unsafe_allow_html at all.
+
+    Wider than markdown_calls on purpose. The flag is not st.markdown's alone:
+    `st.write` takes it, and so does the write() of a container -- the console
+    passes it to the st.status panel it streams a run's progress into, which
+    is the one call site of the eleven that `st.markdown` matching would miss.
+    """
+    source = open(os.path.join(ROOT, path), encoding="utf-8").read()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and any(
+            k.arg == "unsafe_allow_html" for k in node.keywords
+        ):
+            yield node.lineno, node
+
+
 def allow_html_of(node):
     """True, False, or None where the argument is absent."""
     for keyword in node.keywords:
@@ -143,17 +161,17 @@ class TestMarkupIsNotHandedToAWidgetToldToEscapeIt:
     """
 
     @pytest.mark.parametrize("path", SURFACES)
-    def test_no_markdown_call_is_told_to_escape(self, path):
+    def test_no_call_is_told_to_escape_its_own_markup(self, path):
         """
         `unsafe_allow_html=False` is the default, so writing it means either a
         deliberate escape -- which belongs in a widget that escapes -- or a
         flag that has been flipped. Neither is right here.
         """
         offenders = [
-            f"{path}:{line} st.markdown(..., unsafe_allow_html={value!r})"
-            for line, node, _ in markdown_calls(path)
+            f"{path}:{line} unsafe_allow_html={value!r}"
+            for line, node in html_calls(path)
             for value in [allow_html_of(node)]
-            if value is not None and value is not True
+            if value is not True
         ]
 
         assert not offenders, (
@@ -186,10 +204,15 @@ class TestMarkupIsNotHandedToAWidgetToldToEscapeIt:
         low count here means the walker broke, not that the page got simpler.
         """
         calls = list(markdown_calls(path))
-        flagged = [node for _, node, _ in calls if allow_html_of(node) is True]
+        flagged = list(html_calls(path))
 
         assert len(calls) >= 10
-        assert len(flagged) >= 10, "nothing renders markup; the walker is blind"
+        assert len(flagged) >= 11, "nothing renders markup; the walker is blind"
+        # The wider walk must see at least what the narrow one sees, plus the
+        # container write the narrow one cannot.
+        assert {line for line, _ in flagged} > {
+            line for line, node, _ in calls if allow_html_of(node) is True
+        }
 
     def test_the_check_would_catch_a_flipped_flag(self):
         """
