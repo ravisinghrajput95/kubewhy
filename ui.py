@@ -704,14 +704,24 @@ with st.sidebar:
     current = active_context()
     contexts = list_contexts()
 
+    # What this session asked for, falling back to what the client reports.
+    # Not active_context() alone: a context that is in the kubeconfig but
+    # cannot be built -- a missing cert file, a malformed user -- reports as
+    # "unavailable" for as long as the process lives, by design. Comparing the
+    # picker against that meant choosing such a context bound it, reran the
+    # script, read "unavailable" again, found it still different and reran
+    # again. The console spun instead of rendering, and the picker snapped
+    # back to the first entry on every pass.
+    bound = _ctx() or current
+
     if contexts:
         chosen = st.selectbox(
             "Context",
             contexts,
-            index=contexts.index(current) if current in contexts else 0,
+            index=contexts.index(bound) if bound in contexts else 0,
             label_visibility="collapsed",
         )
-        if chosen != current:
+        if chosen != bound:
             # Only this session moves. Another browser session on another
             # cluster keeps reading its own, which a process-wide switch used
             # to break underneath it.

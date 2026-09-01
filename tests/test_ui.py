@@ -1458,6 +1458,23 @@ class TestTheTimingCaptionIsTheRunsOwnNumbers:
         assert caption == ("3 model rounds · model 8.0s · tools 0.4s · "
                            "re-asks: 0 named-tool, 1 evidence, 0 coverage")
 
+    def test_a_long_investigation_reports_the_time_it_actually_took(self):
+        """
+        A short run cannot see a wrong divisor: 8400/1000 and 8400/1001 both
+        print as "8.4s", and so does every duration this file otherwise uses.
+        Eight minutes can -- 500500ms is 500.5s and 500.0s under the two --
+        and the console reports a measured duration, so being 0.1% out is
+        still reporting a number that was never measured.
+        """
+        answer = {**ANSWER,
+                  "timing": {"wall_ms": 500500, "model_ms": 480200,
+                             "tool_ms": 20300, "rounds": 9}}
+        app = render_answer(answer)
+        caption = next(c.value for c in app.caption if "model rounds" in c.value)
+
+        assert "480.2s" in caption and "20.3s" in caption
+        assert "500.5s" in _html(app, "<div class='kw-strip'>")[0]
+
     def test_a_run_that_reported_less_reads_as_zero_not_as_missing(self):
         """
         The defaults, which the case above cannot see because it supplies
@@ -1541,3 +1558,126 @@ class TestTheNextStepNeedsEvidenceToReasonFrom:
 
         assert blocks, "no recommendation: the prompt's target was not used"
         assert "crasher-x" in blocks[0]
+
+
+# --- which cluster is being read ---------------------------------------------
+
+def run_contexts(contexts, current, answer=None):
+    """The app with kubectl's context list and active context stubbed."""
+    import streamlit as st
+
+    st.cache_data.clear()
+    with patch.object(k8s, "scan_cluster", return_value={"result": "ok"}), \
+         patch.object(k8s, "list_nodes", return_value={}), \
+         patch.object(k8s, "list_contexts", return_value=contexts), \
+         patch.object(k8s, "active_context", return_value=current), \
+         patch.object(k8s, "use_context", lambda *a, **k: None):
+        app = AppTest.from_file(UI, default_timeout=60)
+        if answer is not None:
+            app.session_state["answer"] = answer
+        app.run()
+    assert not app.exception, [str(e.value) for e in app.exception]
+    return app
+
+
+class TestThePickerStartsOnTheClusterYouAreReading:
+    """
+    The selectbox reports the bound context. Starting it anywhere else is not
+    a cosmetic slip: the page below compares the picked context to the active
+    one and rebinds the session when they differ, so a picker that opened on
+    the wrong entry would move the session to another cluster on load.
+    """
+
+    CONTEXTS = ["kind-alpha", "gke-prod", "kind-beta"]
+
+    def test_the_active_context_is_the_selected_one(self):
+        app = run_contexts(self.CONTEXTS, "gke-prod")
+        picker = next(s for s in app.selectbox if s.label == "Context")
+
+        assert picker.value == "gke-prod"
+
+    def test_an_active_context_that_is_not_in_the_list_falls_back_to_the_first(self):
+        """
+        kubeconfig can name a current-context that no longer has an entry --
+        measured on this machine, `current-context: kind-aiops-test` for a
+        cluster that does not exist. The page has to render anyway.
+        """
+        app = run_contexts(["only-one"], "kind-deleted")
+        picker = next(s for s in app.selectbox if s.label == "Context")
+
+        assert picker.value == "only-one"
+
+    def test_no_contexts_at_all_is_not_a_picker(self):
+        app = run_contexts([], "unavailable")
+
+        assert not any(s.label == "Context" for s in app.selectbox)
+
+
+class TestTheHeaderNamesTheClusterEvenWhenItCannotAsk:
+    """
+    Every finding on the page is about one cluster and there is no other
+    indication of which, so the header names it from whatever it can get:
+    this session's bound context, else kubectl's, else a placeholder.
+    """
+
+    def test_it_uses_kubectls_context_when_the_session_has_not_bound_one(self):
+        header = _html(run_contexts(["gke-prod"], "gke-prod", answer=ANSWER),
+                       "<div class='kw-hdr'>")[0]
+
+        assert "gke-prod" in header
+
+    def test_a_kubeconfig_that_cannot_be_read_is_named_as_such(self):
+        """
+        active_context() never raises -- it returns "unavailable", because a
+        caller asking which cluster it is on must not be the one thing that
+        takes the page down. The header shows that word rather than a blank.
+        """
+        header = _html(run_contexts([], "unavailable", answer=ANSWER),
+                       "<div class='kw-hdr'>")[0]
+
+        assert "unavailable" in header
+
+
+class TestAContextThatCannotBeBound:
+    """
+    `list_contexts()` reads the kubeconfig; `_build_bundle()` builds a client.
+    A context can be in the first and fail the second -- a cluster entry whose
+    cert file was removed, a malformed user -- and `active_context()` then
+    reports "unavailable" for it, permanently, by design.
+
+    The picker compared what was chosen against that. Choosing such a context
+    set the session state, bound it, and called st.rerun(); the next run read
+    "unavailable" again, found it still different, and reran again. The
+    console spun instead of rendering, and no unit test could see it because
+    every test bound a context that binds.
+
+    Measured before the fix: the AppTest run did not finish, and failed on the
+    60s script timeout rather than on an assertion.
+    """
+
+    def test_the_page_finishes_rendering(self):
+        app = run_contexts(["broken-context", "other"], "unavailable")
+
+        assert not app.exception
+        assert any(s.label == "Context" for s in app.selectbox)
+
+    def test_the_picker_stays_on_what_this_session_chose(self):
+        """
+        And does not snap back to the first entry, which is where a session
+        that asked for the third context would find itself reading the first.
+        """
+        import streamlit as st
+
+        st.cache_data.clear()
+        with patch.object(k8s, "scan_cluster", return_value={"result": "ok"}), \
+             patch.object(k8s, "list_nodes", return_value={}), \
+             patch.object(k8s, "list_contexts",
+                          return_value=["alpha", "beta", "broken"]), \
+             patch.object(k8s, "active_context", return_value="unavailable"), \
+             patch.object(k8s, "use_context", lambda *a, **k: None):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.session_state["context"] = "broken"
+            app.run()
+
+        picker = next(s for s in app.selectbox if s.label == "Context")
+        assert picker.value == "broken"
