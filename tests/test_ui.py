@@ -14,6 +14,7 @@ nothing is wrong during an incident.
 import os
 import re
 import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -1337,3 +1338,206 @@ class TestTheAskPanelBeforeAnythingIsAsked:
         assert seen == ["what is wrong with this cluster?"], \
             "the question did not reach the agent unscoped"
         assert not app.exception, [str(e.value) for e in app.exception]
+
+
+# --- the header strip, chip by chip ------------------------------------------
+#
+# One line above everything, and the only thing on the page that says which
+# cluster the findings below are about and where the evidence goes. The
+# existing test asserts the three labels are present; these assert the values,
+# which is what a reader acts on.
+
+class FakeGateway:
+    """inference.gateway() with a chosen destination."""
+
+    def __init__(self, destination="on-network", provider="ollama",
+                 mode="local", model="qwen3"):
+        described = {"mode": mode, "provider": provider, "model": model,
+                     "destination": destination}
+        self.config = SimpleNamespace(describe=lambda: {"primary": described})
+
+
+def header_of(app):
+    return _html(app, "<div class='kw-hdr'>")[0]
+
+
+class TestTheHeaderSaysWhereEvidenceGoes:
+    """
+    Where inference happens decides what leaves your network. The chip is the
+    one place the console states it, so it has to state it correctly: a
+    deployment sending pod logs to a hosted API must not read as on-network.
+    """
+
+    def _header(self, gateway, answer=None):
+        import inference
+
+        with patch.object(inference, "gateway", lambda: gateway):
+            return header_of(render_answer(answer or ANSWER))
+
+    def test_a_local_backend_reads_as_on_network(self):
+        header = self._header(FakeGateway(destination="on-network"))
+
+        assert "on-network" in header
+        assert "external" not in header
+
+    def test_a_hosted_backend_reads_as_external(self):
+        header = self._header(FakeGateway(destination="external",
+                                          provider="anthropic", mode="api"))
+
+        assert "external" in header
+        # And in the warning tone, which is the half a reader sees first.
+        assert "kw-warn" in header
+
+    def test_the_backend_is_named_not_just_classified(self):
+        header = self._header(FakeGateway(provider="vllm", mode="cluster",
+                                          model="qwen3-32b"))
+
+        assert "vllm" in header and "qwen3-32b" in header
+
+    def test_a_backend_that_cannot_be_described_says_so(self):
+        """
+        The header never raises: one that took the page down when the model is
+        unreachable would hide the one fact worth showing.
+        """
+        import inference
+
+        def explode():
+            raise ConnectionError("no backend")
+
+        with patch.object(inference, "gateway", explode):
+            header = header_of(render_answer(ANSWER))
+
+        assert "ConnectionError" in header
+
+
+class TestTheHealthChip:
+    """Rendered only once something has probed, so that "not ready" means a
+    failed probe rather than a page that has not asked yet."""
+
+    def test_a_ready_backend(self):
+        import streamlit as st
+
+        st.cache_data.clear()
+        with patch.object(k8s, "scan_cluster", return_value={"result": "ok"}), \
+             patch.object(k8s, "list_nodes", return_value={}):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.session_state["health"] = True
+            app.run()
+
+        assert "ready" in header_of(app)
+        assert "not ready" not in header_of(app)
+
+    def test_a_backend_that_failed_its_probe(self):
+        import streamlit as st
+
+        st.cache_data.clear()
+        with patch.object(k8s, "scan_cluster", return_value={"result": "ok"}), \
+             patch.object(k8s, "list_nodes", return_value={}):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.session_state["health"] = False
+            app.run()
+
+        assert "not ready" in header_of(app)
+
+    def test_nothing_probed_yet_shows_no_chip(self):
+        """The counter: "health" absent is not "health false"."""
+        assert "health" not in header_of(render_answer(ANSWER))
+
+
+class TestTheTimingCaptionIsTheRunsOwnNumbers:
+    """
+    Seconds, rounds and re-asks under the timeline. Nine of ui.py's survivors
+    were in this one f-string -- both divisors, both defaults and all three
+    re-ask counts -- because nothing asserted the sentence it produces.
+    """
+
+    def test_the_numbers_are_the_ones_the_run_reported(self):
+        app = render_answer(ANSWER)
+        caption = next(c.value for c in app.caption if "model rounds" in c.value)
+
+        assert caption == ("3 model rounds · model 8.0s · tools 0.4s · "
+                           "re-asks: 0 named-tool, 1 evidence, 0 coverage")
+
+    def test_a_run_that_reported_less_reads_as_zero_not_as_missing(self):
+        """
+        The defaults, which the case above cannot see because it supplies
+        every key. A run from an older record has no re-ask counts at all.
+        """
+        answer = {k: v for k, v in ANSWER.items()
+                  if k not in {"nudges", "policies", "coverage"}}
+        answer["timing"] = {"rounds": 2}
+        app = render_answer(answer)
+        caption = next(c.value for c in app.caption if "model rounds" in c.value)
+
+        assert caption == ("2 model rounds · model 0.0s · tools 0.0s · "
+                           "re-asks: 0 named-tool, 0 evidence, 0 coverage")
+
+
+class TestTheEvidencePanelSaysWhenThereIsNone:
+    def test_a_run_that_kept_nothing(self):
+        app = render_answer({**ANSWER, "evidence": []})
+
+        assert any("evidence was not retained" in c.value for c in app.caption)
+
+    def test_a_run_that_kept_its_evidence_does_not_say_that(self):
+        app = render_answer(ANSWER)
+
+        assert not any("evidence was not retained" in c.value for c in app.caption)
+
+
+class TestTheDisclosureIsAboutARewrite:
+    """
+    The panel exists because the checkbox defaults to on, so a question gets
+    silently rewritten. A run whose prompt is the question was not rewritten,
+    and a panel there says a rewrite happened when none did.
+    """
+
+    def test_a_prompt_identical_to_the_question_is_not_a_rewrite(self):
+        app = render_answer({**ANSWER,
+                             "question": "why does it restart?",
+                             "prompt": "why does it restart?"})
+
+        assert not any("what was actually sent" in (e.label or "")
+                       for e in app.expander)
+        assert not any("Scoped to the selected workload" in c.value
+                       for c in app.caption)
+
+
+class TestTheNextStepNeedsEvidenceToReasonFrom:
+    """
+    `next_step` is agent.evidence_gap() borrowed, and evidence_gap decides what
+    is missing by reading tool *results*. A trace with no results behind it
+    cannot support a recommendation.
+    """
+
+    CRASHING = {"id": "tool-1", "tool": "describe_pod",
+                "result": '{"pod": "crasher-x", "namespace": "demo",'
+                          '"status": "CrashLoopBackOff",'
+                          '"containers": {"c": {"last_termination":'
+                          '{"reason": "Error", "exit_code": 1}}}}'}
+    CALL = {"name": "describe_pod",
+            "arguments": {"name": "crasher-x", "namespace": "demo"}}
+
+    def test_calls_with_no_results_produce_no_recommendation(self):
+        app = render_answer({**ANSWER, "question": "why is crasher-x failing?",
+                             "tool_calls": [self.CALL], "evidence": []})
+
+        assert not _html(app, "<div class='kw-next'>")
+
+    def test_the_prompt_is_what_names_the_pod(self):
+        """
+        The typed question often does not name anything -- "why is this
+        broken?" -- and the scoped prompt always does. Reading the question
+        instead loses the target and with it the recommendation.
+        """
+        app = render_answer({**ANSWER,
+                             "question": "why is this broken?",
+                             "prompt": "Answer only about the workload "
+                                       "demo/crasher-x (pod: crasher-x). "
+                                       "why is this broken?",
+                             "tool_calls": [self.CALL],
+                             "evidence": [self.CRASHING]})
+        blocks = _html(app, "<div class='kw-next'>")
+
+        assert blocks, "no recommendation: the prompt's target was not used"
+        assert "crasher-x" in blocks[0]
