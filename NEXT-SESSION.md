@@ -100,13 +100,36 @@ on the markdown proto. Verified on streamlit 1.61.1 against a two-line app.
   session. The previous handoff recorded the same thing about nine other
   containers. **Do not conclude you deleted something, and do not rely on a
   container you started still being there.**
-- No kind cluster. `~/.kube/config` has **no current-context** — and it is
-  rewritten by something else on this machine mid-session, so re-check rather
-  than trusting that.
-- Postgres for shared-state tests (without it 17 store cases skip silently):
+- **Corrected 2026-09-02: there is a kind cluster, and it is not yours.**
+  `kind get clusters` returns `aiops-test`, `~/.kube/config` has it as
+  current-context, and it holds a `payments` namespace full of deliberately
+  broken workloads. Something else on this machine is **actively working in
+  it**: at 08:59 every deployment was 14m old except `flapper` at 51s. Do not
+  deploy into it, do not `kind delete` it, and do not read a scan of it as a
+  measurement of anything this project set up. Make your own cluster with
+  your own name if you need one. The line this replaces said there was no
+  cluster and no current-context; both were wrong within twenty minutes of
+  the session starting, which is the point — re-check, do not trust.
+- Containers appear here as well as vanish. At 08:43 `docker ps` showed four
+  containers from two other projects plus the kind node, none of which this
+  session started, and `docker ps -a` held a `kubewhy-ha-pg` in `Created`
+  state from an earlier session with a malformed port binding
+  (`{invalid IP 55432}`) that published nothing. It was removed and remade.
+- Postgres for shared-state tests (without it **26** store cases skip
+  silently — it was 17 when that count was written):
   `docker run -d --name kubewhy-ha-pg -e POSTGRES_PASSWORD=kubewhy
-   -e POSTGRES_DB=kubewhy -p 55432:5432 postgres:17-alpine`
-  then `TRIAGE_TEST_PG_DSN=postgresql://postgres:kubewhy@127.0.0.1:55432/kubewhy`.
+   -e POSTGRES_DB=kubewhy -p 127.0.0.1:55433:5432 postgres:17-alpine`
+  then `TRIAGE_TEST_PG_DSN=postgresql://postgres:kubewhy@127.0.0.1:55433/kubewhy`.
+  **55433, not 55432.** On 2026-09-02 port 55432 was already published by
+  `ai-kubernetes-agent-postgres`, another project of yours, and the DSN this
+  file used to give reached that server and was refused: `FATAL: password
+  authentication failed`. A refused DSN is not an error you see — the store
+  cases skip on it, silently, exactly as if no Postgres were running. Prove
+  the connection before trusting a green run:
+  `python -c "import psycopg;
+   print(psycopg.connect('$TRIAGE_TEST_PG_DSN').execute(
+   'select current_database()').fetchone())"`
+  and check `pytest tests/test_store.py -q` reports no `s`.
 - `OPENAI_API_KEY` in `.env` was revoked 2026-08-24.
 - **Checking on background jobs: use `ps ax`, not `ps`.** A full 18-module
   survey takes ~60 minutes; one module with a five-file test set takes ~35.
