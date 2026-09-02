@@ -547,3 +547,184 @@ class TestOneReplicaDoesNotFailAnothersWork:
         db.create_job("theirs", "q2", at=2, owner="pod-b")
         assert db.fail_interrupted(at=10, owner="pod-a") == 1
         assert db.get_job("theirs")["state"] == "queued"
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
+def durable(request, tmp_path):
+    """The two stores a lease means something in. MemoryStore always holds."""
+    if request.param == "sqlite":
+        yield store.SqliteStore(str(tmp_path / "lease.db"))
+    else:
+        if not PG_DSN:
+            pytest.skip("TRIAGE_TEST_PG_DSN is unset; no Postgres to test against")
+        db = _fresh_postgres(PG_DSN)
+        yield db
+        db.close()
+
+
+class TestTheLeaseExpiresAtItsTtlAndNotASecondLater:
+    """
+    The takeover boundary, which is what the controller's failover time is
+    measured against, and which nothing pinned.
+
+    The two durable stores express it in opposite forms. SQLite refuses while
+    `at - renewed_at < ttl`; Postgres takes over when
+    `EXCLUDED.renewed_at - lease.renewed_at >= ttl`. Those agree only if you
+    read both carefully, and the existing cases probed 30 seconds in and 121
+    seconds in -- comfortably either side, and true under a ttl of 120 or 121
+    or any comparison you like.
+
+    Two implementations of one rule agree by coincidence until something
+    checks the instant itself.
+    """
+
+    def test_one_second_short_of_the_ttl_the_lease_still_holds(self, durable):
+        durable.claim_lease("dead-pod/1", at=1000)
+
+        assert durable.claim_lease("new-pod/2", at=1000 + 119) is False
+
+    def test_at_exactly_the_ttl_the_lease_is_gone(self, durable):
+        """
+        120 seconds after the last renewal the holder is presumed dead. The
+        default is 120, and a run that took over at 121 would still pass every
+        case that existed before this one.
+        """
+        durable.claim_lease("dead-pod/1", at=1000)
+
+        assert durable.claim_lease("new-pod/2", at=1000 + 120) is True
+
+    def test_the_holder_renews_at_the_boundary_too(self, durable):
+        """The holder is never locked out of its own lease by expiry."""
+        durable.claim_lease("pod-a/1", at=1000)
+
+        assert durable.claim_lease("pod-a/1", at=1000 + 120) is True
+
+
+class TestTheStoreTheConfigurationAsksFor:
+    """
+    `build()` is how every surface gets a store, and it had no test. Both of
+    its two lines could be inverted -- the default-path conditional and the
+    emptiness check -- and the suite stayed green, which means nothing
+    anywhere asserted that configuring a path gets you a database.
+    """
+
+    def test_no_path_configured_is_memory(self, monkeypatch):
+        """The CLI case. A database file next to every question is litter."""
+        monkeypatch.setattr(store, "STATE_DB", "")
+
+        assert isinstance(store.build(), store.MemoryStore)
+
+    def test_an_explicit_path_is_a_database_at_that_path(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(store, "STATE_DB", "")
+        path = str(tmp_path / "explicit.db")
+
+        built = store.build(path)
+
+        assert isinstance(built, store.SqliteStore)
+        assert built.path == path
+
+    def test_a_configured_path_is_used_when_the_caller_names_none(self, monkeypatch, tmp_path):
+        path = str(tmp_path / "from-env.db")
+        monkeypatch.setattr(store, "STATE_DB", path)
+
+        built = store.build()
+
+        assert isinstance(built, store.SqliteStore)
+        assert built.path == path
+
+    def test_a_shared_dsn_is_the_one_store_two_replicas_can_share(self, monkeypatch):
+        """
+        Routing only -- PostgresStore's own behaviour is tested against a real
+        server elsewhere. What matters here is that a postgresql:// DSN is not
+        treated as a filename, which is how a two-replica deployment would
+        quietly get two private SQLite files.
+        """
+        monkeypatch.setattr(store, "STATE_DB", "")
+        seen = {}
+
+        class Fake:
+            def __init__(self, dsn):
+                seen["dsn"] = dsn
+
+        monkeypatch.setattr(store, "PostgresStore", Fake)
+
+        built = store.build("postgresql://user@host:5432/kubewhy")
+
+        assert isinstance(built, Fake)
+        assert seen["dsn"] == "postgresql://user@host:5432/kubewhy"
+
+
+class TestTheCutoffIsInsideTheWindow:
+    """
+    Both windowed queries take a cutoff, and both count the instant itself as
+    inside it: `reports_since` keeps an emission at exactly the cutoff, and
+    `purge_jobs` keeps a job created at exactly the cutoff. The existing cases
+    probe well either side -- emissions at 0 and 250, a purge at 50 against
+    jobs at 10 and 100 -- so both boundaries could move by one without
+    anything failing.
+
+    It matters because the caller derives the cutoff by subtraction. The
+    controller asks for reports since `now - window`, so "at exactly the
+    cutoff" is the oldest event still in the hour, and dropping it makes the
+    budget one report more generous than it says it is.
+    """
+
+    def test_an_emission_at_the_cutoff_is_still_in_the_window(self, state):
+        state.record_report("demo/crasher", at=100.0)
+        state.record_report("demo/other", at=200.0)
+
+        assert state.reports_since(100.0) == 2
+
+    def test_an_emission_before_the_cutoff_has_left_it(self, state):
+        state.record_report("demo/crasher", at=100.0)
+        state.record_report("demo/other", at=200.0)
+
+        assert state.reports_since(100.5) == 1
+
+    def test_a_job_created_at_the_cutoff_is_not_purged(self, state):
+        state.create_job("edge", "q", 50.0)
+        state.purge_jobs(50.0)
+
+        assert state.get_job("edge") is not None
+
+    def test_a_job_created_before_the_cutoff_is(self, state):
+        state.create_job("older", "q", 49.0)
+        state.purge_jobs(50.0)
+
+        assert state.get_job("older") is None
+
+
+class TestAFailedWriteLeavesNothingBehind:
+    """
+    The pool is opened with `autocommit=False` and nothing said why. It
+    matters because several writes here are two statements against two
+    tables: `record_report` inserts into `reports` and then `emissions`, and
+    `undo_report` touches both in the other direction. Without a transaction
+    around them a failure between the two leaves the budget counting an
+    emission for a report that was never recorded -- the rate limiter
+    tightening itself for a finding nobody received.
+
+    Flipping that flag to True passed every other case in this file, because
+    every one of them completes.
+    """
+
+    def test_an_exception_mid_transaction_rolls_back_the_write_before_it(self, pg_dsn):
+        db = _fresh_postgres(pg_dsn)
+        try:
+            with pytest.raises(RuntimeError):
+                with db._pool.connection() as connection:
+                    connection.execute("INSERT INTO emissions (at) VALUES (1.0)")
+                    raise RuntimeError("the statement after this one failed")
+
+            assert db.reports_since(0) == 0, (
+                "the insert survived a failed transaction: the pool is "
+                "committing each statement as it goes")
+        finally:
+            db.close()
+
+    def test_a_transaction_that_finishes_is_kept(self):
+        """The counter for the case above: it must fail for the right reason."""
+        db = store.MemoryStore()
+        db.record_report("demo/crasher", at=1.0)
+
+        assert db.reports_since(0) == 1
