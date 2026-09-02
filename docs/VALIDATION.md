@@ -1534,6 +1534,26 @@ is green either way -- 26 cases, silently. Moved to 55433 bound to 127.0.0.1,
 with a connect check and "no `s` in the store run" written down as the proof
 to demand. **A skip is a result you have to go and look for.**
 
+**What the silence cost, measured as a pair.** The same survey, the same
+`store.py`, the same 53 mutants, the same test file, run twice on 2026-09-02
+with nothing different but the environment variable:
+
+| | killed | survivors |
+|---|---|---|
+| `TRIAGE_TEST_PG_DSN` unset | 25 | 28 |
+| pointed at a Postgres that answers | **33** | **20** |
+
+Eight mutants live or die on whether a database is running, and both runs
+report success. The `store.py` row in the 2026-09-01 all-module survey --
+25 killed, 26 survivors -- was measured in the first of those two states, so
+eight of its recorded survivors were never survivors of anything but a skip.
+`results/mutation/store-with-postgres-2026-09-02.json` is the honest list.
+
+Two of the 20 are new and are not gaps: the `strict=True` added to `store.py`'s
+two column-name zips in the same session. Nothing can produce a length
+mismatch without editing the SQL, which is what the guard is for -- it fires
+the day someone adds a column to one list and not the other.
+
 
 ## What the `vllm` provider has and has not been run against
 
