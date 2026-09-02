@@ -11,6 +11,7 @@ and a UI that renders a 403 as an empty table would tell an operator that
 nothing is wrong during an incident.
 """
 
+import json
 import os
 import re
 import sys
@@ -1473,12 +1474,15 @@ class TestTheTimingCaptionIsTheRunsOwnNumbers:
         still reporting a number that was never measured.
         """
         answer = {**ANSWER,
-                  "timing": {"wall_ms": 500500, "model_ms": 480200,
-                             "tool_ms": 20300, "rounds": 9}}
+                  "timing": {"wall_ms": 500500, "model_ms": 300100,
+                             "tool_ms": 200400, "rounds": 9}}
         app = render_answer(answer)
         caption = next(c.value for c in app.caption if "model rounds" in c.value)
 
-        assert "480.2s" in caption and "20.3s" in caption
+        # All three, and each is checked against a duration the wrong divisor
+        # renders differently: 300.1/299.8, 200.4/200.2, 500.5/500.0. The
+        # tools figure used to be 20300ms, which reads as 20.3s under both.
+        assert "300.1s" in caption and "200.4s" in caption
         assert "500.5s" in _html(app, "<div class='kw-strip'>")[0]
 
     def test_a_run_that_reported_less_reads_as_zero_not_as_missing(self):
@@ -1547,23 +1551,56 @@ class TestTheNextStepNeedsEvidenceToReasonFrom:
 
         assert not _html(app, "<div class='kw-next'>")
 
+    LISTING = {"id": "tool-1", "tool": "list_pods", "result": json.dumps({
+        "log-shipper-8gnqk": {"status": "CrashLoopBackOff", "ready": "0/1",
+                              "restarts": 4},
+        "crasher-5964d9-9g8vg": {"status": "CrashLoopBackOff", "ready": "0/1",
+                                 "restarts": 7}})}
+    LIST_CALL = {"name": "list_pods", "arguments": {"namespace": "demo"}}
+
+    def test_results_with_no_calls_behind_them_produce_no_recommendation(self):
+        """
+        The mirror, and the half that was untested. The namespace comes from
+        the call, not from the result, so a listing with no trace beside it
+        reaches the gap detector with nothing to take a namespace from and it
+        falls back to `default`. Measured: the recommendation that guard
+        stops is `get_pod_logs` on crasher-5964d9-9g8vg in `default` -- a
+        namespace nothing ever reported.
+        """
+        app = render_answer({**ANSWER, "question": "why is this broken?",
+                             "tool_calls": [], "evidence": [self.LISTING]})
+
+        assert not _html(app, "<div class='kw-next'>")
+
     def test_the_prompt_is_what_names_the_pod(self):
         """
         The typed question often does not name anything -- "why is this
-        broken?" -- and the scoped prompt always does. Reading the question
-        instead loses the target and with it the recommendation.
+        broken?" -- and the scoped prompt always does.
+
+        Two pods, because with one there is nothing to choose between and
+        this test could not fail: measured 2026-09-02, the single-pod fixture
+        it used to carry returned the same recommendation from the prompt,
+        from the question, and from neither, so the mutation that swaps them
+        survived and the test proved nothing it claimed.
+
+        Two is the shape of the live failure the policy records from
+        2026-08-19: asked about `crasher`, the model listed every unhealthy
+        pod in the namespace and the recommendation pointed at the first one
+        it found -- log-shipper, a workload nobody had mentioned.
         """
         app = render_answer({**ANSWER,
                              "question": "why is this broken?",
                              "prompt": "Answer only about the workload "
-                                       "demo/crasher-x (pod: crasher-x). "
-                                       "why is this broken?",
-                             "tool_calls": [self.CALL],
-                             "evidence": [self.CRASHING]})
+                                       "demo/crasher (pod: crasher-5964d9-"
+                                       "9g8vg). why is this broken?",
+                             "tool_calls": [self.LIST_CALL],
+                             "evidence": [self.LISTING]})
         blocks = _html(app, "<div class='kw-next'>")
 
         assert blocks, "no recommendation: the prompt's target was not used"
-        assert "crasher-x" in blocks[0]
+        assert "crasher-5964d9-9g8vg" in blocks[0]
+        assert "log-shipper" not in blocks[0], (
+            "the recommendation named the pod the question did not ask about")
 
 
 # --- which cluster is being read ---------------------------------------------
