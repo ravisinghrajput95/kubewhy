@@ -710,3 +710,497 @@ class TestACitationNamesTheFieldTheNumberCameFrom:
         assert absence, "the confirmed absence was not recorded as a claim"
         assert absence[0]["evidence"][0]["field"] == "ready_endpoints"
         assert self._counted("ready_endpoints", self.UNREADY_ONLY) == 0
+
+
+class TestWhichThingTheAbsenceIsAbout:
+    """
+    `_absence_is_about` decides whether an absence phrase is talking about a
+    given entity, and it is the guard that stopped the stuck-volume answer
+    being called a contradiction. Its docstring says it was fixed by testing
+    it directly rather than through a run; nothing in the suite did that, and
+    six of the module's mutation survivors sat in its five lines.
+
+    The cases below are its boundaries: the phrase missing, the name missing
+    before it, and the name at index 0 of the clause -- where the search that
+    finds it starts.
+    """
+
+    PHRASE = "does not exist"
+
+    def test_a_clause_without_the_phrase_is_about_nothing(self):
+        assert not contradiction._absence_is_about(
+            "The pod `nginx-conf` is running.", self.PHRASE, "nginx-conf")
+
+    def test_a_name_that_never_precedes_the_phrase_is_not_its_subject(self):
+        """
+        The name is in the clause, after the phrase. An absence attaches to
+        the nearest named thing *before* it, so this is not its subject.
+        """
+        assert not contradiction._absence_is_about(
+            "The ConfigMap does not exist, unlike `nginx-conf`.",
+            self.PHRASE, "nginx-conf")
+
+    def test_a_name_at_the_very_start_of_the_clause_is_still_its_subject(self):
+        """
+        The boundary three mutants live on. `rfind(name, 0, at)` searches from
+        index 0, and a clause that opens with the entity puts it exactly
+        there -- the model writes this shape often, because the sentence
+        before it named the pod.
+        """
+        assert contradiction._absence_is_about(
+            "nginx-conf does not exist in the config-faults namespace.",
+            self.PHRASE, "nginx-conf")
+
+    def test_a_marked_up_name_in_between_takes_the_absence_away(self):
+        """The rule the function exists for, at the same starting index."""
+        assert not contradiction._absence_is_about(
+            "nginx-conf mounts `other-map`, which does not exist.",
+            self.PHRASE, "nginx-conf")
+
+
+def entries(*bodies):
+    """What scan() hands the fact walk: scoped evidence, text and source."""
+    return [{"text": json.dumps(b), "source": {"id": f"tool-{i}", "tool": "t"}}
+            for i, b in enumerate(bodies, 1)]
+
+
+class TestTheFactsTheEvidenceEstablishes:
+    """
+    `facts()` is a dispatch chain: each branch is a key test AND a type test,
+    and every one of those guards was a mutation survivor. The chain reads
+    every (key, value) pair in the document depth first and takes the first
+    match with `setdefault`, so a guard that lets one pair too many through
+    does not add a wrong fact beside the right one -- it wins the race and
+    the right one is dropped.
+
+    The document below is built to lose that race in every branch: a string
+    before `status`, an integer before `restarts`, a dict that is not
+    `last_termination`, a dict that is not `limits`, and a list that is not
+    an endpoint list.
+    """
+
+    NOISY = {
+        "pod": "crasher-x",
+        "generation": 7,
+        "namespace": "demo",
+        "conditions": {"reason": "ContainersNotReady"},
+        "requests": {"memory": "32Mi"},
+        "tolerations": ["node.kubernetes.io/not-ready", "node.kubernetes.io/x"],
+        "status": "CrashLoopBackOff",
+        "containers": {
+            "crasher": {
+                "restarts": 3,
+                "limits": {"memory": "64Mi"},
+                "last_termination": {"reason": "OOMKilled", "exit_code": 137},
+            }
+        },
+    }
+
+    def test_only_a_status_key_becomes_the_status(self):
+        found = contradiction.facts(entries(self.NOISY))
+
+        assert found["status"] == "crashloopbackoff"
+
+    def test_only_a_termination_becomes_the_termination_reason(self):
+        """
+        `conditions.reason` is `ContainersNotReady`, which is a true fact
+        about the pod and not a reason anything terminated. It is walked
+        first, so a guard that accepts any dict reports it as the cause of
+        death and the rule that reads OOMKilled never sees it.
+        """
+        found = contradiction.facts(entries(self.NOISY))
+
+        assert found["termination_reason"] == "oomkilled"
+        assert found["exit_code"] == 137
+
+    def test_only_a_limits_key_becomes_a_limit(self):
+        found = contradiction.facts(entries(self.NOISY))
+
+        assert found["limit_memory"] == "64Mi"
+        assert [k for k in found if k.startswith("limit_")] == ["limit_memory"]
+
+    def test_only_a_restart_count_becomes_the_restart_count(self):
+        found = contradiction.facts(entries(self.NOISY))
+
+        assert found["restarts"] == 3
+
+    def test_a_list_that_is_not_an_endpoint_list_is_not_counted(self):
+        """
+        Two tolerations are not two endpoints. `endpoints_total` absent and
+        `endpoints_total == 0` are different states -- absent means no service
+        was read, and confirming an absence from a tool nobody called is the
+        tick this module exists to prevent.
+        """
+        found = contradiction.facts(entries(self.NOISY))
+
+        assert "endpoints_total" not in found
+
+    def test_endpoints_are_counted_up(self):
+        """
+        Both counters accumulate. A subtraction here reads as a negative
+        count, which is neither `> 0` nor `== 0`, so both endpoint rules go
+        silent and no finding is produced at all.
+        """
+        found = contradiction.facts(entries({
+            "service": "healthy-svc",
+            "ready_endpoints": ["10.244.0.20"],
+            "not_ready_endpoints": ["10.244.0.21", "10.244.0.22"]}))
+
+        assert found["ready_endpoints_total"] == 1
+        assert found["endpoints_total"] == 3
+
+
+class TestReadinessInEveryShapeATtoolReportsIt:
+    def test_no_containers_at_all_is_not_ready(self):
+        """
+        `0/0` is what a Deployment scaled to zero reports. Nothing is ready,
+        because nothing is running -- and reading it as ready would say a
+        workload with no pods is serving.
+        """
+        assert contradiction._ready_fraction("0/0") is False
+
+    def test_every_container_ready_is_ready(self):
+        assert contradiction._ready_fraction("2/2") is True
+
+    def test_some_containers_ready_is_not(self):
+        assert contradiction._ready_fraction("1/2") is False
+
+
+class TestWhatCountsAsTheToolsReportingAnEntityExists:
+    """
+    `_entity_present` is what stops "the pod nginx-conf does not exist" being
+    scored against a pod the tools never saw. It recognises three shapes, and
+    two of them -- keyed by name, and named as a workload's example pod --
+    had no test: their `return True` could be flipped to `return False` and
+    the suite stayed green.
+
+    Both shapes are what a real scan looks like. `scan_cluster` keys by
+    `namespace/workload` and hangs the pod name off `example`, so a question
+    about a pod reaches the second shape and a question about a workload the
+    first.
+    """
+
+    def test_a_name_that_keys_a_document_is_present(self):
+        found = entries({"crasher-1": {"status": "CrashLoopBackOff",
+                                       "restarts": 7}})
+
+        assert contradiction._entity_present(found, "crasher-1") is True
+
+    def test_a_workloads_example_pod_is_present(self):
+        found = entries({"demo/crasher": {"status": "CrashLoopBackOff",
+                                          "pods": 1, "example": "crasher-1"}})
+
+        assert contradiction._entity_present(found, "crasher-1") is True
+
+    def test_a_document_about_a_pod_reports_it_present(self):
+        found = entries({"pod": "crasher-1", "namespace": "demo"})
+
+        assert contradiction._entity_present(found, "crasher-1") is True
+
+    def test_the_evidence_saying_it_is_missing_is_not_presence(self):
+        """The reason this is not a substring search."""
+        found = entries({"pod": "volume-stuck", "events": [
+            {"message": 'configmap "nginx-conf" not found'}]})
+
+        assert contradiction._entity_present(found, "nginx-conf") is False
+
+    def test_a_name_nothing_reported_is_not_present(self):
+        found = entries({"demo/crasher": {"status": "CrashLoopBackOff"}})
+
+        assert contradiction._entity_present(found, "payments-api") is False
+
+
+READY_POD = ("describe_pod", {
+    "pod": "healthy-web-abc123", "namespace": "demo", "status": "Running",
+    "containers": {"web": {"ready": True}}})
+
+
+class TestTwoRulesNothingDrove:
+    """
+    `ready_vs_claimed_not_ready` was named once in the suite, in another
+    test's docstring, and `running_vs_claimed_failing` not at all. Neither had
+    a case that made it fire, so `if known.get("ready") is True` could be
+    inverted and both of the phrase lookups under it disabled, with the suite
+    green.
+
+    Each rule gets both halves, because the halves fail in opposite
+    directions. The firing case proves the rule works; the denial case proves
+    it is reading an assertion rather than a phrase -- the failure this whole
+    module was rewritten for, where "no OOMKilled reported" was scored as a
+    claim that the container was OOM-killed.
+    """
+
+    def test_a_pod_the_tools_report_ready_is_not_unready(self):
+        answer = "The healthy-web pod is not ready, so the Service has no backend."
+
+        found = grounding.check(answer, ev(READY_POD))["contradictions"]
+
+        assert found and found[0]["rule"] == "ready_vs_claimed_not_ready"
+        assert found[0]["measured"] == "ready reported true by the tools"
+
+    def test_denying_unreadiness_is_not_claiming_it(self):
+        """`nothing` sits inside the 40-character window before the phrase."""
+        answer = "Nothing shows the pod is not ready; the failure is elsewhere."
+
+        found = grounding.check(answer, ev(READY_POD))["contradictions"]
+
+        assert [f for f in found if f["rule"] == "ready_vs_claimed_not_ready"] == []
+
+    def test_a_running_ready_pod_is_not_failing(self):
+        answer = "The healthy-web pod is failing and needs to be restarted."
+
+        found = grounding.check(answer, ev(READY_POD))["contradictions"]
+
+        assert found and found[0]["rule"] == "running_vs_claimed_failing"
+        assert "status = running" in found[0]["measured"]
+
+    def test_denying_failure_is_not_claiming_it(self):
+        answer = "There is no sign the pod is failing; it is serving normally."
+
+        found = grounding.check(answer, ev(READY_POD))["contradictions"]
+
+        assert [f for f in found if f["rule"] == "running_vs_claimed_failing"] == []
+
+    def test_denying_an_application_cause_is_not_claiming_one(self):
+        """
+        The rule the module was rewritten for, from the other side. The
+        recorded sentence is "This is not a resource exhaustion issue (no
+        OOMKilled or memory limits reported)": the phrase is present and is
+        being denied. Its mirror -- an OOMKilled pod where the answer rules
+        out an application error -- had no case.
+        """
+        answer = ("The container was OOMKilled. There was no application "
+                  "error involved.")
+
+        found = grounding.check(answer, ev(OOM_POD))["contradictions"]
+
+        assert [f for f in found
+                if f["rule"] == "imposed_termination_vs_application_cause"] == []
+
+    def test_denying_an_absence_is_not_claiming_one(self):
+        """
+        The same half, for the existence rule. This one had firing cases and
+        no denial case, so the assertion check in its phrase lookup could be
+        dropped without the suite noticing.
+        """
+        answer = ("No evidence the pod `crasher-abc123` does not exist; it "
+                  "is running and crashing.")
+        pod = ("describe_pod", {"pod": "crasher-abc123", "namespace": "demo",
+                                "status": "CrashLoopBackOff"})
+
+        found = grounding.check(answer, ev(pod))["contradictions"]
+
+        assert [f for f in found
+                if f["rule"] == "claimed_absent_but_measured_present"] == []
+
+
+class TestAPhraseThatIsNotThereIsNotAsserted:
+    def test_a_phrase_absent_from_the_clause_is_not_asserted(self):
+        assert contradiction._asserted("the pod is running", "is not ready") is False
+
+    def test_a_phrase_present_and_undenied_is_asserted(self):
+        assert contradiction._asserted("the pod is not ready", "is not ready") is True
+
+
+class TestTheTwoHalvesAreNotInterchangeable:
+    """
+    `check()` and `confirmations()` are this module's public API and neither
+    has a caller in the repository -- grounding.py calls `scan()` and takes
+    both halves itself. Untested and uncalled, `check()` could return the
+    confirmations and `confirmations()` could raise IndexError, and nothing
+    anywhere would fail. An API nobody exercises is a claim, not a function.
+    """
+
+    ENDPOINTS = ("get_service_endpoints", {
+        "service": "typo-svc", "namespace": "demo",
+        "selector": {"app": "web-frontend"},
+        "ready_endpoints": [], "not_ready_endpoints": []})
+
+    def test_check_returns_the_contradictions(self):
+        answer = ("The typo-svc service has no endpoints. The container "
+                  "exited with an application error.")
+        oom = ev(OOM_POD, self.ENDPOINTS)
+
+        found = contradiction.check(answer, oom)
+
+        assert found and all(f["rule"].startswith("imposed_termination")
+                             for f in found)
+
+    def test_confirmations_returns_the_other_half(self):
+        answer = "The typo-svc service has no endpoints."
+
+        confirmed = contradiction.confirmations(answer, ev(self.ENDPOINTS))
+
+        assert confirmed
+        assert confirmed[0]["rule"] == "service_endpoints_confirmed_empty"
+
+    def test_neither_half_is_the_other(self):
+        answer = ("The typo-svc service has no endpoints. The container "
+                  "exited with an application error.")
+        both = ev(OOM_POD, self.ENDPOINTS)
+
+        assert (contradiction.check(answer, both)
+                != contradiction.confirmations(answer, both))
+
+
+class TestWhatAFindingSaysAboutWhereItCameFrom:
+    def test_a_finding_names_the_tool_call_it_read(self):
+        """
+        The id is how an operator gets from the finding back to the call. The
+        `or {}` guarding it had no test: a finding could report `id: None`
+        for every rule and the suite stayed green.
+        """
+        answer = ("The pod is in CrashLoopBackOff, which means the container "
+                  "exited with an application error.")
+
+        found = grounding.check(answer, ev(OOM_POD))["contradictions"]
+
+        assert found
+        assert found[0]["evidence"][0]["id"] == "tool-1"
+
+    def test_a_record_with_no_source_does_not_break_the_finding(self):
+        """What the `or {}` is for -- a record the caller assembled by hand."""
+        answer = ("The pod is in CrashLoopBackOff, which means the container "
+                  "exited with an application error.")
+        raw = [{"text": json.dumps(OOM_POD[1]), "source": None}]
+
+        found, _ = contradiction.scan(answer, [
+            {"id": None, "tool": OOM_POD[0], "result": raw[0]["text"]}])
+
+        assert found
+        assert found[0]["evidence"][0]["id"] is None
+
+
+class TestScanRefusesToWorkWithNothing:
+    def test_no_evidence_is_not_an_answer_with_no_contradictions(self):
+        """
+        `not text or not tool_outputs` returns early. With `and` in its place
+        a question with no evidence reaches `tool_outputs[0]` and raises
+        IndexError, which is a crash in the middle of an investigation rather
+        than a verdict.
+        """
+        assert contradiction.scan("The pod is not ready.", []) == ([], [])
+
+    def test_no_answer_is_not_an_answer(self):
+        assert contradiction.scan("", ev(OOM_POD)) == ([], [])
+
+    def test_raw_tool_outputs_are_accepted_as_well_as_records(self):
+        """
+        Two evidence shapes, and the branch that tells them apart had no test
+        driving the second. A record is a dict carrying `result`; the raw
+        shape is a plain list of JSON strings, which is what every caller
+        older than grounding.records() passes.
+        """
+        answer = ("The pod is in CrashLoopBackOff, which means the container "
+                  "exited with an application error.")
+
+        found, _ = contradiction.scan(answer, [json.dumps(OOM_POD[1])])
+
+        assert found and found[0]["rule"] == "imposed_termination_vs_application_cause"
+
+    def test_evidence_of_neither_shape_produces_no_findings_rather_than_a_crash(self):
+        """
+        A dict with no `result` is neither shape. It reaches this module from
+        a caller that assembled evidence by hand, and the honest answer is
+        that nothing could be checked -- not an exception thrown out of the
+        middle of an investigation.
+        """
+        assert contradiction.scan("The pod is not ready.", [{"tool": "x"}]) == ([], [])
+
+
+class TestAResourceLimitTheAnswerGotWrong:
+    """
+    `resource_limit_disagrees` had no test anywhere in the repository -- not
+    in this file, not in the eval harness. It is the rule that catches an
+    answer quoting a limit the cluster does not have, and its two phrasings,
+    its guard against firing with nothing measured, and the regex group it
+    reads the value from were all unexercised.
+
+    Both phrasings are here because they are two alternatives in one pattern
+    and only the second was reachable through any existing test: reading the
+    wrong group returns None for the first, an empty value, and no finding.
+    """
+
+    HOG = ("describe_pod", {
+        "pod": "memory-hog-x", "namespace": "demo", "status": "CrashLoopBackOff",
+        "containers": {"hog": {"limits": {"memory": "64Mi", "cpu": "100m"}}}})
+
+    def test_a_limit_stated_after_the_unit_is_checked(self):
+        """`memory limit of 512Mi` -- the first alternative, group 1."""
+        answer = "The pod has a memory limit of 512Mi, which it exceeded."
+
+        found = grounding.check(answer, ev(self.HOG))["contradictions"]
+
+        limit = next((f for f in found
+                      if f["rule"] == "resource_limit_disagrees"), None)
+        assert limit, "the stated limit was not checked against the measured one"
+        assert limit["claim"] == "512Mi"
+        assert limit["measured"] == "limits.memory = 64Mi"
+
+    def test_a_limit_stated_before_the_unit_is_checked(self):
+        """`512Mi memory limit` -- the second alternative, group 2."""
+        answer = "The container was killed against its 512Mi memory limit."
+
+        found = grounding.check(answer, ev(self.HOG))["contradictions"]
+
+        assert [f for f in found if f["rule"] == "resource_limit_disagrees"]
+
+    def test_the_measured_limit_is_not_contradicted_by_itself(self):
+        answer = "The pod has a memory limit of 64Mi and was OOMKilled against it."
+
+        found = grounding.check(answer, ev(self.HOG))["contradictions"]
+
+        assert [f for f in found if f["rule"] == "resource_limit_disagrees"] == []
+
+    def test_a_limit_nothing_measured_is_not_contradicted(self):
+        """
+        The guard. With no limit in the evidence there is nothing to disagree
+        with, and a rule that fires here would be inventing the measurement it
+        claims to have made.
+        """
+        no_limits = ("describe_pod", {
+            "pod": "crasher-x", "namespace": "demo", "status": "Running",
+            "containers": {"crasher": {}}})
+        answer = "The pod has a memory limit of 512Mi."
+
+        found = grounding.check(answer, ev(no_limits))["contradictions"]
+
+        assert [f for f in found if f["rule"] == "resource_limit_disagrees"] == []
+
+    def test_a_bare_number_beside_the_unit_is_not_a_stated_limit(self):
+        """
+        Six false positives, zero true ones, from the `stress` fixture's log
+        line. The number has to be presented as a limit or a request.
+        """
+        answer = ("The logs read `dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd`, "
+                  "which is the workload starting.")
+
+        found = grounding.check(answer, ev(self.HOG))["contradictions"]
+
+        assert [f for f in found if f["rule"] == "resource_limit_disagrees"] == []
+
+
+class TestWhichNamesTheAbsenceRuleWillConsider:
+    def test_a_bare_word_is_not_a_generated_object_name(self):
+        """
+        "The pod demo does not exist" -- `demo` is the next English word, not
+        an object. Requiring a digit or a hyphen is what keeps the rule off
+        it, and dropping that requirement fires the rule on prose.
+        """
+        pod = ("list_pods", {"demo": {"status": "Running", "ready": "1/1"}})
+        answer = "The pod demo does not exist in this cluster."
+
+        found = grounding.check(answer, ev(pod))["contradictions"]
+
+        assert [f for f in found
+                if f["rule"] == "claimed_absent_but_measured_present"] == []
+
+    def test_a_generated_name_is_considered(self):
+        """The behaviour the filter must not cost."""
+        pod = ("list_pods", {"demo-1": {"status": "Running", "ready": "1/1"}})
+        answer = "The pod demo-1 does not exist in this cluster."
+
+        found = grounding.check(answer, ev(pod))["contradictions"]
+
+        assert [f for f in found
+                if f["rule"] == "claimed_absent_but_measured_present"]
