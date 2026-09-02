@@ -1262,25 +1262,24 @@ eight more die: both `_caller()` sites, and the whole vanished-workload
 guard, which `test_investigation_identity.py` was already driving. A narrow
 survivor count is an upper bound, again.
 
-| | killed / 167 | survivors | |
+| | killed | survivors | |
 |---|---|---|---|
 | pass 1, `tests/test_ui.py` alone | 58 | 109 | 35% |
 | pass 2, the wider set | 66 | 101 | 40% |
 | pass 3, after the first three batches of tests | **101** | **66** | 60% |
-| after batches 4-7 | **not measured** | | |
+| after batches 4-7, of 168 | **123** | **45** | 73% |
 
-The survivor lists are kept: `results/mutation/ui-pass2-2026-09-01.json` and
-`ui-pass3-after-2026-09-01.json`.
+The first three rows are of 167 mutants, the last of 168. The survivor
+lists are kept: `results/mutation/ui-pass2-2026-09-01.json`,
+`ui-pass3-after-2026-09-01.json` and `ui-pass4-2026-09-02.json`.
 
-**The last row is honest about what it is.** Four more batches of tests
+**The last row was measured on 2026-09-02**, by the full survey the
+previous session started twice and finished neither. Four batches of tests had
 landed after pass 3 — the header chips, the timing caption, the context
 picker, the claim columns, the history click and the recommendation's inputs,
-33 tests in all — and the survey that would have measured them was stopped
-before it finished. Nothing here claims a kill for them. They are written
-against named survivors, each named below, and the next session should run a
-**full** `ui.py` survey rather than a `--sites` pass: the defect fixed below
-changed the file, so every site index after it has moved and the numbers in
-this table cannot be indexed into any more.
+33 tests in all — and they were worth 22 kills. The mutant count moves 167 →
+168 because the context fix below added a site. See defect 29 for what the 45
+survivors are and for the two tests among them that could not fail.
 
 **What they were, mostly: regions of the page nothing drove at all.**
 
@@ -1372,6 +1371,169 @@ it catches everything to avoid. And the display budgets — the cache TTL, the
 history length, the citation and claim caps, the label truncation, the four
 slider bounds — constants with no behavioural contract, where a test would
 freeze a layout decision rather than protect a behaviour.
+
+### 27. A contradiction that cited a field holding the opposite of its claim
+
+`_finding()`'s last argument is the field a number came from, and the console
+prints it to the operator as `tool.field` (`ui._cite`). It is an instruction:
+open that result, read that field, see what I saw.
+
+Both endpoint rules passed the literal `"ready_endpoints"`. The line above
+them worked out which measurement actually settled the claim -- a claim naming
+readiness is about `ready_endpoints`, a general one about both lists --
+assigned it to `field`, and then nothing used it. ruff's F841 found the dead
+local; the defect is what the local was for.
+
+Measured on `crasher-svc` with `ready_endpoints: []` and
+`not_ready_endpoints: ["10.244.0.12"]`, answer "The crasher-svc service
+matches no pods.":
+
+    measured: get_service_endpoints reported 1 endpoint(s)
+    evidence: field ready_endpoints
+    the cited field held: []
+
+The count came from both lists; the citation named the one that was empty. The
+confirmation half was wrong more quietly: an absence of endpoints holds only
+because both lists are empty, and citing one of them confirms an absence from
+silence about the other -- the unfalsifiable tick this module exists to
+prevent.
+
+`field` is now passed, and it names fields of the tool result rather than
+`endpoints_total`, which is a counter this module derives and nobody can look
+up in the JSON. One existing test asserted the literal and was corrected.
+
+**Replayed, because this is contradiction detection.** 1650 records, 60 moved
+-- byte-identical to the same replay with the previous `contradiction.py` in
+place. The verdicts do not move; only the citation does. Three new tests
+measure the citation directly, and the third keeps the fix honest: a
+readiness-scoped claim must still cite `ready_endpoints` alone, because
+`not_ready_endpoints` holds an endpoint with no bearing on it. Two of the
+three fail before the change; that one passes on both sides.
+
+### 28. Three rules nothing drove, and two functions nobody called
+
+`contradiction.py` read one survivor at a time. Pass 2 first, as always: 43
+survivors against `test_contradiction.py` alone, **41** against the wider set.
+
+| | mutants | killed | survivors | |
+|---|---|---|---|---|
+| pass 1, `tests/test_contradiction.py` | 117 | 74 | 43 | 63% |
+| pass 2, the wider set | 117 | 76 | 41 | 65% |
+| after the review, all four test files | 117 | **108** | **9** | **92%** |
+
+Lists: `results/mutation/contradiction-pass2-2026-09-02.json` and
+`contradiction-2026-09-02.json`.
+
+**Three rules had no case that made them fire.**
+`ready_vs_claimed_not_ready` was named once in the suite, inside another
+test's docstring. `running_vs_claimed_failing` was not named at all. Their
+shared guard -- `if known.get("ready") is True` -- could be inverted and both
+phrase lookups under it disabled, green. `resource_limit_disagrees` had no
+test in this file, the test tree or the eval harness; its two phrasings are
+alternatives in one regex and only the second was reachable.
+
+**Two functions had no caller.** `check()` and `confirmations()` are the
+module's public API. `grounding.py` calls `scan()` and takes both halves
+itself, so nothing called either: `check()` could return the confirmations and
+`confirmations()` could raise IndexError, invisibly.
+
+Each firing rule now has its denial case beside it, because the halves fail in
+opposite directions. The firing case proves the rule works; the denial case
+proves it reads an *assertion* rather than a phrase, which is the failure the
+module was rewritten for -- "no OOMKilled reported" scored as a claim that the
+container was OOM-killed.
+
+`facts()` is driven for the first time. It is a dispatch chain where every
+branch is a key test AND a type test, and it takes the first match with
+`setdefault` -- so a guard that admits one pair too many does not add a wrong
+fact beside the right one, it wins the race and the right one is dropped. The
+document in the test is built to lose that race in every branch.
+
+**The nine survivors, each classified.**
+
+*Equivalent, with the argument.* `_absence_is_about` line 261, two mutants:
+`at == 0` makes `rfind(name, 0, 0)` search an empty range, so the real code
+returns False exactly where the mutants return False. 450 crafted inputs, zero
+differences. Line 610, one mutant: every word in `grounding._ENTITY_KINDS` is
+lowercase letters, checked, so the next line filters all ten regardless of
+this one.
+
+*Equivalent in the program, and the first argument for it was wrong.*
+`_entity_present` line 375, three mutants. The argument was that any check
+that can match implies the quoted name is in the JSON text, so the guard
+cannot change the answer. A brute force over 270 inputs said otherwise: 30
+differences, every one at `name == ""`, where the empty default of
+`data.get("pod", "")` matches an empty name. The only call site filters
+exactly that -- `if not name ... continue`. Equivalent in the program; a test
+that killed them would be asserting that the empty-string entity exists.
+**Reason about a mutant, then measure the reasoning.**
+
+*A tuning constant.* `_NEGATION_WINDOW = 40`, how far back to look for a
+negator. Distinguishable only by a clause with a negator exactly 41 characters
+out, and a test for it would pin the number rather than a behaviour.
+
+Found while building the denial cases, and recorded rather than fixed: the
+window is measured in characters, and a marked-up entity name spends fifteen
+to twenty of them. "Nothing suggests the pod \`crasher-abc123\` does not
+exist" puts `nothing` at offset 41 and the rule fires on a correct answer.
+Every other rule's phrases sit close to their negator; the absence rule is the
+one that requires a named entity in between. Changing 40 is a tuning change
+and needs a corpus replay behind it, which is the next session's, not a
+guess.
+
+*Display budgets.* A 220-character clause excerpt and one cited entry per
+finding -- constants with no behavioural contract, the class defect 26 named.
+
+### 29. The console survey finished, and two of its tests could not fail
+
+The full `ui.py` survey the previous session started twice and finished
+neither: **168 mutants, 123 killed, 45 survived, 73%.** The four unmeasured
+batches were worth 22 kills against the last real measurement of 101 of 167.
+`results/mutation/ui-pass4-2026-09-02.json`.
+
+Forty-three of the 45 fall into the classes defect 26 named -- rendering flags
+with no element-tree consequence (`show_spinner` on seven cache decorators,
+`hide_index` on four dataframes, `horizontal` on two radios,
+`clear_on_submit`), the `st.status` panel AppTest cannot see, and the display
+budgets. Two did not.
+
+**`test_the_prompt_is_what_names_the_pod` proved nothing it claimed.** It
+asserts `next_step` reads the scoped prompt rather than the typed question,
+"because reading the question instead loses the target and with it the
+recommendation". Its fixture had one pod, and `evidence_gap` uses the question
+to *choose between* reported pods -- with one there is nothing to choose and
+the question is never consulted. Measured: prompt, question and neither all
+returned the same recommendation. Rebuilt on two pods, which is the shape of
+the live 2026-08-19 failure the policy's own comment records: asked about
+`crasher`, the model listed every unhealthy pod and the recommendation pointed
+at log-shipper, a workload nobody had mentioned. With the prompt it names
+crasher; with the question alone, log-shipper.
+
+**A divisor test that could not see the divisor.** The long-investigation case
+checks three durations against a wrong `/1000`. Two of them could distinguish
+it. The tools figure was 20300ms, which renders `20.3s` under both, so a third
+of the caption was pinned by a case that could not fail. 300100 and 200400
+both can.
+
+One real gap beside them: **results with no calls behind them.** The namespace
+comes from the call, not from the result, so a listing reaching the gap
+detector with no trace falls back to `default`. The guard had a test for one
+direction only, and the recommendation it prevents is `get_pod_logs` on a pod
+in `default` -- a namespace nothing ever reported.
+
+### 30. A test DSN that reached another project's database
+
+`NEXT-SESSION.md` told the next session to run Postgres on port 55432. On this
+machine 55432 was already published by `ai-kubernetes-agent-postgres`, another
+project, so the documented DSN reached that server and was refused: `FATAL:
+password authentication failed`.
+
+That is not a failure anyone sees. `tests/test_store.py` skips its Postgres
+cases on a DSN it cannot use, exactly as if none were configured, and the run
+is green either way -- 26 cases, silently. Moved to 55433 bound to 127.0.0.1,
+with a connect check and "no `s` in the store run" written down as the proof
+to demand. **A skip is a result you have to go and look for.**
+
 
 ## What the `vllm` provider has and has not been run against
 
