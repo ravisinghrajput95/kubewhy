@@ -521,6 +521,14 @@ class TestAbsenceTheEvidenceConfirms:
         assert verdict["checked"] >= 1
 
     def test_the_observation_cites_the_field_that_settled_it(self):
+        """
+        This asserted `ready_endpoints` alone until 2026-09-02, which was the
+        literal the code passed rather than the field the claim was settled
+        from. "has no endpoints" names no readiness, so both lists had to be
+        empty for it to hold and both are named. See
+        TestACitationNamesTheFieldTheNumberCameFrom for the contradiction half,
+        where citing one list was not merely partial but wrong.
+        """
         answer = "The `typo-svc` service has no endpoints."
 
         claims = grounding.check(answer, ev(self.EMPTY))["claims"]
@@ -528,7 +536,8 @@ class TestAbsenceTheEvidenceConfirms:
 
         assert absence, "the confirmed absence was not recorded as a claim"
         assert absence[0]["evidence"][0]["tool"] == "get_service_endpoints"
-        assert absence[0]["evidence"][0]["field"] == "ready_endpoints"
+        assert absence[0]["evidence"][0]["field"] == (
+            "ready_endpoints, not_ready_endpoints")
 
     def test_no_ready_endpoints_is_true_when_the_only_endpoint_is_unready(self):
         """
@@ -603,3 +612,101 @@ class TestAbsenceTheEvidenceConfirms:
 
         if verdict["confidence"] == grounding.CONTRADICTED:
             assert not [c for c in verdict["claims"] if c.get("kind") == "absence"]
+
+
+class TestACitationNamesTheFieldTheNumberCameFrom:
+    """
+    A citation is an instruction to the operator. The console renders it as
+    `tool.field` beside the finding (`ui._cite`), so naming a field means:
+    open that result, read that field, and you will see what I saw.
+
+    Both endpoint rules cited `ready_endpoints` unconditionally, while the
+    count behind them came from `ready_endpoints` and `not_ready_endpoints`
+    together whenever the claim did not name readiness. The module decided
+    which measurement settled the claim, wrote it into a local, and then
+    passed the literal instead -- so a finding reading "reported 1
+    endpoint(s)" pointed at a field holding `[]`.
+    """
+
+    UNREADY_ONLY = {
+        "service": "crasher-svc", "namespace": "demo",
+        "selector": {"app": "crasher"},
+        "ready_endpoints": [], "not_ready_endpoints": ["10.244.0.12"]}
+    EMPTY = {
+        "service": "typo-svc", "namespace": "demo",
+        "selector": {"app": "web-frontend"},
+        "ready_endpoints": [], "not_ready_endpoints": []}
+
+    @staticmethod
+    def _counted(cited, result):
+        """
+        How many endpoints the cited fields actually hold.
+
+        Every name in the citation has to be a key of the tool result -- a
+        derived counter like `endpoints_total` is a name this module made up
+        and an operator cannot find, which is the same failure in a politer
+        form.
+        """
+        names = [n.strip() for n in cited.split(",")]
+        assert names, "the finding cited no field at all"
+        for name in names:
+            assert name in result, (
+                f"cited {name!r}, which is not a field of the tool result")
+        return sum(len(result[name]) for name in names)
+
+    def test_a_general_contradiction_cites_the_fields_it_counted(self):
+        """
+        The failing case. "matches no pods" names no readiness, so the count
+        is both lists -- one endpoint, and it is in `not_ready_endpoints`.
+        Citing `ready_endpoints` alone sends the operator to an empty list.
+        """
+        answer = "The crasher-svc service matches no pods."
+
+        found = grounding.check(
+            answer, ev(("get_service_endpoints", self.UNREADY_ONLY))
+        )["contradictions"]
+
+        assert found and found[0]["rule"] == "service_has_endpoints_vs_claimed_none"
+        assert "reported 1 endpoint(s)" in found[0]["measured"]
+        counted = self._counted(found[0]["evidence"][0]["field"], self.UNREADY_ONLY)
+        assert counted == 1, (
+            f"the finding reports 1 endpoint; its citation accounts for {counted}")
+
+    def test_a_general_confirmation_cites_both_lists_it_had_to_read(self):
+        """
+        An absence confirmed from one of two lists is confirmed from silence
+        about the other, which is the tick this module exists to prevent. Both
+        were read; both are named.
+        """
+        answer = "The `typo-svc` service has no endpoints."
+
+        claims = grounding.check(
+            answer, ev(("get_service_endpoints", self.EMPTY))
+        )["claims"]
+        absence = [c for c in claims if c.get("kind") == "absence"]
+
+        assert absence, "the confirmed absence was not recorded as a claim"
+        cited = absence[0]["evidence"][0]["field"]
+        assert self._counted(cited, self.EMPTY) == 0
+        assert "not_ready_endpoints" in cited, (
+            "an absence of endpoints is settled by both lists being empty")
+
+    def test_a_readiness_claim_still_cites_readiness_alone(self):
+        """
+        The other half of the contract, and the reason the literal was nearly
+        right: a claim that names readiness is about `ready_endpoints`, and
+        widening every citation to both lists would make this one wrong in the
+        opposite direction -- `not_ready_endpoints` holds an endpoint that has
+        no bearing on it.
+        """
+        answer = ("The crasher-svc service is unreachable because it has no "
+                  "ready endpoints.")
+
+        claims = grounding.check(
+            answer, ev(("get_service_endpoints", self.UNREADY_ONLY))
+        )["claims"]
+        absence = [c for c in claims if c.get("kind") == "absence"]
+
+        assert absence, "the confirmed absence was not recorded as a claim"
+        assert absence[0]["evidence"][0]["field"] == "ready_endpoints"
+        assert self._counted("ready_endpoints", self.UNREADY_ONLY) == 0

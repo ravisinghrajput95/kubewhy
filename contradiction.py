@@ -577,7 +577,12 @@ def scan(answer, tool_outputs):
         # phrase naming readiness is about ready_endpoints; one naming
         # endpoints or pods in general is about all of them.
         ready_scoped = hit is not None and "ready" in hit
-        field = "ready_endpoints" if ready_scoped else "endpoints_total"
+        # Named for the operator, who is told to go and read it: `ui._cite`
+        # prints this beside the finding as `tool.field`. So it names fields
+        # of the tool result, never `endpoints_total`, which is a counter
+        # this module derives and nobody can look up.
+        field = ("ready_endpoints" if ready_scoped
+                 else "ready_endpoints, not_ready_endpoints")
         count = known.get("ready_endpoints_total" if ready_scoped
                           else "endpoints_total")
 
@@ -586,7 +591,7 @@ def scan(answer, tool_outputs):
                 "service_has_endpoints_vs_claimed_none", hit,
                 f"get_service_endpoints reported {count} "
                 f"{'ready ' if ready_scoped else ''}endpoint(s)",
-                clause, entries, "ready_endpoints"))
+                clause, entries, field))
         elif hit and count == 0:
             # The same predicate, the same fact, the other direction. `== 0`
             # rather than `not known.get(...)`: the key is absent when no
@@ -597,7 +602,7 @@ def scan(answer, tool_outputs):
                 "service_endpoints_confirmed_empty", hit,
                 f"get_service_endpoints reported 0 "
                 f"{'ready ' if ready_scoped else ''}endpoint(s)",
-                clause, entries, "ready_endpoints"))
+                clause, entries, field))
 
         if hit:
             for kind, name in grounding._LABELLED_ENTITY.findall(clause):
