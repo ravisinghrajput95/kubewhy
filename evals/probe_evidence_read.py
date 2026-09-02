@@ -50,7 +50,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agent  # noqa: E402
 import controller  # noqa: E402
 import routers.k8s_pods_info as k8s  # noqa: E402
-import sinks  # noqa: E402
 import store  # noqa: E402
 
 import evidence_read  # noqa: E402

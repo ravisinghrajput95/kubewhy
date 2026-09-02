@@ -21,7 +21,6 @@ findings and only one of them is about the agent.
 import argparse
 import json
 import subprocess
-import sys
 
 # scenario -> (namespace, selector-or-pod, the kubectl-visible fact that is
 # the correct answer). `kind` says where the truth lives, which is the thing

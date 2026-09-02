@@ -1,0 +1,60 @@
+# Tool configuration only. This project is run from a checkout, not installed
+# as a package -- there is deliberately no [build-system] or [project] table,
+# and pytest keeps its own pytest.ini.
+
+[tool.ruff]
+target-version = "py311"       # the floor CI tests; see README
+extend-exclude = ["demo", ".venv"]
+
+[tool.ruff.lint]
+select = [
+    "F",      # pyflakes: undefined names, unused imports
+    "E", "W", # pycodestyle
+    "I",      # import sorting
+    "B",      # bugbear: mutable defaults, loop-variable capture
+    "UP",     # pyupgrade
+    "C4",     # comprehensions
+    "SIM",    # simplifications
+    "RUF",
+]
+ignore = [
+    # Not a style opinion: reflowing lines moves them, and every survivor in
+    # results/mutation/ is recorded against a line number in the file it was
+    # measured on. 291 lines are over any limit worth setting. Turn this on
+    # in a commit that does nothing else, or not at all.
+    "E501",
+    # `with a, b:` over nested `with` -- this codebase uses backslash
+    # continuations for long patch stacks in tests, which ruff reads as
+    # nesting. Combining them is not clearer at five patches deep.
+    "SIM117",
+    # 48 of these, and they are deliberate: this codebase catches broadly at
+    # boundaries on purpose (`active_context()` catches everything so that a
+    # caller asking which cluster it is on cannot be made to raise). Nine
+    # sites already carry `noqa: BLE001` from a flake8 that was never run.
+    "BLE001",
+    # Which leaves those nine, plus 50 `noqa: E402`, as directives ruff does
+    # not need. They record why the import is where it is. Deleting 60 of
+    # them to satisfy the linter that made them redundant is not a trade.
+    "RUF100",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test and eval scripts open files to read them once and let refcounting close
+# them; a context manager per read would bury the assertion it exists for.
+"tests/*" = ["SIM115"]
+"evals/*" = ["SIM115"]
+
+[tool.mypy]
+# No `python_version` pin. Setting it to the 3.11 floor makes mypy parse the
+# installed numpy stubs under 3.11 rules, where `type X = ...` is a syntax
+# error, and it stops before checking any of this project. Syntax that is too
+# new for 3.11 is ruff's job (`target-version = "py311"` above), and CI runs
+# the suite on 3.11 regardless.
+files = ["."]
+exclude = ["^demo/", "^\\.venv/"]
+ignore_missing_imports = true
+# `routers/` has no __init__.py -- it is a namespace package that pytest.ini
+# puts on the path. Without these two, mypy finds k8s_pods_info.py under both
+# `k8s_pods_info` and `routers.k8s_pods_info` and refuses to check anything.
+mypy_path = "."
+explicit_package_bases = true

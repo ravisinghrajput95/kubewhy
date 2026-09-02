@@ -542,7 +542,7 @@ class PostgresStore:
         if not row:
             return None
         job = dict(zip(("id", "state", "question", "created_at", "finished_at",
-                        "result", "owner"), row))
+                        "result", "owner"), row, strict=True))
         job["result"] = json.loads(job["result"]) if job["result"] else None
         return job
 
@@ -553,7 +553,7 @@ class PostgresStore:
                 "ORDER BY created_at DESC LIMIT %s", (limit,)
             ).fetchall()
         return [dict(zip(("id", "state", "question", "created_at", "finished_at"),
-                         row)) for row in rows]
+                         row, strict=True)) for row in rows]
 
     def purge_jobs(self, cutoff):
         with self._pool.connection() as connection:

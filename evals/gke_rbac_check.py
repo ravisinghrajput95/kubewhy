@@ -27,7 +27,6 @@ it exists to verify.
 import argparse
 import json
 import subprocess
-import sys
 
 from kubernetes import client
 

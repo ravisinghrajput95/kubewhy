@@ -23,7 +23,6 @@ import backends  # noqa: F401  -- re-exported for callers that name a backend
 
 import grounding
 import inference
-import observability
 import targeting
 import telemetry
 from routers.platform_info import get_platform_info

@@ -2,7 +2,6 @@
 Tests for the HTTP surface: auth, health split, and error shape.
 """
 
-import importlib
 import json
 from unittest.mock import patch
 
@@ -596,7 +595,6 @@ class TestTheInvestigationCeiling:
         Otherwise a client in a retry loop pushes its own window out forever
         and never recovers, which turns a rate limit into a permanent ban.
         """
-        import limits
 
         monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "1")
         with patch.object(app_module, "API_TOKEN", ""):

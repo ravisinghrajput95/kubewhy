@@ -75,7 +75,7 @@ class Counter:
 
     def samples(self):
         with _LOCK:
-            return [(self.name, dict(zip(self.labels, key)), value)
+            return [(self.name, dict(zip(self.labels, key, strict=True)), value)
                     for key, value in sorted(self.values.items())]
 
 
@@ -116,7 +116,7 @@ class Histogram:
         with _LOCK:
             items = sorted(self.values.items())
         for key, (counts, total, seen) in items:
-            labels = dict(zip(self.labels, key))
+            labels = dict(zip(self.labels, key, strict=True))
             running = 0
             for index, edge in enumerate(self.buckets):
                 running = counts[index]
