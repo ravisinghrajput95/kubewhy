@@ -1267,11 +1267,13 @@ survivor count is an upper bound, again.
 | pass 1, `tests/test_ui.py` alone | 58 | 109 | 35% |
 | pass 2, the wider set | 66 | 101 | 40% |
 | pass 3, after the first three batches of tests | **101** | **66** | 60% |
-| after batches 4-7, of 168 | **123** | **45** | 73% |
+| after batches 4-7, of 168 | 123 | 45 | 73% |
+| after defect 29's three tests, of 168 | **126** | **42** | **75%** |
 
-The first three rows are of 167 mutants, the last of 168. The survivor
+The first three rows are of 167 mutants, the last two of 168. The survivor
 lists are kept: `results/mutation/ui-pass2-2026-09-01.json`,
-`ui-pass3-after-2026-09-01.json` and `ui-pass4-2026-09-02.json`.
+`ui-pass3-after-2026-09-01.json`, `ui-pass4-2026-09-02.json` and
+`ui-2026-09-02.json`.
 
 **The last row was measured on 2026-09-02**, by the full survey the
 previous session started twice and finished neither. Four batches of tests had
@@ -1520,6 +1522,10 @@ comes from the call, not from the result, so a listing reaching the gap
 detector with no trace falls back to `default`. The guard had a test for one
 direction only, and the recommendation it prevents is `get_pod_logs` on a pod
 in `default` -- a namespace nothing ever reported.
+
+All three were verified individually with `--sites` and then together: the
+full survey after them reports **126 killed of 168, 42 survivors**, which is
+exactly the three kills the individual runs predicted.
 
 ### 30. A test DSN that reached another project's database
 

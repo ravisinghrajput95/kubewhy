@@ -80,11 +80,12 @@ every survivor line number in `results/mutation/`.
    the 45 ui.py ones. Defects 28 and 29. Do not re-review them as though they
    were open; do read the classifications, and argue with them if they are
    wrong — one of mine was, and defect 28 records how it was caught.
-   The ui.py number to quote is **45 of 168**, which is a completed survey.
-   Three of those 45 were killed afterwards and each kill was verified
-   individually with `--sites`; the full survey that would fold them into one
-   number was still running when this was written, so **42 is a prediction,
-   not a measurement.** Run it and write down what it says.
+   The ui.py number to quote is **126 killed of 168, 42 survivors**, measured
+   2026-09-02 23:11 after the three tests below landed —
+   `results/mutation/ui-2026-09-02.json`. It supersedes the 45 in the same
+   file's earlier row, and it came out at exactly the 42 that was predicted
+   from three individual `--sites` kills, which is the only reason the
+   prediction is worth mentioning.
 6. `limits.py:140` is an equivalent mutant, not "the standing proof".
 7. Generalized diagnostic accuracy stays NOT TESTED.
 8. HA is still NOT TESTED — the mechanism is proven, the behaviour is not.
