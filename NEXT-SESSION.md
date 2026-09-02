@@ -105,9 +105,24 @@ every survivor line number in `results/mutation/`.
    after pass 2). Pass 2 first, always — it moved contradiction.py 43 → 41 and
    ui.py 109 → 101, and the previous session wrote two redundant tests by
    skipping it. **Do not** put `test_mutate.py` in a broad set.
-   Broad sets that are known: `controller.py` → `test_controller`,
-   `test_chart`, `test_store`. `grounding.py` → `test_agent_loop`,
-   `test_contradiction`, `test_replay_grounding`.
+   **Candidate broad sets**, derived 2026-09-02 by grepping `tests/` for each
+   module name. They are a *superset*: a grep hit can be a comment, and a
+   wider set only costs time, it does not invalidate a measurement. Drop
+   `test_ui.py` unless you have the half hour — every case in it is an
+   AppTest script run.
+
+   | module | candidates beyond its own test file |
+   |---|---|
+   | `controller.py` | `test_chart`, `test_store` |
+   | `inference.py` | `test_agent_loop`, `test_api`, `test_audit`, `test_chart`, `test_controller`, `test_redaction`, `test_ui_security`, (`test_ui`) |
+   | `grounding.py` | `test_agent_loop`, `test_contradiction`, `test_replay_grounding`, `test_eval_graders`, `test_audit`, `test_inference`, `test_redaction`, (`test_ui`) |
+   | `store.py` | `test_chart`, `test_controller`, (`test_ui`) |
+   | `telemetry.py` | `test_audit`, `test_inference` |
+   | `backends.py` | `test_agent_loop`, `test_inference`, `test_investigation_identity` |
+   | `targeting.py` | `test_investigation_identity` |
+
+   `ui.py` imports `grounding`, `store`, `agent`, `audit` and `identity`, so
+   `test_ui.py` is a real pass-2 set for each of them and an expensive one.
 3. **The negation window, with a replay behind it.** `_NEGATION_WINDOW = 40`
    is measured in characters and a marked-up entity name spends fifteen to
    twenty of them, so "Nothing suggests the pod \`x-abc123\` does not exist"
