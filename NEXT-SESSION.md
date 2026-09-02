@@ -7,12 +7,17 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-02 morning head — `git log --oneline -1`, which
-is the authority, not this line — tree clean and pushed, 1475 tests pass (50s,
-with Postgres up), CI green on the last code commit, tags through v0.2.0. No
-survey of this project is running. A kind cluster and several containers ARE
-running and none of them are this project's — see Environment before touching
-anything.**
+**State: `main` at the 2026-09-02 head — `git log --oneline -1`, which is the
+authority, not this line — tree clean and pushed, **1499 tests** pass (50s,
+with Postgres up), CI green, tags through v0.2.0. No survey of this project is
+running; one was abandoned, see pick-up item 1. A kind cluster and several
+containers ARE running and none of them are this project's — see Environment
+before touching anything.**
+
+**Mutation coverage as it stands, all measured 2026-09-02 and all with their
+survivors classified in defects 28-30: `contradiction.py` 108/117 (92%),
+`store.py` 41/53 (77%), `ui.py` 126/168 (75%). There is no repo-wide number
+and defect 31 says why the old one was never repo-wide.**
 
 **Read `docs/VALIDATION.md` first — defects 27 to 30 are the 2026-09-02
 morning session, and 25 and 26 the evening before it — then "Pick up, in
