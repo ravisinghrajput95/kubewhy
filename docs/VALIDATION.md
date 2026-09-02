@@ -1561,6 +1561,47 @@ mismatch without editing the SQL, which is what the guard is for -- it fires
 the day someone adds a column to one list and not the other.
 
 
+### 31. The repo-wide survey was never repo-wide
+
+`evals/mutate.py --all` documents itself honestly -- "every top-level module
+that has a **matching test file**" -- and the number it produces has been
+quoted as though it covered the repository. It does not, and the gap is not
+at the edges.
+
+`--all` looks for `tests/test_<module>.py`. Three of the largest modules are
+tested under a different name, so none of them has ever been in a survey:
+
+| module | lines | its tests | surveyed |
+|---|---|---|---|
+| `agent.py` | 1738 | `tests/test_agent_loop.py`, 139 cases | never |
+| `routers/k8s_pods_info.py` | 1643 | `tests/test_k8s_projection.py`, 123 cases | never |
+| `app.py` | 626 | `tests/test_api.py`, 50 cases | never |
+
+That is **4007 lines against 7873 surveyed** -- the agent loop itself, the
+whole Kubernetes projection layer that every tool result comes through, and
+the REST surface. `routers/` is doubly excluded: `--all` globs `*.py` at the
+top level and never descends.
+
+Two more, `observability.py` and `version.py`, have no dedicated test file at
+all and are exercised only in passing from `test_inference.py`,
+`test_mcp_server.py` and `conftest.py`.
+
+**What this changes about every previous total.** "692 killed / 282
+survivors" was already known to mix measurement bases. It is also a figure
+about eighteen chosen modules, and nothing that quoted it said so. A coverage
+number that silently omits the module the product is named after is not a
+coverage number.
+
+None of this is a defect in `mutate.py`, which says what it does in its own
+`--help`. It is a defect in how its output was read, and the fix is to name
+the test file rather than rely on the convention:
+
+    python evals/mutate.py agent.py --tests tests/test_agent_loop.py
+    python evals/mutate.py app.py --tests tests/test_api.py
+    python evals/mutate.py routers/k8s_pods_info.py \
+        --tests tests/test_k8s_projection.py
+
+
 ## What the `vllm` provider has and has not been run against
 
 `vllm` in this project is the OpenAI chat-completions protocol under a name
