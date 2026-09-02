@@ -92,13 +92,46 @@ every survivor line number in `results/mutation/`.
 
 ## Pick up, in order
 
-1. **Re-survey the whole repository, with Postgres up.** This is now the
-   blocking one: three of the 18 rows are known wrong or stale and the total
-   cannot be quoted. ~60 minutes.
-   `TRIAGE_TEST_PG_DSN=... python evals/mutate.py --all --json results/mutation/all-<date>.json`
-   Note `--all` uses each module's *default* narrow test set, so it is a pass 1
-   and its survivor counts are upper bounds. Run pass 2 on any module you
-   intend to read.
+1. **Re-survey the whole repository — and it is bigger than `--all`.** Still
+   the blocking one. Attempted 2026-09-02 23:12 and abandoned three modules in;
+   see the two traps below before starting.
+
+   ```
+   caffeinate -is env TRIAGE_TEST_PG_DSN=postgresql://postgres:kubewhy@127.0.0.1:55433/kubewhy \
+     python evals/mutate.py --all --json results/mutation/all-<date>.json
+   ```
+   then, because `--all` does not reach them (defect 31), the three modules
+   tested under another name:
+   ```
+   python evals/mutate.py agent.py --tests tests/test_agent_loop.py
+   python evals/mutate.py app.py  --tests tests/test_api.py
+   python evals/mutate.py routers/k8s_pods_info.py --tests tests/test_k8s_projection.py
+   ```
+   That is 4007 more lines than any previous "repo-wide" number covered.
+
+   **`caffeinate -is` is not optional and the reason is not Ollama.** The
+   attempt above sat 22 minutes on one `controller.py` mutant and looked hung.
+   It was not: `pmset -g log` showed the Mac asleep 23:35:42 to 23:51:38.
+   `subprocess.run(timeout=...)` measures monotonic time, which does not
+   advance across sleep on macOS, so the 300s mutant timeout never fires and
+   there is no upper bound on a survey's wall clock. Diagnosis: elapsed 22
+   minutes against 1m13s of CPU.
+
+   **Check the battery.** The same attempt was on battery at 26% with 55
+   minutes left, against a job that needs about 60. `--json` is written after
+   every module, so a machine that dies mid-run leaves a real partial result
+   — but name it for what it is.
+
+   `--all` uses each module's *default* narrow test set, so it is a pass 1 and
+   its survivor counts are upper bounds. Run pass 2 on any module you intend
+   to read.
+
+   The three modules that did land before it was stopped are kept in
+   `results/mutation/all-2026-09-02-PARTIAL-3-of-18.json`: `audit.py` 40/0,
+   `backends.py` 20 killed 17 survived, `contradiction.py` 108/9. That last
+   one is worth noting — 108 killed against `test_contradiction.py` **alone**,
+   the same figure the four-file set produced, so this session's tests closed
+   the whole gap pass 2 used to find.
 2. **Keep reviewing survivors.** Densest now, from the 2026-09-01 pass 1 and
    so still upper bounds: `inference.py` (36), `controller.py` (37),
    `grounding.py` (26), `store.py` (**20**, re-measured with Postgres),
