@@ -7,83 +7,123 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-01 evening head — `git log --oneline -1`, which
-is the authority, not this line — tree clean and pushed, 1405 tests pass
-(47s), CI green on the last code commit, tags through v0.2.0. Nothing of this
-project is running: no survey, no kind cluster, no containers.**
+**State: `main` at the 2026-09-02 morning head — `git log --oneline -1`, which
+is the authority, not this line — tree clean and pushed, 1475 tests pass (50s,
+with Postgres up), CI green on the last code commit, tags through v0.2.0. No
+survey of this project is running. A kind cluster and several containers ARE
+running and none of them are this project's — see Environment before touching
+anything.**
 
-**Read `docs/VALIDATION.md` first — defects 25 and 26 are the whole of the
-2026-09-01 evening session — then "Pick up, in order" below. Everything under
-"What changed on 2026-08-26 / 27" is history.**
+**Read `docs/VALIDATION.md` first — defects 27 to 30 are the 2026-09-02
+morning session, and 25 and 26 the evening before it — then "Pick up, in
+order" below. Everything under "What changed on 2026-08-26 / 27" is history.**
 
-## What landed on 2026-09-01 (evening)
+## What landed on 2026-09-02 (morning)
 
-**The suite is half as slow, and the reason was not I/O.** 83.7s of wall clock
-for 15.4s of CPU. Twelve tests in `test_agent_loop.py` used `get_system_info`
-as the tool a mocked model asks for and dispatched the real one;
-`psutil.cpu_percent(interval=1)` blocks for a second by design. A `HOST_STUB`
-beside the existing `HEALTHY_STUB` took the suite to 41.8s. Defect 25.
+**The console survey finished. 168 mutants, 123 killed, 45 survived, 73%** —
+the run the previous session started twice and finished neither. The four
+unmeasured test batches were worth 22 kills against the last real measurement
+of 101 of 167. Defect 26's table is closed; defect 29 says what the 45 are.
 
-**`ui.py` was reviewed, survivor by survivor: 58 killed of 167 -> 66 broad ->
-101 measured after three batches of tests, then 33 more tests that are not
-measured.** Defect 26 has the table and the classifications. Sixty-nine new
-tests over the console: `test_ui.py` 43 -> 108, `test_ui_markup.py` 4 -> 8.
+**`contradiction.py` was read one survivor at a time: 74 killed of 117 → 76
+broad → 108, 92%, with all nine remaining survivors classified.** Three rules
+had no case that made them fire — `ready_vs_claimed_not_ready`,
+`running_vs_claimed_failing` and `resource_limit_disagrees`, the last with no
+test anywhere in the repository — and `check()` and `confirmations()`, the
+module's public API, had no caller. Defect 28.
 
-**A shipped defect: the console spun instead of rendering.** A context that is
-in the kubeconfig but cannot be built reports as `"unavailable"` from
-`active_context()` forever, by design. The picker compared the chosen context
-against that, so choosing one bound it, called `st.rerun()`, read
-`"unavailable"` again and reran — and the picker snapped back to the first
-entry each pass, so a session that asked for the third context read the
-first. Found while writing a test for the picker's starting index. Both
-regression tests fail on the 60s AppTest script timeout before the fix.
+**A shipped defect: a contradiction cited a field holding the opposite of its
+claim.** The console prints the citation as `tool.field` and it means "open
+that result, read that field". Both endpoint rules passed the literal
+`"ready_endpoints"` while the line above worked out the right answer, assigned
+it to `field`, and was ignored. On a service with one *not-ready* endpoint the
+finding read "reported 1 endpoint(s)" and cited a field holding `[]`. Found by
+ruff's F841 on the dead local. Defect 27. Replayed: 1650 records, verdicts
+byte-identical.
 
-**A claim in this project's own docs was too broad and is corrected.**
-`test_ui_markup.py` said AppTest reads the string submitted rather than the
-text painted and that no assertion over the element tree can ever distinguish
-those. True for `st.error`. False for `st.markdown`: `allow_html` is a field
-on the markdown proto. Verified on streamlit 1.61.1 against a two-line app.
+**Two tests could not fail, and the survivors said so.**
+`test_the_prompt_is_what_names_the_pod` had a one-pod fixture, and the
+question is only consulted to choose *between* pods — prompt, question and
+neither all returned the same recommendation. The divisor test checked three
+durations and one of them, 20300ms, reads as `20.3s` under both divisors.
+Defect 29.
+
+**17k lines have a linter.** `pyproject.toml`, ruff and mypy. 565 raw findings
+down to 164 by turning off four rules with the reason written next to each;
+four were real. Nothing reflowed: E501 is off because moving lines invalidates
+every survivor line number in `results/mutation/`.
+
+**Two claims in this handoff were wrong, and one was a silent trap.** Defect
+30, and the numbers under "Do not let these be misreported" below.
 
 ## Do not let these be misreported
 
-1. **The last four batches of ui.py tests have no kill measurement.** The
-   survey was stopped mid-run. Run a **full** `ui.py` survey, not `--sites`:
-   the context fix changed the file and every site index after it moved.
-2. **692 killed / 282 survivors mixes measurement bases.** It carries the
-   ui.py broad row into a narrow-default total. Do not compare it against a
-   future narrow total.
-3. **Six ui.py timing survivors are equivalent, and three are not.** `%.1f`
-   rounds 8400/1000 and 8400/1001 to the same `8.4s`; the three *default*
-   mutants can never be distinguished, the three *divisors* can, with a
-   500500ms run.
+1. **A skip is a result you have to go and look for.** Measured as a pair on
+   2026-09-02: the same `store.py` survey, same 53 mutants, same test file,
+   killed **25** with `TRIAGE_TEST_PG_DSN` unset and **33** with it pointed at
+   a Postgres that answers. Both runs report success. The `store.py` row in
+   the 2026-09-01 all-module survey (25 killed, 26 survivors) was measured in
+   the first state. **Every module whose tests touch Postgres has to be
+   surveyed with the database up.**
+2. **692 killed / 282 survivors mixes measurement bases**, and is now also
+   stale in two rows — `ui.py` and `contradiction.py` — and wrong in a third,
+   `store.py`. Do not quote it. Re-run the 18-module survey before there is
+   any repo-wide number again, with Postgres up.
+3. **Three ui.py timing survivors are equivalent, and the divisors are now
+   killed.** `%.1f` rounds a default of 0ms and 1ms to the same `0.0s`, so the
+   three *default* mutants can never be distinguished. All three divisors die
+   on the long-investigation case, which now uses durations that can see them.
 4. **`st.status` is invisible to AppTest.** Measured: a run yielding two
    `tool_call` and two `tool_result` events produced zero elements in
    `app.status`. The progress counter and elapsed time need a browser.
-5. `limits.py:140` is an equivalent mutant, not "the standing proof".
-6. Generalized diagnostic accuracy stays NOT TESTED.
-7. HA is still NOT TESTED — the mechanism is proven, the behaviour is not.
+5. **Nine contradiction.py survivors are classified, not unread**, and so are
+   the 45 ui.py ones. Defects 28 and 29. Do not re-review them as though they
+   were open; do read the classifications, and argue with them if they are
+   wrong — one of mine was, and defect 28 records how it was caught.
+   The ui.py number to quote is **45 of 168**, which is a completed survey.
+   Three of those 45 were killed afterwards and each kill was verified
+   individually with `--sites`; the full survey that would fold them into one
+   number was still running when this was written, so **42 is a prediction,
+   not a measurement.** Run it and write down what it says.
+6. `limits.py:140` is an equivalent mutant, not "the standing proof".
+7. Generalized diagnostic accuracy stays NOT TESTED.
+8. HA is still NOT TESTED — the mechanism is proven, the behaviour is not.
 
 ## Pick up, in order
 
-1. **Re-survey `ui.py` and finish the review.** Full survey, five-file test
-   set: `--tests tests/test_ui.py tests/test_ui_auth.py tests/test_ui_markup.py
-   tests/test_ui_security.py tests/test_investigation_identity.py`. ~35
-   minutes. Then read whatever is left against the classifications in defect
-   26 — most of the remainder should be the equivalent and
-   not-visible-to-AppTest sets named there.
-2. **Keep reviewing survivors elsewhere.** Densest now: `contradiction.py`
-   (43), `controller.py` (37), `inference.py` (36), `store.py` (26),
-   `grounding.py` (26), `telemetry.py` (11), `backends.py` (10 after pass 2),
-   `targeting.py` (5 after pass 2). Broad test sets are tabled below; **do
-   not** put `test_mutate.py` in one. `contradiction.py`'s 43 are read and
-   listed in `results/mutation/survivors-2026-09-01.json`; its broad set is
-   `test_agent_loop`, `test_grounding`, `test_replay_grounding`, and pass 2
-   should be run before reading any of them.
-3. **Run HA as two replicas.** kind + Postgres, `sharedState.replicas=2`, kill
-   the lease holder, time takeover against 120s ttl + 15s poll.
-4. **`pyproject.toml` + ruff + mypy.** 17k lines, zero static analysis.
-5. Slack audit trail (needs a workspace).
-6. The n=10 `insufficient_no_such_workload` rerun; build the counter first.
+1. **Re-survey the whole repository, with Postgres up.** This is now the
+   blocking one: three of the 18 rows are known wrong or stale and the total
+   cannot be quoted. ~60 minutes.
+   `TRIAGE_TEST_PG_DSN=... python evals/mutate.py --all --json results/mutation/all-<date>.json`
+   Note `--all` uses each module's *default* narrow test set, so it is a pass 1
+   and its survivor counts are upper bounds. Run pass 2 on any module you
+   intend to read.
+2. **Keep reviewing survivors.** Densest now, from the 2026-09-01 pass 1 and
+   so still upper bounds: `inference.py` (36), `controller.py` (37),
+   `grounding.py` (26), `store.py` (**20**, re-measured with Postgres),
+   `telemetry.py` (11), `backends.py` (10 after pass 2), `targeting.py` (5
+   after pass 2). Pass 2 first, always — it moved contradiction.py 43 → 41 and
+   ui.py 109 → 101, and the previous session wrote two redundant tests by
+   skipping it. **Do not** put `test_mutate.py` in a broad set.
+   Broad sets that are known: `controller.py` → `test_controller`,
+   `test_chart`, `test_store`. `grounding.py` → `test_agent_loop`,
+   `test_contradiction`, `test_replay_grounding`.
+3. **The negation window, with a replay behind it.** `_NEGATION_WINDOW = 40`
+   is measured in characters and a marked-up entity name spends fifteen to
+   twenty of them, so "Nothing suggests the pod \`x-abc123\` does not exist"
+   puts the negator one character outside the window and the absence rule
+   fires on a correct answer. Found 2026-09-02, recorded in defect 28, not
+   fixed: changing it is a tuning change and needs `evals/replay_grounding.py`
+   over the corpus to say what it costs. Baseline to beat: 1650 records, 60
+   moved.
+4. **Run HA as two replicas.** kind + Postgres, `sharedState.replicas=2`, kill
+   the lease holder, time takeover against 120s ttl + 15s poll. Make your own
+   cluster — see the environment note about the one that is already here.
+5. **Finish what the linter found.** 164 ruff findings and 20 from mypy are
+   left, all triaged in the commit that added `pyproject.toml`, none of them
+   live defects. The 12 mypy `var-annotated` ones would let mypy gate CI.
+6. Slack audit trail (needs a workspace).
+7. The n=10 `insufficient_no_such_workload` rerun; build the counter first.
 
 ## Environment
 
