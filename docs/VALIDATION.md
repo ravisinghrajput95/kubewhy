@@ -1527,6 +1527,22 @@ All three were verified individually with `--sites` and then together: the
 full survey after them reports **126 killed of 168, 42 survivors**, which is
 exactly the three kills the individual runs predicted.
 
+**What the two cheap ones found, 2026-09-03.** `app.py` came in at 17 of 42,
+the lowest score in the project, on the surface other systems talk to. Six of
+its survivors were contracts rather than budgets -- four HTTP status codes,
+and the sign of the job-expiry cutoff, where `now + TTL` purges every job in
+the store including the one being created. Now 23 of 42.
+
+`routers/k8s_pods_info.py` came in at 178 of 262. Its 84 survivors are 31
+boolean operators, 31 integers, 15 comparisons and 6 flags; the integers
+include the four unit boundaries of the age string every event carries
+(`< 60` seconds, `< 3600`, `< 86400`), the `sum(1 for ...)` that produces the
+ready count in every `1/1`, and the `[0]` that picks a pod's default
+container.
+
+Both were surveyed by naming the test file. Neither needed anything new from
+`mutate.py`.
+
 ### 30. A test DSN that reached another project's database
 
 `NEXT-SESSION.md` told the next session to run Postgres on port 55432. On this
@@ -1571,11 +1587,11 @@ at the edges.
 `--all` looks for `tests/test_<module>.py`. Three of the largest modules are
 tested under a different name, so none of them has ever been in a survey:
 
-| module | lines | its tests | surveyed |
+| module | lines | its tests | first measured |
 |---|---|---|---|
-| `agent.py` | 1738 | `tests/test_agent_loop.py`, 139 cases | never |
-| `routers/k8s_pods_info.py` | 1643 | `tests/test_k8s_projection.py`, 123 cases | never |
-| `app.py` | 626 | `tests/test_api.py`, 50 cases | never |
+| `agent.py` | 1738 | `tests/test_agent_loop.py`, 139 cases | not yet — 245 mutants, ~49 min |
+| `routers/k8s_pods_info.py` | 1643 | `tests/test_k8s_projection.py`, 123 cases | **178 / 262, 68%** |
+| `app.py` | 626 | `tests/test_api.py`, 50 cases | **17 / 42, 40%** |
 
 That is **4007 lines against 7873 surveyed** -- the agent loop itself, the
 whole Kubernetes projection layer that every tool result comes through, and
