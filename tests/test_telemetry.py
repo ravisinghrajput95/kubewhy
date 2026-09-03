@@ -158,3 +158,60 @@ class TestTimer:
 
         assert clock.seconds >= 0
         assert clock.seconds < 1
+
+
+class TestTheEdgeIsInsideItsBucket:
+    """
+    `le` is Prometheus for "less than or equal", and the existing cumulative
+    case observes 0.5, 5 and 50 against edges of 1, 10 and 100 -- every value
+    strictly inside a bucket, so `<=` and `<` produce the same table and the
+    label's own meaning was never checked.
+
+    A histogram that drops the edge renders and scrapes cleanly and reports
+    wrong quantiles, which is the failure mode the cumulative test above
+    names.
+    """
+
+    def test_an_observation_exactly_on_an_edge_is_in_that_bucket(self):
+        hist = telemetry.Histogram("h", "help", (), buckets=(1, 10, 100))
+        hist.observe(10)
+
+        samples = {labels["le"]: value
+                   for name, labels, value in hist.samples()
+                   if name.endswith("_bucket")}
+
+        assert samples == {"1": 0, "10": 1, "100": 1, "+Inf": 1}
+
+    def test_a_hair_above_the_edge_is_in_the_next_one(self):
+        """The counter: the case above must not pass by counting everything."""
+        hist = telemetry.Histogram("h", "help", (), buckets=(1, 10, 100))
+        hist.observe(10.001)
+
+        samples = {labels["le"]: value
+                   for name, labels, value in hist.samples()
+                   if name.endswith("_bucket")}
+
+        assert samples == {"1": 0, "10": 0, "100": 1, "+Inf": 1}
+
+
+class TestTheTimerDoesNotSwallowWhatHappensInside:
+    """
+    `__exit__` returning True suppresses the exception. A timer that ate every
+    failure in the block it measures would turn a crashed investigation into a
+    silent one that reports a duration -- and every existing timer case runs a
+    block that succeeds, so nothing noticed.
+    """
+
+    def test_an_exception_inside_the_block_still_propagates(self):
+        with pytest.raises(ValueError, match="the tool failed"):
+            with telemetry.timer():
+                raise ValueError("the tool failed")
+
+    def test_it_still_records_the_time_it_took_to_fail(self):
+        """A failed call is one worth having the latency of."""
+        clock = telemetry.timer()
+        with pytest.raises(ValueError):
+            with clock:
+                raise ValueError("boom")
+
+        assert clock.seconds >= 0.0
