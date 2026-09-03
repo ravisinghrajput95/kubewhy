@@ -97,9 +97,27 @@ every survivor line number in `results/mutation/`.
 
 ## Pick up, in order
 
-1. **Re-survey the whole repository — and it is bigger than `--all`.** Still
-   the blocking one. Attempted 2026-09-02 23:12 and abandoned three modules in;
-   see the two traps below before starting.
+1. **Finish the survey: only `agent.py` is left.** The repo-wide `--all` run
+   completed 2026-09-03 10:35 — 18 modules, 979 mutants, 764 killed, 215
+   survivors, 78.0%, in `results/mutation/all-2026-09-03.json` and written up
+   as defect 32. `app.py` (23/42) and `routers/k8s_pods_info.py` (191/262)
+   are done too.
+
+   `agent.py` is the one module never yet measured. It was 32 minutes into an
+   estimated ~49 when this session was stopped, and **it wrote nothing**: a
+   single-module run writes its JSON only at the end, so there is no partial
+   result to resume from. Start it fresh, and give it the machine:
+
+   ```
+   caffeinate -is env PYTHONUNBUFFERED=1 \
+     .venv/bin/python evals/mutate.py agent.py --tests tests/test_agent_loop.py \
+     --json results/mutation/agent-2026-09-03.json
+   ```
+   245 mutants at ~12s a run. It needs no Postgres. Expect 30-50 minutes and
+   do not run anything else against the CPU while it goes — three concurrent
+   surveys is what stretched it.
+
+   The two traps below still apply to anything long.
 
    ```
    caffeinate -is env TRIAGE_TEST_PG_DSN=postgresql://postgres:kubewhy@127.0.0.1:55433/kubewhy \
