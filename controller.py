@@ -22,6 +22,7 @@ there is a global hourly ceiling.
 import datetime as dt
 import logging
 import os
+import contextlib
 import queue
 import signal
 import threading
@@ -430,10 +431,19 @@ class Controller:
         """
         while not self.stopping.is_set():
             try:
-                pod, status, evidence, receipt = self.work.get(timeout=1)
+                item = self.work.get(timeout=1)
             except queue.Empty:
                 continue
 
+            # The shutdown sentinel run() puts on the queue. Without it this
+            # thread cannot notice `stopping` until its own poll expires, so
+            # every shutdown -- and every test that drives the real run() --
+            # pays that second before the join can finish.
+            if item is None:
+                self.work.task_done()
+                return
+
+            pod, status, evidence, receipt = item
             try:
                 finding = self.diagnose(pod, status, evidence, receipt)
                 if finding:
@@ -606,6 +616,10 @@ class Controller:
                 log.warning("watch_restarting", extra={"error": str(exc)})
                 time.sleep(2)
 
+        # Wake the worker rather than waiting out its queue poll. Full means
+        # it has plenty to notice; it will see `stopping` on its next pass.
+        with contextlib.suppress(queue.Full):
+            self.work.put_nowait(None)
         thread.join(timeout=5)
 
     def stop(self, *_):

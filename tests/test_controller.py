@@ -887,3 +887,66 @@ class TestASecondControllerStandsByRatherThanCrashing:  # noqa: E301
         w = self._watcher(db)
         with patch.dict(os.environ, {"TRIAGE_STATE_DB": "postgresql://x/y"}):
             assert w.wait_for_lease(poll=99) is True
+
+
+class TestShutdownDoesNotWaitOutTheWorkersPoll:
+    """
+    The worker blocks in `work.get(timeout=1)`, so it cannot see `stopping`
+    until that second expires. run() therefore paid a full second on every
+    shutdown, and so did each of the six cases that drive the real run():
+    measured 2026-09-03, `pytest tests/test_controller.py` took 7.25s of wall
+    clock for 0.7s of CPU, and 0.95s after this.
+
+    The fix is a sentinel on the queue, and these pin it rather than the
+    timing, which would be flaky.
+    """
+
+    def _controller(self):
+        return ctrl.Controller(sink=MagicMock(),
+                               budget=ctrl.Budget(state=store.MemoryStore()))
+
+    def test_the_worker_returns_when_it_reads_the_sentinel(self):
+        controller = self._controller()
+        controller.work.put_nowait(None)
+
+        thread = threading.Thread(target=controller.worker)
+        thread.start()
+        thread.join(timeout=5)
+
+        assert not thread.is_alive(), (
+            "the worker did not stop on the sentinel; without it a shutdown "
+            "waits out the queue poll")
+
+    def test_the_sentinel_leaves_no_unfinished_work_behind(self):
+        """
+        `task_done()` has to be called for the sentinel too. A queue with
+        unfinished tasks makes any future join() on it hang.
+        """
+        controller = self._controller()
+        controller.work.put_nowait(None)
+
+        thread = threading.Thread(target=controller.worker)
+        thread.start()
+        thread.join(timeout=5)
+
+        assert controller.work.unfinished_tasks == 0
+
+    def test_a_full_queue_does_not_break_shutdown(self):
+        """
+        `put_nowait` raises on a full queue. A controller shutting down under
+        load is exactly when the queue is full, and raising there would turn a
+        clean stop into a traceback.
+        """
+        controller = self._controller()
+        while not controller.work.full():
+            controller.work.put_nowait(("pod", "status", {}, None))
+        controller.stopping.set()
+
+        def one_cycle(api):
+            controller.stopping.set()
+        controller.watch_once = one_cycle
+
+        with patch.object(ctrl.config, "load_kube_config"), \
+             patch.object(ctrl.client, "CoreV1Api", return_value=MagicMock()), \
+             patch.object(ctrl.agent, "_backend"):
+            controller.run()
