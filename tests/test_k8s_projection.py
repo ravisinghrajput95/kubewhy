@@ -2049,3 +2049,150 @@ class TestAMissingNamespaceIsNotHealthy:
 
         assert "error" not in result
         assert "no matching pods" in result["result"]
+
+
+class TestTheAgeStringChangesUnitOnTheBoundary:
+    """
+    `_age` is what stops a 27-minute-old FailedScheduling warning reading as a
+    current one, and every event in every projection carries it. Its four unit
+    boundaries were all mutation survivors: `< 60`, `< 3600`, `< 86400` and
+    the divisors under them could each move by one and no case noticed,
+    because the only test observes an event seconds old.
+
+    kubectl's convention is what the docstring promises: 60 seconds is `1m`,
+    not `60s`.
+    """
+
+    @staticmethod
+    def age(seconds):
+        when = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=seconds)
+        return k8s._age(when)
+
+    @pytest.mark.parametrize("seconds,expected", [
+        (0, "0s"),
+        (59, "59s"),
+        (60, "1m"),        # the boundary, not "60s"
+        (3599, "59m"),
+        (3600, "1h"),      # the boundary, not "60m"
+        (86399, "23h"),
+        (86400, "1d"),     # the boundary, not "24h"
+    ])
+    def test_each_unit_starts_where_the_last_one_ends(self, seconds, expected):
+        assert self.age(seconds) == expected
+
+    def test_a_future_timestamp_is_not_a_negative_age(self):
+        """
+        Clock skew between the API server and this process is ordinary. An age
+        of `-3s` in a projection reads as a broken tool rather than a clock.
+        """
+        ahead = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=30)
+
+        assert k8s._age(ahead) == "0s"
+
+    def test_a_naive_timestamp_is_read_as_utc(self):
+        """
+        The Kubernetes client usually hands back aware datetimes, but a
+        recorded fixture or a hand-built event may not, and subtracting a
+        naive one raises rather than returning a wrong answer.
+        """
+        naive = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+
+        assert k8s._age(naive) == "0s"
+
+    def test_no_timestamp_is_no_age(self):
+        assert k8s._age(None) is None
+
+
+class TestWhichContainerIsWorthReading:
+    """
+    `_failing_container` exists because guessing "the first one" hands back the
+    service mesh proxy's logs while the application is what crashed -- worse
+    than an error, because it looks like an answer. Its fallbacks had no test:
+    `statuses[0]` and `pod.spec.containers[0]` could both be `[1]` and nothing
+    failed.
+
+    The fallback only runs when every container looks fine, where any choice is
+    arbitrary -- but arbitrary and *out of range* are different, and index 1 on
+    a single-container pod is an IndexError in the middle of an investigation.
+    """
+
+    def test_the_broken_container_is_chosen_over_the_first(self):
+        pod = make_pod(statuses=[
+            container_status(name="istio-proxy", ready=True),
+            container_status(name="app", ready=False,
+                             terminated_reason="Error", exit_code=1),
+        ])
+
+        assert k8s._failing_container(pod) == "app"
+
+    def test_an_all_healthy_pod_falls_back_to_the_first_status(self):
+        pod = make_pod(statuses=[
+            container_status(name="app", ready=True),
+            container_status(name="istio-proxy", ready=True),
+        ])
+
+        assert k8s._failing_container(pod) == "app"
+
+    def test_a_single_healthy_container_does_not_index_past_the_end(self):
+        """The fallback on a one-container pod: index 1 would raise."""
+        pod = make_pod(statuses=[container_status(name="only", ready=True)])
+
+        assert k8s._failing_container(pod) == "only"
+
+    def test_a_pod_with_no_statuses_yet_falls_back_to_the_spec(self):
+        """
+        A pod that has not started reports no container statuses at all, and
+        that is exactly when someone asks why.
+        """
+        pod = make_pod(statuses=[])
+        pod.spec.containers = [client.V1Container(name="app"),
+                               client.V1Container(name="sidecar")]
+
+        assert k8s._failing_container(pod) == "app"
+
+    def test_a_pod_with_neither_statuses_nor_containers_is_no_container(self):
+        pod = make_pod(statuses=[])
+        pod.spec.containers = []
+
+        assert k8s._failing_container(pod) is None
+
+
+class TestTheReadyFractionCountsContainers:
+    """
+    `ready` is the numerator of the `1/2` every listed pod carries, and it is
+    a `sum(1 for cs in statuses if cs.ready)`. Mutated to `sum(2 ...)` it
+    reports `2/2` for a pod with one of two containers ready -- a sidecar-only
+    pod reading as fully up -- and no case noticed, because every fixture that
+    reaches this line has a single container where 1 and 2 are equally wrong
+    but only one of them is visible.
+    """
+
+    def test_one_of_two_ready_reads_as_one_of_two(self, api):
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[make_pod(
+            name="meshed", namespace="demo", statuses=[
+                container_status(name="istio-proxy", ready=True),
+                container_status(name="app", ready=False,
+                                 waiting_reason="CrashLoopBackOff"),
+            ])])
+
+        assert k8s.list_pods("demo")["meshed"]["ready"] == "1/2"
+
+    def test_none_ready_reads_as_zero(self, api):
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[make_pod(
+            name="down", namespace="demo", statuses=[
+                container_status(name="a", ready=False,
+                                 waiting_reason="CrashLoopBackOff"),
+                container_status(name="b", ready=False,
+                                 waiting_reason="CrashLoopBackOff"),
+            ])])
+
+        assert k8s.list_pods("demo")["down"]["ready"] == "0/2"
+
+    def test_all_ready_reads_as_full(self, api):
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[make_pod(
+            name="up", namespace="demo", statuses=[
+                container_status(name="a", ready=True),
+                container_status(name="b", ready=True),
+            ])])
+
+        assert k8s.list_pods("demo", only_unhealthy=False)["up"]["ready"] == "2/2"
