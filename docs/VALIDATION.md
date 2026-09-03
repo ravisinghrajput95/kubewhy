@@ -1621,6 +1621,55 @@ the test file rather than rely on the convention:
         --tests tests/test_k8s_projection.py
 
 
+### 32. A repo-wide number that says what it covers
+
+Run 2026-09-03 under `caffeinate -is` with Postgres up, after two attempts
+the night before were abandoned -- one to a sleeping laptop, one to a
+battery at 26%.
+
+**18 modules, 979 mutants, 764 killed, 215 survivors, 78.0%.**
+`results/mutation/all-2026-09-03.json`.
+
+| module | killed | |
+|---|---|---|
+| `backends.py` | 20 / 37 | 54% |
+| `controller.py` | 51 / 89 | 57% |
+| `telemetry.py` | 18 / 29 | 62% |
+| `inference.py` | 89 / 125 | 71% |
+| `tool_schema.py` | 5 / 7 | 71% |
+| `ui.py` | 122 / 168 | 73% |
+| `store.py` | 41 / 53 | 77% |
+| `grounding.py` | 92 / 118 | 78% |
+| `podcache.py` | 15 / 18 | 83% |
+| `sinks.py` | 27 / 31 | 87% |
+| `slack_socket.py` | 15 / 17 | 88% |
+| `targeting.py` | 66 / 74 | 89% |
+| `contradiction.py` | 108 / 117 | 92% |
+| `limits.py` | 27 / 28 | 96% |
+| `audit.py` | 40 / 40 | 100% |
+| `identity.py` | 20 / 20 | 100% |
+| `mcp_server.py` | 2 / 2 | 100% |
+| `redaction.py` | 6 / 6 | 100% |
+
+**Three things this number is not.**
+
+It is a **pass 1**. `--all` runs each module against its own
+`tests/test_<module>.py` and nothing else, so every survivor count here is an
+upper bound. `ui.py` reads 122 of 168 in this table and 126 of 168 against
+the five-file set it is actually tested by. Do not compare a row here with a
+figure measured against a wider set.
+
+It is **not the repository**, for the reason defect 31 gives: `agent.py`,
+`app.py` and `routers/k8s_pods_info.py` are tested under other names and
+`--all` cannot reach them. Measured separately the same day: `app.py`
+23 of 42, `routers/k8s_pods_info.py` 191 of 262, `agent.py` pending. With
+those three the surface is about 1,700 mutants rather than 979.
+
+It is **not a score**. `backends.py` at 54% is the lowest and has never had a
+pass 2; `audit.py`, `identity.py`, `mcp_server.py` and `redaction.py` are at
+100% and `mcp_server.py` has two mutants, which says more about the module's
+size than its testing.
+
 ## What the `vllm` provider has and has not been run against
 
 `vllm` in this project is the OpenAI chat-completions protocol under a name
