@@ -652,3 +652,89 @@ class TestTheInvestigationCeiling:
             body = client.get("/inference").json()
 
         assert body["limits"]["investigations_per_hour"] == 42
+
+
+class TestTheStatusCodeIsTheContract:
+    """
+    app.py had never been surveyed -- `--all` looks for tests/test_app.py and
+    this file is called test_api.py, so 42 mutants went unmeasured until
+    2026-09-03, and 25 of them survived. Four were status codes.
+
+    A status code is the part of an error a client acts on without reading.
+    503 is retried, 403 is not; 404 says the job is gone rather than that the
+    server broke. Each of these was a constant no case pinned, so any of them
+    could have been changed by a typo and every test still passed.
+    """
+
+    def test_a_model_that_cannot_be_reached_is_503(self, open_client):
+        """
+        Retryable, and matching /readyz. The handler exists to keep this out
+        of the 500s, where it would read as a bug in the agent.
+        """
+        with patch.object(app_module, "ask", side_effect=ConnectionError("refused")):
+            response = open_client.post("/ask", json={"question": "why?"})
+
+        assert response.status_code == 503
+        assert "inference unreachable" in response.json()["detail"]
+
+    def test_policy_refusing_to_send_evidence_is_403_not_500(self):
+        """
+        The handler's own docstring is the contract: "a 500 reads as a bug and
+        gets retried, while a 403 reads as a decision and gets read". Nothing
+        checked it, so the code could have been anything.
+        """
+        with patch.object(app_module, "API_TOKEN", ""), \
+             patch.object(app_module, "ask",
+                          side_effect=PermissionError("egress refused to api.example")):
+            response = TestClient(app_module.app).post("/ask", json={"question": "q"})
+
+        assert response.status_code == 403
+        assert response.status_code != 500
+
+    def test_an_accepted_job_is_202_not_200(self, open_client):
+        """
+        202 is the difference between "here is your answer" and "I have taken
+        the question". A client that reads 200 as done stops polling.
+        """
+        with patch.object(app_module, "ask", return_value={"answer": "ok"}):
+            response = open_client.post("/ask/jobs", json={"question": "why?"})
+
+        assert response.status_code == 202
+        assert response.json()["id"]
+
+    def test_asking_for_a_job_that_does_not_exist_is_404(self, open_client):
+        response = open_client.get("/ask/jobs/no-such-job-id")
+
+        assert response.status_code == 404
+
+
+class TestExpiryIsChargedToTheSubmitter:
+    """
+    There is no reaper thread: every submission purges what has aged out.
+    The cutoff is `now - JOB_TTL_SECONDS`, and the sign is the whole of it --
+    `now + TTL` is a cutoff in the future, which purges every job in the
+    store including the one being created. Nothing tested the direction.
+    """
+
+    def test_a_job_just_created_survives_its_own_purge(self, open_client):
+        with patch.object(app_module, "ask", return_value={"answer": "ok"}):
+            created = open_client.post("/ask/jobs", json={"question": "why?"})
+        job_id = created.json()["id"]
+
+        assert open_client.get(f"/ask/jobs/{job_id}").status_code == 200
+
+    def test_the_cutoff_is_a_time_in_the_past(self, open_client):
+        """
+        Read at the call rather than inferred, because a purge that removed
+        everything and a purge that removed nothing both leave the new job
+        reachable if it is written after the sweep.
+        """
+        import store
+
+        with patch.object(app_module, "ask", return_value={"answer": "ok"}), \
+             patch.object(app_module.JOBS, "purge_jobs") as purge:
+            open_client.post("/ask/jobs", json={"question": "why?"})
+
+        cutoff = purge.call_args.args[0]
+        assert cutoff < store.now()
+        assert store.now() - cutoff == pytest.approx(store.JOB_TTL_SECONDS, abs=5)
