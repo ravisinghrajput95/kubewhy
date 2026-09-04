@@ -15,6 +15,14 @@ an auditable root-cause analysis.
 *A real investigation on a kind cluster with a local model. Nothing scripted —
 the 46.6s in the verdict strip is the model thinking.*
 
+Or ask it from Slack, where the same investigation answers in a thread:
+
+![Asking kubewhy in Slack](docs/media/slack-diagnosis.gif)
+
+*`#kubernetes-events`, 2026-09-04. `ledger` is in `ImagePullBackOff` against a
+tag that does not exist — answered `grounded` from `list_pods` and
+`describe_pod`, with the asker's Slack id in the audit record.*
+
 ## Why kubewhy?
 
 Pointing a language model at a Kubernetes cluster produces a specific set of
@@ -780,11 +788,8 @@ inbound listener and signature verification — exposing to the internet a tool
 whose whole claim is that nothing leaves your network. There is no public
 endpoint, and nothing unauthenticated can reach the process.
 
-![Asking kubewhy in Slack](docs/media/slack-diagnosis.gif)
-
-Recorded in `#kubernetes-events` on 2026-09-04: a question typed in the
-channel, answered `grounded` from `list_pods` and `describe_pod` -- `ledger`
-is in `ImagePullBackOff` against a tag that does not exist.
+The recording at the top of this file is this path: a question typed in
+`#kubernetes-events`, answered in a thread.
 
 **The reply path is verified against real Slack** as of 2026-09-04 --
 workspace `Xfusion`, channel `#kubernetes-events`. A question driven through
