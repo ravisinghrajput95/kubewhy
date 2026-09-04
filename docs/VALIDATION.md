@@ -1767,6 +1767,29 @@ a failed diagnosis is still audited.
 
 **Defect 33 was found here**, and only here.
 
+**A fixed defect: the model's Markdown was never translated into Slack's.**
+Slack's `mrkdwn` is not Markdown -- bold is one asterisk, not two -- and the
+blocks declared `mrkdwn` while nothing converted into it. A grounded, correct
+diagnosis arrived reading
+
+    1. **payments/archiver (Pending)**
+       - **Cause**: Likely scheduling failure ...
+
+with every asterisk visible. `_mrkdwn()` now converts `**bold**` and
+`__bold__`, leaving fenced blocks and code spans alone because a diagnosis
+quotes YAML and log lines where `**` is text. Headings and `[text](url)`
+links are still passed through, and the docstring says why: translating them
+well needs a parser, and a half-done one mangles the log lines.
+
+**How it was found is the point.** I had the raw string from
+`conversations.history` in front of me and read past it -- I was checking the
+header. It took a *screenshot of the rendered message* to see it. That is the
+same trap `test_ui_markup.py` records for the console, in a different
+surface: **reading the string a surface submits is not seeing what it
+paints.** The regression test that guards it asserts on the block the sink
+actually sends, not only on the helper, because a helper nothing calls
+converts nothing.
+
 **A found, unfixed defect: every Slack answer is prefixed with a header that
 misreads the question as a broken workload.** `slack_socket.answer` packs the
 question into the `workload` key of a controller *finding* and sends it

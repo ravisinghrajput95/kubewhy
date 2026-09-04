@@ -363,3 +363,57 @@ class TestTheStdoutSinkFlushes:
             sinks.StdoutSink().send(finding())
 
         assert printed.call_args.kwargs.get("flush") is True
+
+
+class TestSlackRendersTheModelsMarkdown:
+    """
+    Slack's `mrkdwn` is not Markdown: bold is one asterisk, not two. The blocks
+    already declared `mrkdwn` and nothing translated into it, so a diagnosis
+    reading `**payments/archiver (Pending)**` arrived with the asterisks
+    visible around the name.
+
+    Observed in #kubernetes-events on 2026-09-04, in an answer that was
+    otherwise correct and scored `grounded`. Reading the raw string over the
+    API did not show it; a screenshot of the rendered message did, which is
+    the same trap `test_ui_markup.py` records for the console.
+    """
+
+    def test_double_asterisks_become_slack_bold(self):
+        assert sinks._mrkdwn("**payments/archiver**") == "*payments/archiver*"
+
+    def test_underscored_bold_is_the_other_markdown_spelling(self):
+        assert sinks._mrkdwn("__also bold__") == "*also bold*"
+
+    def test_bold_inside_a_fence_is_left_alone(self):
+        """A diagnosis quotes YAML and log lines; `**` in a fence is text."""
+        text = "before ```x = **literal**``` after"
+
+        assert sinks._mrkdwn(text) == text
+
+    def test_bold_inside_a_code_span_is_left_alone(self):
+        text = "the flag `--a**b**c` is not emphasis"
+
+        assert sinks._mrkdwn(text) == text
+
+    def test_stray_asterisks_are_not_emphasis(self):
+        """`a ** b ** c` is multiplication or noise, not bold."""
+        for text in ("a ** b ** c", "****", "2 ** 8 is 256"):
+            assert sinks._mrkdwn(text) == text
+
+    def test_the_conversion_reaches_the_block_that_is_sent(self):
+        """
+        The counter for the cases above: they all test the helper, and a
+        helper nothing calls converts nothing.
+        """
+        blocks = sinks.SlackSink("https://hooks.example.invalid/x")._blocks({
+            "workload": "checkout", "namespace": "payments", "pod": "checkout-1",
+            "status": "CrashLoopBackOff", "replicas": 1,
+            "diagnosis": "The **checkout** container exited 1.",
+            "confidence": "grounded", "unverified": [],
+        })
+        body = "".join(
+            b.get("text", {}).get("text", "") for b in blocks["blocks"]
+            if isinstance(b.get("text"), dict))
+
+        assert "*checkout* container" in body
+        assert "**checkout**" not in body

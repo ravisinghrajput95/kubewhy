@@ -9,6 +9,7 @@ the dedup and rate-limit state.
 import json
 import logging
 import os
+import re
 import ssl
 import urllib.error
 import urllib.request
@@ -40,6 +41,44 @@ def _tls_context():
 # Slack rejects a section block over 3000 characters, so the diagnosis has to
 # be bounded. Leaving room for the marker below.
 _SLACK_LIMIT = 2900
+
+
+# Fenced blocks and inline code, so emphasis inside them is left alone. A
+# diagnosis quotes YAML and log lines, and `**` inside a code span is text.
+_CODE = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
+
+# `**bold**` and `__bold__`, Markdown's two spellings. Non-greedy, and the
+# lookarounds stop it spanning `** a ** b **` or eating an empty `****`.
+_BOLD = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
+
+
+def _mrkdwn(text):
+    """
+    Markdown as a model writes it, in the dialect Slack renders.
+
+    Slack's `mrkdwn` is not Markdown. Bold is `*one*` asterisk, not two, so
+    `**payments/archiver**` arrives as literal asterisks around the name --
+    seen in #kubernetes-events on 2026-09-04, in a diagnosis that was
+    otherwise correct and grounded. The blocks already declare `mrkdwn`;
+    nothing was translating into it.
+
+    Only bold is converted, and deliberately. It is the construct models emit
+    constantly and the only one that is both common and *wrong* rather than
+    merely unstyled: Slack renders `-` bullets, `1.` lists and backticks the
+    way Markdown means them. Headings and `[text](url)` links are still
+    passed through unconverted -- a heading reads as `### Cause` and a link
+    shows its target -- because translating them well needs a real parser and
+    a half-done one silently mangles the log lines a diagnosis quotes.
+
+    Code is protected: `**` inside a fence or a code span is text.
+    """
+    out, last = [], 0
+    for m in _CODE.finditer(text):
+        out.append(_BOLD.sub(r"*\2*", text[last:m.start()]))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(_BOLD.sub(r"*\2*", text[last:]))
+    return "".join(out)
 
 
 def _fit(text, limit=_SLACK_LIMIT):
@@ -132,7 +171,7 @@ class SlackSink:
                 {"type": "section", "text": {"type": "mrkdwn", "text": header}},
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": _fit(finding["diagnosis"])},
+                    "text": {"type": "mrkdwn", "text": _fit(_mrkdwn(finding["diagnosis"]))},
                 },
                 {
                     "type": "context",
