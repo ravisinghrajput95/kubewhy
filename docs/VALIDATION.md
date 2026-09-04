@@ -1665,10 +1665,23 @@ It is **not the repository**, for the reason defect 31 gives: `agent.py`,
 23 of 42, `routers/k8s_pods_info.py` 191 of 262, `agent.py` pending. With
 those three the surface is about 1,700 mutants rather than 979.
 
-It is **not a score**. `backends.py` at 54% is the lowest and has never had a
-pass 2; `audit.py`, `identity.py`, `mcp_server.py` and `redaction.py` are at
-100% and `mcp_server.py` has two mutants, which says more about the module's
-size than its testing.
+It is **not a score**. `audit.py`, `identity.py`, `mcp_server.py` and
+`redaction.py` are at 100%, and `mcp_server.py` has two mutants, which says
+more about the module's size than its testing.
+
+**And the bottom of the table did not survive its own caveat.** `backends.py`
+read 20 of 37, 54%, the lowest here. Pass 2 against `test_agent_loop`,
+`test_inference` and `test_investigation_identity` killed **8 of its 17
+survivors**, putting it at 28 of 37, **76%** -- mid-table. Every one of the
+eight is in `_model_check`, which decides whether the configured model is
+among those a provider serves, and which has no test in `test_backends.py`
+and is covered incidentally from three other files.
+
+That is the caveat made concrete rather than stated: a pass-1 row can be
+twenty-two points from the truth, and the module this table called worst was
+not. It also nearly cost something -- `_model_check`'s six survivors read
+exactly like a gap worth writing tests for, and pass 2 is the only reason
+those tests were not written twice.
 
 ## What the `vllm` provider has and has not been run against
 
