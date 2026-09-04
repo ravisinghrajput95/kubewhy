@@ -51,6 +51,11 @@ _CODE = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
 # lookarounds stop it spanning `** a ** b **` or eating an empty `****`.
 _BOLD = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
 
+# `### Root Cause` at the start of a line. Slack has no headings, and left
+# alone the hashes are visible -- seen in a real diagnosis on 2026-09-04.
+# Bold is what a heading means here.
+_HEADING = re.compile(r"^\s{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*\s*$", re.MULTILINE)
+
 
 def _mrkdwn(text):
     """
@@ -62,22 +67,28 @@ def _mrkdwn(text):
     otherwise correct and grounded. The blocks already declare `mrkdwn`;
     nothing was translating into it.
 
-    Only bold is converted, and deliberately. It is the construct models emit
-    constantly and the only one that is both common and *wrong* rather than
-    merely unstyled: Slack renders `-` bullets, `1.` lists and backticks the
-    way Markdown means them. Headings and `[text](url)` links are still
-    passed through unconverted -- a heading reads as `### Cause` and a link
-    shows its target -- because translating them well needs a real parser and
-    a half-done one silently mangles the log lines a diagnosis quotes.
+    Bold and headings, and nothing else. They are the constructs models emit
+    constantly which Slack renders *wrong* rather than merely unstyled: `-`
+    bullets, `1.` lists and backticks already mean what Markdown means, while
+    `**bold**` shows its asterisks and `### Root Cause` shows its hashes. Both
+    were seen in real diagnoses on 2026-09-04. A heading becomes bold, which
+    is what a heading means in a channel.
+
+    `[text](url)` links are still passed through and show their target.
+    Converting them needs the same care as the rest of a real parser, and
+    unlike bold and headings the failure is ugly rather than misleading.
 
     Code is protected: `**` inside a fence or a code span is text.
     """
+    def convert(chunk):
+        return _HEADING.sub(r"*\1*", _BOLD.sub(r"*\2*", chunk))
+
     out, last = [], 0
     for m in _CODE.finditer(text):
-        out.append(_BOLD.sub(r"*\2*", text[last:m.start()]))
+        out.append(convert(text[last:m.start()]))
         out.append(m.group(0))
         last = m.end()
-    out.append(_BOLD.sub(r"*\2*", text[last:]))
+    out.append(convert(text[last:]))
     return "".join(out)
 
 

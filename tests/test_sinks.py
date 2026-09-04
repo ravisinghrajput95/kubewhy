@@ -482,3 +482,49 @@ class TestAnAnswerIsNotAFinding:
         })
 
         assert "is unhealthy in `payments`" in blocks["blocks"][0]["text"]["text"]
+
+
+class TestSlackHasNoHeadings:
+    """
+    A real diagnosis on 2026-09-04 arrived containing
+
+        ### Root Cause
+        - **Memory Exhaustion**: the container's limit is **96Mi** ...
+
+    with the hashes visible. Slack has no heading syntax; bold is what a
+    heading means in a channel.
+
+    This was first written up as deliberately unconverted, on the grounds that
+    doing it well needs a parser. Seeing it in real output did not survive that
+    reasoning: a heading is one anchored line, and leaving it produced a wart
+    in every structured answer the model writes.
+    """
+
+    def test_a_heading_becomes_bold(self):
+        assert sinks._mrkdwn("### Root Cause") == "*Root Cause*"
+
+    def test_every_depth_is_a_heading(self):
+        assert sinks._mrkdwn("# One") == "*One*"
+        assert sinks._mrkdwn("###### Six") == "*Six*"
+
+    def test_closing_hashes_are_dropped(self):
+        assert sinks._mrkdwn("## Trailing ##") == "*Trailing*"
+
+    def test_a_hash_mid_line_is_not_a_heading(self):
+        """`kubectl get pod # comment` is not a title."""
+        assert sinks._mrkdwn("a # not a heading") == "a # not a heading"
+
+    def test_a_hash_without_a_space_is_not_a_heading(self):
+        """`#nospace` is a tag or an anchor, not Markdown."""
+        assert sinks._mrkdwn("#nospace") == "#nospace"
+
+    def test_a_comment_inside_a_fence_is_left_alone(self):
+        """The case that makes this safe: diagnoses quote shell and YAML."""
+        text = "```\n# set the limit\nresources:\n```"
+
+        assert sinks._mrkdwn(text) == text
+
+    def test_a_heading_and_bold_together(self):
+        got = sinks._mrkdwn("### Root Cause\n- **Memory** exhausted")
+
+        assert got == "*Root Cause*\n- *Memory* exhausted"

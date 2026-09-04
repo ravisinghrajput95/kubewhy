@@ -1775,11 +1775,16 @@ diagnosis arrived reading
     1. **payments/archiver (Pending)**
        - **Cause**: Likely scheduling failure ...
 
-with every asterisk visible. `_mrkdwn()` now converts `**bold**` and
-`__bold__`, leaving fenced blocks and code spans alone because a diagnosis
-quotes YAML and log lines where `**` is text. Headings and `[text](url)`
-links are still passed through, and the docstring says why: translating them
-well needs a parser, and a half-done one mangles the log lines.
+with every asterisk visible. `_mrkdwn()` now converts `**bold**`,
+`__bold__` and `### headings`, leaving fenced blocks and code spans alone
+because a diagnosis quotes YAML and log lines where `**` and `#` are text.
+
+Headings were written up here as *deliberately* unconverted, on the grounds
+that doing Markdown properly needs a parser. That did not survive seeing real
+output: the next answer arrived containing `### Root Cause` with the hashes
+showing, and a heading is one anchored line, not a parser. `[text](url)`
+links are still passed through -- that failure is ugly rather than
+misleading, which is the line drawn now.
 
 **How it was found is the point.** I had the raw string from
 `conversations.history` in front of me and read past it -- I was checking the
