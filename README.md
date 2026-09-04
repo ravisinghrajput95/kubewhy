@@ -780,6 +780,12 @@ inbound listener and signature verification — exposing to the internet a tool
 whose whole claim is that nothing leaves your network. There is no public
 endpoint, and nothing unauthenticated can reach the process.
 
+![Asking kubewhy in Slack](docs/media/slack-diagnosis.gif)
+
+Recorded in `#kubernetes-events` on 2026-09-04: a question typed in the
+channel, answered `grounded` from `list_pods` and `describe_pod` -- `ledger`
+is in `ImagePullBackOff` against a tag that does not exist.
+
 **The reply path is verified against real Slack** as of 2026-09-04 --
 workspace `Xfusion`, channel `#kubernetes-events`. A question driven through
 `handle()` reaches Ollama, posts a reply, and writes an audit record naming
