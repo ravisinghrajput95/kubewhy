@@ -396,8 +396,12 @@ class TestSlackRendersTheModelsMarkdown:
         assert sinks._mrkdwn(text) == text
 
     def test_stray_asterisks_are_not_emphasis(self):
-        """`a ** b ** c` is multiplication or noise, not bold."""
-        for text in ("a ** b ** c", "****", "2 ** 8 is 256"):
+        """
+        `a ** b ** c` is multiplication or noise, not bold. Strays are tested
+        *within* a line: a line of nothing but asterisks is a horizontal rule
+        and is dropped, which TestSlackHasNoHorizontalRule covers.
+        """
+        for text in ("a ** b ** c", "2 ** 8 is 256", "x = y ** 2 here"):
             assert sinks._mrkdwn(text) == text
 
     def test_the_conversion_reaches_the_block_that_is_sent(self):
@@ -528,3 +532,56 @@ class TestSlackHasNoHeadings:
         got = sinks._mrkdwn("### Root Cause\n- **Memory** exhausted")
 
         assert got == "*Root Cause*\n- *Memory* exhausted"
+
+
+class TestAHeadingConsumesItsOwnEmphasis:
+    """
+    The first version of `_mrkdwn` converted bold and *then* wrapped the
+    heading, so a heading containing bold nested the asterisks. A real answer
+    on 2026-09-04 arrived reading
+
+        *✅ *Key Findings**
+
+    from the model's `### ✅ **Key Findings**`. `## **Root** Cause` was worse:
+    `**Root* Cause*`, which Slack renders as neither.
+
+    Headings run first now and flatten the emphasis inside them -- the whole
+    line is bold already, so an inner marker has nothing left to say.
+    """
+
+    def test_bold_inside_a_heading_does_not_nest(self):
+        assert sinks._mrkdwn("### ✅ **Key Findings**") == "*✅ Key Findings*"
+
+    def test_bold_at_the_start_of_a_heading(self):
+        assert sinks._mrkdwn("## **Root** Cause") == "*Root Cause*"
+
+    def test_a_plain_heading_is_unaffected(self):
+        assert sinks._mrkdwn("### Root Cause") == "*Root Cause*"
+
+    def test_bold_outside_a_heading_still_converts(self):
+        assert sinks._mrkdwn("- **Memory** exhausted") == "- *Memory* exhausted"
+
+
+class TestSlackHasNoHorizontalRule:
+    """
+    `---` between sections is Markdown's rule. Slack renders it as three
+    dashes on their own line, which reads as a typo in the middle of a
+    diagnosis. Seen in the same answer as the heading defect above.
+    """
+
+    def test_a_dash_rule_is_dropped(self):
+        assert sinks._mrkdwn("a\n---\nb") == "a\nb"
+
+    def test_the_other_spellings_too(self):
+        assert sinks._mrkdwn("a\n***\nb") == "a\nb"
+        assert sinks._mrkdwn("a\n___\nb") == "a\nb"
+
+    def test_a_rule_inside_a_fence_is_left_alone(self):
+        """YAML front matter and shell heredocs use them."""
+        text = "```\n---\napiVersion: v1\n```"
+
+        assert sinks._mrkdwn(text) == text
+
+    def test_two_dashes_are_not_a_rule(self):
+        """`--flag` and a dashed list are not rules."""
+        assert sinks._mrkdwn("a\n--\nb") == "a\n--\nb"

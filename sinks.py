@@ -56,6 +56,10 @@ _BOLD = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
 # Bold is what a heading means here.
 _HEADING = re.compile(r"^\s{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*\s*$", re.MULTILINE)
 
+# A line that is only dashes, asterisks or underscores: Markdown's horizontal
+# rule. Slack has none, so `---` arrives as three dashes on their own line.
+_RULE = re.compile(r"^\s{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$\n?", re.MULTILINE)
+
 
 def _mrkdwn(text):
     """
@@ -74,14 +78,26 @@ def _mrkdwn(text):
     were seen in real diagnoses on 2026-09-04. A heading becomes bold, which
     is what a heading means in a channel.
 
+    Horizontal rules (`---`) are dropped: Slack has no rule, and a line of
+    three dashes in the middle of a diagnosis reads as a typo.
+
     `[text](url)` links are still passed through and show their target.
     Converting them needs the same care as the rest of a real parser, and
     unlike bold and headings the failure is ugly rather than misleading.
 
     Code is protected: `**` inside a fence or a code span is text.
     """
+    def heading(m):
+        # Emphasis inside a heading is flattened, not converted. The whole
+        # line becomes bold, and `### ✅ **Key Findings**` run through bold
+        # first then wrapped gives `*✅ *Key Findings**` -- seen in a real
+        # answer on 2026-09-04, from the first version of this function.
+        return "*" + _BOLD.sub(r"\2", m.group(1)).strip() + "*"
+
     def convert(chunk):
-        return _HEADING.sub(r"*\1*", _BOLD.sub(r"*\2*", chunk))
+        # Headings first, and they consume their own emphasis, so the bold
+        # pass below cannot reach inside one and nest asterisks.
+        return _BOLD.sub(r"*\2*", _RULE.sub("", _HEADING.sub(heading, chunk)))
 
     out, last = [], 0
     for m in _CODE.finditer(text):

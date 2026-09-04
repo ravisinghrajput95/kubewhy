@@ -1779,6 +1779,18 @@ with every asterisk visible. `_mrkdwn()` now converts `**bold**`,
 `__bold__` and `### headings`, leaving fenced blocks and code spans alone
 because a diagnosis quotes YAML and log lines where `**` and `#` are text.
 
+A heading that *contains* bold broke the first version of this. Bold ran
+first and the heading was wrapped afterwards, so the model's
+`### ✅ **Key Findings**` arrived as `*✅ *Key Findings**` and
+`## **Root** Cause` as `**Root* Cause*`, which Slack renders as neither.
+Headings run first now and flatten the emphasis inside them: the whole line is
+bold already, so an inner marker has nothing left to say. Horizontal rules
+(`---`) are dropped in the same pass, because Slack has none and three dashes
+mid-diagnosis read as a typo.
+
+**Both were found the same way and it is the same lesson a third time:** by
+looking at the rendered message, after the tests for the previous fix passed.
+
 Headings were written up here as *deliberately* unconverted, on the grounds
 that doing Markdown properly needs a parser. That did not survive seeing real
 output: the next answer arrived containing `### Root Cause` with the hashes
