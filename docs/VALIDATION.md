@@ -1786,14 +1786,47 @@ second rendering for answers or the bot stops borrowing the finding one.
 Recorded rather than patched at the call site, which would leave the same
 trap for the next caller.
 
-**What is still unverified: the inbound path.** Socket Mode connects and the
-app token is good -- a listener logging every envelope was attached for 22
-seconds while a message was posted to the channel, and received **zero**. The
-app has no bot events subscribed, so Slack delivers nothing. `app_mention`
-needs the `app_mentions:read` scope, which the granted set does not include;
-`message.channels` would work with the `channels:history` already granted.
-Everything from `handle()` inward is now verified; Slack -> socket -> handle
-is not.
+**The inbound path is verified too, and getting there corrected a wrong
+conclusion of mine.**
+
+First attempt: a listener logging every envelope ran for 22 seconds while a
+message was posted, and received **zero**. I recorded that as "the app has no
+bot events subscribed". That was wrong. Both `app_mention` and
+`message.channels` were subscribed all along.
+
+**Two Socket Mode connections split the event stream.** The bot was still
+running when the listener attached, and Slack delivers each envelope to *one*
+open connection, not to all of them. The envelope went to the bot, which drops
+messages carrying `bot_id` before it logs anything -- so both processes looked
+silent for opposite reasons. With the listener as the only connection, the
+envelope arrives immediately.
+
+That is worth keeping for its own sake: **anything that opens a second socket
+while the bot runs is not observing the bot, it is competing with it.** It
+also says what two replicas of the Slack bot would do -- each would answer
+about half the questions, which is survivable, but never "both see
+everything".
+
+Verified end to end on 2026-09-04, from a message typed in the Slack client by
+a real user rather than injected:
+
+    slack_question  channel C0BNH5JKL5U          Slack -> socket -> handle
+    principal       U0BNM2JB60H                  the user who typed it
+    question        why is checkout failing in payments?
+    outcome         answered
+    verdict         grounded
+    tool_calls      3
+    tools           scan_cluster(only_unhealthy=True)          822 chars
+                    describe_pod(payments/checkout-5b5fd...)   658 chars
+                    get_pod_logs(..., container=checkout, tail=50)  157 chars
+    namespaces      ['payments']
+    sensitive_reads get_pod_logs on payments/checkout-5b5fd...
+    duration_ms     139836.5
+
+The reply landed in a thread on the question. `sensitive_reads` named the log
+read; no tool *result* appears anywhere in the record, which is the property
+[[audit-records-exclude-evidence]] exists for -- checked by searching the
+serialised record for one.
 
 ## What the `vllm` provider has and has not been run against
 

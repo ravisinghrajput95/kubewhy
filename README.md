@@ -786,10 +786,15 @@ workspace `Xfusion`, channel `#kubernetes-events`. A question driven through
 the Slack user id. See defect 34 in `docs/VALIDATION.md`, including a reply
 header that misreads the question as a broken workload.
 
-**The inbound path is still unverified.** The socket connects, but a listener
-logging every envelope received none in 22 seconds while a message was posted:
-the app had no bot events subscribed. Subscribe `app_mention` (needs the
-`app_mentions:read` scope) or `message.channels` (needs `channels:history`).
+**The inbound path is verified too**, from a message typed in the Slack
+client: `message.channels` delivered it, `handle()` accepted it, and the
+answer came back `grounded` after three tool calls, in a thread on the
+question.
+
+One trap worth knowing: **Slack delivers each envelope to one open Socket
+Mode connection, not to all of them.** A second process attached to watch the
+bot will take events *from* it, and the bot drops anything carrying `bot_id`
+before it logs -- so both look idle. Debug with one connection at a time.
 
 Defaults to `stdout`, so you can read what it would have said before pointing
 it at a channel. The chart creates the read-only ServiceAccount and
