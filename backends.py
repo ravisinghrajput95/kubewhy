@@ -39,6 +39,7 @@ only check on a model change: 16 cases, the controller, and grounding. A
 backend added without those numbers is unverified, whatever its tests say.
 """
 
+import inspect
 import json
 import os
 
@@ -500,7 +501,36 @@ def get(name=None, endpoint=None, api_key=None, timeout=None):
         kwargs["api_key"] = api_key
     if timeout is not None:
         kwargs["timeout"] = timeout
-    return factory(**kwargs)
+    return factory(**_accepted(factory, kwargs))
+
+
+def _accepted(factory, kwargs):
+    """
+    Only the arguments this factory actually takes.
+
+    The paragraph above promises a factory that takes none keeps working, and
+    that was only true while the caller happened to pass none. inference.py
+    reads OPENAI_API_KEY onto the primary target whatever the provider is, so
+    a developer with that variable exported -- which is ordinary -- got
+
+        TypeError: OllamaBackend.__init__() got an unexpected keyword
+        argument 'api_key'
+
+    on every local investigation. Ollama has no key to take. Filtering here
+    rather than teaching each backend to swallow arguments it has no use for:
+    a backend's signature is the honest statement of what it accepts, and a
+    provider that quietly ignored a key would be the wrong thing to build for
+    one that genuinely needs it.
+    """
+    try:
+        params = inspect.signature(factory).parameters
+    except (TypeError, ValueError):
+        # A C callable with no introspectable signature. Forward everything
+        # and let it raise, which is the behaviour before this existed.
+        return kwargs
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return kwargs
+    return {k: v for k, v in kwargs.items() if k in params}
 
 
 def register(name, factory):

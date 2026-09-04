@@ -10,6 +10,7 @@ than the loop.
 No model and no network: the client is mocked.
 """
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -297,3 +298,61 @@ class TestOpenAIProtocol:
         with self.post(openai_reply(content="ok")) as post:
             self.backend().chat("qwen3", [], [], think=False)
         assert "tools" not in post.call_args.kwargs["json"]
+
+
+class TestAFactoryOnlyGetsArgumentsItTakes:
+    """
+    `get()`'s docstring promises that keyword arguments "are only forwarded
+    when given, so a factory added through register() that takes none keeps
+    working". The code honoured that only when the *caller* omitted them; it
+    never asked what the factory accepts.
+
+    Found on 2026-09-04 by driving the Slack surface with a real workspace
+    identity. Every local investigation died with
+
+        TypeError: OllamaBackend.__init__() got an unexpected keyword
+        argument 'api_key'
+
+    because `inference.config_from_env` reads `OPENAI_API_KEY` onto the
+    primary Target whatever the provider is, and Ollama takes no key. An
+    exported OPENAI_API_KEY is ordinary on a developer machine, and it broke
+    local mode completely.
+    """
+
+    def test_ollama_ignores_an_api_key_it_has_no_use_for(self):
+        made = backends.get("ollama", api_key="sk-not-used-by-ollama")
+
+        assert isinstance(made, backends.OllamaBackend)
+
+    def test_a_factory_taking_nothing_still_works(self):
+        """The case the docstring was written for."""
+        backends.register("takes-nothing", lambda: "made")
+        try:
+            assert backends.get("takes-nothing", endpoint="http://x",
+                                api_key="k", timeout=9) == "made"
+        finally:
+            backends._BACKENDS.pop("takes-nothing", None)
+
+    def test_a_factory_taking_everything_still_gets_everything(self):
+        """The fix must not start dropping arguments that are wanted."""
+        seen = {}
+        backends.register("takes-all", lambda **kw: seen.update(kw) or "made")
+        try:
+            backends.get("takes-all", endpoint="http://x", api_key="k", timeout=9)
+        finally:
+            backends._BACKENDS.pop("takes-all", None)
+
+        assert seen == {"endpoint": "http://x", "api_key": "k", "timeout": 9}
+
+    def test_an_openai_key_in_the_environment_does_not_break_local_mode(self, monkeypatch):
+        """
+        The end-to-end shape of the bug, at the seam that produced it.
+        """
+        import inference
+
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-exported-by-the-developer")
+        monkeypatch.setenv("TRIAGE_INFERENCE_MODE", "local")
+        monkeypatch.setenv("TRIAGE_MODEL", "qwen3")
+        gateway = inference.Gateway(inference.from_env(os.environ))
+
+        assert gateway.tools({}) is not None

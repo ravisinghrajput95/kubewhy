@@ -1689,6 +1689,53 @@ as a ranking. It also nearly cost something -- `_model_check`'s six survivors re
 exactly like a gap worth writing tests for, and pass 2 is the only reason
 those tests were not written twice.
 
+### 33. An exported OPENAI_API_KEY broke local mode entirely
+
+Found 2026-09-04 by driving the Slack surface against a real workspace, which
+is the only reason it was found at all: every unit test that reaches a backend
+builds one directly or with an explicit argument, and nothing assembled the
+combination the environment does.
+
+    TypeError: OllamaBackend.__init__() got an unexpected keyword argument
+    'api_key'
+
+`inference.from_env` reads `OPENAI_API_KEY` onto the primary `Target`
+whatever the provider is -- reasonable, since any provider that needs a key
+should have it. `Gateway._backend` then calls
+`backends.get(..., api_key=target.api_key or None)`, and `backends.get`
+forwards every argument it was given. `OllamaBackend.__init__` takes
+`endpoint` and `timeout`. Ollama has no key to take.
+
+So **every local investigation failed** for anyone with `OPENAI_API_KEY`
+exported, which is ordinary on a developer machine and is exactly what this
+repository's own `.env` carries. Reduced to one line:
+
+    OPENAI_API_KEY=sk-x TRIAGE_INFERENCE_MODE=local python -c \
+      "import inference; inference.gateway().tools({})"    # TypeError
+    TRIAGE_INFERENCE_MODE=local python -c \
+      "import inference; inference.gateway().tools({})"    # fine
+
+**`get()`'s docstring already promised the fix.** It says the keyword
+arguments "are only forwarded when given, so a factory added through
+register() that takes none keeps working" -- true only while the *caller*
+happened to pass none, because nothing asked what the factory accepts. It
+does now, by signature, with `**kwargs` factories still getting everything.
+
+Filtering at that seam rather than teaching each backend to swallow arguments
+it has no use for: a backend's signature is the honest statement of what it
+accepts, and a provider that quietly ignored a key would be the wrong thing
+to build for one that genuinely needs it.
+
+Four tests, and two of them guard the fix rather than the bug: a factory
+taking nothing gets nothing, and a factory taking `**kwargs` still gets
+everything, so this cannot decay into dropping arguments that were wanted.
+
+**Why no survey caught it.** `backends.py` was at 76% after pass 2 and
+`get()`'s own lines are killed. This is not a mutation of a line -- it is two
+correct-looking modules disagreeing about a contract, which is the failure
+[[classifier-and-client-must-agree]] describes and which mutation testing
+does not model.
+
 ## What the `vllm` provider has and has not been run against
 
 `vllm` in this project is the OpenAI chat-completions protocol under a name
