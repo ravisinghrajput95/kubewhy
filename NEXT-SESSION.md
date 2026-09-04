@@ -7,59 +7,61 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-02 head — `git log --oneline -1`, which is the
-authority, not this line — tree clean and pushed, **1499 tests** pass (50s,
-with Postgres up), CI green, tags through v0.2.0. No survey of this project is
-running; one was abandoned, see pick-up item 1. A kind cluster and several
-containers ARE running and none of them are this project's — see Environment
-before touching anything.**
+**State: `main` at the 2026-09-04 head — `git log --oneline -1` is the
+authority, not this line — tree clean and pushed, **1522 tests pass, 32
+skipped** (43s; the skips are Postgres cases, see Environment), CI green, tags
+through v0.2.0. Nothing of this project is running.**
 
-**Mutation coverage as it stands, all measured 2026-09-02 and all with their
-survivors classified in defects 28-30: `contradiction.py` 108/117 (92%),
-`store.py` 41/53 (77%), `ui.py` 126/168 (75%). There is no repo-wide number
-and defect 31 says why the old one was never repo-wide.**
+**Mutation coverage, all measured 2026-09-02/03.** 18 modules via `--all`:
+979 mutants, 764 killed, **78.0%** (`results/mutation/all-2026-09-03.json`,
+defect 32). Plus the three `--all` structurally cannot reach (defect 31):
+`app.py` 23/42, `routers/k8s_pods_info.py` 191/262, and **`agent.py` never
+measured**. Every row from `--all` is a **pass 1** and its survivor count an
+upper bound — `backends.py` read 54% and is 76% after pass 2, `controller.py`
+57% and 73%.
 
-**Read `docs/VALIDATION.md` first — defects 27 to 30 are the 2026-09-02
-morning session, and 25 and 26 the evening before it — then "Pick up, in
-order" below. Everything under "What changed on 2026-08-26 / 27" is history.**
+**Read `docs/VALIDATION.md` first — defects 27 to 34 are this session.**
+Then "Pick up, in order" below. Everything under "What changed on
+2026-08-26 / 27" is history.
 
-## What landed on 2026-09-02 (morning)
+## What landed on 2026-09-02 to 04
 
-**The console survey finished. 168 mutants, 123 killed, 45 survived, 73%** —
-the run the previous session started twice and finished neither. The four
-unmeasured test batches were worth 22 kills against the last real measurement
-of 101 of 167. Defect 26's table is closed; defect 29 says what the 45 are.
+**The repo-wide number exists again and says what it does not cover** (32),
+after two abandoned attempts — one to a sleeping laptop whose monotonic
+`subprocess.run` timeouts cannot fire across a suspend, one to a battery at
+26%. **`--all` was never repo-wide** (31): it needs `tests/test_<module>.py`
+and never descends into packages, so 4007 lines including the agent loop and
+the whole projection layer had never been surveyed.
 
-**`contradiction.py` was read one survivor at a time: 74 killed of 117 → 76
-broad → 108, 92%, with all nine remaining survivors classified.** Three rules
-had no case that made them fire — `ready_vs_claimed_not_ready`,
-`running_vs_claimed_failing` and `resource_limit_disagrees`, the last with no
-test anywhere in the repository — and `check()` and `confirmations()`, the
-module's public API, had no caller. Defect 28.
+**Two shipped defects, both found by driving a real surface rather than by
+any survey.**
 
-**A shipped defect: a contradiction cited a field holding the opposite of its
-claim.** The console prints the citation as `tool.field` and it means "open
-that result, read that field". Both endpoint rules passed the literal
-`"ready_endpoints"` while the line above worked out the right answer, assigned
-it to `field`, and was ignored. On a service with one *not-ready* endpoint the
-finding read "reported 1 endpoint(s)" and cited a field holding `[]`. Found by
-ruff's F841 on the dead local. Defect 27. Replayed: 1650 records, verdicts
-byte-identical.
+*Defect 33: an exported `OPENAI_API_KEY` broke local mode entirely.*
+`TypeError: OllamaBackend.__init__() got an unexpected keyword argument
+'api_key'` on **every** local investigation, for anyone with that variable
+set — which is ordinary, and is what this repo's own `.env` carries.
+`backends.get()` now forwards only what a factory's signature accepts, which
+its docstring had promised all along.
 
-**Two tests could not fail, and the survivors said so.**
-`test_the_prompt_is_what_names_the_pod` had a one-pod fixture, and the
-question is only consulted to choose *between* pods — prompt, question and
-neither all returned the same recommendation. The divisor test checked three
-durations and one of them, 20300ms, reads as `20.3s` under both divisors.
-Defect 29.
+*Defect 34: the Slack surface, driven against a real workspace.* The audit
+trail holds — a question typed in `#kubernetes-events` records the asker's
+Slack id, the typed question, the tools named with argument and result size
+and **no tool result**. Three rendering defects fixed on the way: answers
+were sent as controller *findings* so every reply was headed
+`:warning: *<the question>* is unhealthy in ``; `**bold**` showed its
+asterisks because nothing converted Markdown into Slack's mrkdwn; and
+`### Root Cause` showed its hashes. `docs/media/slack-diagnosis.gif` is the
+result, pinned at the top of README.
 
-**17k lines have a linter.** `pyproject.toml`, ruff and mypy. 565 raw findings
-down to 164 by turning off four rules with the reason written next to each;
-four were real. Nothing reflowed: E501 is off because moving lines invalidates
-every survivor line number in `results/mutation/`.
+**`store.py`, `contradiction.py`, `ui.py`, `telemetry.py`, `k8s_pods_info.py`
+and `app.py` all had survivors read and tested.** Highlights: `build()` — the
+factory every surface calls — had no test at all; the lease boundary is
+written in opposite forms in the two durable stores and nothing checked they
+agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
+`__exit__` could have swallowed every exception in the block it measured.
 
-**Two claims in this handoff were wrong, and one was a silent trap.** Defect
-30, and the numbers under "Do not let these be misreported" below.
+**The controller's shutdown waited out a queue poll.** `test_controller.py`
+7.25s -> 0.95s, and ~9 minutes off every future survey of that module.
 
 ## Do not let these be misreported
 
@@ -97,105 +99,54 @@ every survivor line number in `results/mutation/`.
 
 ## Pick up, in order
 
-1. **Finish the survey: only `agent.py` is left.** The repo-wide `--all` run
-   completed 2026-09-03 10:35 — 18 modules, 979 mutants, 764 killed, 215
-   survivors, 78.0%, in `results/mutation/all-2026-09-03.json` and written up
-   as defect 32. `app.py` (23/42) and `routers/k8s_pods_info.py` (191/262)
-   are done too.
+1. **HA as two replicas, on GKE.** Deferred to a fresh session deliberately.
+   Budget is ₹266 of free credit; the 2026-08-08 run cost **₹10 for ~57
+   minutes**, so this is affordable if it is torn down. Read the GKE notes in
+   this file before creating anything — a *regional* cluster means one node
+   per zone and triple the bill, and `e2-medium`'s system pods take ~760m of
+   ~940m allocatable, so lower the chart's **requests** rather than adding a
+   node.
+   `sharedState.enabled=true`, `sharedState.replicas=2`, a Secret holding the
+   DSN, Postgres in-cluster. Kill the lease holder and time takeover against
+   the 120s ttl + 15s poll. Nothing is deployed and nothing is billing:
+   checked 2026-09-04, zero clusters in every project.
+   Note the controller resolves inference at startup and *raises* if the
+   gateway would refuse it, so give it a configuration that builds.
 
-   `agent.py` is the one module never yet measured. It was 32 minutes into an
-   estimated ~49 when this session was stopped, and **it wrote nothing**: a
-   single-module run writes its JSON only at the end, so there is no partial
-   result to resume from. Start it fresh, and give it the machine:
-
+2. **`agent.py` — the one module never measured.** 245 mutants at ~12s a run,
+   ~49 minutes, no Postgres needed. A single-module run writes its `--json`
+   only at the end, so an interrupted one leaves **nothing** to resume from.
+   Give it the machine.
    ```
    caffeinate -is env PYTHONUNBUFFERED=1 \
      .venv/bin/python evals/mutate.py agent.py --tests tests/test_agent_loop.py \
-     --json results/mutation/agent-2026-09-03.json
+     --json results/mutation/agent-<date>.json
    ```
-   245 mutants at ~12s a run. It needs no Postgres. Expect 30-50 minutes and
-   do not run anything else against the CPU while it goes — three concurrent
-   surveys is what stretched it.
 
-   The two traps below still apply to anything long.
+3. **Pass 2 on `inference.py` (36) and `grounding.py` (26).** The only two
+   dense modules that have never had one, and the two that did both moved ~20
+   points. Do this *before* reading a survivor or writing a test against one:
+   six survivors in `backends._model_check` read exactly like a gap worth
+   testing, and pass 2 killed eight of seventeen because three other files
+   already covered them. Candidate test sets are tabled below.
 
-   ```
-   caffeinate -is env TRIAGE_TEST_PG_DSN=postgresql://postgres:kubewhy@127.0.0.1:55433/kubewhy \
-     python evals/mutate.py --all --json results/mutation/all-<date>.json
-   ```
-   then, because `--all` does not reach them (defect 31), the three modules
-   tested under another name:
-   ```
-   python evals/mutate.py agent.py --tests tests/test_agent_loop.py
-   python evals/mutate.py app.py  --tests tests/test_api.py
-   python evals/mutate.py routers/k8s_pods_info.py --tests tests/test_k8s_projection.py
-   ```
-   That is 4007 more lines than any previous "repo-wide" number covered.
+4. **`_NEGATION_WINDOW = 40`**, found and not fixed. It is measured in
+   characters and a marked-up entity name spends 15-20 of them, so "Nothing
+   suggests the pod \`x-abc123\` does not exist" puts the negator one
+   character outside the window and the absence rule fires on a correct
+   answer. Changing it is a tuning change and needs `evals/replay_grounding.py`
+   over the corpus to say what it costs. Baseline: 1650 records, 60 moved.
 
-   **`caffeinate -is` is not optional and the reason is not Ollama.** The
-   attempt above sat 22 minutes on one `controller.py` mutant and looked hung.
-   It was not: `pmset -g log` showed the Mac asleep 23:35:42 to 23:51:38.
-   `subprocess.run(timeout=...)` measures monotonic time, which does not
-   advance across sleep on macOS, so the 300s mutant timeout never fires and
-   there is no upper bound on a survey's wall clock. Diagnosis: elapsed 22
-   minutes against 1m13s of CPU.
+5. **Slack: `[text](url)` links still show their target.** Bold and headings
+   are converted; links are not, deliberately — that failure is ugly rather
+   than misleading. Fix it if you want, with the same care about code spans.
 
-   **Check the battery.** The same attempt was on battery at 26% with 55
-   minutes left, against a job that needs about 60. `--json` is written after
-   every module, so a machine that dies mid-run leaves a real partial result
-   — but name it for what it is.
+6. **Finish what the linter found.** 164 ruff and 20 mypy findings, all
+   triaged in the commit that added `pyproject.toml`, none of them live
+   defects. The 12 mypy `var-annotated` ones would let mypy gate CI.
 
-   `--all` uses each module's *default* narrow test set, so it is a pass 1 and
-   its survivor counts are upper bounds. Run pass 2 on any module you intend
-   to read.
-
-   The three modules that did land before it was stopped are kept in
-   `results/mutation/all-2026-09-02-PARTIAL-3-of-18.json`: `audit.py` 40/0,
-   `backends.py` 20 killed 17 survived, `contradiction.py` 108/9. That last
-   one is worth noting — 108 killed against `test_contradiction.py` **alone**,
-   the same figure the four-file set produced, so this session's tests closed
-   the whole gap pass 2 used to find.
-2. **Keep reviewing survivors.** Densest now, from the 2026-09-01 pass 1 and
-   so still upper bounds: `inference.py` (36), `controller.py` (37),
-   `grounding.py` (26), `store.py` (**20**, re-measured with Postgres),
-   `telemetry.py` (11), `backends.py` (10 after pass 2), `targeting.py` (5
-   after pass 2). Pass 2 first, always — it moved contradiction.py 43 → 41 and
-   ui.py 109 → 101, and the previous session wrote two redundant tests by
-   skipping it. **Do not** put `test_mutate.py` in a broad set.
-   **Candidate broad sets**, derived 2026-09-02 by grepping `tests/` for each
-   module name. They are a *superset*: a grep hit can be a comment, and a
-   wider set only costs time, it does not invalidate a measurement. Drop
-   `test_ui.py` unless you have the half hour — every case in it is an
-   AppTest script run.
-
-   | module | candidates beyond its own test file |
-   |---|---|
-   | `controller.py` | `test_chart`, `test_store` |
-   | `inference.py` | `test_agent_loop`, `test_api`, `test_audit`, `test_chart`, `test_controller`, `test_redaction`, `test_ui_security`, (`test_ui`) |
-   | `grounding.py` | `test_agent_loop`, `test_contradiction`, `test_replay_grounding`, `test_eval_graders`, `test_audit`, `test_inference`, `test_redaction`, (`test_ui`) |
-   | `store.py` | `test_chart`, `test_controller`, (`test_ui`) |
-   | `telemetry.py` | `test_audit`, `test_inference` |
-   | `backends.py` | `test_agent_loop`, `test_inference`, `test_investigation_identity` |
-   | `targeting.py` | `test_investigation_identity` |
-
-   `ui.py` imports `grounding`, `store`, `agent`, `audit` and `identity`, so
-   `test_ui.py` is a real pass-2 set for each of them and an expensive one.
-3. **The negation window, with a replay behind it.** `_NEGATION_WINDOW = 40`
-   is measured in characters and a marked-up entity name spends fifteen to
-   twenty of them, so "Nothing suggests the pod \`x-abc123\` does not exist"
-   puts the negator one character outside the window and the absence rule
-   fires on a correct answer. Found 2026-09-02, recorded in defect 28, not
-   fixed: changing it is a tuning change and needs `evals/replay_grounding.py`
-   over the corpus to say what it costs. Baseline to beat: 1650 records, 60
-   moved.
-4. **Run HA as two replicas.** kind + Postgres, `sharedState.replicas=2`, kill
-   the lease holder, time takeover against 120s ttl + 15s poll. Make your own
-   cluster — see the environment note about the one that is already here.
-5. **Finish what the linter found.** 164 ruff findings and 20 from mypy are
-   left, all triaged in the commit that added `pyproject.toml`, none of them
-   live defects. The 12 mypy `var-annotated` ones would let mypy gate CI.
-6. Slack audit trail (needs a workspace).
-7. The n=10 `insufficient_no_such_workload` rerun; build the counter first.
+7. Generalized diagnostic accuracy stays NOT TESTED. The n=10
+   `insufficient_no_such_workload` rerun; build the counter first.
 
 ## Environment
 
