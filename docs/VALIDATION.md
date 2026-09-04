@@ -1736,6 +1736,65 @@ correct-looking modules disagreeing about a contract, which is the failure
 [[classifier-and-client-must-agree]] describes and which mutation testing
 does not model.
 
+### 34. The Slack reply path, driven against a real workspace
+
+Run 2026-09-04 against workspace `Xfusion`, channel `#kubernetes-events`, bot
+`kubewhy`. README said "the reply path is untested against real Slack ...
+treat that half as unverified". It is tested now, and three things came out
+of it.
+
+**The audit trail does what it claims.** A question driven through
+`slack_socket.handle` with a real workspace member's id produced:
+
+    principal    U0BNM2JB60H        the Slack user id, not a display name
+    auth         slack              Slack authenticated them, not kubewhy
+    surface      slack
+    cluster      kind-aiops-test
+    question     why is the crasher pod failing?     the typed question
+    model        qwen3
+    outcome      answered
+    verdict      insufficient_evidence
+    tool_calls   1
+    tools        scan_cluster(only_unhealthy=True, workload=crasher),
+                 result_chars 62, duration_ms 30.5
+
+Which is the contract: the user id because that is what the workspace's own
+audit log keys on, so the two can be joined; the typed question rather than
+the scaffolded prompt; and the tools *named* with their arguments and result
+sizes but never their contents. An earlier run of the same test recorded
+`outcome: error` with the principal still set, which is the other half --
+a failed diagnosis is still audited.
+
+**Defect 33 was found here**, and only here.
+
+**A found, unfixed defect: every Slack answer is prefixed with a header that
+misreads the question as a broken workload.** `slack_socket.answer` packs the
+question into the `workload` key of a controller *finding* and sends it
+through the same sink, so `sinks.Slack._blocks` renders
+
+    :warning: *why is the crasher pod failing?* is unhealthy in ``
+
+above the real answer, with empty backticks where a namespace would go. The
+answer itself is correct and sits in the block below. The sink's shape is
+right for the controller, which reports findings about workloads, and wrong
+for the bot, which answers questions -- `slack_socket` reuses it and the
+comment there shows the reuse was known about, for a different reason (the
+`replicas` key, which once raised KeyError on the answering thread).
+
+Not fixed because it is a shape question, not a typo: either the sink grows a
+second rendering for answers or the bot stops borrowing the finding one.
+Recorded rather than patched at the call site, which would leave the same
+trap for the next caller.
+
+**What is still unverified: the inbound path.** Socket Mode connects and the
+app token is good -- a listener logging every envelope was attached for 22
+seconds while a message was posted to the channel, and received **zero**. The
+app has no bot events subscribed, so Slack delivers nothing. `app_mention`
+needs the `app_mentions:read` scope, which the granted set does not include;
+`message.channels` would work with the `channels:history` already granted.
+Everything from `handle()` inward is now verified; Slack -> socket -> handle
+is not.
+
 ## What the `vllm` provider has and has not been run against
 
 `vllm` in this project is the OpenAI chat-completions protocol under a name

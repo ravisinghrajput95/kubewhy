@@ -780,9 +780,16 @@ inbound listener and signature verification — exposing to the internet a tool
 whose whole claim is that nothing leaves your network. There is no public
 endpoint, and nothing unauthenticated can reach the process.
 
-**The reply path is untested against real Slack.** The connection is
-exercised, but posting a reply needs a genuine bot token, so treat that half
-as unverified.
+**The reply path is verified against real Slack** as of 2026-09-04 --
+workspace `Xfusion`, channel `#kubernetes-events`. A question driven through
+`handle()` reaches Ollama, posts a reply, and writes an audit record naming
+the Slack user id. See defect 34 in `docs/VALIDATION.md`, including a reply
+header that misreads the question as a broken workload.
+
+**The inbound path is still unverified.** The socket connects, but a listener
+logging every envelope received none in 22 seconds while a message was posted:
+the app had no bot events subscribed. Subscribe `app_mention` (needs the
+`app_mentions:read` scope) or `message.channels` (needs `channels:history`).
 
 Defaults to `stdout`, so you can read what it would have said before pointing
 it at a channel. The chart creates the read-only ServiceAccount and
