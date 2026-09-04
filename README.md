@@ -19,9 +19,10 @@ Or ask it from Slack, where the same investigation answers in a thread:
 
 ![Asking kubewhy in Slack](docs/media/slack-diagnosis.gif)
 
-*`#kubernetes-events`, 2026-09-04. `ledger` is in `ImagePullBackOff` against a
-tag that does not exist — answered `grounded` from `list_pods` and
-`describe_pod`, with the asker's Slack id in the audit record.*
+*`#kubernetes-events`, 2026-09-04. `notifier` references a ConfigMap that does
+not exist — answered `grounded` from `list_pods`, `describe_pod` and
+`get_pod_events`, citing the 416 events that say so, with the asker's Slack id
+in the audit record.*
 
 ## Why kubewhy?
 
