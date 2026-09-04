@@ -70,18 +70,17 @@ def answer(question, channel, thread_ts, user=""):
             "unverified": [],
         }
 
+    # `kind: answer`, not a finding with the question stuffed into `workload`.
+    # That is what this used to send, and every reply arrived headed
+    # ":warning: *<the question>* is unhealthy in ``" -- the question read as
+    # a broken workload and the empty namespace as empty backticks. The
+    # controller reports findings about workloads; this answers questions, and
+    # the two want different headers. See sinks._answer_blocks_for.
     sinks.build(name="slack", channel=channel or CHANNEL).send(
         {
-            "workload": question[:80],
-            "namespace": "",
-            # "replicas", not "pods": every writer in sinks.py reads this key
-            # by subscript, so the wrong name raised KeyError('replicas') on
-            # the answering thread and no Slack question was ever answered.
-            # One, not zero -- the count is only announced above one, and a
-            # question asked in a channel has no replica count to report.
-            "replicas": 1,
-            "status": "",
-            "diagnosis": result["answer"],
+            "kind": "answer",
+            "question": question[:80],
+            "answer": result["answer"],
             "confidence": result.get("confidence", "ungrounded"),
             "unverified": result.get("unverified", []),
             "thread_ts": thread_ts,

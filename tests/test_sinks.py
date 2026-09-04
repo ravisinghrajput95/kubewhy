@@ -417,3 +417,68 @@ class TestSlackRendersTheModelsMarkdown:
 
         assert "*checkout* container" in body
         assert "**checkout**" not in body
+
+
+class TestAnAnswerIsNotAFinding:
+    """
+    The bot sent answers through the finding renderer with the question in the
+    `workload` key, so every reply was headed
+
+        :warning: *why is checkout failing in payments?* is unhealthy in ``
+
+    Seen in #kubernetes-events on 2026-09-04, above an answer that was itself
+    correct and grounded. The controller reports findings about workloads; the
+    bot answers questions. Sharing one renderer is what produced it.
+    """
+
+    ANSWER = {
+        "kind": "answer",
+        "question": "why is checkout failing in payments?",
+        "answer": "The **checkout** container exited 1.",
+        "confidence": "grounded",
+        "unverified": [],
+    }
+
+    def test_the_header_does_not_call_the_question_unhealthy(self):
+        blocks = sinks.SlackSink("https://hooks.example.invalid/x")._blocks(self.ANSWER)
+        header = blocks["blocks"][0]["text"]["text"]
+
+        assert "is unhealthy in" not in header
+        assert "``" not in header, "an empty namespace rendered as empty backticks"
+        assert self.ANSWER["question"] in header
+
+    def test_the_answer_is_still_rendered_as_mrkdwn(self):
+        blocks = sinks.SlackSink("https://hooks.example.invalid/x")._blocks(self.ANSWER)
+        body = blocks["blocks"][1]["text"]["text"]
+
+        assert "*checkout* container" in body and "**checkout**" not in body
+
+    def test_the_fallback_text_is_the_question(self):
+        """What a notification preview shows, and what search indexes."""
+        blocks = sinks.SlackSink("https://hooks.example.invalid/x")._blocks(self.ANSWER)
+
+        assert blocks["text"] == self.ANSWER["question"]
+
+    def test_the_verdict_still_travels_with_it(self):
+        answer = {**self.ANSWER, "confidence": "partial", "unverified": ["8Gi"]}
+        blocks = sinks.SlackSink("https://hooks.example.invalid/x")._blocks(answer)
+        context = blocks["blocks"][2]["elements"][0]["text"]
+
+        assert "partial" in context and "8Gi" in context
+
+    def test_stdout_splits_them_too(self):
+        """`[] <question> in ` reads as a broken parser."""
+        text = sinks.format_text(self.ANSWER)
+
+        assert text.startswith("Q: why is checkout failing in payments?")
+        assert "is unhealthy" not in text
+
+    def test_a_finding_is_still_a_finding(self):
+        """The controller's path must be untouched."""
+        blocks = sinks.SlackSink("https://hooks.example.invalid/x")._blocks({
+            "workload": "checkout", "namespace": "payments", "pod": "checkout-1",
+            "status": "CrashLoopBackOff", "replicas": 1,
+            "diagnosis": "exited 1", "confidence": "grounded", "unverified": [],
+        })
+
+        assert "is unhealthy in `payments`" in blocks["blocks"][0]["text"]["text"]

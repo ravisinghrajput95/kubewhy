@@ -154,6 +154,8 @@ class SlackSink:
             log.warning("slack_delivery_failed", extra={"error": str(exc)})
 
     def _blocks(self, finding):
+        if finding.get("kind") == "answer":
+            return _answer_blocks_for(finding)
         icon = _ICON.get(finding["status"], ":warning:")
         scope = finding["workload"] or finding["pod"]
 
@@ -179,6 +181,39 @@ class SlackSink:
                 },
             ],
         }
+
+
+def _answer_blocks_for(answer):
+    """
+    A reply to a question, which is not a finding about a workload.
+
+    The bot sent answers through the finding renderer with the question in the
+    `workload` key, so every reply was headed
+
+        :warning: *why is checkout failing in payments?* is unhealthy in ``
+
+    -- the question read as a broken workload, and the empty namespace
+    rendered as empty backticks. Seen in #kubernetes-events on 2026-09-04
+    above an answer that was correct and grounded.
+
+    A separate renderer rather than a special case inside the finding one: the
+    controller reports findings *about* workloads and the bot answers
+    questions, and the two have different things to say in a header. Sharing
+    one renderer is what produced the defect.
+    """
+    context = answer["confidence"]
+    if answer["unverified"]:
+        context += f" · unverified: {', '.join(answer['unverified'])}"
+    return {
+        "text": answer["question"],
+        "blocks": [
+            {"type": "section",
+             "text": {"type": "mrkdwn", "text": f":mag: *{answer['question']}*"}},
+            {"type": "section",
+             "text": {"type": "mrkdwn", "text": _fit(_mrkdwn(answer["answer"]))}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": context}]},
+        ],
+    }
 
 
 class SlackApiSink(SlackSink):
@@ -237,6 +272,15 @@ class SlackApiSink(SlackSink):
 
 
 def format_text(finding):
+    if finding.get("kind") == "answer":
+        # Same split as the Slack renderer, for the same reason: stdout is
+        # what you read while trying the bot out, and "[] <question> in "
+        # reads as a broken parser.
+        tail = (f"  -- {finding['confidence']}"
+                + (f", unverified: {', '.join(finding['unverified'])}"
+                   if finding["unverified"] else ""))
+        return "\n".join([f"Q: {finding['question']}",
+                           finding["answer"], tail]) + "\n"
     scope = finding["workload"] or finding["pod"]
     lines = [
         f"[{finding['status']}] {scope} in {finding['namespace']}"

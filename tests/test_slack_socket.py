@@ -138,19 +138,32 @@ class TestAnAnswerActuallyReachesTheSink:
 
         return captured["finding"]
 
-    def test_a_finding_is_delivered_rather_than_raising(self):
-        assert "memory limit" in self._delivered()["diagnosis"]
+    def test_an_answer_is_delivered_rather_than_raising(self):
+        assert "memory limit" in self._delivered()["answer"]
 
-    def test_the_finding_carries_every_key_the_sinks_subscript(self):
+    def test_the_payload_carries_every_key_the_sinks_subscript(self):
         """
         The general form of the defect: `sinks` reads these by subscript, so a
         missing one is a KeyError at delivery rather than a blank field.
-        """
-        finding = self._delivered()
 
-        for key in ("workload", "namespace", "replicas", "status",
-                    "diagnosis", "confidence", "unverified"):
-            assert key in finding, key
+        The key set changed on 2026-09-04 when answers stopped being sent as
+        findings -- the question used to travel in `workload` and every reply
+        was headed "*<the question>* is unhealthy in ``". The assertion is the
+        same one: whatever shape this sends, the renderer that receives it must
+        find every key it subscripts.
+        """
+        payload = self._delivered()
+
+        assert payload["kind"] == "answer"
+        for key in ("question", "answer", "confidence", "unverified"):
+            assert key in payload, key
+
+    def test_it_is_not_sent_as_a_finding_about_a_broken_workload(self):
+        """The defect itself: a question is not a workload."""
+        payload = self._delivered()
+
+        assert "workload" not in payload
+        assert "is unhealthy" not in sinks.format_text(payload)
 
     def test_a_single_question_is_not_announced_as_several_pods(self):
         assert sinks.format_text(self._delivered()).count("pods") == 0

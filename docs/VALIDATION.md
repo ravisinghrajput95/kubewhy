@@ -1790,8 +1790,8 @@ paints.** The regression test that guards it asserts on the block the sink
 actually sends, not only on the helper, because a helper nothing calls
 converts nothing.
 
-**A found, unfixed defect: every Slack answer is prefixed with a header that
-misreads the question as a broken workload.** `slack_socket.answer` packs the
+**A third defect, now fixed: every Slack answer was prefixed with a header
+that misread the question as a broken workload.** `slack_socket.answer` packs the
 question into the `workload` key of a controller *finding* and sends it
 through the same sink, so `sinks.Slack._blocks` renders
 
@@ -1804,10 +1804,17 @@ for the bot, which answers questions -- `slack_socket` reuses it and the
 comment there shows the reuse was known about, for a different reason (the
 `replicas` key, which once raised KeyError on the answering thread).
 
-Not fixed because it is a shape question, not a typo: either the sink grows a
-second rendering for answers or the bot stops borrowing the finding one.
-Recorded rather than patched at the call site, which would leave the same
-trap for the next caller.
+Fixed the way the entry said it had to be: the sink grew a second renderer.
+`kind: "answer"` selects it, and the bot sends `question` and `answer` rather
+than stuffing a question into `workload`. Patching the call site would have
+left the same trap for the next caller.
+
+Both renderers are exercised, and `format_text` splits them too -- stdout is
+what you read while trying the bot out, and `[] <question> in ` reads as a
+broken parser. The two tests that guarded the original `KeyError: 'replicas'`
+were updated rather than deleted: the assertion is still "whatever shape this
+sends, the renderer must find every key it subscripts", against the new
+shape. Verified in the channel: the header is now the question alone.
 
 **The inbound path is verified too, and getting there corrected a wrong
 conclusion of mine.**
