@@ -1677,9 +1677,15 @@ eight is in `_model_check`, which decides whether the configured model is
 among those a provider serves, and which has no test in `test_backends.py`
 and is covered incidentally from three other files.
 
+`controller.py`, second from bottom at 51 of 89, does the same: pass 2
+against `test_chart` and `test_store` kills 14 more, putting it at 65 of 89,
+**73%**.
+
 That is the caveat made concrete rather than stated: a pass-1 row can be
-twenty-two points from the truth, and the module this table called worst was
-not. It also nearly cost something -- `_model_check`'s six survivors read
+twenty-two points from the truth, the module this table called worst was not,
+and the two lowest rows both moved by roughly the same amount. Treat the
+bottom of this table as a list of modules whose pass 2 has not been run, not
+as a ranking. It also nearly cost something -- `_model_check`'s six survivors read
 exactly like a gap worth writing tests for, and pass 2 is the only reason
 those tests were not written twice.
 
