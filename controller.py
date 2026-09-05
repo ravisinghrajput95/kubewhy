@@ -71,6 +71,28 @@ STUCK_WHEN_SLOW = {"ContainerCreating", "PodInitializing"}
 # of every ordinary start-up.
 STUCK_AFTER = int(os.getenv("TRIAGE_STUCK_AFTER", "300"))
 
+# How long a lease survives without a renewal, and how often the holder
+# renews it. Both live here, and the ttl is passed to `claim_lease` rather
+# than left to its default, because the whole correctness of the standby
+# depends on these two numbers being related -- and for one release they were
+# not related to each other at all.
+#
+# Measured on GKE 2026-09-05, two replicas sharing one Postgres: the holder
+# renewed once per `watch_once()`, which returns on the watch's 300s timeout.
+# 300s is longer than the 120s ttl, so a **healthy** holder's row went stale
+# and the standby claimed it 120.4s after startup, with nothing wrong and
+# nothing restarted. The displaced holder never noticed -- `run()` discarded
+# the return value of its renewal -- so both replicas watched the cluster and
+# both queued the same four workloads for diagnosis. The lease then changed
+# hands again every watch cycle, indefinitely. That is precisely the
+# double-posting the lease exists to prevent, arrived at by holding the lease
+# correctly for 120 seconds and then simply not renewing it.
+#
+# A third of the ttl, so two consecutive renewals can fail -- a slow database,
+# a paused process -- and the row is still fresh when the third succeeds.
+LEASE_TTL = int(os.getenv("TRIAGE_LEASE_TTL", "120"))
+LEASE_RENEW = max(1, LEASE_TTL // 3)
+
 NAMESPACES = [n for n in os.getenv("TRIAGE_NAMESPACES", "").split(",") if n]
 COOLDOWN = int(os.getenv("TRIAGE_COOLDOWN", "1800"))
 MAX_PER_HOUR = int(os.getenv("TRIAGE_MAX_PER_HOUR", "12"))
@@ -162,6 +184,10 @@ class Controller:
         # Bounded by the number of pods present at startup, and never added
         # to after that window closes.
         self.preexisting_uids = set()
+        # Set by the renewer when this process no longer holds the lease.
+        # Separate from `stopping`: losing the lease means stop *acting*, not
+        # stop running -- the pod goes back to standby rather than exiting.
+        self.lost_lease = threading.Event()
 
     # -- detection ----------------------------------------------------------
 
@@ -504,6 +530,39 @@ class Controller:
         """Whether the watch is still replaying pods that predate us."""
         return time.monotonic() - self.start_time < window
 
+    def claim(self):
+        """Take or renew the lease, on the one ttl this module agrees on."""
+        return self.budget.store.claim_lease(
+            self.identity, store.now(), ttl=LEASE_TTL
+        )
+
+    def renew_lease(self):
+        """
+        Hold the claim on its own clock, not the watch's.
+
+        This ran once per `watch_once()` for one release, which made the
+        renewal interval whatever the Kubernetes watch happened to be -- 300
+        seconds -- against a 120 second ttl. See LEASE_TTL for what that
+        measured on a real cluster. The renewal cadence must be a property of
+        the lease, so it is timed here and nowhere else.
+
+        A failed renewal is not survivable by carrying on. It means another
+        replica now holds the claim and is acting, so continuing to watch is
+        the double-posting itself. The flag stops the work; `run()` puts this
+        process back into standby, because a pod that exits here restarts,
+        loses the claim again, and crashloops -- which is the failure
+        `wait_for_lease` already exists to avoid.
+        """
+        while not self.stopping.wait(LEASE_RENEW):
+            if not self.claim():
+                log.error(
+                    "controller_lost_lease",
+                    extra={"identity": self.identity,
+                           "reason": "another replica claimed the lease"},
+                )
+                self.lost_lease.set()
+                return
+
     def wait_for_lease(self, poll=15):
         """
         Hold the claim, or stand by until the holder stops renewing.
@@ -528,7 +587,7 @@ class Controller:
         at most the lease ttl plus one poll: the holder stops renewing, the row
         goes stale, and the next poll here wins it.
         """
-        if self.budget.store.claim_lease(self.identity, store.now()):
+        if self.claim():
             return True
 
         if not store.is_shared_dsn(os.getenv("TRIAGE_STATE_DB", "")):
@@ -547,7 +606,7 @@ class Controller:
         while not self.stopping.is_set():
             if self.stopping.wait(poll):
                 return False
-            if self.budget.store.claim_lease(self.identity, store.now()):
+            if self.claim():
                 log.info("controller_took_over", extra={"identity": self.identity})
                 return True
         return False
@@ -559,68 +618,109 @@ class Controller:
         ) else config.load_kube_config()
         api = client.CoreV1Api()
 
-        # One controller per state file. Two of them watching the same cluster
-        # is what a rollout produces by default -- old pod and new pod both
-        # running -- and since dedup is keyed on the workload, two controllers
-        # deliver every finding twice. That is the noise the cooldown and the
-        # hourly ceiling exist to prevent, reintroduced by the Deployment doing
-        # its ordinary job. Advisory, and only meaningful with TRIAGE_STATE_DB
-        # set: without one there is no shared state to contend for.
-        if not self.wait_for_lease():
-            return
-
-        # Resolve inference before watching anything. Found by installing the
-        # published chart on 2026-08-23 rather than by templating it: the
-        # gateway is built lazily on the first diagnosis, so a controller whose
-        # inference configuration the gateway would *refuse* installed cleanly,
-        # reported 1/1 Running, logged nothing about inference at all, and
-        # would have surfaced the refusal at the first fault -- which is during
-        # an incident, and is the worst moment available.
-        #
-        # `mode: cluster` pointed at api.openai.com is the case that proves it.
-        # Helm cannot classify a hostname in a template, so its guards do not
-        # catch that one; the gateway does, and it has to be asked. Raising
-        # here is right: a controller that can never diagnose is not degraded,
-        # it is broken, and a CrashLoopBackOff carrying the reason is how
-        # Kubernetes says so.
-        #
-        # It also puts the configuration in the log at startup, so an operator
-        # can confirm what this deployment claims about their data without
-        # waiting for a workload to break.
-        agent._backend()
-
-        thread = threading.Thread(target=self.worker, daemon=True)
-        thread.start()
-
-        log.info(
-            "controller_started",
-            extra={
-                "namespaces": NAMESPACES or ["*"],
-                "cooldown_s": self.budget.cooldown,
-                "max_per_hour": self.budget.max_per_hour,
-                "stuck_after_s": STUCK_AFTER,
-                "model": self.model,
-                "sink": type(self.sink).__name__,
-            },
-        )
-
+        # Outer loop, not a single pass, because losing the lease is a return
+        # to standby rather than a shutdown -- see the end of the body.
         while not self.stopping.is_set():
-            # Renewed each cycle rather than held for the process lifetime: a
-            # controller that is SIGKILLed never releases anything, so the
-            # claim has to expire on its own or the next one can never start.
-            self.budget.store.claim_lease(self.identity, store.now())
-            try:
-                self.watch_once(api)
-            except Exception as exc:
-                # Watches expire and API servers restart; that is normal.
-                log.warning("watch_restarting", extra={"error": str(exc)})
-                time.sleep(2)
+            # One controller per state file. Two of them watching the same
+            # cluster is what a rollout produces by default -- old pod and new
+            # pod both running -- and since dedup is keyed on the workload, two
+            # controllers deliver every finding twice. That is the noise the
+            # cooldown and the hourly ceiling exist to prevent, reintroduced by
+            # the Deployment doing its ordinary job. Advisory, and only
+            # meaningful with TRIAGE_STATE_DB set: without one there is no
+            # shared state to contend for.
+            if not self.wait_for_lease():
+                return
 
-        # Wake the worker rather than waiting out its queue poll. Full means
-        # it has plenty to notice; it will see `stopping` on its next pass.
-        with contextlib.suppress(queue.Full):
-            self.work.put_nowait(None)
-        thread.join(timeout=5)
+            # Resolve inference before watching anything. Found by installing
+            # the published chart on 2026-08-23 rather than by templating it:
+            # the gateway is built lazily on the first diagnosis, so a
+            # controller whose inference configuration the gateway would
+            # *refuse* installed cleanly, reported 1/1 Running, logged nothing
+            # about inference at all, and would have surfaced the refusal at
+            # the first fault -- which is during an incident, and is the worst
+            # moment available.
+            #
+            # `mode: cluster` pointed at api.openai.com is the case that proves
+            # it. Helm cannot classify a hostname in a template, so its guards
+            # do not catch that one; the gateway does, and it has to be asked.
+            # Raising here is right: a controller that can never diagnose is
+            # not degraded, it is broken, and a CrashLoopBackOff carrying the
+            # reason is how Kubernetes says so.
+            #
+            # It also puts the configuration in the log at startup, so an
+            # operator can confirm what this deployment claims about their data
+            # without waiting for a workload to break.
+            agent._backend()
+
+            thread = threading.Thread(target=self.worker, daemon=True)
+            thread.start()
+
+            log.info(
+                "controller_started",
+                extra={
+                    "namespaces": NAMESPACES or ["*"],
+                    "cooldown_s": self.budget.cooldown,
+                    "max_per_hour": self.budget.max_per_hour,
+                    "stuck_after_s": STUCK_AFTER,
+                    "model": self.model,
+                    "sink": type(self.sink).__name__,
+                },
+            )
+
+            # The claim is renewed on its own clock, in its own thread. Riding
+            # on the watch loop made the renewal interval whatever the watch
+            # happened to be -- 300 seconds against a 120 second ttl, measured
+            # on GKE. See LEASE_TTL.
+            renewer = threading.Thread(
+                target=self.renew_lease, name="lease-renewer", daemon=True
+            )
+            renewer.start()
+
+            while not self.stopping.is_set() and not self.lost_lease.is_set():
+                try:
+                    self.watch_once(api)
+                except Exception as exc:
+                    # Watches expire and API servers restart; that is normal.
+                    log.warning("watch_restarting", extra={"error": str(exc)})
+                    time.sleep(2)
+
+            # Wake the worker rather than waiting out its queue poll. Full
+            # means it has plenty to notice; it will see the flag on its next
+            # pass.
+            with contextlib.suppress(queue.Full):
+                self.work.put_nowait(None)
+            thread.join(timeout=5)
+            renewer.join(timeout=LEASE_RENEW + 1)
+
+            if not self.lost_lease.is_set():
+                return
+
+            # A lost lease is not a shutdown. Another replica is acting now, so
+            # this one stops watching -- but exiting the process would restart
+            # it into the same contention and crashloop, which is the failure
+            # `wait_for_lease` exists to avoid. Round the outer loop instead
+            # and stand by, which is what this replica is for.
+            #
+            # Honest about the window: a Kubernetes watch is not interruptible
+            # from outside, so the loss is acted on at the end of the current
+            # watch session rather than at the instant it happens. That is a
+            # bounded overlap after an event that should not occur at all now
+            # the renewal has its own clock -- and a peer needs the same
+            # database to claim the lease that this process needs to renew it,
+            # so the case where one succeeds and the other fails is narrow.
+            # Whatever is still queued belongs to the replica that holds the
+            # lease now. Diagnosing it after standing down would deliver the
+            # findings twice, which is the thing the lease is for.
+            while True:
+                try:
+                    self.work.get_nowait()
+                except queue.Empty:
+                    break
+                else:
+                    self.work.task_done()
+
+            self.lost_lease.clear()
 
     def stop(self, *_):
         log.info("controller_stopping")

@@ -771,21 +771,150 @@ class TestControllerRunPath:
 
         watched.assert_not_called()
 
-    def test_run_renews_the_lease_each_cycle(self, tmp_path):
+    def test_run_renews_the_lease(self, tmp_path):
         """
         A held-forever claim would never expire for the next controller; a
         renewed one keeps this process's hold alive while it works.
+
+        This used to assert only that a renewal happened. *When* is the part
+        that mattered -- see the interval test below.
         """
         state = store.SqliteStore(str(tmp_path / "s.db"))
         controller = self._controller(state)
         state.claim_lease = MagicMock(return_value=True)
 
-        self._run(controller)
+        with patch.object(ctrl, "LEASE_RENEW", 0.02):
+            self._run(controller)
 
-        # Once to acquire, once inside the loop body.
-        assert state.claim_lease.call_count >= 2
+        assert state.claim_lease.call_count >= 1
         assert all(call.args[0] == controller.identity
                    for call in state.claim_lease.call_args_list)
+
+    def test_the_renewal_interval_is_shorter_than_the_lease(self):
+        """
+        The invariant the shipped code broke, as a number rather than a story.
+
+        LEASE_TTL is how long the row survives unrenewed; LEASE_RENEW is how
+        often the holder renews it. If the second is not comfortably smaller
+        than the first, a healthy holder's lease expires under it and the
+        standby -- correctly, by the rules -- takes a claim nobody released.
+        """
+        assert ctrl.LEASE_RENEW * 2 <= ctrl.LEASE_TTL
+
+    def test_the_renewal_does_not_ride_on_the_watch_loop(self, tmp_path):
+        """
+        The shipped defect, reproduced. Measured on GKE 2026-09-05.
+
+        The renewal was one statement at the top of the watch loop, so it ran
+        once per `watch_once()` -- which returns on the Kubernetes watch's own
+        300s timeout, against a 120s ttl. The holder therefore stopped
+        renewing for 180 seconds out of every 300 while perfectly healthy,
+        the standby claimed the stale row 120.4s after startup, and both
+        replicas watched the cluster and queued the same four workloads.
+
+        Here the watch blocks for longer than the renewal interval, exactly as
+        a real one does. At least two renewals must land while it is blocked.
+        Against the old code exactly zero do.
+        """
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = ctrl.Controller(
+            sink=MagicMock(), budget=ctrl.Budget(state=state))
+
+        renewals = []
+        real_claim = state.claim_lease
+
+        def counted(holder, at, **kwargs):
+            renewals.append(time.monotonic())
+            return real_claim(holder, at, **kwargs)
+        state.claim_lease = counted
+
+        def slow_watch(api):
+            time.sleep(0.25)
+            controller.stopping.set()
+        controller.watch_once = slow_watch
+
+        with patch.object(ctrl, "LEASE_RENEW", 0.05), \
+             patch.object(ctrl, "LEASE_TTL", 0.5):
+            started = time.monotonic()
+            self._run(controller)
+
+        during = [t for t in renewals if t > started]
+        assert len(during) >= 3, (
+            f"the lease was renewed {len(during)} times while the watch was "
+            f"blocked for 0.25s at a 0.05s renewal interval -- the renewal is "
+            f"still paced by the watch, not by the lease"
+        )
+
+    def test_a_lost_lease_stands_the_controller_down(self, tmp_path):
+        """
+        The second half of the same defect.
+
+        `run()` discarded the result of its renewal, so a controller that had
+        lost the lease carried on watching and diagnosing -- which is the
+        double-posting the lease exists to prevent, now with the loser doing
+        it. It must stop acting; it must NOT exit, because a pod that exits
+        here restarts, loses the claim again, and crashloops.
+        """
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = ctrl.Controller(
+            sink=MagicMock(), budget=ctrl.Budget(state=state))
+
+        watches = []
+
+        def watch_once(api):
+            watches.append(1)
+            # The peer takes the lease out from under this process. A claim
+            # dated in the future, because a peer cannot take a lease that is
+            # being renewed -- which is the whole point of the fix, and makes
+            # this the one way to reach the losing path deliberately.
+            state.claim_lease("peer/1", at=store.now() + 3600)
+            time.sleep(0.15)
+        controller.watch_once = watch_once
+
+        threading.Timer(0.6, controller.stopping.set).start()
+        with patch.object(ctrl, "LEASE_RENEW", 0.03), \
+             patch.dict(os.environ, {"TRIAGE_STATE_DB": "postgresql://x/y"}):
+            self._run(controller)
+
+        assert controller.lost_lease.is_set() is False, (
+            "it stood down but never cleared the flag, so it can never work "
+            "again even after the peer releases the lease"
+        )
+        # The row is dated in the future, so it is not stale: this succeeds
+        # only if `peer/1` is still the holder.
+        assert state.claim_lease("peer/1", at=store.now()) is True, (
+            "the stood-down controller stole the lease back"
+        )
+        assert len(watches) <= 2, (
+            f"it watched {len(watches)} times after losing the lease; a "
+            f"controller that has lost the claim must stop acting"
+        )
+
+    def test_standing_down_discards_the_work_it_had_queued(self, tmp_path):
+        """
+        Whatever is in the queue belongs to whoever holds the lease now.
+        Diagnosing it after standing down delivers those findings twice.
+        """
+        state = store.SqliteStore(str(tmp_path / "s.db"))
+        controller = ctrl.Controller(
+            sink=MagicMock(), budget=ctrl.Budget(state=state))
+
+        def watch_once(api):
+            controller.work.put_nowait(("pod", "CrashLoopBackOff", {}, None))
+            state.claim_lease("peer/1", at=store.now() + 3600)
+            time.sleep(0.15)
+        controller.watch_once = watch_once
+        controller.worker = lambda: None      # nothing drains it but standby
+
+        threading.Timer(0.5, controller.stopping.set).start()
+        with patch.object(ctrl, "LEASE_RENEW", 0.03), \
+             patch.dict(os.environ, {"TRIAGE_STATE_DB": "postgresql://x/y"}):
+            self._run(controller)
+
+        assert controller.work.empty(), (
+            "work queued while it held the lease survived the stand-down and "
+            "would be diagnosed a second time by the replica that took over"
+        )
 
     def test_run_exits_when_another_controller_holds_the_lease(self, tmp_path, caplog):
         state = store.SqliteStore(str(tmp_path / "s.db"))

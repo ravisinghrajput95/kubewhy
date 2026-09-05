@@ -48,7 +48,7 @@ What it buys:
 
 | | One replica | `sharedState.enabled` |
 |---|---|---|
-| Controller restart | An outage for the length of the restart | A standby takes the lease, at most `ttl` (120s) later |
+| Controller restart | An outage for the length of the restart | A standby takes the lease, at most `ttl` + one poll (135s) later. Measured on GKE 2026-09-05: **115.4s** from a force-delete of the holder |
 | Controller rollout | `Recreate`: down, then up | `RollingUpdate`, because the lease stops the overlap double-posting |
 | Console restart | The page is down | Other replicas serve it |
 | Console history | Per pod | Shared; every replica shows the same sidebar |
@@ -68,6 +68,11 @@ What it buys:
   investigation faster, and if they share one Ollama they contend for it.
 - **It is not a supported-in-production claim.** What is tested is in
   VALIDATION.md; read that row before relying on this.
+- **No tagged release carries shared state yet.** `image.tag` defaults to the
+  chart's appVersion, and the code landed after 0.2.0 was cut, so the chart
+  refuses that combination rather than crashlooping on it. Until a version
+  carrying it is tagged, `sharedState.enabled` needs an explicit `image.tag`
+  built from a tree that has it. See defect 35.
 
 **The failure this design had to avoid.** `fail_interrupted()` closed out every
 job left `queued` or `running` at startup. With one writer that is exactly
@@ -154,6 +159,11 @@ entirely, which is usually the outcome you wanted.
 kubectl logs deployment/<release> -n <namespace> | grep -E 'controller_already_running|inference_'
 ```
 
+- `controller_standby` means this replica is healthy and waiting: another
+  replica holds the lease. It is the expected state of every replica but one,
+  and it is not an error. `controller_took_over` is the failover; a
+  `controller_lost_lease` says this replica stood down because a peer claimed
+  the lease out from under it, which should be rare -- see defect 36.
 - `controller_already_running` means another controller holds the lease. With
   `Recreate` this should not happen; if it does, something is running a second
   copy outside the Deployment.

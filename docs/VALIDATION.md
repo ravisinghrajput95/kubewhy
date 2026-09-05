@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1405 passing, 24 skipped, in 48s; no cluster or model, and a real Postgres for the shared-state cases. A fixture now makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1566 passing, **0 skipped**, in 46s; no cluster or model, and a real Postgres for the shared-state cases — with the database down 32 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | 1489 recorded runs, reproducible from the repository |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -29,8 +29,8 @@ and does not support. Four words are used and they mean specific things:
 | Audit trail (controller) | **PROVEN** | live unprompted run, attributed to controller/system |
 | Audit trail (Slack) | **NOT TESTED** | needs a workspace. The unit tests were also not evidence: they mocked the sink, and the surface could not deliver an answer at all until 2026-09-01 — see defect 23 |
 | Restart-interrupted jobs | **PROVEN** | SIGKILL mid-run, restarted against the same state file |
-| Shared state (Postgres) | **PARTIALLY PROVEN** | full store contract + lease race against a real Postgres 17; never run as two replicas in a cluster |
-| High availability | **NOT TESTED** | no failover observed; the lease and the owner-scoped restart sweep are unit-proven, the behaviour they enable is not |
+| Shared state (Postgres) | **PROVEN** | full store contract + lease race against a real Postgres 17, and run as two replicas against an in-cluster Postgres 17 on GKE 2026-09-05 |
+| High availability | **PARTIALLY PROVEN** | GKE 2026-09-05, two replicas: holder force-deleted, standby took over in **115.4s**, inside the 135s bound; one holder for 15m41s across 24 renewals with zero spurious handovers. This is what found defects 35 and 36 — before the fix the lease changed hands 6 times in 14m with nothing wrong. Measured on a build of `main`, not a release: no tagged image carries shared state (defect 35). Console replicas and the owner-scoped restart sweep are still unit-proven only |
 | Read-only RBAC | **PROVEN** | runtime validated on GKE by attempting operations |
 | GKE runtime | **PROVEN** | released chart, real cluster |
 | GKE / Calico NetworkPolicy | **PROVEN** | dataplane-enforced egress |
@@ -1951,6 +1951,157 @@ about how validation actually goes.
 
 A "no regressions" result that has not proved it exercised two different versions
 is not a result.
+
+### 35. The chart's headline feature could not install at all
+
+**Problem.** `helm install` of the chart on `main` with
+`sharedState.enabled=true` brought up two replicas and both exited
+immediately, restarting into CrashLoopBackOff:
+
+```
+File "/app/store.py", line 327, in build
+  return SqliteStore(path) if path else MemoryStore()
+OSError: [Errno 30] Read-only file system: 'postgresql:'
+```
+
+Measured on GKE 2026-09-05, `kubewhy-ha` in `asia-south1-a`: 2 of 2 replicas,
+5 restarts each inside four minutes.
+
+**Detection.** Installing it on a real cluster. This is the first time
+`sharedState.enabled` had been installed anywhere — defect 22 shipped it
+with unit tests and a rendered manifest.
+
+**Root cause.** `image.tag` defaults to `.Chart.AppVersion`, which is
+`"0.2.0"`, and **v0.2.0 does not contain the code the feature needs**. The tag
+was cut 2026-08-26; `PostgresStore` landed after it, in "Make more than one
+replica possible…". `git show v0.2.0:store.py | grep -c "class PostgresStore"`
+returns 0. So the 0.2.0 image's `store.build()` has no shared-DSN branch, reads
+`TRIAGE_STATE_DB` as a filesystem path, and tries to `mkdir` a directory called
+`postgresql:` on a read-only root.
+
+Two files carry one version between them and only one of them moved. The chart
+gained a feature; the image it pins did not.
+
+**Why no existing test could see it.** `tests/test_chart.py` rendered shared
+state with the default tag and asserted the YAML — the secret reference, the
+replica count, the rollout strategy. Every one of those assertions was correct
+about a manifest for a pod that could not start. `helm template` cannot know
+what is inside an image, which is the whole reason defect 21 exists too: this
+project has now been bitten twice by a chart that renders and does not run.
+
+**Fix.** The chart refuses at template time when `sharedState.enabled` is set
+and the resolved tag is a *released* version at or below 0.2.0, naming the
+error the operator would otherwise read in a pod log. Non-semver tags pass
+untouched — a build of the working tree is what you need in order to test the
+fix, and a guard that blocked it would be useless.
+
+**What this does NOT fix, and it is the part that matters.** The published
+`ghcr.io/ravisinghrajput95/kubewhy:0.2.0` still has no shared state in it. The
+chart now refuses rather than crashlooping, which turns twenty minutes of
+confusion into one clear message, but **`sharedState.enabled` remains
+unavailable to anyone installing a release until a version carrying it is
+tagged.** That is a release decision, not a code change, and it is left open
+deliberately.
+
+**Regression evidence.** Two chart cases: the released tag is refused with a
+message naming the cause, and a dev tag and a later release both render. The
+five pre-existing shared-state cases now pass an explicit tag, and the comment
+on that tuple says why.
+
+### 36. Two healthy replicas, both diagnosing everything
+
+**Problem.** The lease is what makes a second controller replica a standby
+rather than a second voice. With two replicas sharing one Postgres and
+**nothing wrong — no restart, no kill, no failure of any kind** — the lease
+changed hands every few minutes, and both replicas watched the cluster and
+queued the same workloads for diagnosis.
+
+**Measured on GKE 2026-09-05**, two replicas against an in-cluster Postgres 17,
+sampling the `lease` row every 5s for 14m05s (161 samples). Seven renewals, and
+**six of them were a change of holder**:
+
+| lease row written | holder | interval |
+|---|---|---|
+| 04:10:48.541 | hbchm | — |
+| 04:12:48.919 | f7wmw | +120.38s |
+| 04:15:48.609 | hbchm | +179.69s |
+| 04:17:48.932 | f7wmw | +120.32s |
+| 04:20:00.530 | ncx4p | +131.60s |
+| 04:22:48.941 | f7wmw | +168.41s |
+| 04:25:00.548 | ncx4p | +131.61s |
+
+Both replicas were `1/1 Running` with **0 restarts** throughout. Both logged
+`controller_started`. Within three minutes of the install they had queued the
+same four workloads — `demo/crasher`, `demo/log-shipper`, `demo/memory-hog`,
+`demo/needs-db` — each of which would have been diagnosed and posted twice.
+
+**Root cause.** The renewal was one statement at the top of the watch loop:
+
+```python
+while not self.stopping.is_set():
+    self.budget.store.claim_lease(self.identity, store.now())
+    self.watch_once(api)          # returns on the watch's own 300s timeout
+```
+
+So the renewal interval was not a property of the lease at all — it was
+whatever `watch_once` happened to be, and `watch_once` blocks on a Kubernetes
+watch with `timeout_seconds=300`. **300 is larger than the 120s ttl.** A
+healthy holder therefore stopped renewing for 180 seconds out of every 300, its
+row went stale, and the standby — polling every 15s and applying exactly the
+rule it was given — claimed a lease nobody had released. 120.38s after startup,
+which is the ttl plus one poll: the standby did nothing wrong.
+
+The second half is worse. `run()` **discarded the return value** of its
+renewal, so the displaced holder never learned it had been displaced and
+carried on watching. The pattern then repeats forever: the loser reclaims at
+the end of its next watch session, the winner loses it 120s after that.
+
+**Why no existing test could see it.** `test_run_renews_the_lease_each_cycle`
+mocked `watch_once` to return instantly, so a cycle took microseconds and a
+renewal always landed inside the ttl. It asserted `claim_lease.call_count >= 2`
+— that renewal happened, never *when*. The one number that mattered was the one
+the mock removed. `test_a_lost_lease_does_not_crash_the_loop` went further and
+asserted the loop keeps running after a failed renewal, which is the
+split-brain written down as a requirement.
+
+**Fix.** `LEASE_TTL` and `LEASE_RENEW = LEASE_TTL // 3` are declared together,
+the ttl is passed to `claim_lease` rather than left to its default, and the
+renewal runs in its own thread on its own clock — so it can no longer be paced
+by whatever the watch is doing. A failed renewal now sets `lost_lease`, which
+stops the watch loop, drains the queue (that work belongs to whoever holds the
+lease now) and returns the process to standby rather than exiting — exiting
+here is the CrashLoopBackOff defect 22 fixed.
+
+**Honest about the residual window.** A Kubernetes watch is not interruptible
+from outside, so a lost lease is acted on at the end of the current watch
+session rather than at the instant it happens. That is bounded, and it follows
+an event that should no longer occur: a peer needs the same database to claim
+the lease that this process needs to renew it.
+
+**Regression evidence, unit.** Four new cases, three of them behavioural. They
+were confirmed red against the old loop *with the new constants present*, so
+the failure is the behaviour and not a missing symbol: the renewal-during-a-
+blocking-watch case, the stand-down case and the queue-drain case all fail
+against the old `run()` and pass against the new one.
+
+**Regression evidence, live.** Same cluster, same two-replica install, image
+rebuilt from the fix. Lease row sampled every 5s:
+
+| | before | after |
+|---|---|---|
+| holder changes, no failures | 6 in 14m05s | **0 in 15m41s (158 samples)** |
+| renewal interval | 120.4–179.7s (n=6) | **40.00s, max 40.01 (n=23)** |
+| replicas logging `controller_started` | 2 | 1 |
+
+**And the failover this whole feature exists for, finally observed.** The
+holder was force-deleted 10.51s after its last renewal. The standby logged
+`controller_took_over` **115.44s after the kill**, 125.95s after that last
+renewal — inside the `ttl` + one poll bound of 135s the RUNBOOK claims. The
+replacement pod scheduled by the Deployment came up 4s after the kill and
+correctly stood by. **Exactly one replica held the lease at every point.**
+
+Both sample sets are committed: `results/ha/lease-gke-2026-09-05-before.csv`
+and `-after.csv`, the raw `lease` row every 5s.
 
 ## Reproducing
 
