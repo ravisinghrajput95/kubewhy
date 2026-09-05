@@ -1707,7 +1707,23 @@ def scan(explain=0):
     return 0
 
 
-if __name__ == "__main__":
+def main(argv):
+    """
+    The CLI, as something a test can call.
+
+    This lived inside `if __name__ == "__main__":` until 2026-09-05, where no
+    test could reach it at all: pytest *imports* this module, so `__name__` is
+    never `"__main__"` and the whole block was dead code from the suite's
+    point of view. The first mutation survey of agent.py made that concrete --
+    16 of its 108 survivors were in here, unkillable by construction rather
+    than merely uncovered. One of them is `--explain`'s `+ 1`: nothing checked
+    that the count is read from the argument *after* the flag, so
+    `--explain 5` reading the word before it would have passed every test this
+    project has.
+
+    Takes the arguments without the program name, and *returns* an exit code
+    rather than raising SystemExit, so a test can assert on the code.
+    """
     # The CLI has a real user and no authentication: whoever is at the
     # terminal already holds the kubeconfig, so the OS account is both the
     # honest answer and the only one available. Recorded as `os` rather than
@@ -1721,18 +1737,23 @@ if __name__ == "__main__":
     except Exception:
         audit.actor("unknown", surface="cli", auth="os")
 
-    if len(sys.argv) < 2:
+    if not argv:
         print(__doc__.strip(), file=sys.stderr)
-        raise SystemExit(1)
+        return 1
 
-    if sys.argv[1] == "--scan":
-        rest = sys.argv[2:]
+    if argv[0] == "--scan":
+        rest = argv[1:]
         count = 0
         if "--explain" in rest:
             after = rest[rest.index("--explain") + 1 :]
             count = int(after[0]) if after and after[0].isdigit() else 3
-        raise SystemExit(scan(explain=count))
+        return scan(explain=count)
 
-    result = ask(" ".join(sys.argv[1:]), verbose=True)
+    result = ask(" ".join(argv), verbose=True)
     print(result["answer"])
     _report_unverified(result)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

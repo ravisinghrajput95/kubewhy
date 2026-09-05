@@ -2047,3 +2047,97 @@ class TestContradictionPolicy:
             result = agent.ask("why is the slow-starter deployment restarting?")
 
         assert result["reconciles"] == 0
+
+
+class TestTheCommandLine:
+    """
+    Every case here was unreachable before 2026-09-05.
+
+    The CLI lived inside `if __name__ == "__main__":`, and pytest imports this
+    module, so `__name__` is never `"__main__"` and none of this code ran under
+    the suite. The first mutation survey of agent.py put a number on it: 16 of
+    108 survivors were in that block, unkillable by construction. The block is
+    `main(argv)` now and these are the tests it could never have.
+    """
+
+    def test_no_arguments_prints_usage_and_fails(self, capsys):
+        assert agent.main([]) == 1
+        assert agent.__doc__.strip().splitlines()[0] in capsys.readouterr().err
+
+    def test_a_question_is_joined_and_asked(self, capsys):
+        with patch.object(agent, "ask", return_value={"answer": "because X"}) as ask, \
+             patch.object(agent, "_report_unverified"):
+            assert agent.main(["why", "is", "web", "down?"]) == 0
+        assert ask.call_args.args[0] == "why is web down?"
+        assert "because X" in capsys.readouterr().out
+        # verbose is what streams the tool calls to a terminal as they happen.
+        # A CLI that goes silent for ninety seconds looks hung, and this kwarg
+        # survived the first pass of this very test.
+        assert ask.call_args.kwargs["verbose"] is True
+
+    def test_an_answer_is_checked_for_unverified_claims(self):
+        """The CLI must not print a conclusion without the caveat beneath it."""
+        with patch.object(agent, "ask", return_value={"answer": "a"}), \
+             patch.object(agent, "_report_unverified") as report:
+            agent.main(["why"])
+        report.assert_called_once()
+
+    def test_scan_without_explain_explains_nothing(self):
+        with patch.object(agent, "scan", return_value=0) as scan:
+            assert agent.main(["--scan"]) == 0
+        assert scan.call_args.kwargs == {"explain": 0}
+
+    def test_scan_returns_the_scans_exit_code(self):
+        # `--scan` is the one path with a meaningful non-zero code.
+        with patch.object(agent, "scan", return_value=2):
+            assert agent.main(["--scan"]) == 2
+
+    def test_explain_reads_the_argument_after_the_flag(self):
+        """
+        The `+ 1` in `rest[rest.index("--explain") + 1:]`, which survived the
+        first survey. Reading the word *before* the flag would have passed
+        every test this project had.
+        """
+        with patch.object(agent, "scan", return_value=0) as scan:
+            agent.main(["--scan", "--explain", "5"])
+        assert scan.call_args.kwargs == {"explain": 5}
+
+    def test_explain_finds_its_argument_after_other_flags(self):
+        with patch.object(agent, "scan", return_value=0) as scan:
+            agent.main(["--scan", "--quiet", "--explain", "7"])
+        assert scan.call_args.kwargs == {"explain": 7}
+
+    def test_a_bare_explain_falls_back_to_three(self):
+        with patch.object(agent, "scan", return_value=0) as scan:
+            agent.main(["--scan", "--explain"])
+        assert scan.call_args.kwargs == {"explain": 3}
+
+    def test_a_non_numeric_explain_falls_back_to_three(self):
+        # `--explain all` is a thing a person types; it must not raise.
+        with patch.object(agent, "scan", return_value=0) as scan:
+            agent.main(["--scan", "--explain", "all"])
+        assert scan.call_args.kwargs == {"explain": 3}
+
+    def test_the_cli_records_who_is_at_the_terminal(self):
+        """
+        The audit trail's actor for this surface. `os` is the honest auth: the
+        CLI authenticates nobody, and calling it anything else would let the
+        record claim an identity it never checked.
+        """
+        with patch.object(agent.audit, "actor") as actor, \
+             patch.object(agent, "scan", return_value=0):
+            agent.main(["--scan"])
+        assert actor.call_args.kwargs == {"surface": "cli", "auth": "os"}
+        assert actor.call_args.args[0]
+
+    def test_an_unnameable_user_still_records_an_actor(self):
+        """
+        getpass.getuser() raises when there is no passwd entry and no
+        USER/LOGNAME -- a container, a cron context. The audit record must
+        still exist, naming the gap rather than being absent.
+        """
+        with patch("getpass.getuser", side_effect=OSError("no passwd entry")), \
+             patch.object(agent.audit, "actor") as actor, \
+             patch.object(agent, "scan", return_value=0):
+            agent.main(["--scan"])
+        assert actor.call_args.args[0] == "unknown"
