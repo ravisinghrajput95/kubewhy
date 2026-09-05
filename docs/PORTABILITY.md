@@ -125,9 +125,17 @@ is the one measured on 2026-08-08 at **~₹10 for 57 minutes**:
 
 ```bash
 gcloud container clusters create kubewhy-test --zone=asia-south1-a \
+  --release-channel=regular \
   --num-nodes=1 --machine-type=e2-small --disk-size=50 \
-  --disk-type=pd-standard --no-enable-autoupgrade --no-enable-autorepair
+  --disk-type=pd-standard
 ```
+
+**`--release-channel` is required as of 2026-09-05**, and it is what replaced
+`--no-enable-autoupgrade --no-enable-autorepair` here. Creating a cluster
+outside a channel now fails with *"not enrolling clusters in a release channel
+is now only allowed for existing customers"*, so the two `--no-enable-` flags
+above are no longer accepted together with anything: a channel manages
+upgrades, which is the trade.
 
 Zonal, not regional: `--num-nodes=1` on a regional cluster means one node *per
 zone* — three nodes and triple the bill. `e2-small` cannot hold the Streamlit

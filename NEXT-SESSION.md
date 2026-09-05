@@ -7,10 +7,12 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-04 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1522 tests pass, 32
-skipped** (43s; the skips are Postgres cases, see Environment), CI green, tags
-through v0.2.0. Nothing of this project is running.**
+**State: `main` at the 2026-09-05 head — `git log --oneline -1` is the
+authority, not this line — tree clean and pushed, **1568 tests pass, 0
+skipped** (46s, with Postgres up; without it 32 of those skip *silently*, see
+Environment), CI green, tags through v0.2.0. Nothing of this project is
+running: the GKE cluster was created and deleted inside the 2026-09-05
+session, zero clusters, disks or Artifact Registry repositories remain.**
 
 **Mutation coverage, all measured 2026-09-02/03.** 18 modules via `--all`:
 979 mutants, 764 killed, **78.0%** (`results/mutation/all-2026-09-03.json`,
@@ -20,9 +22,43 @@ measured**. Every row from `--all` is a **pass 1** and its survivor count an
 upper bound — `backends.py` read 54% and is 76% after pass 2, `controller.py`
 57% and 73%.
 
-**Read `docs/VALIDATION.md` first — defects 27 to 34 are this session.**
-Then "Pick up, in order" below. Everything under "What changed on
-2026-08-26 / 27" is history.
+**Read `docs/VALIDATION.md` first — defects 35 and 36 are the last session,
+27 to 34 the two before it.** Then "Pick up, in order" below. Everything
+under "What changed on 2026-08-26 / 27" is history.
+
+## What landed on 2026-09-05: HA, run for real
+
+**High availability is PARTIALLY PROVEN and it cost two defects to get there.**
+Two replicas on GKE against an in-cluster Postgres 17. Both were found by
+installing and watching, not by templating or reading.
+
+*Defect 35: the chart's headline feature could not install at all.*
+`sharedState.enabled=true` brought up two replicas and both CrashLoopBackOffed
+with `OSError: [Errno 30] Read-only file system: 'postgresql:'`. `image.tag`
+defaults to `.Chart.AppVersion` = 0.2.0, and **v0.2.0 does not contain
+`PostgresStore`** — it was tagged 2026-08-26 and shared state landed after it.
+The chart gained a feature and the image it pins did not. Every existing chart
+test rendered shared state onto that image and asserted the YAML, which was
+correct YAML for a pod that could not start.
+
+*Defect 36: two healthy replicas, both diagnosing everything.* With nothing
+wrong — no restart, no kill, no failure — the lease changed hands **six times
+in fourteen minutes** and both replicas queued the same four workloads. The
+renewal was one statement at the top of the watch loop, so the renewal
+interval was whatever `watch_once()` happened to be: 300s, against a 120s ttl.
+The holder stopped renewing for 180s out of every 300, and the standby claimed
+the stale row 120.4s after startup by applying exactly the rule it was given.
+`run()` then discarded the renewal's return value, so the loser never noticed
+and kept watching. Unit tests mocked `watch_once` to return instantly, which
+removed the only number that mattered; one of them asserted the loop keeps
+running after a failed renewal, which is the split-brain written down as a
+requirement.
+
+**After the fix, measured on the same cluster:** one holder for 15m41s across
+24 renewals at 40.00s (max 40.01), **zero** handovers, one replica logging
+`controller_started`. Force-deleting the holder moved the lease in **115.4s**,
+inside the ttl-plus-one-poll bound of 135s. Raw `lease` samples every 5s, both
+before and after, are in `results/ha/`.
 
 ## What landed on 2026-09-02 to 04
 
@@ -95,23 +131,30 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    prediction is worth mentioning.
 6. `limits.py:140` is an equivalent mutant, not "the standing proof".
 7. Generalized diagnostic accuracy stays NOT TESTED.
-8. HA is still NOT TESTED — the mechanism is proven, the behaviour is not.
+8. **HA is PARTIALLY PROVEN, and the qualifier is not decoration.** What was
+   measured is the *controller* lease on GKE 2026-09-05: failover 115.4s,
+   15m41s of stable holding, both numbers in `results/ha/`. What was **not**:
+   the console at more than one replica, the owner-scoped restart sweep under
+   two live API replicas, and any of it on a *released* image — no tag carries
+   shared state (defect 35), so this ran on a build of `main`. Do not quote
+   the failover number as though a `helm install` of v0.2.0 would produce it.
+9. **The lease numbers are two different measurements.** 115.4s is kill ->
+   takeover; 125.95s is the holder's last renewal -> takeover, and 135s is the
+   bound (`ttl` 120 + poll 15). They are not interchangeable, and only the
+   middle one is comparable to the bound.
 
 ## Pick up, in order
 
-1. **HA as two replicas, on GKE.** Deferred to a fresh session deliberately.
-   Budget is ₹266 of free credit; the 2026-08-08 run cost **₹10 for ~57
-   minutes**, so this is affordable if it is torn down. Read the GKE notes in
-   this file before creating anything — a *regional* cluster means one node
-   per zone and triple the bill, and `e2-medium`'s system pods take ~760m of
-   ~940m allocatable, so lower the chart's **requests** rather than adding a
-   node.
-   `sharedState.enabled=true`, `sharedState.replicas=2`, a Secret holding the
-   DSN, Postgres in-cluster. Kill the lease holder and time takeover against
-   the 120s ttl + 15s poll. Nothing is deployed and nothing is billing:
-   checked 2026-09-04, zero clusters in every project.
-   Note the controller resolves inference at startup and *raises* if the
-   gateway would refuse it, so give it a configuration that builds.
+1. **Tag a release that carries shared state.** This is the loose end
+   defect 35 leaves, and it is the only thing standing between the HA work
+   and anyone being able to use it. `sharedState.enabled` has been in the
+   chart since 2026-09-01 and there has never been an image with the code in
+   it; the chart now refuses that combination instead of crashlooping, which
+   is better and is not a fix. A release also needs `version.py`, `Chart.yaml`
+   `version` and `appVersion` moved together — a test asserts they agree.
+   **This is a publish, so it is a decision to take rather than a task to
+   run.** Check the tags from the registry afterwards, not from the workflow
+   log; this repo has shipped the wrong image under a right-looking tag once.
 
 2. **`agent.py` — the one module never measured.** 245 mutants at ~12s a run,
    ~49 minutes, no Postgres needed. A single-module run writes its `--json`
@@ -151,6 +194,37 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
 ## Environment
 
 - `.venv/bin/python` for everything.
+- **GKE: `--no-enable-autoupgrade` alone is no longer accepted.** As of
+  2026-09-05 `gcloud container clusters create` refuses a cluster with no
+  release channel for a new customer: *"not enrolling clusters in a release
+  channel is now only allowed for existing customers"*. The recipe in
+  `docs/PORTABILITY.md` fails on that line. What works, and what the HA
+  session actually billed — **~49 minutes, one `e2-medium`**:
+  ```
+  gcloud container clusters create <name> --zone=asia-south1-a \
+    --release-channel=regular --num-nodes=1 --machine-type=e2-medium \
+    --disk-size=50 --disk-type=pd-standard
+  ```
+  Still `--zone`, never `--region`.
+- **e2-medium headroom, measured 2026-09-05: 757m of 940m allocatable is gone
+  before you deploy anything**, and 1.1Gi of 2.73Gi. That leaves ~183m of CPU,
+  which held two controllers at `resources.requests.cpu=25m` plus an
+  in-cluster Postgres at 50m. `demo/broken-pods.yaml` does not fit alongside
+  them — `healthy-web` alone asks for 100m and pushed a replacement controller
+  pod into `Pending` with `Insufficient cpu`. Scale `healthy-web` to 0.
+- **Postgres for an in-cluster test wants `emptyDir`, not a PVC.** A
+  dynamically provisioned PD is not reclaimed when the cluster is deleted —
+  that is how a 20GB disk went on billing after the 2026-08-22 run. Nothing in
+  the HA test needed Postgres to survive its own pod.
+- **Cloud Build is not a shortcut on this project.** `gcloud builds submit`
+  fails with the compute default service account lacking
+  `storage.objects.get` on its own source bucket. Local
+  `docker buildx build --platform linux/amd64 --push` to an Artifact Registry
+  repo in the same project works and took ~25s on a warm cache; delete the
+  repository in teardown.
+- **Docker Desktop was down at the start of the 2026-09-05 session** despite
+  the previous handoff saying it was up. `open -a Docker` and poll
+  `docker info`; it came up in ~20s.
 - **Docker Desktop is UP with 0 containers and 38 images.**
 - **Something on this machine removes containers, and it has now been seen
   twice.** At 23:24 on 2026-09-01 `docker ps` showed `mlops-project-mlflow-1`
