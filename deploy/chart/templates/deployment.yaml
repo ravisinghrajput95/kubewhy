@@ -3,6 +3,10 @@
 {{- if and .Values.sharedState.enabled (not .Values.sharedState.existingSecret) }}
   {{- fail "\n\nsharedState.enabled=true needs sharedState.existingSecret.\n\nThe DSN carries a database password, so it comes from a Secret rather than a\nvalues file -- values files end up in git and in `helm get values`.\n\n  kubectl create secret generic kubewhy-state -n <namespace> \\\n    --from-literal=dsn='postgresql://user:pass@host:5432/kubewhy'\n\nThen set sharedState.existingSecret=kubewhy-state.\n" }}
 {{- end }}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
+{{- if and .Values.sharedState.enabled (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+$" $tag) (semverCompare "<=0.2.0" $tag) }}
+  {{- fail (printf "\n\nimage tag %s does not have shared state in it.\n\nsharedState.enabled moves the controller's state into Postgres, and the code\nthat can talk to Postgres landed after 0.2.0. An older image reads\nTRIAGE_STATE_DB as a filesystem path, so every replica starts, tries to\nmkdir a directory called `postgresql:` on a read-only root, and exits:\n\n  OSError: [Errno 30] Read-only file system: 'postgresql:'\n\nMeasured on GKE 2026-09-05: both replicas CrashLoopBackOff, which is a\nruntime failure for a mistake that is visible right here.\n\nSet image.tag to a build that has it, or leave sharedState.enabled off.\n" $tag) }}
+{{- end }}
 {{- if and .Values.persistence.enabled .Values.podSecurityContext.runAsNonRoot (not .Values.podSecurityContext.fsGroup) }}
   {{- fail "\n\npersistence.enabled=true needs podSecurityContext.fsGroup set.\n\nA provisioned volume is owned by root and this pod is not root, so the\ncontroller would install cleanly, bind the PVC, and then crashloop with\nsqlite3.OperationalError: unable to open database file. That is a runtime\nfailure for a mistake that is visible here, so it fails here instead.\n\nSet podSecurityContext.fsGroup to podSecurityContext.runAsUser's group (the\nchart default is 1000 for both), or run as root if that is genuinely what you\nwant.\n" }}
 {{- end }}

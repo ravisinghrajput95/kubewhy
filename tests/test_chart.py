@@ -211,6 +211,33 @@ class TestTheChartRefusesWhatTheCodeWouldRefuse:
             "networkPolicy.enabled=true", "inference.mode=api",
             "inference.allowExternal=true")
 
+    def test_shared_state_on_an_image_that_does_not_have_it(self):
+        """
+        Defect 35, measured on GKE 2026-09-05.
+
+        `image.tag` defaults to `.Chart.AppVersion`, and the chart shipped
+        `sharedState.enabled` while its appVersion still named 0.2.0 -- an
+        image whose `store.build()` predates Postgres and reads the DSN as a
+        filesystem path. `helm install` succeeded, both replicas came up, and
+        both exited with `Read-only file system: 'postgresql:'`.
+        """
+        assert "does not have shared state" in refuses(
+            "sharedState.enabled=true", "sharedState.existingSecret=s")
+
+    def test_a_dev_tag_is_not_second_guessed(self):
+        """
+        The guard reads released version numbers and nothing else. A tag that
+        is not semver is a build somebody made on purpose, and refusing it
+        would make the chart untestable against exactly the image that fixes
+        this.
+        """
+        assert render("sharedState.enabled=true",
+                      "sharedState.existingSecret=s",
+                      "image.tag=leasefix")
+        assert render("sharedState.enabled=true",
+                      "sharedState.existingSecret=s",
+                      "image.tag=0.3.0")
+
     def test_the_same_configurations_are_refused_by_the_code(self):
         """
         The guards are a convenience, not the control. If the chart's checks
@@ -768,7 +795,13 @@ class TestSharedStateIsWhatUnlocksReplicas:
     existed -- a store both pods can read -- and not for any other.
     """
 
-    HA = ("sharedState.enabled=true", "sharedState.existingSecret=kubewhy-state")
+    # The tag is here because of defect 35: `image.tag` defaults to the
+    # chart's appVersion, and every one of these cases used to render shared
+    # state onto an image that has no Postgres in it -- a manifest that was
+    # correct YAML for a pod that could not start. A non-semver tag is what a
+    # build of this working tree looks like, and the guard leaves those alone.
+    HA = ("sharedState.enabled=true", "sharedState.existingSecret=kubewhy-state",
+          "image.tag=test")
     CONSOLE = ("ui.enabled=true", "ui.exposureAcknowledged=true")
 
     def test_the_console_is_still_refused_more_than_one_by_default(self):
