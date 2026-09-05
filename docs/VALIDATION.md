@@ -43,7 +43,7 @@ and does not support. Four words are used and they mean specific things:
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
-| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`, all 18 modules, 974 mutants, 649 killed (66.6%); survivor list kept in `results/mutation/survivors-2026-09-01.json`. Six modules reviewed and closed, 325 survivors still unread. The narrow default over-counts: `backends.py` reads 18 survivors alone and 11 against the suites that actually exercise it |
+| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`. 18 modules via `--all`: 979 mutants, 764 killed, 78.0% (`results/mutation/all-2026-09-03.json`) — every row a pass 1, so every survivor count an upper bound. Plus the three `--all` cannot reach (defect 31): `app.py` 23/42, `routers/k8s_pods_info.py` 191/262, and **`agent.py` 166/246 (67.5%)**, measured 2026-09-05 — see defect 37. **There is no repo-wide number and these must not be added into one:** the 18 are pass 1 and `agent.py` is pass 2, and summing the two bases is how 692/282 came to be quoted for a fortnight |
 
 ## Defects found and fixed
 
@@ -2102,6 +2102,67 @@ correctly stood by. **Exactly one replica held the lease at every point.**
 
 Both sample sets are committed: `results/ha/lease-gke-2026-09-05-before.csv`
 and `-after.csv`, the raw `lease` row every 5s.
+
+### 37. The CLI had no tests, and could not have had any
+
+**Problem.** `agent.py`'s command line — the `--scan` branch, the `--explain N`
+parse, the audit actor, the question path — lived inside
+`if __name__ == "__main__":`. pytest *imports* the module, so `__name__` is
+never `"__main__"` and none of that code ran under the suite. It was not
+under-tested; it was **unreachable**, and no test written against it could
+have changed that.
+
+**Detection.** The first mutation survey of `agent.py`, which was the one
+module never measured. Pass 1 came back **137 of 245 killed (55.9%)** with 108
+survivors, and 16 of those survivors were inside the guard — killed by
+nothing, because nothing could execute them. A coverage tool would have shown
+the same lines uncovered and been easy to wave away as "it's just the CLI";
+the mutation survey put a count on what the suite was structurally incapable
+of checking.
+
+**Two things it was not checking, in order of consequence.**
+
+`--explain`'s `+ 1`. `rest[rest.index("--explain") + 1:]` mutated to `- 1` and
+survived, so a CLI that read `--explain 5` as the argument *before* the flag
+rather than after it would have passed every test in this project. The code
+was right; nothing said so.
+
+`verbose=True` on the CLI's own `ask()`. This one survived **the first version
+of the new test**, which patched `ask` and never looked at the kwarg. `verbose`
+is what streams tool calls to the terminal as they happen; without it the CLI
+prints nothing for ninety seconds and looks hung. Eleven green cases is not
+the same as eleven cases that would fail.
+
+**Fix.** `main(argv)`: arguments without the program name, and an exit code
+*returned* rather than a `SystemExit` raised, so a test asserts on the result
+instead of catching an exception. The guard is one line —
+`raise SystemExit(main(sys.argv[1:]))`.
+
+**Regression evidence.** Eleven cases, none of which could have existed
+before, and the block re-surveyed rather than assumed: **17 mutants in the new
+`main()`, 16 killed.** The one survivor is `sys.argv[1:]` inside the guard
+itself and is irreducible — the guard has to contain a statement and nothing
+imported can execute it. The unkillable region went from 16 mutants to 1.
+
+**What the survey says about `agent.py` as a whole.** Pass 2 over pass 1's 108
+survivors, against the six test files that actually drive `agent`
+(`test_agent_loop`, `test_investigation_identity`, `test_targeting`,
+`test_ui`, `test_audit`, `test_inference`), killed **13** more — sites in
+`_resolve_entity`, `scoped_target` and `_stream` that other files covered all
+along. That is 150/245 (61.2%) before the extraction and **166/246 (67.5%)
+after it**.
+
+Two honesty notes on that 67.5%. It **composes two measurement bases**: the
+`main()` block was measured against `test_agent_loop.py` alone and the rest
+against six files. That is sound only because 16/17 is already the irreducible
+ceiling for that block, so a wider set cannot improve it — the composition is
+stated rather than hidden. And **agent.py's pass-2 gain was small**: +5.3
+points, against `backends.py`'s +22 and `controller.py`'s +16. The narrow
+default did not over-count much here, which means the 79 survivors still
+standing outside the CLI are a genuine gap rather than an artifact of test
+selection. They are concentrated in `_stream` (33), `scan` (11) and `_timing`
+(8), and they are **unread** — see `results/mutation/agent-2026-09-05.json`
+and `-pass2.json`.
 
 ## Reproducing
 

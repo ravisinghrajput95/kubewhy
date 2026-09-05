@@ -14,13 +14,19 @@ Environment), CI green, tags through v0.2.0. Nothing of this project is
 running: the GKE cluster was created and deleted inside the 2026-09-05
 session, zero clusters, disks or Artifact Registry repositories remain.**
 
-**Mutation coverage, all measured 2026-09-02/03.** 18 modules via `--all`:
+**Mutation coverage.** 18 modules via `--all`, measured 2026-09-02/03:
 979 mutants, 764 killed, **78.0%** (`results/mutation/all-2026-09-03.json`,
 defect 32). Plus the three `--all` structurally cannot reach (defect 31):
-`app.py` 23/42, `routers/k8s_pods_info.py` 191/262, and **`agent.py` never
-measured**. Every row from `--all` is a **pass 1** and its survivor count an
-upper bound — `backends.py` read 54% and is 76% after pass 2, `controller.py`
-57% and 73%.
+`app.py` 23/42, `routers/k8s_pods_info.py` 191/262, and **`agent.py`
+166/246 = 67.5%**, measured 2026-09-05 at last — pass 1 137/245, pass 2 over
+its 108 survivors killed 13 more, and extracting the CLI into `main(argv)`
+took the block from 16 unkillable mutants to 1 (defect 37). Every row from
+`--all` is a **pass 1** and its survivor count an upper bound — `backends.py`
+read 54% and is 76% after pass 2, `controller.py` 57% and 73%.
+
+**Do not add these into a repo-wide number.** The 18 are pass 1 and `agent.py`
+is pass 2; summing the two bases is exactly how 692/282 came to be quoted for
+a fortnight.
 
 **Read `docs/VALIDATION.md` first — defects 35 and 36 are the last session,
 27 to 34 the two before it.** Then "Pick up, in order" below. Everything
@@ -156,15 +162,20 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    run.** Check the tags from the registry afterwards, not from the workflow
    log; this repo has shipped the wrong image under a right-looking tag once.
 
-2. **`agent.py` — the one module never measured.** 245 mutants at ~12s a run,
-   ~49 minutes, no Postgres needed. A single-module run writes its `--json`
-   only at the end, so an interrupted one leaves **nothing** to resume from.
-   Give it the machine.
-   ```
-   caffeinate -is env PYTHONUNBUFFERED=1 \
-     .venv/bin/python evals/mutate.py agent.py --tests tests/test_agent_loop.py \
-     --json results/mutation/agent-<date>.json
-   ```
+2. **Read `agent.py`'s 79 survivors.** Done as a measurement, not as a
+   review: 166/246 after two passes and the CLI extraction, with **79
+   survivors outside the CLI still unread** —
+   `results/mutation/agent-2026-09-05.json` and `-pass2.json`. They cluster in
+   `_stream` (33), `scan` (11) and `_timing` (8). Pass 2 is already done here,
+   so unlike every other module these are *not* an upper bound: a survivor in
+   this list is a real question. Expect the `_timing` and `elapsed` ones
+   (`1000 -> 1001`, `Sub -> Add` on millisecond conversions) to be equivalent
+   mutants in the same way three `ui.py` timing survivors were — classify
+   them, do not write tests against them.
+   **Never pipe a survey through `tail`.** The 2026-09-05 pass-1 run was
+   `... | tail -60`, which buffers until the producer exits and threw away the
+   summary line; the counts had to be recovered from the `--json`, and there
+   was no progress visible for 49 minutes. Redirect to a file instead.
 
 3. **Pass 2 on `inference.py` (36) and `grounding.py` (26).** The only two
    dense modules that have never had one, and the two that did both moved ~20
