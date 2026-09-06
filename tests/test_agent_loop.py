@@ -17,6 +17,7 @@ import pytest
 import agent
 import backends
 import grounding
+import telemetry
 
 
 # A cluster with nothing wrong in it. Used wherever a loop test calls a pod
@@ -1312,7 +1313,14 @@ class TestTimingAttribution:
 
         t = result["timing"]
         assert t["tool_ms"] >= 200
-        assert t["model_share"] < 0.5, "slow tool time was attributed to the model"
+        # Bounded, not merely small. `model_share` is model time over the
+        # total, so a value outside (0, 1) is not a share at all -- and a
+        # one-sided `< 0.5` accepted exactly that. With the total computed as
+        # `model_ms - tool_ms` the share comes out NEGATIVE on this very case,
+        # which is smaller than 0.5 and passed: agent.py:485 survived two
+        # mutation passes behind this assertion.
+        assert 0 < t["model_share"] < 0.5, (
+            "slow tool time was attributed to the model")
 
     def test_one_hung_round_is_visible_among_fast_ones(self):
         """
@@ -1349,6 +1357,60 @@ class TestTimingAttribution:
 
         assert "Gave up" in result["answer"]
         assert result["timing"]["rounds"] == agent.MAX_ROUNDS
+
+
+class TestTheToolOutcomeLabel:
+    """
+    `outcome` on `kubewhy_tool_calls_total`, and the only thing that separates
+    a run where every `list_pods` came back `{"error": ...}` -- a broken RBAC
+    grant -- from a run where the model simply chose badly. Rule 3 returns tool
+    errors as data rather than raising them, so the label is decided by reading
+    the document, and nothing in the suite read it: `_outcome` is named in no
+    test and both mutants at agent.py:322 survived two passes.
+    """
+
+    def test_the_label_follows_the_document_not_an_exception(self):
+        """
+        Snapshotted rather than asserted absolutely: the counter is process
+        global and every other test in this file adds to it.
+        """
+        before = dict(telemetry.TOOL_CALLS.values)
+        stub = {
+            "get_system_info": lambda **k: {
+                "error": "pods is forbidden: User cannot list resource"},
+            "get_platform_info": lambda **k: {"os": "linux"},
+        }
+        with patch.dict(agent.TOOLS, stub), mock_chat(side_effect=[
+                reply(calls=[tool_call("get_system_info", {}),
+                             tool_call("get_platform_info", {})]),
+                reply(content="done")]):
+            agent.ask("q")
+
+        after = telemetry.TOOL_CALLS.values
+
+        def gained(tool, outcome):
+            key = (tool, outcome)
+            return after.get(key, 0) - before.get(key, 0)
+
+        assert gained("get_system_info", "error") == 1, (
+            "a tool that returned an error document was counted as ok, so a "
+            "cluster the agent has no RBAC for looks like a healthy one")
+        assert gained("get_system_info", "ok") == 0
+        assert gained("get_platform_info", "ok") == 1
+        assert gained("get_platform_info", "error") == 0
+
+    def test_a_document_that_is_not_a_mapping_is_not_an_error_report(self):
+        """
+        The second mutant, and the reason the two conditions are `and` rather
+        than `or`. The membership test is only meaningful once it is known to
+        be a mapping: run on whatever came back, a JSON array of log lines
+        reports `error` because one line says so, and a bare number raises
+        TypeError inside the metric call and takes the run down with it.
+        """
+        assert agent._outcome(json.dumps(["error", "connection refused"])) == "ok"
+        assert agent._outcome(json.dumps(5)) == "ok"
+        assert agent._outcome("not json at all") == "ok"
+        assert agent._outcome(json.dumps({"error": "boom"})) == "error"
 
 
 class TestPlaceholderArguments:
