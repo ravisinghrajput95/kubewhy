@@ -2141,3 +2141,228 @@ class TestTheCommandLine:
              patch.object(agent, "scan", return_value=0):
             agent.main(["--scan"])
         assert actor.call_args.args[0] == "unknown"
+
+
+class TestWhatTheFirstSurveyOfStreamFound:
+    """
+    Fourteen mutants in `_stream` that survived both passes on 2026-09-05.
+
+    Each of these was chosen because the mutation changes behaviour a comment
+    in agent.py already promises. The rest of that survivor list is classified
+    equivalent or cosmetic in VALIDATION.md; these are the ones a reader would
+    be entitled to think were already covered.
+    """
+
+    LOG = {"get_pod_logs": lambda **k: {"pod": "p", "logs": "exited with code 137"}}
+
+    def test_a_stated_namespace_beats_the_one_the_lookup_found(self):
+        """
+        agent.py:1114. "A namespace the question stated wins over the one the
+        lookup found: the user may be asking about one of two same-named
+        things." The `or` carrying that rule survived; flipped to `and` the
+        lookup wins instead, and the run silently investigates the wrong
+        cluster half.
+        """
+        # A caller that scopes to a namespace and lets the question name the
+        # workload -- which is the only shape that reaches this line, since
+        # the lookup runs only when the target has no name yet.
+        guessed = {"kind": "deployment", "name": "web", "namespace": "guessed-ns"}
+        with patch.object(agent.targeting, "confirm", return_value=dict(guessed)), \
+             mock_chat(return_value=reply(content="x")):
+            result = agent.ask("why is web down?", target={"namespace": "stated-ns"})
+
+        assert result["target"]["namespace"] == "stated-ns"
+        assert result["target"]["name"] == "web", "the lookup still supplies the name"
+
+    def test_the_looked_up_namespace_is_used_when_none_was_stated(self):
+        """The counter-case, so the fallback half of the `or` stays reachable."""
+        guessed = {"kind": "deployment", "name": "web", "namespace": "guessed-ns"}
+        with patch.object(agent.targeting, "confirm", return_value=dict(guessed)), \
+             mock_chat(return_value=reply(content="x")):
+            result = agent.ask("why is web down?")
+
+        assert result["target"]["namespace"] == "guessed-ns"
+
+    def test_evidence_ids_are_unique_across_prefetched_and_live(self):
+        """
+        agent.py:1139. Two id generators share one namespace and agree only by
+        coincidence: prefetched records are numbered `enumerate(prefetched, 1)`
+        while live ones take `tool-{len(outputs)}`, and `outputs` is seeded
+        with the prefetched results. Start the enumerate anywhere but 1 and the
+        first live call collides with the last prefetched one -- so a verified
+        claim cites whichever record the lookup happens to reach first.
+
+        Asserted as uniqueness rather than as "starts at 1", because
+        uniqueness is the property that matters and it survives a rewrite of
+        either generator.
+        """
+        item = {"name": "get_pod_logs", "arguments": {"name": "p"},
+                "result": '{"logs": "exited with code 137"}'}
+        responses = [
+            reply(calls=[tool_call("get_pod_logs", {"name": "p"})]),
+            reply(content="It exited with code 137."),
+        ]
+        with patch.dict(agent.TOOLS, self.LOG), mock_chat(side_effect=responses):
+            result = agent.ask("why?", prefetched=[item], evidence=True)
+
+        ids = [record["id"] for record in result["evidence"]]
+        assert len(ids) == len(set(ids)), f"evidence ids collide: {ids}"
+        assert len(ids) >= 2, "the test did not produce both kinds of evidence"
+
+    def test_prefetched_evidence_keeps_its_arguments_in_the_trace(self):
+        """
+        agent.py:1153. `item.get("arguments") or {}` mutated to `and` returns
+        an empty dict whenever arguments are actually present -- so every
+        prefetched call in the chain loses what it was called with. The audit
+        trail's promise is the tool named *with its arguments*; this is the
+        half that goes missing.
+        """
+        item = {"name": "get_pod_logs", "arguments": {"name": "p", "tail": 50},
+                "result": "{}"}
+        with mock_chat(return_value=reply(content="x")):
+            result = agent.ask("why?", prefetched=[item])
+
+        assert result["tool_calls"][0]["arguments"] == {"name": "p", "tail": 50}
+
+    def test_a_prefetched_call_with_no_arguments_still_has_the_key(self):
+        """The counter-case, so the `or {}` fallback stays reachable."""
+        item = {"name": "scan_cluster", "result": "{}"}
+        with mock_chat(return_value=reply(content="x")):
+            result = agent.ask("why?", prefetched=[item])
+
+        assert result["tool_calls"][0]["arguments"] == {}
+
+    def test_the_duration_histogram_excludes_time_the_machine_was_asleep(self):
+        """
+        agent.py:1444. `max(wall_ms - slept_ms, 0.0) / 1000`, whose own comment
+        cites a 725s run with 548s of sleep in it. `Sub -> Add` counts the nap
+        as latency and `Div -> Mult` reports a p95 a thousand times too large;
+        both survived, so the guard against this project's most expensive
+        recurring measurement error had nothing checking it.
+        """
+        # A suspend, simulated the way the code detects one: wall clock jumps
+        # while the monotonic clock does not. Only time.time is faked, and it
+        # is used in exactly two places, both inside `elapsed()` -- the
+        # deadlines all run off perf_counter and are untouched.
+        real_time = time.time
+        calls = {"n": 0}
+
+        def wall():
+            calls["n"] += 1
+            return real_time() + (0.0 if calls["n"] == 1 else 5.0)
+
+        observed = []
+        with patch.object(agent.telemetry.INVESTIGATION_DURATION, "observe",
+                          observed.append), \
+             patch.object(agent.time, "time", wall), \
+             mock_chat(return_value=reply(content="x")):
+            result = agent.ask("why?")
+
+        assert observed, "the histogram was never given a value"
+        assert result["timing"]["slept_ms"] > 4000, (
+            "the fake suspend did not register, so this test proves nothing"
+        )
+        # Seconds of real work, and a mocked run does milliseconds of it.
+        # Adding the sleep instead of subtracting gives ~10; multiplying by
+        # 1000 instead of dividing gives four figures.
+        assert 0.0 <= observed[0] < 1.0, observed[0]
+
+
+class TestTheNeverOnTheLastRoundsRule:
+    """
+    One rule, four re-asks, nine surviving mutants, and nothing checking it.
+
+    `rounds_left = MAX_ROUNDS - round_index - 1`, and each of the four re-asks
+    is gated on `rounds_left >= 2`. Four separate comments in agent.py explain
+    why -- "a run with no round left to answer in would trade a flawed
+    diagnosis for none at all" -- and after two mutation passes the constant,
+    the comparison and the arithmetic all still survived at every site.
+
+    Each pair below is the same run twice with only MAX_ROUNDS changed, so
+    what varies is `rounds_left` and nothing else. The answer is produced in
+    round 0 by handing the evidence over as `prefetched`, which is what makes
+    the boundary reachable without driving six rounds of fixtures.
+
+    MAX_ROUNDS 3 -> rounds_left 2 -> the re-ask fires.
+    MAX_ROUNDS 2 -> rounds_left 1 -> it does not, and the answer stands.
+    """
+
+    STUCK = json.dumps({"pod": "missing-configmap-volume",
+                        "namespace": "config-faults",
+                        "status": "ContainerCreating"})
+    SCAN = json.dumps({
+        "demo/memory-hog": {"status": "OOMKilled", "pods": 1,
+                            "example": "memory-hog-abc"},
+        "demo/crasher": {"status": "Error", "pods": 1, "example": "crasher-def"},
+    })
+
+    @staticmethod
+    def _reasks(max_rounds, answer, prefetched=None):
+        """
+        The re-ask messages a run produced, by policy.
+
+        Counting model calls is not enough and this is the test that proved
+        it: the first version of the coverage pair asserted `chat.call_count`,
+        passed, and killed neither mutant -- the extra round was the *evidence*
+        policy firing on the same scan output. A count cannot tell you which
+        mechanism spent the round. Each policy sends a differently worded
+        message, so the message is the counter.
+        """
+        responses = [reply(content=answer)] * 6
+        with patch.object(agent, "MAX_ROUNDS", max_rounds), \
+             mock_chat(side_effect=responses) as chat:
+            agent.ask("what is wrong?", prefetched=prefetched)
+
+        fired = []
+        for call in chat.call_args_list:
+            for message in call.kwargs["messages"]:
+                if not isinstance(message, dict) or message["role"] != "user":
+                    continue
+                text = message["content"]
+                for name, template in (
+                    ("nudge", agent.NUDGE),
+                    ("evidence", agent.EVIDENCE_POLICY),
+                    ("coverage", agent.COVERAGE_POLICY),
+                    ("contradiction", agent.CONTRADICTION_POLICY),
+                ):
+                    head = template.split("{")[0].strip()
+                    if head and head in text and name not in fired:
+                        fired.append(name)
+        return fired
+
+    # -- the tool-naming nudge, agent.py:1307 -----------------------------
+
+    NAMES_A_TOOL = "Exit code 1. Next step: call get_pod_logs on that pod."
+
+    def test_the_nudge_fires_with_two_rounds_left(self):
+        assert "nudge" in self._reasks(3, self.NAMES_A_TOOL)
+
+    def test_the_nudge_does_not_fire_with_one_round_left(self):
+        assert "nudge" not in self._reasks(2, self.NAMES_A_TOOL), (
+            "it spent the last round nudging, so there was none left to "
+            "answer in -- a usable answer traded for 'gave up'"
+        )
+
+    # -- the evidence-gap re-ask, agent.py:1330 ---------------------------
+
+    def _stuck(self, max_rounds):
+        item = {"name": "describe_pod",
+                "arguments": {"name": "missing-configmap-volume"},
+                "result": self.STUCK}
+        return self._reasks(max_rounds, "Some ConfigMaps may be missing.",
+                            prefetched=[item])
+
+    def test_the_evidence_reask_fires_with_two_rounds_left(self):
+        assert "evidence" in self._stuck(3)
+
+    def test_the_evidence_reask_does_not_fire_with_one_round_left(self):
+        assert "evidence" not in self._stuck(2)
+
+    # The coverage re-ask (agent.py:1356) and the contradiction re-ask (1419)
+    # are NOT covered here, and their four mutants still survive. Both need a
+    # fixture that reaches the gate: an earlier policy fires on the same round
+    # and `continue`s, so with MAX_ROUNDS=3 the only round with rounds_left >= 2
+    # is already spent by the time the coverage check is reached. Isolating the
+    # gate means stubbing the detectors -- named_but_not_called, evidence_gap,
+    # uncovered_workloads and the contradiction verdict -- so exactly one fires.
+    # See NEXT-SESSION.md.
