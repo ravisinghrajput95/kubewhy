@@ -2358,11 +2358,131 @@ class TestTheNeverOnTheLastRoundsRule:
     def test_the_evidence_reask_does_not_fire_with_one_round_left(self):
         assert "evidence" not in self._stuck(2)
 
-    # The coverage re-ask (agent.py:1356) and the contradiction re-ask (1419)
-    # are NOT covered here, and their four mutants still survive. Both need a
-    # fixture that reaches the gate: an earlier policy fires on the same round
-    # and `continue`s, so with MAX_ROUNDS=3 the only round with rounds_left >= 2
-    # is already spent by the time the coverage check is reached. Isolating the
-    # gate means stubbing the detectors -- named_but_not_called, evidence_gap,
-    # uncovered_workloads and the contradiction verdict -- so exactly one fires.
-    # See NEXT-SESSION.md.
+    # -- the coverage re-ask, agent.py:1356 -------------------------------
+
+    # Reaching this gate is the whole difficulty, and the fixture is what
+    # solves it rather than a stub. The three re-asks share one round and the
+    # first to fire `continue`s, so with MAX_ROUNDS=3 the only round carrying
+    # rounds_left >= 2 is spent before the coverage check is read. The scan
+    # below is built so that neither earlier detector can fire on it:
+    # OOMKilled is in neither EVIDENCE_IN_EVENTS nor EVIDENCE_IN_LOGS -- the
+    # status is the cause -- and the answer names no tool. The first attempt
+    # used SCAN above, whose `demo/crasher` is an Error workload; the logs
+    # policy took the round, the pair went green, and neither mutant died.
+    OOM_SCAN = json.dumps({
+        "demo/memory-hog": {"status": "OOMKilled", "pods": 1,
+                            "example": "memory-hog-5b7c9d8f6-lq2xv"},
+        "demo/cache-warmer": {"status": "OOMKilled", "pods": 1,
+                              "example": "cache-warmer-7d4f8b2c1-h9kdt"},
+    })
+    HALF_THE_SCAN = (
+        "memory-hog is being OOMKilled: its container asks for more memory "
+        "than the limit it was given and the kernel stops it."
+    )
+
+    def _half_covered(self, max_rounds):
+        item = {"name": "scan_cluster", "arguments": {},
+                "result": self.OOM_SCAN}
+        return self._reasks(max_rounds, self.HALF_THE_SCAN, prefetched=[item])
+
+    def test_the_fixture_reaches_the_coverage_gate_and_nothing_earlier(self):
+        """
+        The counter for the pair below. Both cases assert on which policy
+        fired, so a fixture that stopped tripping `uncovered_workloads`
+        would turn the negative case into a test that passes for the wrong
+        reason -- and the positive one into a failure whose cause is the
+        fixture, not the gate. This says which detector the fixture arms.
+        """
+        assert agent.named_but_not_called(
+            self.HALF_THE_SCAN, {"scan_cluster"}) == []
+        assert agent.evidence_gap(
+            [{"name": "scan_cluster", "arguments": {}}], [self.OOM_SCAN],
+            "what is wrong?") is None
+        assert agent.uncovered_workloads(
+            [self.OOM_SCAN], self.HALF_THE_SCAN) == ["demo/cache-warmer"]
+
+    def test_the_coverage_reask_fires_with_two_rounds_left(self):
+        assert self._half_covered(3) == ["coverage"], (
+            "coverage alone, and by name: an extra model call proves only "
+            "that some policy spent the round"
+        )
+
+    def test_the_coverage_reask_does_not_fire_with_one_round_left(self):
+        assert self._half_covered(2) == [], (
+            "there was no round left to answer the re-ask in, so the summary "
+            "with a workload missing is still better than 'gave up' -- the "
+            "backstop appends the missing entries instead"
+        )
+
+    # -- the contradiction re-ask, agent.py:1419 --------------------------
+
+    # 137 is SIGKILL, which a liveness kill and an OOM kill both produce;
+    # last_termination.reason = Error is what separates them, and it is in the
+    # same document as the exit code. The same fixture as
+    # TestContradictionPolicy, handed over as `prefetched` so the draft lands
+    # in round 0 and rounds_left is MAX_ROUNDS - 1. The logs entry is not
+    # decoration: without it a CrashLoopBackOff pod whose logs were never read
+    # is an evidence gap, and that policy would take the round first.
+    KILLED = json.dumps({
+        "pod": "slow-starter-56c8f89495-c4qtf",
+        "namespace": "demo",
+        "status": "CrashLoopBackOff",
+        "containers": {"web": {
+            "image": "busybox:1.36",
+            "ready": False,
+            "restarts": 5,
+            "limits": {},
+            "last_termination": {"reason": "Error", "exit_code": 137},
+        }},
+    })
+    OOM_DRAFT = (
+        "The slow-starter deployment is restarting because the container was "
+        "OOMKilled: exit code 137 means the kernel's OOM killer terminated it "
+        "for exceeding available memory."
+    )
+
+    def _contradicted(self, max_rounds):
+        where = {"name": "slow-starter-56c8f89495-c4qtf", "namespace": "demo"}
+        held = [
+            {"name": "describe_pod", "arguments": dict(where),
+             "result": self.KILLED},
+            {"name": "get_pod_logs", "arguments": dict(where),
+             "result": json.dumps({"pod": "slow-starter-56c8f89495-c4qtf",
+                                   "logs": []})},
+        ]
+        return self._reasks(max_rounds, self.OOM_DRAFT, prefetched=held)
+
+    def test_the_fixture_reaches_the_contradiction_gate_and_nothing_earlier(self):
+        """
+        The same counter, for the same reason. `grounding.check` has to
+        actually contradict this draft, and the three re-asks ahead of it have
+        to find nothing, or the pair below measures the fixture.
+        """
+        trace = [{"name": "describe_pod",
+                  "arguments": {"name": "slow-starter-56c8f89495-c4qtf",
+                                "namespace": "demo"}},
+                 {"name": "get_pod_logs",
+                  "arguments": {"name": "slow-starter-56c8f89495-c4qtf",
+                                "namespace": "demo"}}]
+        outputs = [self.KILLED, json.dumps(
+            {"pod": "slow-starter-56c8f89495-c4qtf", "logs": []})]
+        question = "why is the slow-starter deployment restarting?"
+
+        assert agent.named_but_not_called(
+            self.OOM_DRAFT, {"describe_pod", "get_pod_logs"}) == []
+        assert agent.evidence_gap(trace, outputs, question) is None
+        assert agent.uncovered_workloads(outputs, self.OOM_DRAFT) == []
+
+        evidence = [{"id": "tool-1", "tool": "describe_pod",
+                     "result": self.KILLED}]
+        assert grounding.check(self.OOM_DRAFT, evidence)["contradictions"]
+
+    def test_the_contradiction_reask_fires_with_two_rounds_left(self):
+        assert self._contradicted(3) == ["contradiction"]
+
+    def test_the_contradiction_reask_does_not_fire_with_one_round_left(self):
+        assert self._contradicted(2) == [], (
+            "a run with no round left to answer in would trade a flawed "
+            "diagnosis for none at all; the contradiction is annotated onto "
+            "the answer instead"
+        )
