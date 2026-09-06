@@ -2299,6 +2299,132 @@ class TestTheCommandLine:
         assert actor.call_args.args[0] == "unknown"
 
 
+class TestTheScanCommand:
+    """
+    `scan()` itself -- the body behind `--scan`, as opposed to the argument
+    parsing in TestTheCommandLine above, every case of which patches `scan`
+    out. Nothing in the suite called it, so eleven mutants inside it survived
+    the six-file survey of 2026-09-06 with the function unread.
+
+    It is the one path with a meaningful exit code, and two of the mutants
+    invert it: a cluster with nothing wrong returning non-zero breaks any
+    script that runs `--scan` in a condition.
+    """
+
+    BROKEN = {
+        "demo/memory-hog:oom": {"status": "OOMKilled", "pods": 1,
+                                "example": "memory-hog-abc"},
+        "demo/crasher": {"status": "Error", "pods": 2, "example": "crasher-def"},
+        "_truncated": "3 more not shown",
+    }
+
+    def test_a_failed_scan_reports_on_stderr_and_exits_non_zero(self, capsys):
+        with patch.object(agent, "scan_cluster",
+                          lambda: {"error": "kubernetes API error 403: forbidden"}):
+            assert agent.scan() == 1
+
+        printed = capsys.readouterr()
+        assert "403" in printed.err
+        assert printed.out == "", "an error must not also print a listing"
+
+    def test_a_cluster_with_nothing_wrong_exits_zero(self, capsys):
+        """
+        `scan_cluster` returns {"result": ...} when it found nothing to report.
+        That is a successful scan, not a failure, and the exit code is what a
+        script reads.
+        """
+        with patch.object(agent, "scan_cluster",
+                          lambda: {"result": "no unhealthy workloads in 4 namespaces"}):
+            assert agent.scan() == 0
+
+        printed = capsys.readouterr()
+        assert "no unhealthy workloads" in printed.out
+        assert printed.err == ""
+
+    def test_the_listing_names_every_workload_and_the_truncation(self, capsys):
+        with patch.object(agent, "scan_cluster", lambda: dict(self.BROKEN)):
+            assert agent.scan() == 0
+
+        printed = capsys.readouterr().out
+        assert "demo/memory-hog:oom" in printed
+        assert "demo/crasher" in printed
+        assert "3 more not shown" in printed
+
+    def test_the_listing_alone_never_reaches_the_model(self):
+        """
+        What makes `--scan` usable as a first look: one API call, under a
+        second, no inference. Only `--explain` pays for a model, and the
+        default has to be no explanations at all.
+        """
+        with patch.object(agent, "scan_cluster", lambda: dict(self.BROKEN)), \
+             patch.object(agent, "ask") as ask:
+            assert agent.scan() == 0
+
+        ask.assert_not_called()
+
+    def test_explain_scopes_each_diagnosis_to_the_workload_and_its_namespace(self):
+        """
+        `demo/memory-hog:oom` carries three things in one key: the namespace
+        before the slash, the workload after it, and the fault after the colon.
+        Taking the right-hand side of either split sends the diagnosis at a
+        namespace named after the workload, or at a workload named `oom` -- the
+        wrong-entity failure, arriving through the CLI.
+
+        `verbose` is the other half. It is what streams tool calls to the
+        terminal as they happen, and without it `--scan --explain` prints
+        nothing for ninety seconds and looks hung. Defect 37 caught exactly
+        this kwarg surviving in main(); scan() has its own call and its own
+        mutant.
+        """
+        spy = MagicMock(side_effect=agent.scoped_question)
+        answer = {"answer": "it exceeded its memory limit", "unverified": []}
+        with patch.object(agent, "scan_cluster", lambda: dict(self.BROKEN)), \
+             patch.object(agent, "scoped_question", spy), \
+             patch.object(agent, "capture_pod_logs", lambda pod, namespace: []), \
+             patch.object(agent, "ask", return_value=answer) as ask:
+            assert agent.scan(explain=1) == 0
+
+        assert ask.call_count == 1, "explain=1 must diagnose exactly one entry"
+        _, workload, namespace, pod = spy.call_args.args
+        assert namespace == "demo"
+        assert workload == "demo/memory-hog", "the fault suffix is not the workload"
+        assert pod == "memory-hog-abc"
+        assert ask.call_args.kwargs["verbose"] is True
+
+    def test_an_explained_answer_is_checked_for_unverified_claims(self):
+        with patch.object(agent, "scan_cluster", lambda: dict(self.BROKEN)), \
+             patch.object(agent, "capture_pod_logs", lambda pod, namespace: []), \
+             patch.object(agent, "ask",
+                          return_value={"answer": "a", "unverified": []}), \
+             patch.object(agent, "_report_unverified") as report:
+            agent.scan(explain=2)
+
+        assert report.call_count == 2
+
+
+class TestUnverifiedClaimsAreReported:
+    """
+    `_report_unverified`, the one line every path that prints an answer has to
+    call. A diagnosis shown without its confidence is the failure grounding.py
+    exists to prevent, and the line that builds the message survived the
+    survey.
+    """
+
+    def test_the_confidence_and_every_claim_reach_stderr(self, capsys):
+        agent._report_unverified(
+            {"confidence": "partial", "unverified": ["512Mi", "3 restarts"]})
+
+        printed = capsys.readouterr()
+        assert "partial" in printed.err
+        assert "512Mi" in printed.err and "3 restarts" in printed.err
+        assert printed.out == "", "the caveat goes to stderr so piping stays clean"
+
+    def test_an_answer_with_nothing_unsupported_says_nothing(self, capsys):
+        agent._report_unverified({"confidence": "grounded", "unverified": []})
+
+        assert capsys.readouterr().err == ""
+
+
 class TestWhatTheFirstSurveyOfStreamFound:
     """
     Fourteen mutants in `_stream` that survived both passes on 2026-09-05.
