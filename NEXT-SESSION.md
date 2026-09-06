@@ -7,12 +7,14 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-05 head — `git log --oneline -1` is the
+**State: `main` at the 2026-09-06 head — `git log --oneline -1` is the
 authority, not this line — tree clean and pushed, **1568 tests pass, 0
 skipped** (46s, with Postgres up; without it 32 of those skip *silently*, see
 Environment), CI green, tags through v0.2.0. Nothing of this project is
 running: the GKE cluster was created and deleted inside the 2026-09-05
-session, zero clusters, disks or Artifact Registry repositories remain.**
+session, zero clusters, disks or Artifact Registry repositories remain. The
+suite figure needs Postgres up — with it down the same tree reads **1558
+passed, 32 skipped**, and those 32 are the shared-state cases.**
 
 **Mutation coverage.** 18 modules via `--all`, measured 2026-09-02/03:
 979 mutants, 764 killed, **78.0%** (`results/mutation/all-2026-09-03.json`,
@@ -162,7 +164,29 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    run.** Check the tags from the registry afterwards, not from the workflow
    log; this repo has shipped the wrong image under a right-looking tag once.
 
-2. **Read `agent.py`'s 79 survivors.** Done as a measurement, not as a
+2. **Finish `_stream`: the coverage and contradiction gates.** All 33
+   `_stream` survivors are read and classified (defect 37): 14 real, 2
+   cosmetic, 17 equivalent. Eleven of the 14 are tested and the kills verified
+   by re-running those exact sites rather than by the tests going green —
+   `agent.py` 1114, 1139, 1153, 1305, 1307, 1330, 1444. **Four still survive:
+   1356 and 1419, the `rounds_left >= 2` gate on the coverage and
+   contradiction re-asks.**
+
+   The blocker is known; do not rediscover it. An earlier policy fires on the
+   same round and `continue`s, so with `MAX_ROUNDS=3` the only round with
+   `rounds_left >= 2` is already spent before the coverage check is reached —
+   a fixture-driven attempt produced **no** re-ask rather than the wrong one.
+   Isolate the gate instead: stub `named_but_not_called`, `evidence_gap`,
+   `uncovered_workloads` and the contradiction verdict so exactly one detector
+   can fire, then vary `MAX_ROUNDS` between 3 and 2 the way
+   `TestTheNeverOnTheLastRoundsRule` already does for the other two.
+
+   **Assert which policy fired, never the round count.** The first coverage
+   case asserted `chat.call_count`, passed, and killed neither mutant: the
+   extra round was the *evidence* policy firing on the same scan output. Each
+   re-ask sends a differently worded message; the helper matches on that.
+
+3. **Read `agent.py`'s remaining survivors.** Done as a measurement, not as a
    review: 166/246 after two passes and the CLI extraction, with **79
    survivors outside the CLI still unread** —
    `results/mutation/agent-2026-09-05.json` and `-pass2.json`. They cluster in
@@ -177,29 +201,29 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    summary line; the counts had to be recovered from the `--json`, and there
    was no progress visible for 49 minutes. Redirect to a file instead.
 
-3. **Pass 2 on `inference.py` (36) and `grounding.py` (26).** The only two
+4. **Pass 2 on `inference.py` (36) and `grounding.py` (26).** The only two
    dense modules that have never had one, and the two that did both moved ~20
    points. Do this *before* reading a survivor or writing a test against one:
    six survivors in `backends._model_check` read exactly like a gap worth
    testing, and pass 2 killed eight of seventeen because three other files
    already covered them. Candidate test sets are tabled below.
 
-4. **`_NEGATION_WINDOW = 40`**, found and not fixed. It is measured in
+5. **`_NEGATION_WINDOW = 40`**, found and not fixed. It is measured in
    characters and a marked-up entity name spends 15-20 of them, so "Nothing
    suggests the pod \`x-abc123\` does not exist" puts the negator one
    character outside the window and the absence rule fires on a correct
    answer. Changing it is a tuning change and needs `evals/replay_grounding.py`
    over the corpus to say what it costs. Baseline: 1650 records, 60 moved.
 
-5. **Slack: `[text](url)` links still show their target.** Bold and headings
+6. **Slack: `[text](url)` links still show their target.** Bold and headings
    are converted; links are not, deliberately — that failure is ugly rather
    than misleading. Fix it if you want, with the same care about code spans.
 
-6. **Finish what the linter found.** 164 ruff and 20 mypy findings, all
+7. **Finish what the linter found.** 164 ruff and 20 mypy findings, all
    triaged in the commit that added `pyproject.toml`, none of them live
    defects. The 12 mypy `var-annotated` ones would let mypy gate CI.
 
-7. Generalized diagnostic accuracy stays NOT TESTED. The n=10
+8. Generalized diagnostic accuracy stays NOT TESTED. The n=10
    `insufficient_no_such_workload` rerun; build the counter first.
 
 ## Environment
