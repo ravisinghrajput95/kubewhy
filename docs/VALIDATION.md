@@ -2164,6 +2164,47 @@ selection. They are concentrated in `_stream` (33), `scan` (11) and `_timing`
 (8), and they are **unread** — see `results/mutation/agent-2026-09-05.json`
 and `-pass2.json`.
 
+### 38. A test that raced the mechanism it was measuring
+
+**Problem.** `test_standing_down_discards_the_work_it_had_queued` failed on CI
+(run 34014994493) and passed on a re-run of the identical tree. The flake is
+not the finding; what it exposed is.
+
+Both stand-down tests drove `run()` and then set `stopping` from a fixed
+`threading.Timer` — 0.5s and 0.6s — against a renewal interval patched to
+0.03s. A sixteen-fold margin, and still a race: the renewal has to notice the
+peer's claim *before* the timer, because those are two different exits from the
+watch loop and only one of them reaches the drain.
+
+```python
+while not self.stopping.is_set() and not self.lost_lease.is_set():
+    self.watch_once(api)
+...
+if not self.lost_lease.is_set():
+    return                       # <- the exit a slow runner takes
+```
+
+**Measured.** Shortening the timer to 0.02s reproduces it deterministically:
+the queue ends with 2 entries and the stand-down never runs. At 0.5s on this
+machine it passes 12 times out of 12, including under the load of a concurrent
+mutation survey — which is why the local suite never saw it and a GitHub runner
+did.
+
+**The second half, which is the one worth keeping.** The sibling test asserts
+`controller.lost_lease.is_set() is False` — "it stood down but never cleared
+the flag". With the peer claim removed so that no stand-down can occur, that
+flag reads **False as well**: it is in its passing state both after a
+successful stand-down and when nothing happened at all. The assertion could
+not tell the two apart, and on a runner slow enough to lose the race it would
+have gone green over a controller that simply stopped.
+
+**Fix.** `stopping` is set by a thread waiting on `lost_lease`, so the test
+waits for the event it is about instead of for the clock, and the timer is
+gone. The same helper returns that event, and both tests now assert the
+stand-down was reached before asserting anything about its effects — the
+counter this project asks for before measuring a mechanism, applied to a
+mechanism that already had two tests and no counter.
+
 ## Reproducing
 
 ```bash
