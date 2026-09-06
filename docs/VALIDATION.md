@@ -2205,6 +2205,86 @@ stand-down was reached before asserting anything about its effects — the
 counter this project asks for before measuring a mechanism, applied to a
 mechanism that already had two tests and no counter.
 
+### 39. A one-sided assertion accepted a number that was not a share
+
+**Problem.** `test_a_slow_tool_is_not_blamed_on_the_model` is the case that
+makes the distinction the timing field exists for: a 200ms tool against a fast
+model must not report the time as the model's. It asserted
+`assert t["model_share"] < 0.5`, passed for months, and was hiding two separate
+defects.
+
+`model_share` is `model_ms / (model_ms + tool_ms)`, so it is a fraction and
+anything outside `(0, 1)` is not a share at all. A one-sided `< 0.5` cannot say
+that. Both of these satisfy it:
+
+| mutation | what the field becomes | `< 0.5`? |
+|---|---|---|
+| `agent.py:485` `total = model_ms + tool_ms` → `-` | negative | passes |
+| `agent.py:1567` `perf_counter() - started` → `+` | rounds to `0.0` | passes |
+
+The first inverts the accounting the field exists to report; the second makes
+`tool_ms` the raw monotonic clock reading, on the order of 10^11 ms. Neither is
+subtle, and the assertion that was written to catch exactly this class of
+error let both through.
+
+**Detection.** The six-file `agent.py` survey of 2026-09-06. `485` was in the
+survivor list; `1567` was not looked for at all and died to the same fix.
+
+**Fix.** `assert 0 < t["model_share"] < 0.5`. One character of intent, two
+mutants.
+
+**The general form**, which is why this is written down rather than just
+fixed: an assertion that bounds a quantity on the side the bug is expected to
+move is not the same as an assertion that the quantity is *well formed*. Every
+`<`, `>` and `!=` in a test is worth reading twice for what it admits, not only
+for what it excludes.
+
+### 40. Every test of the CLI patched out the function it calls
+
+**Problem.** Defect 37 extracted `main(argv)` so the command line could be
+tested, and eleven cases were written against it. All eleven patch
+`agent.scan`, which is correct for asserting argument parsing — and it means
+that after `--scan` was made testable, **the thing `--scan` does was still
+never executed**.
+
+The 2026-09-06 six-file survey put a number on it: **11 of 64 survivors were
+inside `scan()`**, the second densest cluster in the module after `_stream`,
+with `_report_unverified` — called by both CLI paths, read by neither —
+alongside it.
+
+**Three things it was not checking.**
+
+`verbose=True` on scan's own `ask()`. This is the same kwarg defect 37 caught
+surviving in `main()`, with the same consequence recorded there: it is what
+streams tool calls to the terminal, and without it `--scan --explain` prints
+nothing for ninety seconds and looks hung. `scan()` has a **second** call site,
+and it survived the fix that closed the first.
+
+The exit code, three ways. A cluster with nothing wrong returns
+`{"result": ...}` and must exit `0`; an unreachable API returns
+`{"error": ...}` and must exit `1`. Inverting either membership test, or moving
+either code, breaks any script that runs `--scan` in a condition.
+
+The key splits. `demo/memory-hog:oom` carries a namespace, a workload and a
+fault in one string. Taking the right-hand side of either split sends the
+diagnosis at a namespace named after the workload, or at a workload named
+`oom` — the wrong-entity failure, arriving through the CLI rather than through
+the model.
+
+**Regression evidence.** Eight cases, and the block re-surveyed rather than
+assumed: `--sites 216..227` read **12 survived before, 10 killed after**.
+
+**The two left alive were classified as equivalent before the run, not after
+it.** `split(sep, 1)` → `split(sep, 2)` on a key holding one slash and one
+colon cannot produce a different first element. They are exactly the two the
+run left standing, which is the only reason the prediction is worth recording.
+
+**The lesson is not "test `scan()`".** It is that a patch which isolates the
+unit under test also hides everything it stands in for, and a suite can gain
+eleven cases for a surface while leaving that surface unexecuted. Coverage
+would have shown these lines as uncovered; what the survey added was the count
+and the fact that nobody had noticed for a day.
+
 ## Reproducing
 
 ```bash
