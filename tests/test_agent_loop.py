@@ -556,6 +556,22 @@ class TestUncoveredWorkloads:
 
         assert agent.uncovered_workloads([err], "nothing") == []
 
+    def test_a_tool_that_returns_an_array_is_not_read_as_a_scan(self):
+        """
+        The guard's first clause, and the only one with a shape behind it that
+        the other two cases do not already reach. `get_processes` returns a
+        list, so `parsed` is not always a mapping -- and the three conditions
+        are joined by `or` precisely so that one true clause is enough to skip
+        it. Joined by `and`, a list falls through to `parsed.items()` and takes
+        the run down with an AttributeError.
+
+        The error case above does NOT cover this: with `and` it stops being
+        skipped, but `{"error": ...}` is still a dict whose one value is a
+        string, so the loop finds no workloads and the assertion passes anyway.
+        """
+        assert agent.uncovered_workloads(
+            [json.dumps([{"pid": 1, "name": "init"}])], "nothing") == []
+
 
 class TestEvidenceIsReturnedOnRequest:
     """
@@ -1708,6 +1724,63 @@ class TestEvidenceGapReadsEveryToolShape:
         assert agent.evidence_gap(trace, out) is None
 
 
+class TestReadingEvidenceForOnePod:
+    """
+    `_terminated_for` and `_not_every_container_ready`, neither of which is
+    named anywhere in the suite before now.
+
+    Both answer a question about ONE pod by reading every result the run
+    happens to hold, so both carry the same guard, and in both the guard
+    survived two mutation passes: a document about a different pod, or a
+    document that is not a mapping at all, must not be read as evidence about
+    this one.
+    """
+
+    OOM = json.dumps({
+        "pod": "memory-hog-abc", "namespace": "demo",
+        "status": "CrashLoopBackOff",
+        "containers": {"hog": {"ready": False,
+                               "last_termination": {"reason": "OOMKilled"}}},
+    })
+
+    def test_a_termination_reason_belongs_to_the_pod_that_recorded_it(self):
+        """
+        agent.py:810. Joined by `and`, the guard stops skipping other pods'
+        documents and a run holding one OOMKilled pod reports every pod as
+        OOMKilled. That reason feeds the SELF_EXPLANATORY_TERMINATION skip in
+        evidence_gap, so the consequence is a crashing pod whose logs are never
+        read because a different pod ran out of memory.
+        """
+        assert agent._terminated_for([self.OOM], "memory-hog-abc") == {"oomkilled"}
+        assert agent._terminated_for([self.OOM], "crasher-def") == set()
+
+    def test_a_container_with_no_readiness_field_is_skipped_not_subscripted(self):
+        """
+        agent.py:857. `isinstance(container, dict) and "ready" in container`
+        with `or` in the middle admits entries the very next line subscripts:
+        a container document that omits `ready` raises KeyError and one that is
+        not a mapping raises TypeError, both from inside the readiness policy.
+
+        Absent is not evidence, which is the same rule `short()` applies to a
+        malformed "1/2" -- so a pod whose only readable container IS ready
+        reports nothing wrong.
+        """
+        partial = json.dumps({
+            "pod": "never-ready-1", "status": "Running",
+            "containers": {"app": {"ready": True},
+                           "sidecar": {"image": "busybox:1.36"},
+                           "broken": "not a mapping"},
+        })
+        failing = json.dumps({
+            "pod": "never-ready-1", "status": "Running",
+            "containers": {"app": {"ready": False},
+                           "sidecar": {"image": "busybox:1.36"}},
+        })
+
+        assert agent._not_every_container_ready([partial], "never-ready-1") is False
+        assert agent._not_every_container_ready([failing], "never-ready-1") is True
+
+
 class TestThePolicyTargetsTheRightPod:
     """
     Observed live 2026-08-19: asked about `crasher`, the model listed every
@@ -1750,6 +1823,11 @@ class TestThePolicyTargetsTheRightPod:
         assert "crasher" in agent.workload_prefix("crasher-5964d99948-9g8vg")
         assert "log-shipper" in agent.workload_prefix("log-shipper-8gnqk")
         assert "sidecar-app" in agent.workload_prefix("sidecar-app")
+        # A single-word workload with one generated suffix -- two parts, which
+        # is the boundary of the trim. The three above all have three parts or
+        # none, so `len(parts) >= 2` was never read: both the constant and the
+        # comparison survived two passes behind them.
+        assert "crasher" in agent.workload_prefix("crasher-8gnqk")
 
     def test_a_daemonset_pod_is_matched_by_its_workload_name(self):
         trace = [{"name": "list_pods", "arguments": {"namespace": "demo"}}]
@@ -1825,6 +1903,22 @@ class TestThePolicyStaysOutOfTheWay:
         assert not agent._looks_like_a_target("unhealthy")
         assert agent._looks_like_a_target("correctly-configured")
         assert agent._looks_like_a_target("crasher-abc123")
+
+    def test_the_length_floor_is_read_at_its_boundary(self):
+        """
+        `len(word) > 3`, and neither half of it was covered: "the" and
+        "unhealthy" carry no digit or hyphen, so they fail the second clause
+        whatever the first one says.
+
+        Both directions matter here. A four-character name is a real workload
+        and has to be recognised, or a question about it stops steering the
+        evidence policy. A three-character token that merely contains a digit
+        is not a name -- "0/1" is a readiness fraction people type into
+        questions, and treating it as a target the cluster does not have makes
+        evidence_gap return None and suppresses the policy entirely.
+        """
+        assert agent._looks_like_a_target("web1")
+        assert not agent._looks_like_a_target("0/1")
 
 
 class TestReadinessPolicy:

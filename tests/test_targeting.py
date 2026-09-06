@@ -324,6 +324,34 @@ class TestUnlabelledTargets:
 
         looked_up.assert_not_called()
 
+    def test_the_namespace_is_the_scan_key_and_not_the_workload_name(self):
+        """
+        `demo/memory-hog` splits at the slash and the namespace is the LEFT
+        half. Taking the right half instead resolves every target into a
+        namespace named after the workload, which does not exist -- the
+        wrong-entity failure this module exists to prevent, arriving through
+        the resolver rather than through the model. The existing workload case
+        asserts only `kind`, so both halves of this line survived two mutation
+        passes.
+        """
+        with patch.object(agent, "scan_cluster",
+                          lambda **k: {"demo/memory-hog": {"status": "OOMKilled"}}):
+            assert agent._resolve_entity("memory-hog") == {
+                "kind": "workload", "namespace": "demo"}
+
+    def test_the_truncation_marker_is_not_the_key_it_resolves_from(self):
+        """
+        A truncated scan carries `_truncated` alongside the workloads, and it
+        is first in the document. Reading it as the workload key gives a name
+        with no slash in it, so the target resolves with `namespace: None` and
+        the run falls back to `default` -- which is the same live failure the
+        service branch above was written for.
+        """
+        truncated = {"_truncated": "3 more not shown",
+                     "demo/memory-hog": {"status": "OOMKilled"}}
+        with patch.object(agent, "scan_cluster", lambda **k: truncated):
+            assert agent._resolve_entity("memory-hog")["namespace"] == "demo"
+
     def test_a_service_resolves_when_no_workload_does(self):
         with patch.object(agent, "scan_cluster",
                           lambda **k: {"result": "no workload named crasher-svc"}), \
