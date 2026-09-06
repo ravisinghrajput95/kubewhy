@@ -716,6 +716,37 @@ class TestControllerRunPath:
              patch.object(ctrl.client, "CoreV1Api", return_value=MagicMock()):
             controller.run()
 
+    @staticmethod
+    def _stop_once_it_notices(controller, timeout=10):
+        """
+        Set `stopping` when the renewal has seen the peer's claim, rather than
+        after a fixed wall-clock delay.
+
+        A 0.5s timer against a 0.03s renewal interval reads like a wide margin
+        and is not one. When `stopping` arrives first, `run()` leaves the watch
+        loop with `lost_lease` still clear, takes the `return` above the drain,
+        and the queue is left full -- for a reason that has nothing to do with
+        the discard the test is about. Observed on CI once (run 34014994493)
+        and then reproduced deterministically by shortening the timer to 0.02s:
+        queue size 2, stand-down never entered.
+
+        Returns the event that says the stand-down was actually reached. Both
+        tests below assert on it, because the flags they check are also in
+        their passing state when nothing happened at all -- `lost_lease` reads
+        clear whether it was cleared after the drain or never set.
+        """
+        noticed = threading.Event()
+
+        def wait():
+            if controller.lost_lease.wait(timeout):
+                noticed.set()
+            # Set either way: a controller that never noticed still has to be
+            # stopped, or a failure hangs the suite instead of reporting.
+            controller.stopping.set()
+
+        threading.Thread(target=wait, daemon=True).start()
+        return noticed
+
     def test_run_acquires_the_lease_and_starts(self, tmp_path, caplog):
         state = store.SqliteStore(str(tmp_path / "s.db"))
         controller = self._controller(state)
@@ -871,11 +902,16 @@ class TestControllerRunPath:
             time.sleep(0.15)
         controller.watch_once = watch_once
 
-        threading.Timer(0.6, controller.stopping.set).start()
+        noticed = self._stop_once_it_notices(controller)
         with patch.object(ctrl, "LEASE_RENEW", 0.03), \
              patch.dict(os.environ, {"TRIAGE_STATE_DB": "postgresql://x/y"}):
             self._run(controller)
 
+        assert noticed.is_set(), (
+            "the renewal never saw the peer's claim, so the losing path this "
+            "test is about never ran -- every assertion below would have "
+            "passed on a controller that simply stopped"
+        )
         assert controller.lost_lease.is_set() is False, (
             "it stood down but never cleared the flag, so it can never work "
             "again even after the peer releases the lease"
@@ -906,11 +942,15 @@ class TestControllerRunPath:
         controller.watch_once = watch_once
         controller.worker = lambda: None      # nothing drains it but standby
 
-        threading.Timer(0.5, controller.stopping.set).start()
+        noticed = self._stop_once_it_notices(controller)
         with patch.object(ctrl, "LEASE_RENEW", 0.03), \
              patch.dict(os.environ, {"TRIAGE_STATE_DB": "postgresql://x/y"}):
             self._run(controller)
 
+        assert noticed.is_set(), (
+            "the renewal never saw the peer's claim, so run() returned above "
+            "the drain and the queue below is full for the wrong reason"
+        )
         assert controller.work.empty(), (
             "work queued while it held the lease survived the stand-down and "
             "would be diagnosed a second time by the replica that took over"
