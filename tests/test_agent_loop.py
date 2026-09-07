@@ -2299,6 +2299,48 @@ class TestTheCommandLine:
         assert actor.call_args.args[0] == "unknown"
 
 
+class TestVerboseStreamsToolCallsAndNothingElse:
+    """
+    `ask(verbose=...)` -- the flag defect 37 found surviving in main() and
+    defect 40 found surviving again at scan()'s call site. Three mutants sit on
+    the mechanism itself rather than on its callers, and all three survived the
+    six-file survey: the default, the event test, and the `and` joining them.
+
+    It matters in both directions. Off is the default because five of the six
+    surfaces call `ask()` from inside a server -- REST, MCP, the controller,
+    the UI and Slack -- and none of them want a tool trace on stderr. On is
+    what makes the CLI usable, because a terminal that prints nothing for
+    ninety seconds looks hung.
+    """
+
+    RUN = [reply(calls=[tool_call("get_system_info", {})]), reply(content="done")]
+
+    def test_a_quiet_ask_prints_nothing(self, capsys):
+        """
+        The default, and the `and`. Either mutated, every server surface starts
+        writing a tool trace to stderr that nothing asked for.
+        """
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(side_effect=list(self.RUN)):
+            agent.ask("is the cpu busy?")
+
+        assert capsys.readouterr().err == ""
+
+    def test_verbose_prints_the_tool_calls_and_only_those(self, capsys):
+        """
+        `event["type"] == "tool_call"` is what selects them. Inverted, the line
+        fires on every OTHER event -- and `tool_result` and `answer` events
+        carry no `name`, so the trace the CLI depends on becomes a KeyError
+        mid-run.
+        """
+        with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(side_effect=list(self.RUN)):
+            agent.ask("is the cpu busy?", verbose=True)
+
+        err = capsys.readouterr().err
+        assert "get_system_info" in err
+        assert err.count("->") == 1, "one tool was called, so one line is traced"
+        assert "done" not in err, "the answer goes to the caller, not to stderr"
+
+
 class TestTheScanCommand:
     """
     `scan()` itself -- the body behind `--scan`, as opposed to the argument
