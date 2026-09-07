@@ -1413,6 +1413,32 @@ class TestTimingAttribution:
         # The other rounds were fast, so a total would have hidden this.
         assert sorted(t["round_ms"])[0] < 100
 
+    def test_the_shape_of_the_timing_block_is_the_contract(self):
+        """
+        `_timing` as a function, away from a run, because seven of its mutants
+        survived a six-file survey behind tests that only ever fed it whole
+        milliseconds and one-sided bounds.
+
+        Two things are pinned here. `unaccounted_ms` is wall clock minus what
+        model and tools account for -- the field the docstring says to look at
+        when the interesting thing is happening outside both -- and adding
+        instead of subtracting turns it into their sum. And every duration is
+        reported to one decimal place: these go on a wire to the console and
+        into the eval reports, and a field that silently changes precision is a
+        field two runs cannot be compared on.
+        """
+        t = agent._timing(1000.456, 500.444, [1000.456, 12.0],
+                          wall_ms=1700.789, slept_ms=12.345)
+
+        assert t["model_ms"] == 1000.5
+        assert t["tool_ms"] == 500.4
+        assert t["wall_ms"] == 1700.8
+        assert t["slept_ms"] == 12.3
+        # 1700.789 - (1000.456 + 500.444). Their SUM is 3201.7, which is what
+        # the mutant reports and what no assertion here would have noticed.
+        assert t["unaccounted_ms"] == 199.9
+        assert t["model_share"] == 0.667
+
     def test_giving_up_still_reports_timing(self):
         """A run that exhausts MAX_ROUNDS is exactly one worth timing."""
         with patch.dict(agent.TOOLS, HOST_STUB), mock_chat(
