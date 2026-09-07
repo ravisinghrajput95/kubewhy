@@ -834,6 +834,55 @@ class TestTheInvestigationBudget:
         # reading, and the reader needs to see how far it got.
         assert "tool_calls" in result
 
+    def test_a_provider_timeout_at_the_deadline_terminates_rather_than_raises(self):
+        """
+        The branch agent.py describes as "found by measuring the fix rather
+        than by writing it", and the one nothing reached: the other budget
+        cases all stop at the `remaining() <= 0` check at the top of the loop,
+        so the model call never fails at all.
+
+        Clamping the provider timeout to the remaining budget means the budget
+        expiring DURING a call surfaces as the provider's own timeout. Without
+        the catch, the deadline ended runs by raising out of the generator
+        instead of terminating them with a reason -- worse than the overrun it
+        was added to prevent.
+
+        The durations are bounded on both sides, which is the whole point:
+        `>= 700` alone passes on `perf_counter() + began` as readily as on the
+        real elapsed time. See defect 39.
+        """
+        def times_out(*a, **k):
+            time.sleep(0.7)
+            raise TimeoutError("read timed out")
+
+        with self.budget(1):
+            with mock_chat(side_effect=times_out):
+                result = agent.ask("why is this slow?", think=False)
+
+        assert result["termination"] == "deadline_exceeded"
+        assert "waiting for the model" in result["answer"], (
+            "this is the mid-call deadline, not the one at the top of the loop")
+
+        timing = result["timing"]
+        assert timing["rounds"] == 1
+        assert 700 <= timing["model_ms"] < 5000, (
+            "the round that timed out is still the model's time, and it is "
+            "roughly what the sleep took")
+        assert 700 <= timing["round_ms"][0] < 5000
+
+    def test_a_provider_failure_with_budget_left_still_propagates(self):
+        """
+        The other half of the same condition, and the reason it is a
+        comparison rather than a bare `except`. A provider that breaks with
+        time still on the clock is a provider failure: swallowing it as
+        `deadline_exceeded` would report a budget problem to someone whose
+        actual problem is that the model is unreachable.
+        """
+        with self.budget(600):
+            with mock_chat(side_effect=ConnectionError("connection refused")):
+                with pytest.raises(ConnectionError):
+                    agent.ask("q", think=False)
+
     def test_running_out_of_rounds_is_labelled_differently(self):
         with self.budget(600):
             with mock_chat(return_value=reply(
