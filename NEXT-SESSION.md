@@ -7,32 +7,105 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-06 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1568 tests pass, 0
+**State: `main` at the 2026-09-07 head — `git log --oneline -1` is the
+authority, not this line — tree clean and pushed, **1619 tests pass, 0
 skipped** (46s, with Postgres up; without it 32 of those skip *silently*, see
 Environment), CI green, tags through v0.2.0. Nothing of this project is
 running: the GKE cluster was created and deleted inside the 2026-09-05
 session, zero clusters, disks or Artifact Registry repositories remain. The
-suite figure needs Postgres up — with it down the same tree reads **1558
-passed, 32 skipped**, and those 32 are the shared-state cases.**
+suite figure needs Postgres up — with it down the same tree reads **1587
+passed, 32 skipped**, and those 32 are the shared-state cases. Both measured
+2026-09-07 on the same tree, minutes apart.**
 
 **Mutation coverage.** 18 modules via `--all`, measured 2026-09-02/03:
 979 mutants, 764 killed, **78.0%** (`results/mutation/all-2026-09-03.json`,
 defect 32). Plus the three `--all` structurally cannot reach (defect 31):
 `app.py` 23/42, `routers/k8s_pods_info.py` 191/262, and **`agent.py`
-166/246 = 67.5%**, measured 2026-09-05 at last — pass 1 137/245, pass 2 over
-its 108 survivors killed 13 more, and extracting the CLI into `main(argv)`
-took the block from 16 unkillable mutants to 1 (defect 37). Every row from
-`--all` is a **pass 1** and its survivor count an upper bound — `backends.py`
-read 54% and is 76% after pass 2, `controller.py` 57% and 73%.
+223/245 = 91.0%**, measured 2026-09-06/07 over four passes and **no longer a
+composed figure** — one enumeration of 245 sites against one set of six test
+files, then three passes over each previous pass's survivors (181, then +14,
++10, +16, plus 2 verified as a pair). That replaces 166/246 = 67.5%, whose 246
+was a 245-site enumeration plus a separately measured 17-mutant block. Defect
+37 carries the table. Every row from `--all` is still a **pass 1** and its
+survivor count an upper bound — `backends.py` read 54% and is 76% after pass 2,
+`controller.py` 57% and 73%.
 
 **Do not add these into a repo-wide number.** The 18 are pass 1 and `agent.py`
 is pass 2; summing the two bases is exactly how 692/282 came to be quoted for
 a fortnight.
 
-**Read `docs/VALIDATION.md` first — defects 35 and 36 are the last session,
-27 to 34 the two before it.** Then "Pick up, in order" below. Everything
-under "What changed on 2026-08-26 / 27" is history.
+**Read `docs/VALIDATION.md` first — defects 37 to 40 are the last session,
+35 and 36 the one before it, 27 to 34 the two before that.** 39 and 40 are the
+two worth reading even if you are not touching `agent.py`: a one-sided
+assertion that admitted a value which was not a share, and eleven CLI tests
+that all patched out the function the CLI calls.
+
+Then "Pick up, in order" below. Everything under "What changed on 2026-08-26 /
+27" is history.
+
+## What landed on 2026-09-06/07: agent.py, measured properly
+
+**Item 2 of the last handoff is done.** The four `_stream` survivors at
+`agent.py:1356` and `1419` — the `rounds_left >= 2` gate on the coverage and
+contradiction re-asks — are dead. The blocker was as diagnosed: the three
+re-asks share one round and the first to fire `continue`s. The fix was **not**
+stubbing the detectors, which the last handoff suggested; it was building
+fixtures the earlier detectors cannot fire on. The coverage case is a scan of
+two *OOMKilled* workloads, because OOMKilled is in neither `EVIDENCE_IN_EVENTS`
+nor `EVIDENCE_IN_LOGS` — the status is the cause. The contradiction case hands
+over `describe_pod` **and** `get_pod_logs` as `prefetched`, because a
+CrashLoopBackOff pod whose logs were never read is an evidence gap and that
+policy takes the round first.
+
+Then the module was surveyed properly and **43 real survivors were killed**,
+taking it from **181/245 (73.9%) to 223/245 (91.0%)**, every one verified as a
+before/after pair on the same `--sites` command rather than by a test going
+green. Defect 37 has the pass table; 39 and 40 are the two findings.
+
+**Read defect 39 even if you never touch this module.**
+`assert t["model_share"] < 0.5` was written to catch tool time being blamed on
+the model. It admits a *negative* share (`total = model_ms - tool_ms`) and a
+share of exactly `0.0` (`perf_counter() + started`, making `tool_ms` about
+10^11). One character — `0 < ... < 0.5` — killed both, and the second was never
+on any survivor list. **An assertion that bounds a quantity on the side the bug
+is expected to move is not an assertion that the quantity is well formed.**
+Every `<`, `>` and `!=` in this suite is worth reading twice for what it
+admits.
+
+**Defect 40 is the structural one.** Defect 37 extracted `main(argv)` so the
+CLI could be tested and eleven cases were written against it. All eleven patch
+`agent.scan` out — correct for asserting argument parsing, and it meant that
+after `--scan` was made testable, *the thing `--scan` does* was still never
+executed. Eleven of the survey's 64 survivors were in there, including the same
+`verbose=True` kwarg defect 37 had already caught at the **other** call site. A
+patch that isolates the unit under test also hides everything it stands in for.
+
+**Two smaller ones worth keeping.** `_terminated_for` and
+`_not_every_container_ready` were named in no test at all, and both guard
+against reading one pod's evidence as another's — joined by `and`, a run
+holding one OOMKilled pod reports every pod as OOMKilled, and that reason feeds
+the `SELF_EXPLANATORY_TERMINATION` skip, so a crashing pod's logs go unread
+because a *different* pod ran out of memory. And `_resolve_entity`'s namespace
+line was entirely unread: the existing workload case asserted only `["kind"]`,
+so taking the right-hand side of `demo/memory-hog` resolved every target into a
+namespace named after the workload.
+
+**Defect 38 came from CI going red on the first commit.** It was flaky, not a
+regression — but both controller stand-down tests set `stopping` from a fixed
+timer against a renewal patched sixteen times faster, and those are two
+different exits from the watch loop with only one reaching the drain.
+Reproduced deterministically at a 0.02s timer: queue size 2, stand-down never
+entered. The half worth keeping is that with the peer claim removed so no
+stand-down can happen, `lost_lease.is_set()` reads `False` — exactly what it
+reads *after* a successful one. Both tests now wait on the event and assert
+they reached it.
+
+**One judgement reversed mid-session, recorded because the reversal was the
+right call.** The `_timing` rounding mutants were classified as cosmetic and
+not worth asserting. That was wrong: those fields go to the console and into
+eval reports, and a duration that silently gains a decimal place is one two
+runs cannot be compared on. A single direct `_timing` call with fractional
+inputs killed seven.
 
 ## What landed on 2026-09-05: HA, run for real
 
@@ -164,66 +237,76 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    run.** Check the tags from the registry afterwards, not from the workflow
    log; this repo has shipped the wrong image under a right-looking tag once.
 
-2. **Finish `_stream`: the coverage and contradiction gates.** All 33
-   `_stream` survivors are read and classified (defect 37): 14 real, 2
-   cosmetic, 17 equivalent. Eleven of the 14 are tested and the kills verified
-   by re-running those exact sites rather than by the tests going green —
-   `agent.py` 1114, 1139, 1153, 1305, 1307, 1330, 1444. **Four still survive:
-   1356 and 1419, the `rounds_left >= 2` gate on the coverage and
-   contradiction re-asks.**
+2. **Pass 2 on `inference.py` (36) and `grounding.py` (26).** Now the top of
+   the list. They are the only two dense modules that have never had one, and
+   the two `--all` rows most likely to be wrong: every module that has had a
+   pass 2 moved a long way — `backends.py` 54% to 76%, `controller.py` 57% to
+   73%, and `agent.py` 73.9% to 91.0% over three further passes this session.
+   Do this *before* reading a survivor or writing a test against one: six
+   survivors in `backends._model_check` read exactly like a gap worth testing,
+   and pass 2 killed eight of seventeen because three other files already
+   covered them. Candidate test sets are tabled below.
 
-   The blocker is known; do not rediscover it. An earlier policy fires on the
-   same round and `continue`s, so with `MAX_ROUNDS=3` the only round with
-   `rounds_left >= 2` is already spent before the coverage check is reached —
-   a fixture-driven attempt produced **no** re-ask rather than the wrong one.
-   Isolate the gate instead: stub `named_but_not_called`, `evidence_gap`,
-   `uncovered_workloads` and the contradiction verdict so exactly one detector
-   can fire, then vary `MAX_ROUNDS` between 3 and 2 the way
-   `TestTheNeverOnTheLastRoundsRule` already does for the other two.
+   **Run it the way the agent.py survey was run**, which is the one piece of
+   method that came out of 2026-09-06 worth copying:
 
-   **Assert which policy fired, never the round count.** The first coverage
-   case asserted `chat.call_count`, passed, and killed neither mutant: the
-   extra round was the *evidence* policy firing on the same scan output. Each
-   re-ask sends a differently worded message; the helper matches on that.
+   ```
+   nohup caffeinate -is .venv/bin/python -u evals/mutate.py <module> \
+     --tests <the files that actually drive it> \
+     --json results/mutation/<name>.json -v > <log> 2>&1 < /dev/null & disown
+   ```
 
-3. **Read `agent.py`'s remaining survivors.** Done as a measurement, not as a
-   review: 166/246 after two passes and the CLI extraction, with **79
-   survivors outside the CLI still unread** —
-   `results/mutation/agent-2026-09-05.json` and `-pass2.json`. They cluster in
-   `_stream` (33), `scan` (11) and `_timing` (8). Pass 2 is already done here,
-   so unlike every other module these are *not* an upper bound: a survivor in
-   this list is a real question. Expect the `_timing` and `elapsed` ones
-   (`1000 -> 1001`, `Sub -> Add` on millisecond conversions) to be equivalent
-   mutants in the same way three `ui.py` timing survivors were — classify
-   them, do not write tests against them.
-   **Never pipe a survey through `tail`.** The 2026-09-05 pass-1 run was
-   `... | tail -60`, which buffers until the producer exits and threw away the
-   summary line; the counts had to be recovered from the `--json`, and there
-   was no progress visible for 49 minutes. Redirect to a file instead.
+   `nohup ... & disown` because a job started with the harness's background
+   flag dies when the session ends — that cost a 50-minute survey. `-u` because
+   `mutate.py -v` prints only survivors, so a redirected log sits empty behind
+   Python's 8KB buffer for the whole run and a healthy job is indistinguishable
+   from a hung one. `--json` under `results/` because a session-scoped
+   scratchpad does not survive either. And **never through `tail`**, which
+   buffers until the producer exits.
 
-4. **Pass 2 on `inference.py` (36) and `grounding.py` (26).** The only two
-   dense modules that have never had one, and the two that did both moved ~20
-   points. Do this *before* reading a survivor or writing a test against one:
-   six survivors in `backends._model_check` read exactly like a gap worth
-   testing, and pass 2 killed eight of seventeen because three other files
-   already covered them. Candidate test sets are tabled below.
+   Then re-run only the survivors, and only the survivors, for as many passes
+   as keep paying: **that chain is exact rather than convenient**, because a
+   test can turn a survivor into a kill and never the reverse. Four passes on
+   `agent.py` cost about 90 minutes of wall clock and moved it 17 points.
 
-5. **`_NEGATION_WINDOW = 40`**, found and not fixed. It is measured in
+3. **`agent.py` has 24 survivors left and they are classified, not unread.**
+   Defect 37 tables every one with the reason it is declined. **Do not
+   re-review them as a gap.** Eight are `1000 -> 1001` on millisecond
+   conversions; five are `round(x, 1) -> round(x, 2)` on durations only a real
+   timer produces, where the only available assertion passes by luck about one
+   run in ten; three are float boundaries not reachable deterministically; four
+   are proven equivalent; and three are self-referential or irreducible.
+
+   If you want to argue with one, argue with **`run_id = uuid4().hex[:12]`**
+   (12 characters rather than 13) or **`MAX_ROUNDS = 8`**, whose one test reads
+   the constant and so moves with the mutant. Those two are the only survivors
+   where a reasonable person might want an assertion and there is no reason it
+   would be flaky.
+
+   **The method that mattered more than the count.** Classify a survivor
+   *before* the run that confirms it. That was done four times this session —
+   `scan`'s two `maxsplit` mutants, the deadline branch's four, the give-up
+   path's three, and `uncovered_workloads:619` — and the runs left exactly
+   those standing each time. A classification that predicts the measurement is
+   worth something; one written afterwards to explain a survivor is worth very
+   little.
+
+4. **`_NEGATION_WINDOW = 40`**, found and not fixed. It is measured in
    characters and a marked-up entity name spends 15-20 of them, so "Nothing
    suggests the pod \`x-abc123\` does not exist" puts the negator one
    character outside the window and the absence rule fires on a correct
    answer. Changing it is a tuning change and needs `evals/replay_grounding.py`
    over the corpus to say what it costs. Baseline: 1650 records, 60 moved.
 
-6. **Slack: `[text](url)` links still show their target.** Bold and headings
+5. **Slack: `[text](url)` links still show their target.** Bold and headings
    are converted; links are not, deliberately — that failure is ugly rather
    than misleading. Fix it if you want, with the same care about code spans.
 
-7. **Finish what the linter found.** 164 ruff and 20 mypy findings, all
+6. **Finish what the linter found.** 164 ruff and 20 mypy findings, all
    triaged in the commit that added `pyproject.toml`, none of them live
    defects. The 12 mypy `var-annotated` ones would let mypy gate CI.
 
-8. Generalized diagnostic accuracy stays NOT TESTED. The n=10
+7. Generalized diagnostic accuracy stays NOT TESTED. The n=10
    `insufficient_no_such_workload` rerun; build the counter first.
 
 ## Environment
@@ -306,6 +389,30 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
 - **Checking on background jobs: use `ps ax`, not `ps`.** A full 18-module
   survey takes ~60 minutes; one module with a five-file test set takes ~35.
 - Never point two surveys at one `--json` path.
+- **A background job started with the harness's own flag dies with the
+  session.** Measured 2026-09-06: a 50-minute `agent.py` survey was started
+  that way, the session ended mid-run, and the process went with it — no
+  `--json`, no log, nothing recoverable, and the scratchpad it was writing to
+  is keyed by session id so that went too. Use
+  `nohup caffeinate -is ... & disown` and write the result under `results/`.
+  `setsid` does not exist on macOS.
+- **`mutate.py -v` prints only survivors, and Python block-buffers a redirected
+  log.** A healthy hour-long run with 80 survivors emits about 3.6KB, under the
+  8KB buffer, so the log reads **empty until the process exits** — 25 minutes
+  of a working survey looking exactly like a hung one. Add `python -u`. This is
+  the same family as the `| tail` trap and a different mechanism: that one
+  buffers in the pipe, this one in libc.
+- **`mutate.py` takes its working copy once, at startup.** So editing tests
+  while a survey runs neither disturbs it nor reaches it: the survivors it
+  reports are against the tree as of its start commit. That is what makes it
+  safe to write tests from a survey's output while it is still going, and it is
+  why the start commit belongs in the commit message.
+- **Watch the right pid.** `ps ax | grep mutate.py | head -1` returns the `zsh`
+  wrapper or the `caffeinate` process, both of which exit while the survey runs
+  on. Match on `Python -u` and wait on that.
+- **The six files that drive `agent.py` need no Postgres**: 512 passed, 0
+  skipped with the database down, measured 2026-09-07. Unlike `store.py`, the
+  silent-skip trap does not apply to that survey.
 
 ## Work style
 
