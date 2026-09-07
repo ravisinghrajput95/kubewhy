@@ -2780,6 +2780,50 @@ class TestTheNeverOnTheLastRoundsRule:
             "answer in -- a usable answer traded for 'gave up'"
         )
 
+    # -- the nudge's grammar, agent.py:1309 -------------------------------
+
+    @staticmethod
+    def _nudge_text(answer):
+        """The nudge as it was actually sent, or "" if it never fired."""
+        with patch.object(agent, "MAX_ROUNDS", 3), \
+             mock_chat(side_effect=[reply(content=answer)] * 6) as chat:
+            agent.ask("what is wrong?")
+
+        head = agent.NUDGE.split("{")[0].strip()
+        for call in chat.call_args_list:
+            for message in call.kwargs["messages"]:
+                if (isinstance(message, dict) and message["role"] == "user"
+                        and head in message["content"]):
+                    return message["content"]
+        return ""
+
+    def test_one_skipped_tool_is_referred_to_in_the_singular(self):
+        """
+        `them = "it" if len(skipped) == 1 else "them"`, substituted four times
+        into a prompt. Both the count and the comparison survived every pass:
+        the nudge was asserted by its opening words and nobody read the rest of
+        the sentence.
+
+        This is a prompt, and this project has measured what prompt wording
+        costs -- see WHY_IT_SETTLES in contradiction.py for a sentence qwen3
+        invented when a re-ask left it room. "You wrote that get_pod_logs
+        should be run, but you did not run them" is the kind of sentence that
+        makes a model wonder what else it was supposed to have run.
+        """
+        sent = self._nudge_text(
+            "Exit code 1. Next step: call get_pod_logs on that pod.")
+
+        assert sent, "the nudge did not fire, so this asserts nothing"
+        assert "did not run it." in sent
+        assert "them" not in sent
+
+    def test_two_skipped_tools_are_referred_to_in_the_plural(self):
+        sent = self._nudge_text(
+            "Next: call get_pod_logs and get_pod_events on that pod.")
+
+        assert sent, "the nudge did not fire, so this asserts nothing"
+        assert "did not run them." in sent
+
     # -- the evidence-gap re-ask, agent.py:1330 ---------------------------
 
     def _stuck(self, max_rounds):
