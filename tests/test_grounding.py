@@ -554,7 +554,56 @@ class TestCheckedCount:
         result = grounding.check("memory-hog was OOMKilled at its 64Mi limit.", tools)
 
         assert result["confidence"] == "grounded"
-        assert result["checked"] > 0
+        # Exactly two -- the 64Mi number and the OOMKilled status -- not
+        # "more than none". `checked` is published in the verdict and in
+        # contract(), so a count that is merely non-zero is a number nobody
+        # can use, and `> 0` is satisfied by a counter that increments by two.
+        # That is how `checked += 1` survived at all four of its sites. Same
+        # shape as defect 39: bounding a quantity on the side the bug moves is
+        # not asserting that the quantity is right.
+        assert result["checked"] == 2
+
+    def test_each_kind_of_claim_counts_itself_once(self):
+        """
+        `checked` is incremented at four separate sites -- one per kind of
+        claim this module can trace -- and every one of them survived pass 1
+        and pass 2 behind `> 0` and `>= 1` assertions. One case each, with the
+        count stated exactly.
+
+        The number matters beyond the verdict it decides. `checked == 0` is
+        what makes an answer `insufficient_evidence` rather than grounded, and
+        the count itself goes out in `contract()` as how much of the answer was
+        traced to a measurement. A doubled count is a published wrong number of
+        exactly the kind this module exists to prevent the model from writing.
+        """
+        running = [json.dumps({"pod": "p", "status": "Running"})]
+
+        # A named entity the evidence never mentions, plus the digits in its
+        # name: two claims, two increments -- the entity site and the number.
+        entity = grounding.check("The pod ghost-abc123 is missing.", running)
+        assert [c["kind"] for c in entity["claims"]] == ["number", "entity"]
+        assert entity["checked"] == 2
+
+        # A KNOWN_CAUSE named in the prose, traced to the logs that support it.
+        cause = grounding.check(
+            "The restarts are caused by a memory leak.",
+            [json.dumps({"pod": "p", "logs": "detected memory leak in worker"})])
+        assert [c["kind"] for c in cause["claims"]] == ["cause"]
+        assert cause["checked"] == 1
+
+        # An absence the evidence positively settles, which is counted as a
+        # measurement precisely because it is one -- see the comment at the
+        # increment site for the answer that scored insufficient_evidence
+        # while holding the empty list that settled it.
+        endpoints = [{"id": "tool-1", "tool": "get_service_endpoints",
+                      "result": json.dumps({
+                          "service": "typo-svc", "namespace": "demo",
+                          "selector": {"app": "web-frontend"},
+                          "ready_endpoints": [], "not_ready_endpoints": []})}]
+        absence = grounding.check(
+            "The `typo-svc` service has no endpoints.", endpoints)
+        assert [c["kind"] for c in absence["claims"]] == ["absence"]
+        assert absence["checked"] == 1
 
     def test_untraceable_claims_are_counted_too(self):
         # Counted, not just flagged: checked is how many were examined.
@@ -566,6 +615,23 @@ class TestCheckedCount:
 
     def test_no_tools_and_no_claims_checks_nothing(self):
         assert grounding.check("I could not determine that.", [])["checked"] == 0
+
+    def test_an_empty_answer_checks_nothing_by_its_own_branch(self):
+        """
+        The early return at the top of check(), which is a different `checked`
+        from the one the case above reaches: "Everything looks fine." runs the
+        whole function and arrives at zero, while an answer that is only
+        whitespace never starts. Both must read 0, and only the second pins the
+        literal -- which is why it survived two passes.
+
+        This is the branch the module was rewritten for: an empty answer must
+        never come back grounded.
+        """
+        result = grounding.check("   ", [json.dumps({"status": "Running"})])
+
+        assert result["confidence"] == "ungrounded"
+        assert result["checked"] == 0
+        assert result["claims"] == []
 
 
 class TestObservedFailuresFrom20260818:
@@ -684,6 +750,22 @@ class TestEvidenceAudit:
 
     POD = json.dumps({"pod": "memory-hog", "status": "OOMKilled",
                       "containers": {"hog": {"limits": {"memory": "64Mi"}}}})
+
+    def test_the_footer_counts_nothing_checked_when_the_verdict_says_nothing(self):
+        """
+        `checked = verdict.get("checked", 0)` is a defensive default -- check()
+        always sets the key -- and it is read straight into the footer's "N of
+        M stated values". A default of 1 would claim a measurement that no
+        verdict recorded, in the one sentence a reader consults to decide how
+        much of the answer to trust.
+
+        annotate() is called on verdicts from replay and from stored records,
+        not only on freshly computed ones, so the fallback is reachable.
+        """
+        out = grounding.annotate("The pod restarted 9 times.",
+                                 {"confidence": "partial", "unverified": ["9"]})
+
+        assert "1 of 0 stated values" in out
 
     def test_an_unsupported_figure_is_named_as_inference(self):
         answer = "memory-hog was OOMKilled. Memory limit: 512Mi."
