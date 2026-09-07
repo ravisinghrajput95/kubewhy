@@ -245,7 +245,28 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    Do this *before* reading a survivor or writing a test against one: six
    survivors in `backends._model_check` read exactly like a gap worth testing,
    and pass 2 killed eight of seventeen because three other files already
-   covered them. Candidate test sets are tabled below.
+   covered them.
+
+   **The test sets, derived rather than guessed** (an earlier handoff said
+   "candidate test sets are tabled below" and there was no table; this is what
+   the tree actually says). Count the files that import the module or call into
+   it, not the ones that merely mention it — a plain grep for "grounding"
+   returns ten files and four of them only say the word in a docstring:
+
+   | module | pass 1 | test files that import it or call into it |
+   |---|---|---|
+   | `grounding.py` | 92/118, 26 survivors | `test_grounding`, `test_contradiction`, `test_agent_loop`, `test_replay_grounding`, `test_ui`, `test_eval_graders` |
+   | `inference.py` | 89/125, 36 survivors | `test_inference`, `test_chart`, `test_audit`, `test_ui_security`, `test_agent_loop`, `test_api`, `test_backends`, `test_controller` |
+
+   Both pass 1 rows were measured against the module's own test file **alone**,
+   which is `mutate.py`'s default and the under-selection every pass 2 has
+   corrected so far.
+
+   **Run them one at a time, not in parallel.** `test_agent_loop.py` is in both
+   sets and carries timing assertions — `sorted(round_ms)[0] < 100` among them
+   — that a competing survey's CPU load can flip, and a test that fails for
+   load counts the mutant as killed. That is a wrong number arriving quietly,
+   which is the failure this whole exercise exists to avoid.
 
    **Run it the way the agent.py survey was run**, which is the one piece of
    method that came out of 2026-09-06 worth copying:
