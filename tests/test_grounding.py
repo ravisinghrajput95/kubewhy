@@ -534,6 +534,61 @@ class TestNoToolsCalled:
         assert result["unverified"] == []
 
 
+class TestTheEntityIndex:
+    """
+    `_entity_index`, named in no test in this repo before now.
+
+    Answers name the workload ("bad-image") while the measurement is filed
+    under the pod ("bad-image-647c5576d5-pxmvr"), so the index registers the
+    ReplicaSet-trimmed prefix as an alias. The comment at that line says what
+    happens without it, and it is the failure this module is most prone to:
+    scoping *invents* failures. A restart count read by describe_pod would not
+    be in scope for a sentence about the workload that owns it, so a correct
+    figure quoted from the evidence gets flagged as unsupported.
+    """
+
+    @staticmethod
+    def _pod(name):
+        return [{"id": "tool-1", "tool": "describe_pod",
+                 "result": json.dumps({"pod": name, "namespace": "demo",
+                                       "restarts": 7})}]
+
+    def test_a_deployment_pod_is_filed_under_its_workload_too(self):
+        """
+        Both suffix counts, because the trim is `parts[:-2]` guarded by
+        `len(parts) >= 3` and every number in that line survived two passes.
+        A single-word workload gives a three-part pod name and a hyphenated one
+        gives four; drop either and the alias is wrong or absent.
+        """
+        three = grounding._entity_index(self._pod("crasher-5964d99948-9g8vg"))
+        assert "crasher" in three
+        assert "crasher-5964d99948-9g8vg" in three
+
+        four = grounding._entity_index(self._pod("bad-image-647c5576d5-pxmvr"))
+        assert "bad-image" in four, (
+            "trimming one segment too many files the measurement under `bad`, "
+            "which is not a workload anybody names")
+        assert "bad-image-647c5576d5-pxmvr" in four
+
+    def test_a_scalar_field_is_not_an_entity(self):
+        """
+        A listing keys pods to detail objects, and the guard skips anything
+        whose value is not one. Joined by `and` it skips only keys that are
+        *both* scalar and underscore-prefixed, so ordinary scalar fields get
+        indexed as entities -- and an entity that is "known" because a field
+        happened to share its name is a claim this module stops checking.
+        """
+        listing = [{"id": "tool-1", "tool": "list_pods", "result": json.dumps(
+            {"web-1": {"status": "Running"}, "total": 5,
+             "_truncated": "3 more not shown"})}]
+
+        index = grounding._entity_index(listing)
+
+        assert "web-1" in index
+        assert "total" not in index
+        assert "_truncated" not in index
+
+
 class TestCheckedCount:
     """
     "Nothing contradicted this" and "nothing was claimed" both come back
