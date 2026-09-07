@@ -883,6 +883,44 @@ class TestTheInvestigationBudget:
                 with pytest.raises(ConnectionError):
                     agent.ask("q", think=False)
 
+    def test_a_run_that_gave_up_still_measures_itself_in_seconds(self, caplog):
+        """
+        `terminated()` carries its own copy of the duration arithmetic that the
+        answer path has, and only the answer path's copy was covered. A run
+        that gave up is the one most worth measuring -- it is the shape that
+        fills a p95 -- and both the histogram observation and the logged
+        `elapsed_s` were unread.
+
+        Bounded on both sides again: the histogram takes SECONDS, so a
+        multiplication where the division should be reports a 1.2s run as
+        twenty minutes, and the log's subtraction inverted reports the raw
+        monotonic clock. Neither is subtle and neither was visible.
+        """
+        observed = MagicMock()
+
+        def slow(*a, **k):
+            time.sleep(0.35)
+            return reply(calls=[tool_call("get_platform_info", {})])
+
+        with self.budget(1), \
+                patch.object(telemetry.INVESTIGATION_DURATION, "observe", observed), \
+                caplog.at_level("WARNING"), \
+                mock_chat(side_effect=slow):
+            result = agent.ask("q", think=False)
+
+        assert result["termination"] == "deadline_exceeded"
+
+        assert observed.call_count == 1
+        seconds = observed.call_args.args[0]
+        assert 0 <= seconds < 60, (
+            f"the histogram is in seconds and this run took about a second; "
+            f"it observed {seconds}")
+
+        terminated = [r for r in caplog.records
+                      if r.getMessage() == "investigation_terminated"]
+        assert len(terminated) == 1
+        assert 0 <= terminated[0].elapsed_s < 60
+
     def test_running_out_of_rounds_is_labelled_differently(self):
         with self.budget(600):
             with mock_chat(return_value=reply(
