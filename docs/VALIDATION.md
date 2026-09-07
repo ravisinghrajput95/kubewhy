@@ -43,7 +43,7 @@ and does not support. Four words are used and they mean specific things:
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
-| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`. 18 modules via `--all`: 979 mutants, 764 killed, 78.0% (`results/mutation/all-2026-09-03.json`) — every row a pass 1, so every survivor count an upper bound. Plus the three `--all` cannot reach (defect 31): `app.py` 23/42, `routers/k8s_pods_info.py` 191/262, and **`agent.py` 166/246 (67.5%)**, measured 2026-09-05 — see defect 37. **There is no repo-wide number and these must not be added into one:** the 18 are pass 1 and `agent.py` is pass 2, and summing the two bases is how 692/282 came to be quoted for a fortnight |
+| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`. 18 modules via `--all`: 979 mutants, 764 killed, 78.0% (`results/mutation/all-2026-09-03.json`) — every row a pass 1, so every survivor count an upper bound. Plus the three `--all` cannot reach (defect 31): `app.py` 23/42, `routers/k8s_pods_info.py` 191/262, and **`agent.py` 223/245 (91.0%)**, measured 2026-09-06/07 over four passes — see defects 37, 39 and 40. That figure replaces the composed 166/246 (67.5%): 246 was a 245-site enumeration plus a separately measured 17-mutant block, and the two halves were measured against different test sets. 245 sites against the same six files, once, needs no such caveat. **There is no repo-wide number and these must not be added into one:** the 18 are pass 1 and `agent.py` is pass 2, and summing the two bases is how 692/282 came to be quoted for a fortnight |
 
 ## Defects found and fixed
 
@@ -2163,6 +2163,53 @@ standing outside the CLI are a genuine gap rather than an artifact of test
 selection. They are concentrated in `_stream` (33), `scan` (11) and `_timing`
 (8), and they are **unread** — see `results/mutation/agent-2026-09-05.json`
 and `-pass2.json`.
+
+**Superseded 2026-09-07, and by measurement rather than by argument.** The
+67.5% above is the last composed figure this project quotes for `agent.py`. A
+single six-file survey of all 245 sites read **181 killed (73.9%)**, and three
+further passes over its survivors — each pass re-running only what the last one
+left alive, which is exact because a test can turn a survivor into a kill and
+never the reverse — took it to **221/245**, plus two more verified individually:
+**223 of 245, 91.0%**.
+
+| pass | what it re-ran | killed | running total |
+|---|---|---|---|
+| survey `agent-2026-09-06-sixfile.json` | all 245 sites | 181 | 181 (73.9%) |
+| `-pass2.json` | its 64 survivors | 14 | 195 (79.6%) |
+| `-pass3.json` | pass 2's 50 survivors | 10 | 205 (83.7%) |
+| `agent-2026-09-07-pass4.json` | pass 3's 40 survivors | 16 | 221 (90.2%) |
+| `--sites 178,179`, verified as a pair | the nudge's grammar | 2 | 223 (91.0%) |
+
+The prediction in the note above held: pass 2's gain over the survey was 14 of
+64, and the survivors that remained were a genuine gap rather than an artefact
+of test selection. Forty-three of them are now dead, in `_resolve_entity`,
+`_outcome`, `_terminated_for`, `_not_every_container_ready`,
+`uncovered_workloads`, `workload_prefix`, `_looks_like_a_target`, `_timing`,
+`scan`, `_report_unverified`, the `verbose` mechanism and the deadline branch —
+see defects 39 and 40 for the two that were structural rather than local.
+
+**The 24 that remain are classified, not unread**, and each was named before
+the pass that confirmed it:
+
+- **Eight `1000 -> 1001`** on millisecond conversions. A 0.1% shift, which no
+  assertion can separate from jitter without becoming flaky.
+- **Five `round(x, 1) -> round(x, 2)`** on durations that only a real timer
+  produces. The one available check — the value equals itself rounded to one
+  place — passes by luck roughly one run in ten, so it is declined rather than
+  missed. The seven rounding mutants that *were* killable went to a direct
+  `_timing` call with fractional inputs.
+- **Three boundaries not reachable deterministically**: `remaining() <= 0` at
+  two sites and `spent < budget_at_call - 0.5`, each needing a float to land
+  exactly on the comparison.
+- **Four proven equivalent**: two `split(sep, 1) -> split(sep, 2)` on a key
+  holding one delimiter of each kind, `example = ... or ""` (whose apparent
+  test passes on the workload form, because a scan's example pod always
+  contains its workload name), and `wall_ms - slept_ms -> +` where no host
+  actually napped.
+- **`MAX_ROUNDS 8 -> 9`**, read by its one test *through the constant*, so it
+  moves with the mutant. **`run_id` at 12 hex characters rather than 13.** And
+  **`sys.argv[1:]`** inside the `__main__` guard, which is the irreducible one
+  this defect already documents.
 
 ### 38. A test that raced the mechanism it was measuring
 
