@@ -43,7 +43,7 @@ and does not support. Four words are used and they mean specific things:
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
-| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`. 18 modules via `--all`: 979 mutants, 764 killed, 78.0% (`results/mutation/all-2026-09-03.json`) — every row a pass 1, so every survivor count an upper bound. Plus the three `--all` cannot reach (defect 31): `app.py` 23/42, `routers/k8s_pods_info.py` 191/262, and **`agent.py` 223/245 (91.0%)**, measured 2026-09-06/07 over four passes — see defects 37, 39 and 40. That figure replaces the composed 166/246 (67.5%): 246 was a 245-site enumeration plus a separately measured 17-mutant block, and the two halves were measured against different test sets. 245 sites against the same six files, once, needs no such caveat. **There is no repo-wide number and these must not be added into one:** the 18 are pass 1 and `agent.py` is pass 2, and summing the two bases is how 692/282 came to be quoted for a fortnight |
+| Mutation testing | **PARTIALLY PROVEN** | `evals/mutate.py`. 18 modules via `--all`: 979 mutants, 764 killed, 78.0% (`results/mutation/all-2026-09-03.json`) — every row a pass 1, so every survivor count an upper bound. Plus the three `--all` cannot reach (defect 31): `app.py` 23/42, `routers/k8s_pods_info.py` 191/262, **`agent.py` 223/245 (91.0%)**, **`grounding.py` 112/118 (94.9%)** and **`inference.py` 121/125 (96.8%)**, all measured 2026-09-06/08 over three or four passes each — see defects 37 and 39 to 43. That figure replaces the composed 166/246 (67.5%): 246 was a 245-site enumeration plus a separately measured 17-mutant block, and the two halves were measured against different test sets. 245 sites against the same six files, once, needs no such caveat. **There is no repo-wide number and these must not be added into one:** the 18 are pass 1 and `agent.py` is pass 2, and summing the two bases is how 692/282 came to be quoted for a fortnight |
 
 ## Defects found and fixed
 
@@ -2331,6 +2331,93 @@ unit under test also hides everything it stands in for, and a suite can gain
 eleven cases for a surface while leaving that surface unexecuted. Coverage
 would have shown these lines as uncovered; what the survey added was the count
 and the fact that nobody had noticed for a day.
+
+### 41. Pass 2 is not what moved the other modules
+
+**Claim under test.** Three modules had a second mutation pass and all three
+jumped: `backends.py` 54% to 76%, `controller.py` 57% to 73%, `agent.py` 73.9%
+to 91.0%. The handoff generalised that into an expectation — the two dense
+modules that had never had one "both moved ~20 points" and these would too.
+
+**Measured 2026-09-07/08.** They did not.
+
+| module | pass 1 | after pass 2 | gain | where the kills came from |
+|---|---|---|---|---|
+| `grounding.py` | 92/118 (78.0%) | 93/118 (78.8%) | **+0.8** | 1 file: `test_contradiction.py` |
+| `inference.py` | 89/125 (71.2%) | 93/125 (74.4%) | **+3.2** | 1 file: `test_chart.py` |
+
+A pass 2 re-runs pass 1's survivors against every test file that drives the
+module rather than just its own. It therefore measures **one thing**: how much
+of a module's behaviour is exercised from somewhere else. `backends.py` and
+`controller.py` have a lot; these two have almost none. The gain was never a
+property of the pass.
+
+**What the runs were actually worth**, and it is not nothing. After a pass 2, a
+survivor is known to be a real question about the code rather than an artefact
+of `mutate.py`'s default test selection — and nobody has to wonder which they
+are looking at. Read on that footing, the two lists gave up **34 real defects
+in the tests**:
+
+| module | pass 1 | pass 2 | after reading survivors |
+|---|---|---|---|
+| `grounding.py` | 78.0% | 78.8% (+1) | **112/118, 94.9%** (+19) |
+| `inference.py` | 71.2% | 74.4% (+4) | **121/125, 96.8%** (+28) |
+
+The wider test set found 5 of 52. Reading found 47. **The pass is a licence to
+read, not a substitute for it.**
+
+### 42. One assertion shape, six sites, three modules
+
+**Problem.** Defect 39 was written up as a single finding: `model_share < 0.5`
+admitted a negative share and a share of exactly `0.0`. It is not a single
+finding. The same shape was then found at five more sites, in two more modules,
+every one of them a quantity asserted as *present* or *greater than something*
+rather than *right*:
+
+| assertion | module | what it admitted |
+|---|---|---|
+| `assert t["model_share"] < 0.5` | `agent.py` | a negative share; a share of `0.0` |
+| `assert result["checked"] > 0` | `grounding.py` | a counter incrementing by two |
+| `assert verdict["checked"] >= 1` | `contradiction` | the same |
+| `assert result["checked"] >= 1` | `contradiction` | the same |
+| `assert telemetry.INFERENCE_DURATION.values` | `inference.py` | `perf_counter() + started`, on the success path |
+| the same assertion, failure path | `inference.py` | the same, on the failure path |
+
+Two of the six were never on a survivor list at all — they died to a fix aimed
+at a neighbour, which is the tell that this is a *class* rather than six
+coincidences.
+
+**The rule.** A quantity that has a correct value should be asserted at it.
+Where the exact value is not knowable, bound it on **both** sides: a duration
+from a stub provider is `0 <= x < 1`, not `>= 0`. One-sided bounds are the
+right tool for one job only — asserting a direction that is genuinely all you
+mean, such as "the tool time was not attributed to the model" — and even there
+the other side is usually free.
+
+**Why it kept happening.** Every one of these assertions is *correct*. They
+fail on the bug they were written for. What they cannot do is fail on a value
+that is not a value of that kind at all, and nothing in a green test run
+distinguishes those two situations. A mutation survey does.
+
+### 43. Two things a survivor turned out not to be
+
+Both found while trying to kill a mutant, and neither is a missing test.
+
+**`inference.Target.build()` is dead code.** Its `api_key or None` mutant is
+unkillable because nothing calls the method — `grep` finds no use in the
+repository, and `Gateway._backend` performs the same construction with a cache
+in front of it. Recorded rather than deleted: removing a public method is a
+decision for the owner, not a side effect of chasing coverage.
+
+**The existing failed-probe test does not exercise a failed probe.**
+`test_a_failed_probe_reports_the_class_and_not_its_message` drives `Broken`,
+which inherits `Recorder` and defines no `probe` at all — so the exception it
+catches is an `AttributeError` from the missing method, not the provider
+failure the branch is about. The test is sound for what it asserts (no
+credential in the output) and was never coverage of `entry["ready"] = False`,
+which stayed alive through two passes. A provider that could not be reached
+could have been reported **Ready**, which is the pod-takes-traffic-it-cannot-
+serve shape this project has now shipped in three different forms.
 
 ## Reproducing
 
