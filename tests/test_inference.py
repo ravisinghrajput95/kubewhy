@@ -1648,3 +1648,52 @@ class TestAnExplicitProviderBeatsAnInferredOne:
         # sends the fallback at whatever address the mode defaults to.
         assert config.fallback.endpoint == "http://vllm.svc:8000/v1"
         assert config.fallback.model == "m"
+
+
+class TestRedactionNeverFailsQuietly:
+    """
+    `isinstance(content, str) and callable(copy)` decides whether a provider's
+    own message object can be redacted by copying it. Joined by `or`, a message
+    that has content but no `model_copy` takes the copy branch anyway and calls
+    None -- so redaction raises TypeError mid-egress instead of passing the
+    message through with a warning.
+
+    The comment on that block says the rule: silently not redacting is the one
+    outcome this must never do quietly. Passing through loudly is the designed
+    behaviour; crashing is not, and neither is skipping without a word.
+    """
+
+    class Copyable:
+        def __init__(self, content):
+            self.content = content
+
+        def model_copy(self, update):
+            return type(self)(update["content"])
+
+    class NoCopy:
+        """A provider object this code cannot rebuild."""
+
+        def __init__(self, content):
+            self.content = content
+
+    def test_a_message_the_module_can_copy_is_redacted(self):
+        out = inference._redacted([self.Copyable("password: hunter2")])
+
+        assert out[0].content == "password: [REDACTED:SECRET]"
+
+    def test_a_message_it_cannot_copy_passes_through_and_says_so(self, caplog):
+        original = self.NoCopy("password: hunter2")
+
+        with caplog.at_level("WARNING"):
+            out = inference._redacted([original])
+
+        assert out[0] is original, (
+            "the message was rebuilt by a copy method it does not have")
+        assert "egress_redaction_skipped" in caplog.text, (
+            "not redacting is survivable; not saying so is not")
+
+    def test_a_plain_dict_is_redacted_without_any_copy_method(self):
+        out = inference._redacted([{"role": "user", "content": "password: hunter2"}])
+
+        assert out[0]["content"] == "password: [REDACTED:SECRET]"
+        assert out[0]["role"] == "user"
