@@ -7,28 +7,44 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-07 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1619 tests pass, 0
+**State: `main` at the 2026-09-08 head — `git log --oneline -1` is the
+authority, not this line — tree clean and pushed, **1654 tests pass, 0
 skipped** (46s, with Postgres up; without it 32 of those skip *silently*, see
 Environment), CI green, tags through v0.2.0. Nothing of this project is
 running: the GKE cluster was created and deleted inside the 2026-09-05
 session, zero clusters, disks or Artifact Registry repositories remain. The
-suite figure needs Postgres up — with it down the same tree reads **1587
+suite figure needs Postgres up — with it down the same tree reads **1622
 passed, 32 skipped**, and those 32 are the shared-state cases. Both measured
 2026-09-07 on the same tree, minutes apart.**
 
-**Mutation coverage.** 18 modules via `--all`, measured 2026-09-02/03:
-979 mutants, 764 killed, **78.0%** (`results/mutation/all-2026-09-03.json`,
-defect 32). Plus the three `--all` structurally cannot reach (defect 31):
-`app.py` 23/42, `routers/k8s_pods_info.py` 191/262, and **`agent.py`
-223/245 = 91.0%**, measured 2026-09-06/07 over four passes and **no longer a
-composed figure** — one enumeration of 245 sites against one set of six test
-files, then three passes over each previous pass's survivors (181, then +14,
-+10, +16, plus 2 verified as a pair). That replaces 166/246 = 67.5%, whose 246
-was a 245-site enumeration plus a separately measured 17-mutant block. Defect
-37 carries the table. Every row from `--all` is still a **pass 1** and its
-survivor count an upper bound — `backends.py` read 54% and is 76% after pass 2,
-`controller.py` 57% and 73%.
+**Mutation coverage.** Three modules are measured properly, on one base each,
+and none of these is a composed figure:
+
+| module | measured | passes | survivors, all classified |
+|---|---|---|---|
+| `agent.py` | **223/245, 91.0%** | 4 | 24 |
+| `grounding.py` | **112/118, 94.9%** | 4 | 6, all equivalent |
+| `inference.py` | **121/125, 96.8%** | 3 | 4 |
+
+`agent.py` replaces 166/246 = 67.5%, whose 246 was a 245-site enumeration plus
+a separately measured 17-mutant block. Defect 37 carries its pass table;
+defects 41 to 43 carry the other two.
+
+**The `--all` survey is now stale in two of its rows.** 18 modules measured
+2026-09-02/03: 979 mutants, 764 killed, 78.0%
+(`results/mutation/all-2026-09-03.json`, defect 32) — but `grounding.py` sits
+in that number at 92/118 and `inference.py` at 89/125, and both are the rows
+above now. Re-run `--all` before quoting 78.0% again. Two more modules
+`--all` structurally cannot reach at all (defect 31): `app.py` 23/42 and
+`routers/k8s_pods_info.py` 191/262.
+
+Every remaining row from `--all` is a **pass 1** and its survivor count an
+upper bound — but read defect 41 before assuming a pass 2 will move one.
+`backends.py` went 54% to 76% and `controller.py` 57% to 73%; `grounding.py`
+went 78.0% to 78.8% and `inference.py` 71.2% to 74.4%. A pass 2 measures how
+much of a module is driven from test files other than its own, and that is a
+property of the module, not of the pass. What moved these two was **reading**
+the survivors afterwards: 47 kills against the wider test set's 5.
 
 **Do not add these into a repo-wide number.** The 18 are pass 1 and `agent.py`
 is pass 2; summing the two bases is exactly how 692/282 came to be quoted for
@@ -42,6 +58,58 @@ that all patched out the function the CLI calls.
 
 Then "Pick up, in order" below. Everything under "What changed on 2026-08-26 /
 27" is history.
+
+## What landed on 2026-09-07/08: grounding and inference
+
+**Both dense modules are measured and nearly closed.** `grounding.py` 78.0% to
+**94.9%**, `inference.py` 71.2% to **96.8%**, 52 real survivors killed, every
+one verified as a before/after pair on the same `--sites` command.
+
+**The headline is a correction, not a number.** Pass 2 was expected to move
+each of these ~20 points because three modules in a row had. It moved them 0.8
+and 3.2. What a pass 2 measures is how much of a module is exercised from test
+files other than its own, and these two are barely exercised from elsewhere —
+`inference`'s four kills all came from `test_chart.py`, `grounding`'s one from
+`test_contradiction.py`. Defect 41. **The pass is a licence to read, not a
+substitute for it:** the wider test set found 5 of the 52, and reading the
+survivors found 47.
+
+**Defect 42 is the one to carry into any module.** Defect 39 was written up as
+a single finding and is a class: six sites, three modules, every one a quantity
+asserted as *present* or *greater than something* rather than *right*.
+`model_share < 0.5` admits a negative share and exactly `0.0`; `checked > 0`
+and two `checked >= 1` admit a counter incrementing by two;
+`assert telemetry.INFERENCE_DURATION.values` admits `perf_counter() + started`
+on both the success and the failure path. Two of the six were never on a
+survivor list — they died to a fix aimed at a neighbour, which is what makes it
+a class rather than six coincidences. Every one of those assertions is correct
+and fails on the bug it was written for; none can fail on a value that is not a
+value of that kind at all.
+
+**What was worth killing.** In `inference.py`, `unavailable()` — the predicate
+deciding whether a failure is retried on the fallback or raised — was the
+densest cluster in the repo at 15 mutants and no test read it; the policy
+defaults `allow_external=False` and `redact_on_egress=True`, which is the
+configuration most installs run and which nothing asserted; the four `or`
+fallbacks carrying the API key, where `key and ""` drops the credential
+silently and the provider answers 401; and `entry["ready"] = False`, where an
+unreachable provider could be reported Ready. In `grounding.py`, the `checked`
+count at all four increment sites and both defaults, and `_entity_index`, named
+in no test at all, which files a pod's measurement under its workload name so
+that — as its own comment warns — scoping does not invent failures.
+
+**One thing `ollama` does that reading the code will not tell you.**
+`ResponseError.status_code` defaults to **-1**, not to 0 and not to absent. So
+a bare `ResponseError` is the provider answering, and an explicit 0 is a
+transport failure worth retrying. Two different cases that look like one until
+you construct them.
+
+**My equivalence predictions ran 8 of 11, not 5 of 5.** The three misses share
+a shape: a dead store (`decimals = 0`, always overwritten because a float
+always contains a ".") and a redundant argument (`strip_ordinals=True` applied
+to text `_claims` has already stripped) both look killable and are not. Reading
+the mutation is not the same as reading what depends on it — check whether the
+mutated value is ever *read* before predicting it will die.
 
 ## What landed on 2026-09-06/07: agent.py, measured properly
 
@@ -237,80 +305,35 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    run.** Check the tags from the registry afterwards, not from the workflow
    log; this repo has shipped the wrong image under a right-looking tag once.
 
-2. **Pass 2 on `inference.py` (36) and `grounding.py` (26).** Now the top of
-   the list. They are the only two dense modules that have never had one, and
-   the two `--all` rows most likely to be wrong: every module that has had a
-   pass 2 moved a long way — `backends.py` 54% to 76%, `controller.py` 57% to
-   73%, and `agent.py` 73.9% to 91.0% over three further passes this session.
-   Do this *before* reading a survivor or writing a test against one: six
-   survivors in `backends._model_check` read exactly like a gap worth testing,
-   and pass 2 killed eight of seventeen because three other files already
-   covered them.
+2. **Re-run the 18-module `--all` survey.** Two of its rows are now wrong in
+   the good direction — `grounding.py` and `inference.py` are 94.9% and 96.8%
+   against the 78.0% and 71.2% that number contains — so 979/764/78.0% should
+   not be quoted until it is re-measured. **With Postgres up**, or `store.py`
+   is measured with 32 of its cases skipping silently. Budget about an hour.
 
-   **The test sets, derived rather than guessed** (an earlier handoff said
-   "candidate test sets are tabled below" and there was no table; this is what
-   the tree actually says). Count the files that import the module or call into
-   it, not the ones that merely mention it — a plain grep for "grounding"
-   returns ten files and four of them only say the word in a docstring:
+   Whatever comes back, read defect 41 before planning what to do with it. A
+   pass 2 on a module measures how much of it is driven from test files other
+   than its own; on `backends.py` and `controller.py` that was a lot and on
+   `grounding.py` and `inference.py` it was almost nothing. **Reading the
+   survivors is what moved those two** — 47 kills against the wider set's 5 —
+   and a pass 2 is what makes the reading worth doing, because after it a
+   survivor is a real question about the code rather than an artefact of the
+   default test selection.
 
-   | module | pass 1 | test files that import it or call into it |
-   |---|---|---|
-   | `grounding.py` | 92/118, 26 survivors | `test_grounding`, `test_contradiction`, `test_agent_loop`, `test_replay_grounding`, `test_ui`, `test_eval_graders` |
-   | `inference.py` | 89/125, 36 survivors | `test_inference`, `test_chart`, `test_audit`, `test_ui_security`, `test_agent_loop`, `test_api`, `test_backends`, `test_controller` |
+3. **Two survivors are decisions rather than gaps**, both recorded in defect
+   43 and neither taken unilaterally:
 
-   Both pass 1 rows were measured against the module's own test file **alone**,
-   which is `mutate.py`'s default and the under-selection every pass 2 has
-   corrected so far.
-
-   **Run them one at a time, not in parallel.** `test_agent_loop.py` is in both
-   sets and carries timing assertions — `sorted(round_ms)[0] < 100` among them
-   — that a competing survey's CPU load can flip, and a test that fails for
-   load counts the mutant as killed. That is a wrong number arriving quietly,
-   which is the failure this whole exercise exists to avoid.
-
-   **Run it the way the agent.py survey was run**, which is the one piece of
-   method that came out of 2026-09-06 worth copying:
-
-   ```
-   nohup caffeinate -is .venv/bin/python -u evals/mutate.py <module> \
-     --tests <the files that actually drive it> \
-     --json results/mutation/<name>.json -v > <log> 2>&1 < /dev/null & disown
-   ```
-
-   `nohup ... & disown` because a job started with the harness's background
-   flag dies when the session ends — that cost a 50-minute survey. `-u` because
-   `mutate.py -v` prints only survivors, so a redirected log sits empty behind
-   Python's 8KB buffer for the whole run and a healthy job is indistinguishable
-   from a hung one. `--json` under `results/` because a session-scoped
-   scratchpad does not survive either. And **never through `tail`**, which
-   buffers until the producer exits.
-
-   Then re-run only the survivors, and only the survivors, for as many passes
-   as keep paying: **that chain is exact rather than convenient**, because a
-   test can turn a survivor into a kill and never the reverse. Four passes on
-   `agent.py` cost about 90 minutes of wall clock and moved it 17 points.
-
-3. **`agent.py` has 24 survivors left and they are classified, not unread.**
-   Defect 37 tables every one with the reason it is declined. **Do not
-   re-review them as a gap.** Eight are `1000 -> 1001` on millisecond
-   conversions; five are `round(x, 1) -> round(x, 2)` on durations only a real
-   timer produces, where the only available assertion passes by luck about one
-   run in ten; three are float boundaries not reachable deterministically; four
-   are proven equivalent; and three are self-referential or irreducible.
-
-   If you want to argue with one, argue with **`run_id = uuid4().hex[:12]`**
-   (12 characters rather than 13) or **`MAX_ROUNDS = 8`**, whose one test reads
-   the constant and so moves with the mutant. Those two are the only survivors
-   where a reasonable person might want an assertion and there is no reason it
-   would be flaky.
-
-   **The method that mattered more than the count.** Classify a survivor
-   *before* the run that confirms it. That was done four times this session —
-   `scan`'s two `maxsplit` mutants, the deadline branch's four, the give-up
-   path's three, and `uncovered_workloads:619` — and the runs left exactly
-   those standing each time. A classification that predicts the measurement is
-   worth something; one written afterwards to explain a survivor is worth very
-   little.
+   - **`inference.Target.build()` has no callers.** `grep` finds none in the
+     repository and `Gateway._backend` does the same construction with a cache.
+     Its mutant is unkillable because the method is dead. Delete it, or keep it
+     deliberately and say so.
+   - **`test_a_failed_probe_reports_the_class_and_not_its_message` does not
+     exercise a failed probe.** It drives `Broken`, which inherits `Recorder`
+     and defines no `probe`, so what it catches is an `AttributeError` from the
+     missing method. The test is correct for what it asserts and was never
+     coverage of the branch it appears to cover; a new case now holds
+     `ready is False`. Decide whether the old one should raise from `probe()`
+     instead.
 
 4. **`_NEGATION_WINDOW = 40`**, found and not fixed. It is measured in
    characters and a marked-up entity name spends 15-20 of them, so "Nothing
