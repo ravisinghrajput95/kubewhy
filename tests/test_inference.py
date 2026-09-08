@@ -1539,3 +1539,112 @@ class TestAProbeThatFailedIsNotReady:
             backends._BACKENDS.pop(Quiet.name, None)
 
         assert report["primary"]["models_listed"] == 0
+
+
+class TestTheApiKeySurvivesToTheClient:
+    """
+    Four `or` fallbacks carry the credential from configuration to the client
+    that opens the connection, and all four survived both passes. Mutated to
+    `and`, every one of them evaluates to the empty branch -- `key and ""` is
+    `""` whenever the key is present -- so the key is dropped silently and the
+    provider answers 401. That reads, from the outside, exactly like a wrong
+    key in the operator's environment.
+    """
+
+    ENDPOINT = "https://api.openai.com/v1"
+
+    def test_a_configured_key_is_kept_on_the_target(self):
+        held = target(mode="api", provider="openai", endpoint=self.ENDPOINT,
+                      model="gpt-4o", api_key="sk-live-xyz")
+
+        assert held.api_key == "sk-live-xyz"
+
+    def test_no_key_is_the_empty_string_and_not_none(self):
+        """`or ""` normalises: the attribute is always a string, so callers can
+        compare and log it without a None check."""
+        assert target().api_key == ""
+
+    def test_the_client_is_built_with_the_key_the_target_holds(self):
+        """
+        The two `or None` sites, which convert "" back to None at the boundary
+        because a client handed an empty string sends an empty Authorization
+        header rather than none at all.
+        """
+        seen = {}
+
+        class Keyed(Recorder):
+            name = "keyed"
+
+            def __init__(self, endpoint=None, api_key=None, timeout=None):
+                super().__init__(endpoint, api_key, timeout)
+                seen["api_key"] = api_key
+
+        backends.register(Keyed.name, Keyed)
+        try:
+            gate = gateway(target(mode="api", provider="keyed",
+                                  endpoint=self.ENDPOINT, model="m",
+                                  api_key="sk-live-xyz"),
+                           allow_external=True)
+            gate.chat("m", [], [], False)
+        finally:
+            backends._BACKENDS.pop(Keyed.name, None)
+
+        assert seen["api_key"] == "sk-live-xyz"
+
+    def test_the_fallback_falls_back_to_the_openai_variable(self):
+        """
+        `TRIAGE_FALLBACK_API_KEY or OPENAI_API_KEY`. The second is the one
+        people actually have set, so dropping it makes a correctly configured
+        fallback fail to authenticate.
+        """
+        config = inference.from_env({
+            "TRIAGE_FALLBACK_ENABLED": "1", "TRIAGE_FALLBACK_MODE": "api",
+            "TRIAGE_FALLBACK_PROVIDER": "openai",
+            "TRIAGE_FALLBACK_ENDPOINT": self.ENDPOINT,
+            "TRIAGE_FALLBACK_MODEL": "gpt-4o",
+            "OPENAI_API_KEY": "sk-from-openai-var",
+            "TRIAGE_ALLOW_EXTERNAL_INFERENCE": "1",
+        })
+
+        assert config.fallback.api_key == "sk-from-openai-var"
+        assert config.fallback.provider == "openai"
+        assert config.fallback.model == "gpt-4o"
+        assert config.fallback.endpoint == self.ENDPOINT
+
+
+class TestAnExplicitProviderBeatsAnInferredOne:
+    """
+    Both the primary's legacy fallback and the fallback target's own provider
+    are `or` chains, and both survived because the provider is *also* inferable
+    from the endpoint -- so a fixture whose explicit value matches what would
+    be inferred anyway proves nothing. These use endpoints where the two
+    disagree.
+    """
+
+    def test_the_legacy_backend_variable_still_names_the_provider(self):
+        """
+        `TRIAGE_BACKEND` predates TRIAGE_INFERENCE_MODE and installs still set
+        it. Dropped, the provider falls back to whatever the default endpoint
+        implies, which is ollama -- so a vLLM install silently talks the wrong
+        client.
+        """
+        config = inference.from_env({"TRIAGE_BACKEND": "vllm"})
+
+        assert config.primary.provider == "vllm"
+
+    def test_the_fallback_provider_is_read_before_it_is_guessed(self):
+        config = inference.from_env({
+            "TRIAGE_FALLBACK_ENABLED": "1",
+            "TRIAGE_FALLBACK_MODE": "cluster",
+            "TRIAGE_FALLBACK_PROVIDER": "vllm",
+            "TRIAGE_FALLBACK_ENDPOINT": "http://vllm.svc:8000/v1",
+            "TRIAGE_FALLBACK_MODEL": "m",
+        })
+
+        assert config.fallback.provider == "vllm", (
+            "the configured provider was dropped and one was inferred from the "
+            "endpoint instead")
+        # The endpoint is the other half of the same line, and dropping it
+        # sends the fallback at whatever address the mode defaults to.
+        assert config.fallback.endpoint == "http://vllm.svc:8000/v1"
+        assert config.fallback.model == "m"
