@@ -357,9 +357,21 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    answer. Changing it is a tuning change and needs `evals/replay_grounding.py`
    over the corpus to say what it costs. Baseline: 1650 records, 60 moved.
 
-5. **Slack: `[text](url)` links still show their target.** Bold and headings
-   are converted; links are not, deliberately — that failure is ugly rather
-   than misleading. Fix it if you want, with the same care about code spans.
+5. **Slack link conversion is done** (2026-09-08). `[text](url)` becomes
+   `<url|text>` for http, https and mailto, and for nothing else — `<...|...>`
+   is also how Slack spells a **channel mention**, so a general conversion
+   would turn a model's `[the section](#root-cause)` into something Slack reads
+   as a channel reference. Images and code spans are excluded too.
+
+   **It could not be verified by mutation and that is a property of the change,
+   not an omission.** The logic is a regex, a regex is a string literal, and
+   `evals/mutate.py` enumerates the same 40 sites in `sinks.py` before and
+   after. Both directions were measured by breaking the mechanism instead:
+   removing the `_LINK.sub` call fails the two positive cases, and widening the
+   regex to any target fails the anchor and image cases. Worth copying whenever
+   a change lands entirely inside a literal — three of those five tests assert
+   *non*-conversion and cannot fail on a missing feature at all, so only the
+   second counter proves they do their job.
 
 6. **Finish what the linter found.** 164 ruff and 20 mypy findings, all
    triaged in the commit that added `pyproject.toml`, none of them live
