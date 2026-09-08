@@ -8,12 +8,12 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-08 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1654 tests pass, 0
+authority, not this line — tree clean and pushed, **1659 tests pass, 0
 skipped** (46s, with Postgres up; without it 32 of those skip *silently*, see
 Environment), CI green, tags through v0.2.0. Nothing of this project is
 running: the GKE cluster was created and deleted inside the 2026-09-05
 session, zero clusters, disks or Artifact Registry repositories remain. The
-suite figure needs Postgres up — with it down the same tree reads **1622
+suite figure needs Postgres up — with it down the same tree reads **1627
 passed, 32 skipped**, and those 32 are the shared-state cases. Both measured
 2026-09-08 on the same tree, minutes apart.**
 
