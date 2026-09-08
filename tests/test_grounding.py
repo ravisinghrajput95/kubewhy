@@ -534,6 +534,194 @@ class TestNoToolsCalled:
         assert result["unverified"] == []
 
 
+class TestNamingSomethingTheEvidenceDoesNotHold:
+    """
+    A named entity is "known" two ways: it appears in what the tools returned,
+    or it matches something the index keys -- either way round, because the
+    answer may name the workload where the tool keyed the pod. Both halves are
+    `or`, and both survived.
+
+    The failure this guards is the one observed live on 2026-08-19: "The
+    crasher pod log-shipper-8gnqk is in Error with 7 restarts". Error and 7
+    were both measured, for log-shipper, so every value checked out and the
+    answer scored grounded while naming the wrong workload in the same breath.
+    """
+
+    def test_a_field_value_is_known_without_being_a_document_subject(self):
+        """
+        The first half. "namespace demo-1" is a field value, not the subject of
+        any document, so the index does not key it -- it is known because the
+        evidence text contains it. Requiring both would flag it, and flagging
+        field values fires on almost every correct answer.
+        """
+        evidence = [{"id": "tool-1", "tool": "list_pods", "result": json.dumps(
+            {"pod": "p", "namespace": "demo-1", "status": "Running"})}]
+
+        verdict = grounding.check("The namespace demo-1 is affected.", evidence)
+
+        assert [c["kind"] for c in verdict["claims"]] == ["number"], (
+            "demo-1 was flagged as an entity the evidence does not hold, but "
+            "the evidence says it plainly")
+
+    def test_a_workload_is_known_through_the_pod_the_tool_keyed(self):
+        """
+        The second half, isolated: `crasher-app` appears nowhere in the
+        evidence text, so it can only be known by matching the trimmed alias
+        `crasher` that the index registered for the pod. Requiring name and
+        entity to be equal AND contained both ways collapses that to equality
+        and the alias stops working.
+        """
+        evidence = [{"id": "tool-1", "tool": "describe_pod", "result": json.dumps(
+            {"pod": "crasher-5964d99948-9g8vg", "restarts": 7})}]
+
+        verdict = grounding.check("The deployment crasher-app owns it.", evidence)
+
+        assert verdict["claims"] == [], (
+            "the workload was flagged as unknown although the index holds the "
+            "pod it was trimmed from")
+
+
+class TestTheRcaContract:
+    """
+    `contract()` splits the edits verify() made into what was corrected and
+    what could only be marked. They are different things to a reader -- one is
+    a value replaced by its measurement, the other a value nothing supports --
+    and the filter that separates them survived both passes.
+    """
+
+    OOM = json.dumps({"pod": "memory-hog", "status": "OOMKilled",
+                      "containers": {"hog": {"limits": {"memory": "64Mi"}}}})
+
+    def test_a_corrected_value_is_a_correction_and_not_an_unknown(self):
+        answer = "memory-hog was OOMKilled. Memory limit: 512Mi."
+        verdict = grounding.check(answer, [self.OOM])
+        _, edits = grounding.verify(answer, verdict, [self.OOM])
+
+        assert [e["action"] for e in edits] == ["corrected"], (
+            "the fixture must produce a correction, or this proves nothing")
+
+        rca = grounding.contract(verdict, edits)
+
+        assert rca["corrections"] == edits
+        assert rca["unknowns"] == []
+
+
+class TestEvidenceRecords:
+    """
+    `records()` pairs each tool result with the name of the tool that produced
+    it. A claim is only auditable if you can say WHICH result supports it, so
+    an off-by-one here attributes every measurement to the wrong tool -- and
+    silently, because the ids still line up.
+    """
+
+    def test_each_result_carries_the_name_of_the_tool_that_produced_it(self):
+        out = grounding.records(["{}", "{}"],
+                                names=["describe_pod", "get_pod_logs"])
+
+        assert [r["id"] for r in out] == ["tool-1", "tool-2"]
+        assert [r["tool"] for r in out] == ["describe_pod", "get_pod_logs"]
+
+    def test_a_result_with_no_name_is_recorded_without_one(self):
+        """The caller does not always know, and a wrong name is worse than
+        none: it would cite a tool that never returned that value."""
+        out = grounding.records(["{}", "{}"], names=["describe_pod"])
+
+        assert [r["tool"] for r in out] == ["describe_pod", None]
+
+
+class TestWhatCountsAsAClaim:
+    """
+    The reporting/prescriptive split, the ordinal guard and the rounding
+    tolerance -- the three things that decide which numbers in an answer get
+    held to the evidence. Eight mutants across them survived pass 1 and pass 2.
+    """
+
+    OOM = json.dumps({"pod": "memory-hog", "status": "OOMKilled",
+                      "containers": {"hog": {"limits": {"memory": "64Mi"}}}})
+
+    def test_an_answer_that_opens_with_a_fenced_block_still_states_claims(self):
+        """
+        A fenced block inherits the intent of the prose introducing it, and
+        `previous_was_prescriptive` is what carries that intent. It is read
+        before it is ever assigned when the answer's FIRST line opens a fence
+        -- there is no preceding prose -- so its initial value decides whether
+        an opening block is evidence or a proposal.
+
+        Starting it True would drop every value in that block from checking. A
+        fabricated limit inside the block a model opened with would go out
+        unflagged, which is the one failure this module exists to prevent.
+        """
+        answer = "```yaml\nlimits:\n  memory: 256Mi\n```\nThat is the current limit."
+
+        assert "  memory: 256Mi" in grounding._claims(answer)
+
+    def test_an_ordinal_is_enumeration_not_a_measurement(self):
+        """
+        "1. first uses 19.66%" splits on the "." into a bare "1." that no
+        longer looks like enumeration, and the numbering gets reported as an
+        unmeasured figure. Both call sites strip ordinals and the parameter
+        defaults to not stripping; all three survived.
+        """
+        # The default is off, and the scope reader relies on it: a measured
+        # value must not be removed from scope for looking like a list marker.
+        assert grounding._numbers("1. first uses 19.66%") == {1.0, 19.66}
+        assert grounding._numbers(
+            "1. first uses 19.66%", strip_ordinals=True) == {19.66}
+
+        # With tools: the list marker must not become an unverified claim.
+        listed = grounding.check("1. memory-hog is OOMKilled.",
+                                 [json.dumps({"pod": "memory-hog",
+                                              "status": "OOMKilled"})])
+        assert listed["unverified"] == []
+        assert listed["checked"] == 1
+
+        # Without tools, the same guard decides between "stated nothing
+        # measurable" and "stated a figure nothing supports".
+        bare = grounding.check("1. It failed.", [])
+        assert bare["confidence"] == grounding.INSUFFICIENT
+        assert bare["checked"] == 0
+
+    def test_a_summarised_number_matches_at_the_precision_it_was_stated(self):
+        """
+        A model that says "20%" off a measured 19.66 is summarising, not
+        inventing. The tolerance is the precision of the CLAIM, so "19.7"
+        matches and "19.5" does not -- and both the decimal count and the test
+        that computes it survived, because nothing ever stated a claim to a
+        different precision from its measurement.
+        """
+        assert grounding._matches(20.0, {19.66}) is True
+        assert grounding._matches(19.7, {19.66}) is True
+        assert grounding._matches(19.5, {19.66}) is False
+
+    def test_a_prescriptive_line_is_not_rewritten(self):
+        """
+        "Raise it to 512Mi" is advice, not a report, and rewriting the value
+        inside it turns the recommendation into nonsense -- it would read
+        "raise it to 64Mi (observed)", which is the number it already has.
+        Only reporting lines are rewritten, and the guard that decides is an
+        `and`: a line is a claim line when it is non-blank AND has a reporting
+        clause. Joined by `or`, every non-blank line qualifies.
+        """
+        answer = "The memory limit is 512Mi.\nRaise it to 512Mi."
+        verdict = grounding.check(answer, [self.OOM])
+        assert verdict["unverified"] == ["512"], "the fixture must flag 512"
+
+        text, edits = grounding.verify(answer, verdict, [self.OOM])
+
+        assert text == "The memory limit is 64Mi (observed).\nRaise it to 512Mi."
+
+    def test_an_answer_with_nothing_to_rewrite_is_returned_untouched(self):
+        """
+        Not merely unchanged in content -- the same object's exact text,
+        trailing newline and all. verify() returns early precisely so a run
+        with nothing unverified cannot be reshaped by a round trip through
+        splitlines and join.
+        """
+        answer = "The pod is fine.\n"
+
+        assert grounding.verify(answer, {"unverified": []}, []) == (answer, [])
+
+
 class TestTheEntityIndex:
     """
     `_entity_index`, named in no test in this repo before now.
