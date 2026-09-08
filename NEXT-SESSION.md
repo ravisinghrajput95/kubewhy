@@ -15,7 +15,7 @@ running: the GKE cluster was created and deleted inside the 2026-09-05
 session, zero clusters, disks or Artifact Registry repositories remain. The
 suite figure needs Postgres up — with it down the same tree reads **1622
 passed, 32 skipped**, and those 32 are the shared-state cases. Both measured
-2026-09-07 on the same tree, minutes apart.**
+2026-09-08 on the same tree, minutes apart.**
 
 **Mutation coverage.** Three modules are measured properly, on one base each,
 and none of these is a composed figure:
@@ -30,21 +30,36 @@ and none of these is a composed figure:
 a separately measured 17-mutant block. Defect 37 carries its pass table;
 defects 41 to 43 carry the other two.
 
-**The `--all` survey is now stale in two of its rows.** 18 modules measured
-2026-09-02/03: 979 mutants, 764 killed, 78.0%
-(`results/mutation/all-2026-09-03.json`, defect 32) — but `grounding.py` sits
-in that number at 92/118 and `inference.py` at 89/125, and both are the rows
-above now. Re-run `--all` before quoting 78.0% again. Two more modules
-`--all` structurally cannot reach at all (defect 31): `app.py` 23/42 and
+**The 18-module `--all` survey, re-run 2026-09-08: 1002 mutants, 834 killed,
+83.2%** (`results/mutation/all-2026-09-08.json`), with Postgres up and
+`test_store.py` confirmed reporting no skips first. It replaces
+979/764/78.0%, which was stale in two rows and measuring a *different file* in
+four more — `controller.py` had grown 89 to 102 sites, `sinks.py` 31 to 40,
+`backends.py` 37 to 39, `slack_socket.py` 17 to 16.
+
+Two modules `--all` structurally cannot reach (defect 31): `app.py` 23/42 and
 `routers/k8s_pods_info.py` 191/262.
 
-Every remaining row from `--all` is a **pass 1** and its survivor count an
-upper bound — but read defect 41 before assuming a pass 2 will move one.
-`backends.py` went 54% to 76% and `controller.py` 57% to 73%; `grounding.py`
-went 78.0% to 78.8% and `inference.py` 71.2% to 74.4%. A pass 2 measures how
-much of a module is driven from test files other than its own, and that is a
-property of the module, not of the pass. What moved these two was **reading**
-the survivors afterwards: 47 kills against the wider test set's 5.
+**Every row is a pass 1** — `--all` uses the default test set, which is the
+module's own test file — so every survivor count is an upper bound, and the low
+rows are not news: `backends.py` reads 22/39 and is 76% after a pass 2,
+`controller.py` reads 60/102 and is 73%. The lowest rows now are
+`controller.py` 58.8%, `backends.py` 56.4%, `telemetry.py` 62.1% and `ui.py`
+72.6%.
+
+**One discrepancy, stated so nobody trips over it.** The survey puts
+`grounding.py` at 111/118 and the table above says 112/118. Both are right: the
+row is against `test_grounding.py` alone, the deeper figure against the six
+files that drive the module, and the difference is the single mutant
+`test_contradiction.py` kills. `inference.py` agrees at 121/125 either way,
+because its kills come from its own file.
+
+Read defect 41 before assuming a pass 2 will move any of these. It measures how
+much of a module is driven from test files *other than its own* — a property of
+the module, not of the pass. `backends.py` went 54% to 76% and `controller.py`
+57% to 73%; `grounding.py` went 78.0% to 78.8% and `inference.py` 71.2% to
+74.4%. What moved those two was **reading** the survivors afterwards: 47 kills
+against the wider test set's 5.
 
 **Do not add these into a repo-wide number.** The 18 are pass 1 and `agent.py`
 is pass 2; summing the two bases is exactly how 692/282 came to be quoted for
@@ -257,10 +272,12 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    the 2026-09-01 all-module survey (25 killed, 26 survivors) was measured in
    the first state. **Every module whose tests touch Postgres has to be
    surveyed with the database up.**
-2. **692 killed / 282 survivors mixes measurement bases**, and is now also
-   stale in two rows — `ui.py` and `contradiction.py` — and wrong in a third,
-   `store.py`. Do not quote it. Re-run the 18-module survey before there is
-   any repo-wide number again, with Postgres up.
+2. **692 killed / 282 survivors mixes measurement bases.** Long dead, and
+   kept here only so nobody revives it: it is superseded twice over, by
+   979/764/78.0% on 2026-09-03 and by **834/1002 = 83.2% on 2026-09-08**,
+   which is the number to quote. The rule it came from still holds — never sum
+   a pass 1 and a pass 2, and never sum a `--all` row with a module measured
+   against a wider test set.
 3. **Three ui.py timing survivors are equivalent, and the divisors are now
    killed.** `%.1f` rounds a default of 0ms and 1ms to the same `0.0s`, so the
    three *default* mutants can never be distinguished. All three divisors die
@@ -305,20 +322,18 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    run.** Check the tags from the registry afterwards, not from the workflow
    log; this repo has shipped the wrong image under a right-looking tag once.
 
-2. **Re-run the 18-module `--all` survey.** Two of its rows are now wrong in
-   the good direction — `grounding.py` and `inference.py` are 94.9% and 96.8%
-   against the 78.0% and 71.2% that number contains — so 979/764/78.0% should
-   not be quoted until it is re-measured. **With Postgres up**, or `store.py`
-   is measured with 32 of its cases skipping silently. Budget about an hour.
+2. **The lowest pass-1 rows, in order.** `--all` was re-run 2026-09-08 and the
+   number to improve is no longer a mystery: `backends.py` 22/39 (56.4%),
+   `controller.py` 60/102 (58.8%), `telemetry.py` 18/29 (62.1%), `ui.py`
+   122/168 (72.6%). The first two already have pass-2 figures of 76% and 73%,
+   so their real gaps are smaller than they read; `telemetry.py` and `ui.py`
+   have never had one.
 
-   Whatever comes back, read defect 41 before planning what to do with it. A
-   pass 2 on a module measures how much of it is driven from test files other
-   than its own; on `backends.py` and `controller.py` that was a lot and on
-   `grounding.py` and `inference.py` it was almost nothing. **Reading the
-   survivors is what moved those two** — 47 kills against the wider set's 5 —
-   and a pass 2 is what makes the reading worth doing, because after it a
-   survivor is a real question about the code rather than an artefact of the
-   default test selection.
+   The method that worked twice this week, in order: run a pass 2 to find out
+   whether the module is driven from elsewhere, then **read the survivors**,
+   which is what actually moves the number. Classify before the run that
+   confirms it, and check whether the mutated value is ever *read* — a dead
+   store and a redundant argument both look killable and are not.
 
 3. **Two survivors are decisions rather than gaps**, both recorded in defect
    43 and neither taken unilaterally:
