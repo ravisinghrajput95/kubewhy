@@ -404,6 +404,48 @@ class TestSlackRendersTheModelsMarkdown:
         for text in ("a ** b ** c", "2 ** 8 is 256", "x = y ** 2 here"):
             assert sinks._mrkdwn(text) == text
 
+    def test_a_markdown_link_becomes_a_slack_link(self):
+        assert sinks._mrkdwn("see [the docs](https://example.com/a) now") == (
+            "see <https://example.com/a|the docs> now")
+        assert sinks._mrkdwn("[mail me](mailto:x@y.z)") == (
+            "<mailto:x@y.z|mail me>")
+
+    def test_a_link_to_anything_but_a_url_is_left_alone(self):
+        """
+        The reason this is narrow rather than general, and it is not
+        fussiness. `<...|...>` is not only Slack's link syntax: `<#C024BE7LR|
+        general>` is a CHANNEL mention. A model writing "[the section]
+        (#root-cause)" to link within its own answer would, under a general
+        conversion, produce something Slack reads as a reference to a channel
+        -- inventing a mention out of a diagnosis. An unconverted link is ugly;
+        that is misleading.
+        """
+        for text in ("[the section](#root-cause)",
+                     "[relative](../a/b)",
+                     "[ftp thing](ftp://example.com/x)"):
+            assert sinks._mrkdwn(text) == text
+
+    def test_an_image_stays_an_image(self):
+        """`![alt](url)` is a picture, and turning it into a link changes what
+        the answer says rather than how it looks."""
+        text = "![a picture](https://example.com/i.png)"
+
+        assert sinks._mrkdwn(text) == text
+
+    def test_a_link_inside_a_code_span_is_left_alone(self):
+        text = "the flag `[x](https://e.com)` is literal"
+
+        assert sinks._mrkdwn(text) == text
+
+    def test_a_link_inside_a_heading_survives_the_flattening(self):
+        """
+        Headings are converted to bold first and consume their own emphasis, so
+        the link pass has to run after them or a link in a heading stays
+        literal.
+        """
+        assert sinks._mrkdwn("### See [docs](https://e.com/d)") == (
+            "*See <https://e.com/d|docs>*")
+
     def test_the_conversion_reaches_the_block_that_is_sent(self):
         """
         The counter for the cases above: they all test the helper, and a

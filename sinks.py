@@ -60,6 +60,24 @@ _HEADING = re.compile(r"^\s{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*\s*$", re.MULTILINE)
 # rule. Slack has none, so `---` arrives as three dashes on their own line.
 _RULE = re.compile(r"^\s{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$\n?", re.MULTILINE)
 
+# `[text](url)` -> Slack's `<url|text>`.
+#
+# Deliberately narrow, and the narrowness is the point. Only http, https and
+# mailto are converted, because `<...|...>` is not merely Slack's link syntax:
+# `<#C024BE7LR|general>` is a CHANNEL mention and `<@U024BE7LH>` is a user
+# mention. Converting `[the section](#root-cause)` -- which a model writes
+# whenever it links within its own answer -- would emit `<#root-cause|the
+# section>` and hand Slack something it reads as a channel reference. An
+# unconverted link is ugly; a fabricated channel mention is not.
+#
+# No whitespace, angle brackets, parentheses or pipes in the URL: a pipe would
+# split the link at the wrong place, and balancing parentheses needs a real
+# parser. A Markdown image is `![alt](url)`, so the lookbehind leaves it alone
+# rather than turning a picture into a link.
+_LINK = re.compile(
+    r"(?<!!)\[([^\]\n]+)\]\((https?://[^\s<>()|]+|mailto:[^\s<>()|]+)\)"
+)
+
 
 def _mrkdwn(text):
     """
@@ -81,9 +99,11 @@ def _mrkdwn(text):
     Horizontal rules (`---`) are dropped: Slack has no rule, and a line of
     three dashes in the middle of a diagnosis reads as a typo.
 
-    `[text](url)` links are still passed through and show their target.
-    Converting them needs the same care as the rest of a real parser, and
-    unlike bold and headings the failure is ugly rather than misleading.
+    `[text](url)` becomes `<url|text>`, for http, https and mailto only. Every
+    other target is left alone on purpose: `<...|...>` is also how Slack spells
+    a channel mention, so converting `[the section](#root-cause)` would emit
+    something Slack reads as a reference to a channel. An unconverted link is
+    ugly; a fabricated channel mention is worse.
 
     Code is protected: `**` inside a fence or a code span is text.
     """
@@ -97,7 +117,12 @@ def _mrkdwn(text):
     def convert(chunk):
         # Headings first, and they consume their own emphasis, so the bold
         # pass below cannot reach inside one and nest asterisks.
-        return _BOLD.sub(r"*\2*", _RULE.sub("", _HEADING.sub(heading, chunk)))
+        # Links last: a heading or bold pass that ran over `<url|text>` could
+        # not reach inside one anyway, but running them first means a link
+        # inside a heading still becomes a link rather than staying literal.
+        return _LINK.sub(
+            r"<\2|\1>",
+            _BOLD.sub(r"*\2*", _RULE.sub("", _HEADING.sub(heading, chunk))))
 
     out, last = [], 0
     for m in _CODE.finditer(text):
