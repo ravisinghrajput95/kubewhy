@@ -1304,3 +1304,81 @@ class TestTokensAreChargedOnlyWhenTheyLeaveTheNetwork:
 
         assert counted == 18
         assert limits.spent() == 0
+
+
+class TestWhatCountsAsUnavailable:
+    """
+    `unavailable()` decides whether a failure is retried on the fallback
+    provider or raised at the caller, and it was the densest survivor cluster
+    in the module: fifteen mutants across four lines, every status literal and
+    every comparison among them.
+
+    The rule the docstring states is the one being pinned. An availability
+    failure is worth trying somewhere else; a 400 is a malformed request and a
+    401 is a wrong key, and both fail identically on the fallback, so quietly
+    succeeding elsewhere would hide a configuration error an operator has to
+    see.
+    """
+
+    @staticmethod
+    def _http(code):
+        import httpx
+        return httpx.HTTPStatusError(
+            "x", request=httpx.Request("POST", "http://x"),
+            response=httpx.Response(code))
+
+    @staticmethod
+    def _ollama(status="absent"):
+        import ollama
+        exc = ollama.ResponseError("boom")
+        if status != "absent":
+            exc.status_code = status
+        return exc
+
+    def test_http_status_decides_by_class_of_failure(self):
+        # Server-side and rate limiting: the fallback may well answer.
+        assert inference.unavailable(self._http(500)) is True
+        assert inference.unavailable(self._http(503)) is True
+        assert inference.unavailable(self._http(429)) is True
+        # Client-side: the fallback would refuse in exactly the same way.
+        assert inference.unavailable(self._http(404)) is False
+        assert inference.unavailable(self._http(400)) is False
+        assert inference.unavailable(self._http(401)) is False
+        # The boundary itself, both sides of it.
+        assert inference.unavailable(self._http(499)) is False
+
+    def test_the_ollama_client_reports_the_same_classes_differently(self):
+        """
+        Its ResponseError carries `status_code`, and it defaults to **-1**, not
+        to 0 or to nothing -- so the guard's fallbacks are load-bearing in a way
+        that is invisible until you construct one. A status of exactly 0 means
+        the client never got a status at all, which is a transport failure and
+        the clearest case there is for trying elsewhere.
+        """
+        assert inference.unavailable(self._ollama(500)) is True
+        assert inference.unavailable(self._ollama(503)) is True
+        assert inference.unavailable(self._ollama(429)) is True
+        assert inference.unavailable(self._ollama(0)) is True
+
+        assert inference.unavailable(self._ollama(404)) is False
+        assert inference.unavailable(self._ollama(499)) is False
+        # The library's own default: it stands for "unset", not for "zero".
+        assert inference.unavailable(self._ollama()) is False
+
+    def test_transport_and_protocol_failures_are_always_worth_retrying(self):
+        import httpx
+
+        assert inference.unavailable(httpx.TimeoutException("t")) is True
+        assert inference.unavailable(httpx.ConnectError("c")) is True
+        assert inference.unavailable(httpx.RemoteProtocolError("p")) is True
+        assert inference.unavailable(ConnectionError("refused")) is True
+        assert inference.unavailable(OSError("name resolution failed")) is True
+
+        # A body that is not this protocol is nearly always an intermediary
+        # rather than the model. Before 2026-08-23 these raised a bare
+        # JSONDecodeError that read as "the provider refused" and never failed
+        # over.
+        assert inference.unavailable(backends.MalformedResponse("html")) is True
+
+    def test_anything_else_is_the_provider_answering(self):
+        assert inference.unavailable(ValueError("nope")) is False
