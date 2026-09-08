@@ -1478,3 +1478,64 @@ class TestTokensAreLocalUntilProvenOtherwise:
 
         assert recorded == [False, False], (
             "the default charged local tokens against the external budget")
+
+
+class TestAProbeThatFailedIsNotReady:
+    """
+    `entry["ready"] = False` on the exception path, and it survived both
+    passes although a test already drives that path -- it asserts only that the
+    error message carries no credential, never that the target is reported
+    unready.
+
+    The consequence is the failure this project has shipped twice in other
+    forms: a pod reporting Ready while every request it takes will fail. The
+    probe feeds /readyz, so a True here is a Service sending traffic to a
+    gateway whose provider it could not reach at all.
+    """
+
+    def test_a_provider_that_cannot_be_reached_reports_unready(self):
+        """
+        The stub raises from `probe()` itself. The existing case that reaches
+        this path uses `Broken`, which inherits Recorder and defines no probe
+        at all, so what it actually exercises is an AttributeError -- fine for
+        asserting no credential leaks, and not the provider failure the entry
+        is about.
+        """
+        class Unreachable(Recorder):
+            name = "unreachable"
+
+            def probe(self, model=None, timeout=5):
+                raise ConnectionError("connection refused")
+
+        backends.register(Unreachable.name, Unreachable)
+        try:
+            report = gateway(target(provider="unreachable")).probe()
+        finally:
+            backends._BACKENDS.pop(Unreachable.name, None)
+
+        primary = report["primary"]
+        assert primary["ready"] is False, (
+            "an unreachable provider was reported ready, which is a pod taking "
+            "traffic it cannot serve")
+        assert primary["error"] == "ConnectionError"
+        assert report["ready"] is False
+
+    def test_a_provider_that_enumerates_nothing_reports_zero(self):
+        """
+        `models_listed` is what separates "answered and listed no models" from
+        "did not answer". Defaulting it to 1 would invent a model nobody
+        served.
+        """
+        class Quiet(Recorder):
+            name = "quiet"
+
+            def probe(self, model=None, timeout=5):
+                return {"model_check": "unsupported"}
+
+        backends.register(Quiet.name, Quiet)
+        try:
+            report = gateway(target(provider="quiet")).probe()
+        finally:
+            backends._BACKENDS.pop(Quiet.name, None)
+
+        assert report["primary"]["models_listed"] == 0
