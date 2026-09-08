@@ -15,7 +15,8 @@ it declines for the right reason is to check the reason.
 
 import json
 
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1382,3 +1383,98 @@ class TestWhatCountsAsUnavailable:
 
     def test_anything_else_is_the_provider_answering(self):
         assert inference.unavailable(ValueError("nope")) is False
+
+
+class TestThePolicyDefaultsAreTheSafeOnes:
+    """
+    Three defaults, three mutants, and all three are the difference between a
+    configuration that protects evidence and one that does not. Every existing
+    case constructs a Policy explicitly or sets the environment variable, so
+    nothing ever read what happens when an operator sets nothing at all --
+    which is the configuration most installs run.
+    """
+
+    def test_a_policy_with_no_arguments_keeps_evidence_in_the_network(self):
+        policy = inference.Policy()
+
+        assert policy.allow_external is False, (
+            "the default must not permit sending cluster evidence off-network")
+        assert policy.fallback_enabled is False
+        assert policy.redact_on_egress is True, (
+            "redaction is the default because the failure is silent: evidence "
+            "leaves unredacted and nothing in the run says so")
+
+    def test_an_empty_environment_redacts_on_egress(self):
+        """
+        `TRIAGE_REDACT_ON_EGRESS` is the one flag whose default is True, and it
+        is the one where a wrong default cannot be noticed from the outside --
+        an unset variable would silently stop redacting.
+        """
+        config = inference.from_env({})
+
+        assert config.policy.redact_on_egress is True
+        assert config.policy.allow_external is False
+        assert config.policy.fallback_enabled is False
+
+
+class TestTheDurationIsTheCallAndNothingElse:
+    """
+    `perf_counter() - started`, observed on both the success and the failure
+    path, and both survived behind `assert telemetry.INFERENCE_DURATION.values`
+    -- an assertion that the histogram is non-empty, which an astronomical
+    reading satisfies as readily as a correct one. Same shape as defect 39;
+    this is the fourth site in this repo where a one-sided check on a duration
+    hid an inverted subtraction.
+
+    Bounded on both sides: a stub provider answers in microseconds, so
+    anything at or above a second is the clock being read rather than the call
+    being timed.
+    """
+
+    def test_a_successful_call_is_timed_at_its_own_length(self):
+        observed = MagicMock()
+        with patch.object(telemetry.INFERENCE_DURATION, "observe", observed):
+            gateway().chat("stub-model", [], [], False)
+
+        assert observed.call_count == 1
+        seconds = observed.call_args.args[0]
+        assert 0 <= seconds < 1, f"a stub call was timed at {seconds}s"
+
+    def test_a_failed_call_is_timed_the_same_way(self):
+        """
+        The observation this path exists for: a call that spent its whole
+        timeout is the single most useful latency reading an operator has, and
+        recording it only on success would drop exactly that one.
+        """
+        observed = MagicMock()
+        gate = gateway(target(provider="broken"))
+
+        with patch.object(telemetry.INFERENCE_DURATION, "observe", observed):
+            with pytest.raises(ConnectionError):
+                gate.chat("m", [], [], False)
+
+        assert observed.call_count == 1
+        seconds = observed.call_args.args[0]
+        assert 0 <= seconds < 1, f"a failing stub call was timed at {seconds}s"
+
+
+class TestTokensAreLocalUntilProvenOtherwise:
+    """
+    `_count_tokens(reply, labels, external=False)`. The keyword decides whether
+    a provider's reported usage lands against the external spend budget, and
+    the default is the safe direction: counting local tokens as spend would
+    invent a bill, and the gateway passes `target.external` explicitly at the
+    one call site that knows.
+    """
+
+    def test_usage_is_not_charged_to_the_budget_unless_it_left_the_network(self):
+        recorded = []
+        reply = SimpleNamespace(usage={"prompt": 120, "completion": 30})
+        labels = {"mode": "local", "provider": "recorder", "model": "m"}
+
+        with patch.object(limits, "record_tokens",
+                          lambda count, external: recorded.append(external)):
+            inference._count_tokens(reply, labels)
+
+        assert recorded == [False, False], (
+            "the default charged local tokens against the external budget")
