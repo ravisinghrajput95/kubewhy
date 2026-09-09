@@ -34,7 +34,7 @@ class Recorder:
     name = "recorder"
     wire = "ollama"
 
-    calls = []
+    calls: list = []
 
     def __init__(self, endpoint=None, api_key=None, timeout=None):
         self.endpoint = endpoint
@@ -958,7 +958,7 @@ class TestTheDeadlineClamp:
 
     class Timed(Recorder):
         name = "timed"
-        seen = []
+        seen: list = []
 
         def __init__(self, endpoint=None, api_key=None, timeout=None):
             super().__init__(endpoint, api_key, timeout)

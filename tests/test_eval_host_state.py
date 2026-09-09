@@ -17,6 +17,7 @@ EVALS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location(
     "host_state", os.path.join(EVALS, "host_state.py")
 )
+assert spec and spec.loader, f"could not load host_state.py from {EVALS}"
 host_state = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(host_state)
 

@@ -131,8 +131,9 @@ print(f"    {'median model rounds':<34}{ma['rounds']:>14}{mb['rounds']:>16}")
 print(f"    {'median duration':<34}{ma['median']:>13.0f}s{mb['median']:>15.0f}s")
 print(f"    {'p95 duration':<34}{ma['p95']:>13.0f}s{mb['p95']:>15.0f}s")
 print(f"    {'p99 duration':<34}{ma['p99']:>13.0f}s{mb['p99']:>15.0f}s")
-for k in ("nudges", "policies", "coverage"):
-    print(f"    {'re-asks: ' + k:<34}{ma['re_asks'][k]:>14}{mb['re_asks'][k]:>16}")
+for re_ask in ("nudges", "policies", "coverage"):
+    print(f"    {'re-asks: ' + re_ask:<34}"
+          f"{ma['re_asks'][re_ask]:>14}{mb['re_asks'][re_ask]:>16}")
 
 print(f"\n  GROUNDING VERDICTS")
 for v in sorted(set(ma["verdicts"]) | set(mb["verdicts"]), key=str):

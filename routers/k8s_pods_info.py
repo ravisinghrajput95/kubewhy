@@ -39,7 +39,7 @@ _requested_context = contextvars.ContextVar("kubewhy_context", default=None)
 # callers on purpose -- the clients are read-only and their connection pools
 # are worth reusing -- and cached rather than rebuilt, so switching back and
 # forth costs nothing.
-_bundles = {}
+_bundles: dict[str | None, dict] = {}
 
 # Held across building a bundle, not just inserting it. load_kube_config sets
 # the client library's global default configuration, so two threads binding
@@ -614,7 +614,7 @@ def list_pods(
     ceiling = max(int(limit), 1)
     shown, omitted = rows[:ceiling], rows[ceiling:]
 
-    result = {name: detail for _, name, detail in shown}
+    result: dict[str, object] = {name: detail for _, name, detail in shown}
     if omitted:
         unhealthy = sum(1 for healthy, _, _ in omitted if not healthy)
         result["_truncated"] = (
@@ -726,7 +726,7 @@ def scan_cluster(
     except Exception as exc:
         return _handle(exc)
 
-    groups = {}
+    groups: dict[tuple[str, str, str], dict] = {}
     for pod in pods:
         if wanted and pod.metadata.namespace not in wanted:
             continue
@@ -810,10 +810,10 @@ def scan_cluster(
         ):
             continue
 
-        existing = [key for key in groups if key[0] == namespace and key[1] == name]
-        if existing:
-            for key in existing:
-                groups[key]["reason"] = reason
+        rows = [row for row in groups if row[0] == namespace and row[1] == name]
+        if rows:
+            for row in rows:
+                groups[row]["reason"] = reason
             continue
 
         groups[(namespace, name, "job-failed")] = {
@@ -837,21 +837,26 @@ def scan_cluster(
     # A workload can carry two distinct faults at once -- a bad rollout leaves
     # the new ReplicaSet ImagePullBackOff while the old one still crashes --
     # and an unqualified key would drop one of them silently.
-    seen = {}
-    for (namespace, workload, _), _entry in shown:
-        seen[(namespace, workload)] = seen.get((namespace, workload), 0) + 1
+    # `owner`, not `workload`: these loops used to rebind the `workload`
+    # parameter, which is read above to filter the scan. Nothing depended on
+    # it, because the filtering is finished by here -- but the Job pass added
+    # in 2026-09-10 reads the parameter too, and a shadow that is only safe
+    # because of statement order is a trap for whatever gets inserted next.
+    seen: dict[tuple[str, str], int] = {}
+    for (namespace, owner, _), _entry in shown:
+        seen[(namespace, owner)] = seen.get((namespace, owner), 0) + 1
 
-    result = {}
-    for (namespace, workload, fault), entry in shown:
-        key = f"{namespace}/{workload}"
-        if seen[(namespace, workload)] > 1:
+    result: dict[str, object] = {}
+    for (namespace, owner, fault), entry in shown:
+        key = f"{namespace}/{owner}"
+        if seen[(namespace, owner)] > 1:
             key = f"{key}:{fault}"
         result[key] = entry
 
     if omitted:
-        namespaces = {namespace for (namespace, _, _), _ in omitted}
+        elsewhere = {namespace for (namespace, _, _), _ in omitted}
         result["_truncated"] = (
-            f"{len(omitted)} more not shown, across {len(namespaces)} "
+            f"{len(omitted)} more not shown, across {len(elsewhere)} "
             f"namespace(s); raise limit, or use list_pods on one namespace"
         )
 
@@ -1813,7 +1818,8 @@ def get_service_endpoints(name: str, namespace: str = "default"):
         )
         return info
 
-    ready, not_ready = [], []
+    ready: list[str] = []
+    not_ready: list[str] = []
     for endpoint_slice in slices.items:
         for endpoint in endpoint_slice.endpoints or []:
             # conditions.ready is None on older API servers; absent means

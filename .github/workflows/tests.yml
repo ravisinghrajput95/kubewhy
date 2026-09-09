@@ -158,6 +158,45 @@ jobs:
           name: grounding-replay
           path: replay.json
 
+  types:
+    # mypy gates; ruff does not, and the asymmetry is deliberate.
+    #
+    # mypy is at zero across 85 files as of 2026-09-10, so it can fail the
+    # build and every failure will be new. Getting there was mostly renaming
+    # loop variables that shadowed a parameter or rebound a name to a second
+    # type -- none of them live defects, but one of the shadows was in
+    # scan_cluster and sat two statements from a parameter that a later commit
+    # started reading. That is the class this job is here to catch.
+    #
+    # ruff still reports 129 findings, all triaged when pyproject.toml landed
+    # and none of them live defects. Gating on it today would mean either a
+    # permanently red build or a 129-change commit nobody can review, so it
+    # runs for the record and does not fail. Turn `continue-on-error` off when
+    # the count reaches zero.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        # requirements-ui.txt too: mypy checks ui.py, and without streamlit
+        # installed it reports a missing import instead of checking the file.
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -r requirements-ui.txt
+
+      - name: mypy
+        run: mypy .
+
+      - name: ruff
+        continue-on-error: true
+        run: ruff check .
+
   docker:
     runs-on: ubuntu-latest
     steps:

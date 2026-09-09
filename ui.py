@@ -1063,7 +1063,11 @@ if submitted and question:
     # the CLI and Slack path. Bound here so that an unscoped run cannot reach
     # the stream() call with the name unset.
     target = None
-    if scoped:
+    # `and subject`: scoped can only be True when subject is set -- the
+    # checkbox that produces it is not rendered otherwise -- but that is an
+    # invariant held two statements away, and it is the kind that survives
+    # until someone adds a third way to set the flag.
+    if scoped and subject:
         # Shared with the CLI, the REST API and the controller: see
         # agent.scoped_question for why this is directive rather than a hint.
         question = agent.scoped_question(

@@ -1333,8 +1333,8 @@ class TestTheClaimColumnsSayWhenTheyAreEmpty:
     under a list of claims is a page contradicting itself.
     """
 
-    EMPTY = {"observations": [], "inferences": [], "unknowns": [],
-             "contradictions": [], "corrections": []}
+    EMPTY: dict[str, list] = {"observations": [], "inferences": [], "unknowns": [],
+                              "contradictions": [], "corrections": []}
 
     def test_an_empty_run_says_so_in_every_column(self):
         app = render_answer({**ANSWER, "rca": self.EMPTY})

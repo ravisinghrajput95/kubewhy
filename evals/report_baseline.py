@@ -86,7 +86,7 @@ print(f"7. MODEL ROUNDS            median {sorted(rounds)[len(rounds)//2]}   "
       f"max {max(rounds)}")
 print(f"8. TOOL CALLS              median {sorted(calls)[len(calls)//2]}   "
       f"max {max(calls)}   total {sum(calls)}")
-re_asks = collections.Counter()
+re_asks: collections.Counter[str] = collections.Counter()
 for r in records:
     for k in ("nudges", "policies", "coverage"):
         re_asks[k] += r.get(k, 0)
@@ -103,8 +103,10 @@ for t, c in term.most_common():
 print(f"\nBY CATEGORY")
 for cat in sorted(by_cat):
     rs = by_cat[cat]
-    k = sum(1 for r in rs if r["passed"])
-    print(f"   {cat:<24} {k}/{len(rs)}")
+    # `passes`, not `k`: `k` is the re-asks loop variable a few lines up, and
+    # reusing it here rebinds a str to an int for the rest of the module.
+    passes = sum(1 for r in rs if r["passed"])
+    print(f"   {cat:<24} {passes}/{len(rs)}")
 
 # entity scoping, checked rather than assumed
 print(f"\nENTITY SCOPING (target recorded on each answer)")

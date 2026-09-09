@@ -10,7 +10,7 @@ def get_processes(name_filter: str = ""):
     given, only matching process names are returned. Always pass a filter if
     you are looking for something specific, since the unfiltered list is long.
     """
-    processes = {}
+    processes: dict[str, list[int]] = {}
     needle = name_filter.lower()
 
     for proc in psutil.process_iter(['pid', 'name']):
