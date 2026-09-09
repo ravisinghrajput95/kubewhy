@@ -2450,6 +2450,15 @@ repository, and `Gateway._backend` performs the same construction with a cache
 in front of it. Recorded rather than deleted: removing a public method is a
 decision for the owner, not a side effect of chasing coverage.
 
+**Decided 2026-09-10: deleted.** Not because it was unused, which on its own
+is a weak reason, but because it was *wrong* next to the path that replaced
+it. `Gateway._backend` clamps the provider timeout down to whatever remains of
+the investigation budget, and never up; `build()` passed `self.timeout`
+straight through. Anyone who found the method and used it would have got a
+client holding the full 300s while the budget said otherwise — a live defect
+waiting for its first caller. Deleting it also removes an unkillable mutant
+from every future survey of this module.
+
 **The existing failed-probe test does not exercise a failed probe.**
 `test_a_failed_probe_reports_the_class_and_not_its_message` drives `Broken`,
 which inherits `Recorder` and defines no `probe` at all — so the exception it
@@ -2459,6 +2468,27 @@ credential in the output) and was never coverage of `entry["ready"] = False`,
 which stayed alive through two passes. A provider that could not be reached
 could have been reported **Ready**, which is the pod-takes-traffic-it-cannot-
 serve shape this project has now shipped in three different forms.
+
+**Decided 2026-09-10, and the decision found a third thing.** `Broken` now
+defines `probe()`, raising whatever the test configured. The reason to fix it
+rather than leave it recorded is that the missing method made the test
+*vacuous*: an `AttributeError` from a missing attribute carries neither the
+credential nor the endpoint, so `assert not [s for s in SECRETS if s in
+rendered]` and `assert "api.example.com" not in rendered` had nothing to find
+and could not fail. The report read `"error": "AttributeError"`.
+
+Measured as a pair, by changing `entry["error"] = type(exc).__name__` to
+`str(exc)` — a deliberate credential leak into an unauthenticated `/readyz`
+response:
+
+| `Broken` | leak introduced | test |
+|---|---|---|
+| no `probe()` (as shipped) | yes | **passes** |
+| `probe()` raising | yes | **fails** |
+
+Same test, same assertions, same leak. This is the shape recorded in defect 26
+and again in the adversarial cases: a test that cannot fail on the thing it
+names reads exactly like one that can.
 
 ### 44. The suite scored 88%, and the number meant something narrower
 

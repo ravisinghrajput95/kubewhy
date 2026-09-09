@@ -68,6 +68,16 @@ class Broken(Recorder):
     def chat(self, model, messages, tools, think):
         raise type(self).raises
 
+    # A failing probe, and it has to be a real one. Without this method the
+    # readiness test below drove an AttributeError from the missing attribute
+    # instead -- so the report said `"error": "AttributeError"`, the exception
+    # carried neither the credential nor the endpoint, and the two assertions
+    # about not leaking them could not fail on anything. Defect 43 recorded
+    # the missing method; that it made the test vacuous is the reason to fix
+    # it rather than to note it.
+    def probe(self, model=None, timeout=5):
+        raise type(self).raises
+
 
 class OtherWire(Recorder):
     """A provider that speaks the other protocol."""

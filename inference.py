@@ -275,10 +275,6 @@ class Target:
     def external(self):
         return self.destination == "external"
 
-    def build(self):
-        return backends.get(self.provider, endpoint=self.endpoint,
-                            api_key=self.api_key or None, timeout=self.timeout)
-
     def describe(self):
         """
         The safe fields, for a log line or an error message.
