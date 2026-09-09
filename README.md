@@ -198,7 +198,7 @@ Details: [docs/INFERENCE.md](docs/INFERENCE.md).
 
 | Capability | Evidence |
 |---|---|
-| Automated tests | 977 passing |
+| Automated tests | 1696 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
 | Grounding replay | 907 recorded runs, no regressions |
 | AI evaluation | 29 scenarios × 5 runs per configuration |
 | GKE runtime | Validated |
