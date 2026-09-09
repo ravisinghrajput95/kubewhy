@@ -325,6 +325,30 @@ def preflight(namespace="demo"):
     return len(pods), context
 
 
+def write_records(path, records, final=False):
+    """
+    Write the run records, to `path + ".partial"` until the set is complete.
+
+    Written after every run rather than at the end, because a full set takes
+    hours and the defect this file exists to measure is one that hangs -- an
+    interrupted run has to leave its evidence behind.
+
+    The suffix is what stops that from costing something else.
+    `tests/test_documented_measurements.py` globs `results/*.json` and
+    recomputes every figure in RUNBOOK.md from it, so a file an eval is still
+    filling in is read as though it were a finished corpus: on 2026-09-10 a
+    run 14 of 102 deep turned the suite red on three CI runners, with a
+    genuine-looking "RUNBOOK.md says 1973 grounded runs; results/ now has
+    1985". The evidence is still on disk under `.partial` and can be renamed
+    by hand; it is simply not a corpus until the run says so.
+    """
+    target = path if final else f"{path}.partial"
+    with open(target, "w") as fh:
+        json.dump(records, fh, indent=1)
+    if final and os.path.exists(f"{path}.partial"):
+        os.remove(f"{path}.partial")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=agent.MODEL)
@@ -456,8 +480,7 @@ def main():
                     "started_at": began_at,
                 })
                 if args.json:
-                    with open(args.json, "w") as fh:
-                        json.dump(records, fh, indent=1)
+                    write_records(args.json, records)
                 continue
 
             ok, why, notes = grade(case, result)
@@ -626,8 +649,7 @@ def main():
             # evidence that was worth collecting. ab_prompt.py already does
             # this; run_eval.py should not be the one that throws it away.
             if args.json:
-                with open(args.json, "w") as fh:
-                    json.dump(records, fh, indent=1)
+                write_records(args.json, records)
 
             total_passes += passes
             total_runs += 1
@@ -680,8 +702,7 @@ def main():
             print(f"         - {reason}")
 
     if args.json:
-        with open(args.json, "w") as fh:
-            json.dump(records, fh, indent=1)
+        write_records(args.json, records, final=True)
         print(f"\nwrote {len(records)} runs to {args.json}")
 
     rate = total_passes / total_runs * 100 if total_runs else 0

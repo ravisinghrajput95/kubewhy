@@ -9,6 +9,7 @@ No cluster and no model: the graders are pure functions over a finding dict.
 """
 
 import importlib.util
+import glob
 import json
 import os
 
@@ -759,6 +760,56 @@ class TestAPayloadMustReachTheModel:
                     f"payload, so it cannot prove the payload reached the model"
                 )
 
+
+
+class TestAnUnfinishedRunIsNotACorpus:
+    """
+    run_eval writes after every run so an interrupted set keeps its evidence.
+    That evidence must not be readable as a finished corpus.
+
+    tests/test_documented_measurements.py globs `results/*.json` and
+    recomputes every figure in RUNBOOK.md from what it finds. On 2026-09-10 a
+    run 14 of 102 deep turned the suite red on three CI runners with
+    "RUNBOOK.md says 1973 grounded runs; results/ now has 1985" -- a failure
+    that looks exactly like a stale document and was neither.
+    """
+
+    def test_a_run_in_progress_writes_only_the_partial_file(self, tmp_path):
+        target = tmp_path / "set.json"
+        agent_eval.write_records(str(target), [{"case": "a"}])
+
+        assert not target.exists(), "an unfinished run must not claim the name"
+        assert json.loads((tmp_path / "set.json.partial").read_text()) == \
+            [{"case": "a"}]
+
+    def test_the_partial_file_is_outside_the_corpus_glob(self, tmp_path):
+        # The property that matters, stated as the glob rather than as the
+        # suffix: `.partial.json` would have satisfied a suffix assertion and
+        # failed this one.
+        agent_eval.write_records(str(tmp_path / "set.json"), [{"case": "a"}])
+
+        assert glob.glob(str(tmp_path / "*.json")) == []
+
+    def test_completing_the_run_renames_it_and_leaves_no_partial(self, tmp_path):
+        target = tmp_path / "set.json"
+        agent_eval.write_records(str(target), [{"case": "a"}])
+        agent_eval.write_records(str(target), [{"case": "a"}, {"case": "b"}],
+                               final=True)
+
+        assert json.loads(target.read_text()) == [{"case": "a"}, {"case": "b"}]
+        assert not (tmp_path / "set.json.partial").exists()
+        assert glob.glob(str(tmp_path / "*.json")) == [str(target)]
+
+    def test_an_interrupted_run_still_leaves_its_records_on_disk(self, tmp_path):
+        # The counter for all of the above: the point of writing per run is
+        # that an interruption keeps the evidence, and a fix that achieved
+        # invisibility by not writing at all would pass every test above.
+        target = tmp_path / "set.json"
+        for i in range(3):
+            agent_eval.write_records(str(target), [{"case": f"c{i}"}])
+
+        assert json.loads((tmp_path / "set.json.partial").read_text()) == \
+            [{"case": "c2"}]
 
 class TestAVoidRunIsNotAFailedOne:
     """
