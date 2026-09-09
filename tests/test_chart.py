@@ -220,9 +220,20 @@ class TestTheChartRefusesWhatTheCodeWouldRefuse:
         image whose `store.build()` predates Postgres and reads the DSN as a
         filesystem path. `helm install` succeeded, both replicas came up, and
         both exited with `Read-only file system: 'postgresql:'`.
+
+        The tag is pinned rather than left to the chart's own appVersion.
+        Until 0.2.1 that default WAS an image without shared state, so this
+        case read correctly while asserting nothing about the guard -- it
+        would have passed with the guard deleted, for as long as the two
+        happened to coincide. It now names the versions it is about, and
+        0.2.1 is the first release the guard has to let through.
         """
         assert "does not have shared state" in refuses(
-            "sharedState.enabled=true", "sharedState.existingSecret=s")
+            "sharedState.enabled=true", "sharedState.existingSecret=s",
+            "image.tag=0.2.0")
+        assert "does not have shared state" in refuses(
+            "sharedState.enabled=true", "sharedState.existingSecret=s",
+            "image.tag=0.1.8")
 
     def test_a_dev_tag_is_not_second_guessed(self):
         """
