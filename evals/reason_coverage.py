@@ -17,12 +17,27 @@ from the kubelet's own source, so the denominator is not an opinion:
 **Two modes, and the difference between them is the whole point.**
 
 `--named` (the default) greps the cases and the fixtures. It is cheap, needs
-no cluster, and it **undercounts**: a fault the fixtures produce but never
-write down reads as missing. `bad-image` runs `nginx:this-tag-does-not-exist`,
-which the kubelet reports as `ErrImagePull` before it settles into
-`ImagePullBackOff` -- produced on every run, named nowhere, and counted absent.
-So the named figure is a lower bound on the corpus and an upper bound on
-nothing.
+no cluster, and it undercounts a fault the fixtures produce but never write
+down.
+
+The example is worth keeping because measuring it corrected me. `bad-image`
+runs `nginx:this-tag-does-not-exist`, and I expected `ErrImagePull` to show up
+as a waiting reason. Measured on kind 2026-09-09, sampled three times: it never
+does. The status settles to `ImagePullBackOff` within seconds and stays there.
+`ErrImagePull` exists only in the event stream, as the message of a `Failed`
+event.
+
+Corrected once more by measuring again: it is **intermittent**, not absent.
+Three consecutive samples of the pod status showed only `ImagePullBackOff`, and
+a fourth, taken during a pull retry, caught `ErrImagePull`. The kubelet cycles
+back through it every time it retries the pull.
+
+That is a fact about the **tool**, not just the corpus: whether an agent can
+see `ErrImagePull` depends on the second it looks, so a diagnosis that relies
+on catching it is unreliable by construction. It has to read events, where the
+same failure is durable -- which is why `agent.evidence_gap` has an events
+policy, and it is the same sampling artefact already recorded for OOMKilled
+versus CrashLoopBackOff.
 
 `--cluster CONTEXT` reads the reasons a live cluster actually reports, after
 the fixtures are applied. That is the measurement; the grep is the estimate.
@@ -98,6 +113,27 @@ REASONS = {
     "FailedValidation": "event",
     # -- scheduler, not the kubelet, but the commonest question there is
     "FailedScheduling": "event",
+    # -- added after a live run reported them and this list did not name them.
+    # `Failed` is the generic container/pod/image failure event, and it is the
+    # one that carries `ErrImagePull` as its message; the others come from
+    # controllers other than the kubelet, which is why transcribing only
+    # kubelet source missed them.
+    "Failed": "event",
+    "ProvisioningFailed": "event",
+    "FailedGetScale": "event",
+    "NoPods": "event",
+    "BackoffLimitExceeded": "event",
+}
+
+# Reported by a healthy cluster and not failures: excluded from the
+# denominator on purpose, so the percentage is over faults rather than over
+# everything a cluster says.
+BENIGN = {
+    "Created", "Started", "Starting", "Pulling", "Pulled", "Scheduled",
+    "NodeReady", "RegisteredNode", "LeaderElection", "SawCompletedJob",
+    "ScalingReplicaSet", "SuccessfulCreate", "NodeAllocatableEnforced",
+    "NodeHasNoDiskPressure", "NodeHasSufficientMemory", "NodeHasSufficientPID",
+    "SuccessfulDelete",
 }
 
 
@@ -165,11 +201,16 @@ def main(argv=None):
         print(f"  of the {len(REASONS)} enumerated: {len(known)} "
               f"({len(known) / len(REASONS):.0%})")
         print(f"  present: {', '.join(sorted(known))}")
-        if unknown:
-            print(f"\n  reported but NOT in the enumeration ({len(unknown)}): "
-                  f"{', '.join(unknown)}")
-            print("  -- the list here is from one kubelet version; a reason "
-                  "this cluster emits and it does not name belongs in it.")
+        faults = [r for r in unknown if r not in BENIGN]
+        if faults:
+            print(f"\n  FAILURE reasons reported and not enumerated "
+                  f"({len(faults)}): {', '.join(faults)}")
+            print("  -- these belong in REASONS; a cluster emitting a fault "
+                  "this list does not name means the denominator is too small.")
+        benign = [r for r in unknown if r in BENIGN]
+        if benign:
+            print(f"\n  reported and deliberately not counted ({len(benign)}): "
+                  f"{', '.join(benign)}")
         return 0
 
     covered, missing = coverage()
@@ -177,8 +218,10 @@ def main(argv=None):
     print(f"Kubernetes failure reasons: {total}")
     print(f"  NAMED in the corpus:      {len(covered)} ({len(covered) / total:.0%})")
     print(f"  not named:                {len(missing)}")
-    print("  (named, not produced -- see the module docstring; ErrImagePull is")
-    print("   produced by bad-image on every run and appears in neither list)")
+    print("  (named, not produced. `--cluster` measures what is actually")
+    print("   emitted, and the two lists do not contain each other: the grep")
+    print("   sees names the cluster never emits, the cluster emits reasons")
+    print("   nobody wrote down. See the docstring.)")
     print()
     for kind in ("waiting", "terminated", "event"):
         gaps = sorted(r for r, k in missing.items() if k == kind)
