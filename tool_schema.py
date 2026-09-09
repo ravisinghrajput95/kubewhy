@@ -3,7 +3,7 @@ JSON Schema for the tool registry, derived rather than hand-written.
 
 Ollama takes the Python callables in `agent.TOOLS` straight from the registry
 and builds the schema itself by introspecting name, signature and docstring.
-Every other provider wants explicit JSON Schema. Hand-maintaining fourteen of
+Every other provider wants explicit JSON Schema. Hand-maintaining fifteen of
 those alongside the functions is how they drift: the docstrings here are
 prompt engineering, not documentation -- they are the text the model reads
 when deciding which tool to call -- and a schema whose description has fallen
@@ -16,7 +16,7 @@ consumers.
 because the alternative is defaulting it to "string" and silently telling the
 model that `only_unhealthy` is text. That kind of error does not fail; it
 produces a slightly worse agent, which is the hardest thing to notice. All
-fourteen tools are fully annotated today and a test pins that.
+fifteen tools are fully annotated today and a test pins that.
 
 **The description is the whole first paragraph of the docstring, not a
 summary.** CONTRIBUTING requires each docstring to say *when to use* the tool

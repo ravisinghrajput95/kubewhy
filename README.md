@@ -47,7 +47,7 @@ are deterministic code, covered by unit tests. See the
 ## Key capabilities
 
 - **Evidence-first investigation** — a bounded loop that collects before it concludes
-- **Kubernetes-native tools** — fourteen read-only collectors returning projections, not raw API objects
+- **Kubernetes-native tools** — fifteen read-only collectors returning projections, not raw API objects
 - **Entity-scoped investigations** — the target is enforced on every tool call
 - **Grounded claims** — each observation carries the `tool.field` it came from
 - **Contradiction detection** — a separate deterministic stage; "the tools did not say" and "the tools said otherwise" are different verdicts
@@ -80,7 +80,7 @@ flowchart TB
     AG --> TOOLS
 
     subgraph TOOLS ["Read-only Kubernetes tools"]
-        K8S["pods · events · logs · services<br/>nodes · deployments · scan"]
+        K8S["pods · events · logs · services<br/>nodes · deployments · jobs · scan"]
         RED["redaction.redact()"]
     end
 
@@ -430,6 +430,44 @@ when asked for `PartialObjectMetadataList`, and the secret's plaintext value
 when the same token asked again without that header. It would have bought
 detection of a non-fault at the price of the guarantee the project is built on.
 
+### When the workload has no pod left to inspect
+
+A Job is the one workload whose failure reason is on no pod. The Job
+controller enforces `activeDeadlineSeconds` and `backoffLimit` itself, records
+`DeadlineExceeded` or `BackoffLimitExceeded` on the Job's own conditions, and
+then deletes or abandons the pods.
+
+```bash
+python agent.py "why did the nightly-rollup job fail?"
+curl http://127.0.0.1:8000/jobs?namespace=batch
+```
+
+Measured on kind against `demo/uncovered-faults.yaml`, tool by tool: a Job
+killed by its own deadline 30 seconds earlier was **invisible**. Its pod was
+gone, so `list_pods`, `describe_pod` and `get_pod_events` had nothing to
+return and `scan_cluster` reported the namespace clean. The reason was on an
+object nothing could read.
+
+Two failures here are routinely misdiagnosed as a broken container, and both
+send an on-call reader to debug code that did nothing wrong:
+
+- **`DeadlineExceeded`** — the Job ran past its deadline and was terminated on
+  purpose by its own spec. The container was killed from outside; its exit code
+  says SIGKILL and means nothing about the application.
+- **`BackoffLimitExceeded`** — the pods did fail, and their logs are worth
+  reading, but the Job stopping is the retry limit being reached rather than a
+  new fault.
+
+`list_jobs` reports both, with the spec limit that produced them —
+`DeadlineExceeded` does not say *what* deadline, and the number is only on the
+spec. `scan_cluster` reports a failed Job too: attached to the workload's
+existing row when pods survive, and as a row of its own, carrying the reason
+and no example pod, when they do not. An empty scan that is confidently wrong
+is worse than a slow one.
+
+This needs `batch/jobs` in the ClusterRole. An install whose role predates it
+loses the Job rows and keeps every other finding, rather than failing the scan.
+
 ## Or don't ask at all
 
 Asking requires you to already know something is wrong, be at a terminal, and
@@ -607,7 +645,7 @@ python mcp_server.py --http     # streamable HTTP on :8765
 }
 ```
 
-All 14 tools are exposed with schemas derived from their signatures. The
+All 15 tools are exposed with schemas derived from their signatures. The
 read-only guarantee and log redaction apply identically here.
 
 ## Browser UI

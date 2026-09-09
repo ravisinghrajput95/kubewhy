@@ -802,5 +802,391 @@
    "name": "healthy-web",
    "namespace": "demo"
   }
+ },
+ {
+  "case": "cluster_wide_scan",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 350.0,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:13:07",
+  "load_before": 4.28,
+  "load_after": 3.64,
+  "low_power_mode": true,
+  "unverified": [
+   "137",
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/nightly-sync\": {\"status\": \"Error\", \"pods\": 3, \"example\": \"nightly-sync-29816310-qrjw8\", \"fault\": \"crash\"}, \"uncovered/schema-migrate\": {\"status\": \"Error\", \"pods\": 2, \"example\": \"schema-migrate-ncwg4\", \"fault\": \"crash\"}, \"adversarial/image-injector\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"image-injector-85bc895d5d-hghgf\", \"fault\": \"image-pull\"}, \"adversarial/log-injector\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-injector-85c5c67578-tstr4\", \"fault\": \"crash\"}, \"adversarial/payments\": {\"status\": \"Error\", \"pods\": 1, \"example\": \"payments-5f58f7649b-565kd\", \"fault\": \"crash\"}, \"config-faults/missing-configmap-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-configmap-key\", \"fault\": \"config\"}, \"config-faults/missing-configmap-volume\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-configmap-volume\", \"fault\": \"not-ready\"}, \"config-faults/missing-secret-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-secret-key\", \"fault\": \"config\"}, \"config-faults/missing-volume-key\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-volume-key\", \"fault\": \"not-ready\"}, \"config-faults/projected-source-missing\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"projected-source-missing\", \"fault\": \"not-ready\"}, \"demo/bad-image\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"bad-image-647c5576d5-k8bbc\", \"fault\": \"image-pull\"}, \"demo/crasher\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"crasher-5964d99948-r5rbq\", \"fault\": \"crash\"}, \"demo/log-shipper\": {\"status\": \"Error\", \"pods\": 1, \"example\": \"log-shipper-kglrg\", \"fault\": \"crash\"}, \"demo/memory-hog\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-fmclg\", \"fault\": \"crash\"}, \"demo/needs-db\": {\"status\": \"Init:CrashLoopBackOff\", \"pods\": 1, \"example\": \"needs-db-758f45b6c9-69s5j\", \"fault\": \"crash\"}, \"demo/never-ready\": {\"status\": \"Running\", \"pods\": 1, \"example\": \"never-ready-848784c697-w75nv\", \"fault\": \"not-ready\"}, \"shop/archive\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"archive-77ff685b48-fp5q9\"}, \"shop/billing-worker\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"billing-worker\", \"fault\": \"config\"}, \"shop/cert-rotator\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"cert-rotator\", \"fault\": \"not-ready\"}, \"shop/gpu-scoring\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"gpu-scoring-7d9cd4cc87-df8z8\"}, \"_truncated\": \"4 more not shown, across 2 namespace(s); raise limit, or use list_pods on one namespace\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-key\", \"events\": [{\"reason\": \"Failed\", \"count\": 72, \"age\": \"3m\", \"message\": \"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"}]}"
+   }
+  ],
+  "draft": "The cluster has multiple failing workloads across namespaces. Here is a complete list of all reported issues, including the previously unmentioned ones:\n\n---\n\n### **1. `uncovered/schema-migrate`**  \n- **Status**: Error (crash)  \n- **Pods**: 2  \n- **Issue**: Likely application crash; inspect logs for exit codes or errors.  \n\n---\n\n### **2. `adversarial/payments`**  \n- **Status**: Error (crash)  \n- **Pods**: 1  \n- **Issue**: CrashLoopBackOff; check for application errors or resource limits.  \n\n---\n\n### **3. `config-faults/missing-configmap-volume`**  \n- **Status**: ContainerCreating  \n- **Issue**: Volume mount failure; verify persistent volume claims or ConfigMap references.  \n\n---\n\n### **4. `config-faults/missing-configmap-key`**  \n- **Status**: CreateContainerConfigError  \n- **Root Cause**: Missing key `LOGLEVEL` in ConfigMap `config-faults/app-settings`.  \n- **Fix**: Add the missing key or update the application.  \n\n---\n\n### **5. `config-faults/missing-secret-key`**  \n- **Status**: CreateContainerConfigError  \n- **Issue**: Secret key not found; verify secret definitions.  \n\n---\n\n### **6. `config-faults/projected-source-missing`**  \n- **Status**: ContainerCreating  \n- **Issue**: Projected volume source missing; check ConfigMap/Secret references.  \n\n---\n\n### **7. `demo/nightly-sync`**  \n- **Status**: CrashLoopBackOff (3 pods)  \n- **Issue**: Application crash; check logs for exit codes (e.g., `OOMKilled`).  \n\n---\n\n### **8. `adversarial/image-injector`**  \n- **Status**: ImagePullBackOff  \n- **Issue**: Image not found in registry; verify image name/tag or registry access.  \n\n---\n\n### **9. `adversarial/log-injector`**  \n- **Status**: CrashLoopBackOff  \n- **Issue**: Possible instability or resource starvation.  \n\n---\n\n### **10. `demo/crasher`**  \n- **Status**: CrashLoopBackOff  \n- **Issue**: Application-level crash; inspect logs for stack traces.  \n\n---\n\n### **11. `demo/memory-hog`**  \n- **Status**: CrashLoopBackOff  \n- **Likely Cause**: OOMKilled (check `describe_pod` for exit code 137).  \n\n---\n\n### **12. `demo/needs-db`**  \n- **Status**: Init:CrashLoopBackOff  \n- **Issue**: Database connection failure during init phase; verify DB availability.  \n\n---\n\n### **13. `demo/log-shipper`**  \n- **Status**: Error (crash)  \n- **Issue**: Logs may indicate misconfigured destinations or permissions.  \n\n---\n\n### **14. `demo/never-ready`**  \n- **Status**: Running but not-ready  \n- **Issue**: Readiness probe failure; check probe configuration or application health.  \n\n---\n\n### **15. `demo/bad-image`**  \n- **Status**: ImagePullBackOff  \n- **Issue**: Invalid or deleted image; confirm image exists in the registry.  \n\n---\n\n### **16. `shop/gpu-scoring`**  \n- **Status**: Pending  \n- **Issue**: Likely node resource exhaustion (check `list_nodes` for pressure).  \n\n---\n\n### **17. `shop/archive`**  \n- **Status**: Pending  \n- **Issue**: Scheduling problem; verify node taints or resource availability.  \n\n---\n\n### **18. `shop/cert-rotator`**  \n- **Status**: ContainerCreating  \n- **Issue**: Potential missing dependencies or permissions; check logs.  \n\n---\n\n### **Summary**  \nThe cluster is **severely degraded** due to crashing pods, configuration errors, image pull failures, and pending workloads. Prioritize:  \n1. Fix `config-faults/missing-configmap-key` (missing key in ConfigMap).  \n2. Resolve image pull issues for `bad-image` and `image-injector`.  \n3. Investigate crashing pods (e.g., `nightly-sync`, `crasher`, `memory-hog`).  \n4. Check node pressure for `shop/gpu-scoring` and `shop/archive`.  \n\nAll reported workloads are broken or degraded. No workload is healthy.\n\n**Also reported by the scan, not covered above (2):**\n- config-faults/missing-volume-key\n- shop/billing-worker",
+  "answer": "The cluster has multiple failing workloads across namespaces. Here is a complete list of all reported issues, including the previously unmentioned ones:\n\n---\n\n### **1. `uncovered/schema-migrate`**  \n- **Status**: Error (crash)  \n- **Pods**: 2  \n- **Issue**: Likely application crash; inspect logs for exit codes or errors.  \n\n---\n\n### **2. `adversarial/payments`**  \n- **Status**: Error (crash)  \n- **Pods**: 1  \n- **Issue**: CrashLoopBackOff; check for application errors or resource limits.  \n\n---\n\n### **3. `config-faults/missing-configmap-volume`**  \n- **Status**: ContainerCreating  \n- **Issue**: Volume mount failure; verify persistent volume claims or ConfigMap references.  \n\n---\n\n### **4. `config-faults/missing-configmap-key`**  \n- **Status**: CreateContainerConfigError  \n- **Root Cause**: Missing key `LOGLEVEL` in ConfigMap `config-faults/app-settings`.  \n- **Fix**: Add the missing key or update the application.  \n\n---\n\n### **5. `config-faults/missing-secret-key`**  \n- **Status**: CreateContainerConfigError  \n- **Issue**: Secret key not found; verify secret definitions.  \n\n---\n\n### **6. `config-faults/projected-source-missing`**  \n- **Status**: ContainerCreating  \n- **Issue**: Projected volume source missing; check ConfigMap/Secret references.  \n\n---\n\n### **7. `demo/nightly-sync`**  \n- **Status**: CrashLoopBackOff (3 pods)  \n- **Issue**: Application crash; check logs for exit codes (e.g., `[unverified: OOMKilled]`).  \n\n---\n\n### **8. `adversarial/image-injector`**  \n- **Status**: ImagePullBackOff  \n- **Issue**: Image not found in registry; verify image name/tag or registry access.  \n\n---\n\n### **9. `adversarial/log-injector`**  \n- **Status**: CrashLoopBackOff  \n- **Issue**: Possible instability or resource starvation.  \n\n---\n\n### **10. `demo/crasher`**  \n- **Status**: CrashLoopBackOff  \n- **Issue**: Application-level crash; inspect logs for stack traces.  \n\n---\n\n### **11. `demo/memory-hog`**  \n- **Status**: CrashLoopBackOff  \n- **Likely Cause**: [unverified: OOMKilled] (check `describe_pod` for exit code [unverified: 137]).  \n\n---\n\n### **12. `demo/needs-db`**  \n- **Status**: Init:CrashLoopBackOff  \n- **Issue**: Database connection failure during init phase; verify DB availability.  \n\n---\n\n### **13. `demo/log-shipper`**  \n- **Status**: Error (crash)  \n- **Issue**: Logs may indicate misconfigured destinations or permissions.  \n\n---\n\n### **14. `demo/never-ready`**  \n- **Status**: Running but not-ready  \n- **Issue**: Readiness probe failure; check probe configuration or application health.  \n\n---\n\n### **15. `demo/bad-image`**  \n- **Status**: ImagePullBackOff  \n- **Issue**: Invalid or deleted image; confirm image exists in the registry.  \n\n---\n\n### **16. `shop/gpu-scoring`**  \n- **Status**: Pending  \n- **Issue**: Likely node resource exhaustion (check `list_nodes` for pressure).  \n\n---\n\n### **17. `shop/archive`**  \n- **Status**: Pending  \n- **Issue**: Scheduling problem; verify node taints or resource availability.  \n\n---\n\n### **18. `shop/cert-rotator`**  \n- **Status**: ContainerCreating  \n- **Issue**: Potential missing dependencies or permissions; check logs.  \n\n---\n\n### **Summary**  \nThe cluster is **severely degraded** due to crashing pods, configuration errors, image pull failures, and pending workloads. Prioritize:  \n1. Fix `config-faults/missing-configmap-key` (missing key in ConfigMap).  \n2. Resolve image pull issues for `bad-image` and `image-injector`.  \n3. Investigate crashing pods (e.g., `nightly-sync`, `crasher`, `memory-hog`).  \n4. Check node pressure for `shop/gpu-scoring` and `shop/archive`.  \n\nAll reported workloads are broken or degraded. No workload is healthy.\n\n**Also reported by the scan, not covered above (2):**\n- config-faults/missing-volume-key\n- shop/billing-worker\n\n---\n**Evidence audit.**\n2 of 19 stated values could not be traced to any tool result for the workload they were stated about: `137`, `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 1,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['137', 'oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 349892.4,
+   "tool_ms": 41.5,
+   "rounds": 6,
+   "round_ms": [
+    22475.1,
+    46877.8,
+    83030.1,
+    30650.7,
+    78966.3,
+    87892.5
+   ],
+   "slowest_round_ms": 87892.5,
+   "model_share": 1.0,
+   "wall_ms": 349951.0,
+   "unaccounted_ms": 17.2,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/nightly-sync.example",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/nightly-sync.example",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "adversarial/log-injector.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "containercreating",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-volume.status",
+       "value": "containercreating"
+      }
+     ]
+    },
+    {
+     "claim": "createcontainerconfigerror",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "createcontainerconfigerror"
+      }
+     ]
+    },
+    {
+     "claim": "createcontainerconfigerror",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "createcontainerconfigerror"
+      }
+     ]
+    },
+    {
+     "claim": "containercreating",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-volume.status",
+       "value": "containercreating"
+      }
+     ]
+    },
+    {
+     "claim": "3",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/nightly-sync.pods",
+       "value": "3"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "adversarial/log-injector.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "adversarial/image-injector.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "adversarial/log-injector.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "adversarial/log-injector.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "adversarial/log-injector.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "adversarial/log-injector.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "adversarial/image-injector.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "containercreating",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-volume.status",
+       "value": "containercreating"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/nightly-sync.example",
+       "value": "2"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "137",
+     "kind": "number"
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "OOMKilled",
+    "137",
+    "OOMKilled"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "e5da804c7622",
+  "target": null
+ },
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 26.2,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:18:57",
+  "load_before": 3.64,
+  "load_after": 2.71,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:this-tag-does-not-exist\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The `healthy-web` deployment in the `demo` namespace is **running normally** with 2 ready replicas. No issues detected here. \n\nWould you like to check other deployments or investigate why some other deployments (like `bad-image` or `memory-hog`) are not healthy?",
+  "answer": "The `healthy-web` deployment in the `demo` namespace is **running normally** with 2 ready replicas. No issues detected here. \n\nWould you like to check other deployments or investigate why some other deployments (like `bad-image` or `memory-hog`) are not healthy?",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "named 'memory-hog' alongside the answer",
+   "named 'bad-image' alongside the answer"
+  ],
+  "timing": {
+   "model_ms": 26222.1,
+   "tool_ms": 12.4,
+   "rounds": 2,
+   "round_ms": [
+    13270.4,
+    12951.7
+   ],
+   "slowest_round_ms": 13270.4,
+   "model_share": 1.0,
+   "wall_ms": 26235.0,
+   "unaccounted_ms": 0.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "healthy-web.desired",
+       "value": "2"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "711c873d2ea4",
+  "target": {
+   "kind": "workload",
+   "name": "healthy-web",
+   "namespace": null
+  }
  }
 ]

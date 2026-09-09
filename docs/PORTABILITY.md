@@ -179,6 +179,11 @@ which is what the reachability diagnosis depends on.
 | `list_nodes` | yes | **no, until fixed** | **node conditions** |
 | `scan_cluster` | yes | yes | none |
 
+`list_jobs` postdates this run and is deliberately absent from the table
+rather than assumed to work: it needs a `batch` grant this cluster's role did
+not carry, and the table records what was measured on GKE, not what should
+follow from it.
+
 **Agentic RCA: 31/31, 95% CI [89-100], 24/31 fully grounded**, over 31 of a
 planned 48 runs (stopped by request in round 3). Round 1 completed 16/16, so
 every case has passed on GKE at least once.
