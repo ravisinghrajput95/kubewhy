@@ -1,0 +1,136 @@
+# Faults the eval corpus had never once produced.
+#
+# The workloads are named the way real ones are -- catalog-api, session-cache,
+# report-worker -- and not after their own bugs. The first draft called them
+# malformed-image, bad-poststart and no-such-binary, and
+# tests/test_eval_graders.py refused three of the five cases outright: an
+# answer that merely repeated the question's workload name satisfied the
+# expectation. A fixture whose name contains its diagnosis cannot measure
+# whether the diagnosis was found.
+#
+# Chosen from `evals/reason_coverage.py`'s gap list -- the reasons Kubernetes
+# can surface that demo/broken-pods.yaml, config-faults.yaml, tricky-pods.yaml
+# and adversarial.yaml between them never create. The corpus measured 18 of 48
+# on a live cluster before this file; these are the uncovered ones that are
+# genuinely reproducible on a single-node kind cluster, without a CSI driver,
+# a second node, or artificial memory pressure.
+#
+# Deliberately NOT here, because faking them teaches the agent the wrong
+# lesson: Evicted (needs real node pressure), FailedAttachVolume and
+# FailedMapVolume (need a real CSI), NetworkNotReady and FailedCreatePodSandBox
+# (need a broken CNI), NodeNotReady and the disk-pressure reasons (need a node
+# to actually degrade). A fixture that produces the *string* without the
+# *situation* would make the suite look wider while testing nothing new.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: uncovered
+---
+# InvalidImageName. Distinct from ImagePullBackOff and diagnosed differently:
+# the registry was never contacted, so there is no pull event to read and no
+# network problem to chase. The reference itself is malformed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-api
+  namespace: uncovered
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: catalog-api }
+  template:
+    metadata:
+      labels: { app: catalog-api }
+    spec:
+      containers:
+        - name: app
+          image: "REGISTRY.example.com/Not_A_Valid_Tag:::v1"
+---
+# DeadlineExceeded. The Job ran, was killed by activeDeadlineSeconds, and the
+# container did nothing wrong -- the commonest misdiagnosis here is to report
+# the workload as crashing when it was stopped on purpose by its own spec.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nightly-rollup
+  namespace: uncovered
+spec:
+  activeDeadlineSeconds: 20
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: worker
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 600"]
+---
+# FailedPostStartHook. The container's own process is healthy; the hook the
+# kubelet runs after starting it is not. The pod is killed and restarted, so it
+# reads as a crashloop from the status alone, and the reason is only in the
+# events.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: session-cache
+  namespace: uncovered
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: session-cache }
+  template:
+    metadata:
+      labels: { app: session-cache }
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          lifecycle:
+            postStart:
+              exec:
+                command: ["sh", "-c", "exit 9"]
+---
+# RunContainerError. The image is fine and was pulled; the command in it cannot
+# be executed. Reads as a start failure and is neither an image problem nor a
+# crash of the application.
+#
+# Measured on kind 2026-09-09, because the guess was wrong: this was written
+# expecting ContainerCannotRun and the kubelet reports RunContainerError. The
+# two are different code paths and only one of them is reachable this way, so
+# ContainerCannotRun stays uncovered and is not claimed here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: report-worker
+  namespace: uncovered
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: report-worker }
+  template:
+    metadata:
+      labels: { app: report-worker }
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["/usr/local/bin/definitely-not-here"]
+---
+# BackoffLimitExceeded. A Job that failed its retries and stopped. The pods are
+# gone or Error; the Job object is where the reason lives, which is a different
+# place to look from every other fault in this corpus.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: schema-migrate
+  namespace: uncovered
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: busybox:1.36
+          command: ["sh", "-c", "echo 'migration: relation \"users\" does not exist' >&2; exit 1"]

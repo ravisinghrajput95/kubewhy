@@ -25,6 +25,108 @@ run.
                   demo/broken-pods.yaml
 """
 
+# --- faults the corpus had never produced, added 2026-09-09 -------------
+#
+# From `evals/reason_coverage.py`'s gap list. Before demo/uncovered-faults.yaml
+# a live cluster running every fixture reported 18 of 48 enumerated failure
+# reasons; with it, 25 of 49. These five cases are what turns that coverage
+# into a graded result -- a fault the corpus can present but never asks about
+# is still not measured.
+#
+# Each has a specific wrong answer in `forbid`, because every one of them looks
+# like a fault the agent has already seen. That resemblance is the point: three
+# of the five read as CrashLoopBackOff or as an image problem from the status
+# alone, and the difference is only in the events or in the controller object.
+UNCOVERED_CASES = [
+    {
+        "name": "malformed_image_reference",
+        "category": "imagename",
+        "ground_truth": "the image reference is syntactically invalid, so no registry was ever contacted",
+        "required_evidence": ["waiting_reason", "image reference"],
+        "expected_grounding": ["grounded", "partial"],
+        "needs": "demo/uncovered-faults.yaml",
+        "question": "The catalog-api deployment in the uncovered namespace will not start. Why?",
+        "expect_any": ["invalidimagename", "invalid image", "not a valid",
+                       "syntactically", "malformed reference"],
+        # The near-miss. This is NOT a pull failure: the kubelet rejected the
+        # reference before any network call, so there is no registry to be
+        # unreachable and no credential to be wrong.
+        "forbid": ["imagepullbackoff", "registry is unreachable",
+                   "does not exist in the registry", "pull secret"],
+        "expect_tools": ["describe_pod"],
+        "require_grounded": True,
+    },
+    {
+        "name": "job_killed_by_its_own_deadline",
+        "category": "deadline",
+        "ground_truth": "the Job hit activeDeadlineSeconds and was terminated on purpose; the container did not fail",
+        "required_evidence": ["DeadlineExceeded", "activeDeadlineSeconds"],
+        "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
+        "needs": "demo/uncovered-faults.yaml",
+        "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+        "expect_any": ["deadline", "activedeadlineseconds", "time limit",
+                       "exceeded its deadline"],
+        # The dangerous wrong answer: reporting a workload as broken when it
+        # was stopped by its own spec. An on-call reader sent to debug the
+        # container will find nothing wrong with it.
+        "forbid": ["crashloop", "out of memory", "oomkilled",
+                   "the container crashed", "exited with an error"],
+        "expect_tools": ["describe_pod"],
+        "require_grounded": True,
+    },
+    {
+        "name": "poststart_hook_not_the_app",
+        "category": "lifecycle",
+        "ground_truth": "the postStart lifecycle hook exits non-zero; the container's own process is healthy",
+        "required_evidence": ["FailedPostStartHook", "poststart"],
+        "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
+        "needs": "demo/uncovered-faults.yaml",
+        "question": "Why does the session-cache deployment in the uncovered namespace keep restarting?",
+        "expect_any": ["poststart", "post-start", "lifecycle hook", "hook"],
+        # From the status alone this is CrashLoopBackOff and nothing else. The
+        # reason exists only in the events, so an answer that stops at the
+        # status names the symptom and misses that the application never ran.
+        "forbid": ["the application crashed", "the process exited",
+                   "check the application logs for the error"],
+        "expect_tools": ["get_pod_events"],
+        "require_grounded": True,
+    },
+    {
+        "name": "entrypoint_that_does_not_exist",
+        "category": "startfailure",
+        "ground_truth": "the image was pulled fine; the configured command is not present in it",
+        "required_evidence": ["waiting_reason", "command"],
+        "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
+        "needs": "demo/uncovered-faults.yaml",
+        "question": "The report-worker deployment in the uncovered namespace is not starting. Why?",
+        "expect_any": ["runcontainererror", "no such file", "executable",
+                       "entrypoint", "not present in the image"],
+        # Not an image problem. The pull succeeded; changing the tag or the
+        # pull secret would fix nothing.
+        "forbid": ["image could not be pulled", "imagepullbackoff",
+                   "registry", "does not exist in the registry"],
+        "expect_tools": ["describe_pod"],
+        "require_grounded": True,
+    },
+    {
+        "name": "job_gave_up_after_retries",
+        "category": "backofflimit",
+        "ground_truth": "the Job exhausted backoffLimit; the underlying failure is a missing users relation in the migration",
+        "required_evidence": ["BackoffLimitExceeded", "container logs"],
+        "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
+        "needs": "demo/uncovered-faults.yaml",
+        "question": "Why did the schema-migrate job in the uncovered namespace stop running?",
+        "expect_any": ["backofflimit", "backoff limit", "retries", "relation",
+                       "users"],
+        # The pods are gone or Error and the Job object is where the reason
+        # lives -- a different place to look from every other fault here.
+        "forbid": ["still running", "in progress", "no failures"],
+        "expect_tools": ["get_pod_logs"],
+        "require_grounded": True,
+    },
+]
+
+
 CASES = [
     {
         "name": "oomkill_root_cause",
@@ -588,3 +690,5 @@ CASES = [
         "forbid": ["oomkilled", "out of memory", "memory limit"],
     },
 ]
+
+CASES.extend(UNCOVERED_CASES)

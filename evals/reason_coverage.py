@@ -123,6 +123,10 @@ REASONS = {
     "FailedGetScale": "event",
     "NoPods": "event",
     "BackoffLimitExceeded": "event",
+    # The image-pull *event* reason, distinct from the ImageInspectError
+    # waiting reason already listed. Found by applying a fixture and reading
+    # what came back, which is the only way this list gets to be right.
+    "InspectFailed": "event",
 }
 
 # Reported by a healthy cluster and not failures: excluded from the
