@@ -627,3 +627,73 @@ class TestSlackHasNoHorizontalRule:
     def test_two_dashes_are_not_a_rule(self):
         """`--flag` and a dashed list are not rules."""
         assert sinks._mrkdwn("a\n--\nb") == "a\n--\nb"
+
+
+class TestFittingADiagnosisIntoABlock:
+    """
+    `_fit` and the numbers around it. Slack rejects a section block over 3000
+    characters, so a long diagnosis has to be trimmed -- and a hard slice cut
+    mid-sentence and said nothing, so a truncated answer read as a complete one
+    that had simply stopped making sense.
+    """
+
+    MARKER = "\n\n_… truncated, see the controller logs for the full diagnosis._"
+
+    def test_the_limit_leaves_room_for_the_marker_under_slacks_ceiling(self):
+        """
+        3000 is Slack's, 2900 is ours, and the difference is what the "something
+        was dropped" line costs. A limit at or above 3000 produces a block Slack
+        refuses outright -- the diagnosis is not truncated then, it is lost.
+        """
+        assert sinks._SLACK_LIMIT == 2900
+        assert sinks._SLACK_LIMIT + len(self.MARKER) < 3000
+
+        fitted = sinks._fit("A" * 10_000)
+
+        assert len(fitted) <= sinks._SLACK_LIMIT
+        assert fitted.endswith(self.MARKER)
+
+    def test_a_boundary_exactly_at_the_cutoff_is_too_far_back(self):
+        """
+        `cut > room * 0.6`, at the one place the comparison can be read. With
+        the default limit, 60% of the room is 1701.6 and no index can equal it,
+        so the strict/non-strict distinction is unreachable -- a custom limit is
+        the only way to stand on the boundary.
+
+        The rule being pinned: a sentence end exactly 60% of the way in throws
+        away 40% of the message, and the comment says to prefer a boundary
+        "only if it is not so far back that it throws away most of it". At the
+        line itself, the full text wins.
+        """
+        room = 1000
+        text = "A" * 600 + ". " + "B" * 5000
+        fitted = sinks._fit(text, limit=room + len(self.MARKER))
+
+        head = fitted[:-len(self.MARKER)]
+
+        assert len(head) == room, (
+            "it cut back to the 60% boundary and threw away 40% of the answer")
+
+    def test_a_boundary_comfortably_past_the_cutoff_is_used(self):
+        """The other side of the same comparison, so the pair says what the
+        rule is rather than only where it stops."""
+        room = 1000
+        text = "A" * 900 + ". " + "B" * 5000
+        fitted = sinks._fit(text, limit=room + len(self.MARKER))
+
+        head = fitted[:-len(self.MARKER)]
+
+        assert len(head) == 900
+
+    def test_both_sinks_bound_their_http_call(self):
+        """
+        A webhook or an API call with no timeout blocks the controller's worker
+        thread indefinitely -- the thread that would otherwise be diagnosing the
+        next workload. Ten seconds is the delivery budget for a message nobody
+        is waiting on.
+        """
+        import inspect
+
+        for cls in (sinks.SlackSink, sinks.SlackApiSink):
+            default = inspect.signature(cls.__init__).parameters["timeout"].default
+            assert default == 10, cls.__name__

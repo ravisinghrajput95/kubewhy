@@ -10,6 +10,7 @@ prove it is current must come back as None so the caller does a live read.
 import importlib
 import os
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -248,3 +249,61 @@ class TestTheModuleLevelCache:
             assert podcache.pods_or_none() == ["a-pod"]
 
         assert built.call_count == 1
+
+
+class TestTheWatchCadencesAreDeliberate:
+    """
+    Three numbers, each with a stated reason above it and none of them read by
+    a test. They are the cache's whole operational behaviour: how often it
+    rebuilds, how long it waits for the one unavoidable full transfer, and how
+    fast it retries after the watch dies.
+    """
+
+    def test_the_watch_is_rebuilt_every_five_minutes(self):
+        """
+        Long-lived watches are dropped by API servers and load balancers, and
+        an expired exec credential is only refreshed when the next request is
+        built -- so the cycle is not an optimisation, it is what stops a
+        long-running controller quietly holding a dead connection and a stale
+        token.
+        """
+        assert podcache.RECONNECT_SECONDS == 300
+
+    def test_the_initial_list_is_bounded(self):
+        """
+        The full transfer is the one request that can be large, and it is made
+        while the cache reports itself unsynced. Unbounded, a hung API server
+        leaves it unsynced forever instead of failing and retrying.
+        """
+        seen = {}
+
+        class Api:
+            def list_pod_for_all_namespaces(self, **kwargs):
+                seen.update(kwargs)
+                return SimpleNamespace(
+                    items=[], metadata=SimpleNamespace(resource_version="1"))
+
+        cache = podcache.PodCache()
+        with patch.object(cache, "_client", lambda: Api()):
+            cache._list()
+
+        assert seen["_request_timeout"] == 30
+
+    def test_a_failed_watch_backs_off_before_retrying(self):
+        """
+        Five seconds, and the wait is on the stop event rather than `sleep` so
+        a shutdown is not held up by it. Zero would spin against a dead API
+        server; a long wait leaves the cache refusing reads for no reason.
+        """
+        waits = []
+        cache = podcache.PodCache()
+
+        def blow_up(*args, **kwargs):
+            raise RuntimeError("watch died")
+
+        with patch.object(cache, "_list", blow_up), \
+             patch.object(cache._stop, "wait", lambda s: (waits.append(s),
+                                                          cache._stop.set())[0]):
+            cache._run()
+
+        assert waits == [5]

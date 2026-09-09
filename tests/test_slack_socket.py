@@ -241,3 +241,64 @@ class TestTheAnswerIsAttributedAndRouted:
             slack_socket.handle(client, request(mention()))
 
         assert started[0]["daemon"] is True
+
+
+class TestTheOperatorFacingDetails:
+    """
+    Two survivors, both about what a person sees rather than what the bot
+    computes -- which is why neither had a test.
+    """
+
+    def test_a_long_question_is_trimmed_in_the_header(self):
+        """
+        `question[:80]`. The question is echoed as the header of the reply, and
+        an unbounded one pushes the answer itself off the first screen of a
+        channel. It is a header, not the record: the full question is in the
+        audit trail and in the thread the person wrote it in.
+        """
+        captured = {}
+
+        class Spy(sinks.StdoutSink):
+            def send(self, finding):
+                captured["finding"] = finding
+                return super().send(finding)
+
+        asked = "why is " + "checkout-service " * 20 + "failing?"
+        with patch.object(slack_socket.agent, "ask", return_value={
+                "answer": "it exceeded its memory limit",
+                "confidence": "grounded", "unverified": []}), \
+             patch.object(slack_socket.sinks, "build", return_value=Spy()):
+            slack_socket.answer(asked, "C1", "1.1", "U9")
+
+        header = captured["finding"]["question"]
+
+        assert len(header) == 80
+        assert asked.startswith(header)
+
+    def test_the_startup_line_is_flushed(self):
+        """
+        `print(..., flush=True)`. This is the only thing that tells an operator
+        the socket is up, and it is the last output before the process blocks
+        forever on an Event. Python block-buffers stdout when it is a pipe --
+        which is what it is under Docker and under Kubernetes -- so without the
+        flush the line sits in the buffer and `kubectl logs` shows nothing at
+        all for a process that started perfectly.
+        """
+        printed = {}
+
+        def capture(*args, **kwargs):
+            printed.update(kwargs)
+            printed["args"] = args
+
+        with patch.object(slack_socket, "build_client") as build, \
+             patch("builtins.print", capture), \
+             patch.object(slack_socket.threading, "Event") as event:
+            event.return_value.wait.side_effect = KeyboardInterrupt
+            with pytest.raises(KeyboardInterrupt):
+                slack_socket.main()
+
+        build.assert_called_once()
+        assert printed["flush"] is True, (
+            "the one line that says the bot is listening would sit in the "
+            "buffer and never reach kubectl logs")
+        assert "listening" in printed["args"][0]

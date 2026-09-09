@@ -280,3 +280,33 @@ def test_the_window_is_an_hour_because_every_message_says_so():
     """
     assert limits.WINDOW_SECONDS == 3600
     assert limits.Window().seconds == 3600
+
+
+class TestTheRetryAfterFloor:
+    """
+    `max(int(self.seconds), 1)` -- the wait returned when dropping every event
+    in the window still does not get under the limit. Both `max` calls in
+    `retry_after` floor at 1 and only the other one was covered.
+
+    Reaching this line at all takes a limit of **zero**, which is a real
+    configuration: a budget set to nothing means no request may proceed, and
+    the honest answer is "come back after the window", not "come back now".
+    """
+
+    def test_a_zero_limit_waits_the_whole_window(self):
+        window = limits.Window(seconds=30)
+        window.add("k", 5, now=1000.0)
+
+        assert window.retry_after("k", limit=0, now=1000.0) == 30
+
+    def test_a_sub_second_window_never_says_come_back_immediately(self):
+        """
+        `Retry-After: 0` tells a client to return at once, which is the one
+        answer a rate limiter must never give -- it turns a limited client into
+        a hot loop. The floor is what stops a window shorter than a second
+        truncating to nothing.
+        """
+        window = limits.Window(seconds=0.5)
+        window.add("k", 1, now=1000.0)
+
+        assert window.retry_after("k", limit=0, now=1000.0) == 1

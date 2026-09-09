@@ -133,3 +133,27 @@ class TestDescriptionIsTheParagraphNotTheLine:
         assert description == (
             "Use this when the service has endpoints but none of them are ready."
         )
+
+
+class TestTheRegistryKeyWins:
+    """
+    `"name": name or func.__name__`. The comment on that line says the rule and
+    why it exists -- the model dispatches by the registry key, they match today,
+    and if they ever diverge the key is the one that has to win -- and nothing
+    held it, because every registered tool currently has a matching name.
+    """
+
+    def test_an_explicit_name_beats_the_functions_own(self):
+        def get_pod_logs_v2():
+            """Read a pod's logs."""
+
+        schema = tool_schema.schema_for(get_pod_logs_v2, name="get_pod_logs")
+
+        assert schema["function"]["name"] == "get_pod_logs", (
+            "the schema advertised a name the model cannot dispatch to")
+
+    def test_without_a_key_the_function_names_itself(self):
+        def list_pods():
+            """List pods."""
+
+        assert tool_schema.schema_for(list_pods)["function"]["name"] == "list_pods"
