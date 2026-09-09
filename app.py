@@ -41,6 +41,7 @@ from routers.k8s_pods_info import (
     get_pod_logs,
     list_nodes,
     list_deployments,
+    list_jobs,
     get_service_endpoints,
     scan_references,
 )
@@ -475,6 +476,12 @@ def nodes():
 @app.get("/deployments", dependencies=[Depends(require_caller)], tags=["kubernetes"])
 def deployments(namespace: str = "default"):
     return list_deployments(namespace)
+
+
+@app.get("/jobs", dependencies=[Depends(require_caller)], tags=["kubernetes"])
+def jobs(namespace: str = "default"):
+    """Jobs with the reason each failed -- which is on the Job, not on a pod."""
+    return list_jobs(namespace)
 
 
 @app.get(

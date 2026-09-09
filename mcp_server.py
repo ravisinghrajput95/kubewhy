@@ -37,6 +37,7 @@ from routers.k8s_pods_info import (
     get_service_endpoints,
     scan_references,
     list_deployments,
+    list_jobs,
     list_nodes,
     list_pods,
     scan_cluster,
@@ -74,6 +75,10 @@ mcp = MCPServer(
         "service with no ready endpoints has nowhere to send traffic. For a "
         "degraded workload use list_deployments. If pods are Pending or being "
         "evicted, check list_nodes for pressure before blaming the workload.\n\n"
+        "For anything called a job, a batch run or a scheduled task, call "
+        "list_jobs before concluding anything from its pods: a Job's failure "
+        "reason is on no pod, and a Job killed by its own activeDeadlineSeconds "
+        "was stopped on purpose rather than crashing.\n\n"
         "Never state an inference as if you measured it. If you read it from a "
         "tool, say it plainly; if you are reasoning past what the tools showed, "
         "mark it -- likely, probably, worth checking.\n\n"
@@ -93,6 +98,7 @@ for _tool in (
     get_pod_logs,
     list_nodes,
     list_deployments,
+    list_jobs,
     get_service_endpoints,
     scan_references,
     get_platform_info,

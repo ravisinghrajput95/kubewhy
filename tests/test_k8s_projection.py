@@ -37,6 +37,13 @@ def apps_api():
 
 
 @pytest.fixture
+def batch_api():
+    mock = MagicMock()
+    with patch.object(k8s, "_batch_api", return_value=mock):
+        yield mock
+
+
+@pytest.fixture
 def discovery_api():
     mock = MagicMock()
     with patch.object(k8s, "_discovery_api", return_value=mock):
@@ -1150,6 +1157,217 @@ class TestDeployments:
         )
         assert k8s.list_deployments("demo")["web"]["ready"] == 0
 
+
+
+class TestJobs:
+    """
+    list_jobs, which exists because a Job's failure reason is on no pod.
+
+    Measured on kind 2026-09-09 against demo/uncovered-faults.yaml: a Job
+    killed by activeDeadlineSeconds records DeadlineExceeded on its own
+    conditions and leaves *no pod at all*, so scan_cluster, list_pods,
+    describe_pod and get_pod_events between them returned nothing about it.
+    These tests hold the two fields that were unreachable -- the reason, and
+    the spec limit that produced it.
+    """
+
+    def _job(self, name="nightly-rollup", conditions=(), failed=0, succeeded=0,
+             deadline=None, backoff=None, suspend=None, completions=1):
+        return client.V1Job(
+            metadata=client.V1ObjectMeta(name=name, namespace="uncovered"),
+            spec=client.V1JobSpec(
+                completions=completions,
+                active_deadline_seconds=deadline,
+                backoff_limit=backoff,
+                suspend=suspend,
+                template=client.V1PodTemplateSpec(
+                    spec=client.V1PodSpec(
+                        restart_policy="Never",
+                        containers=[
+                            client.V1Container(name="worker", image="busybox:1.36")
+                        ],
+                    )
+                ),
+            ),
+            status=client.V1JobStatus(
+                failed=failed, succeeded=succeeded, conditions=list(conditions)
+            ),
+        )
+
+    def _condition(self, type_, reason, message, status="True"):
+        return client.V1JobCondition(
+            type=type_, status=status, reason=reason, message=message
+        )
+
+    def _owned_pod(self, name, job):
+        return client.V1Pod(
+            metadata=client.V1ObjectMeta(
+                name=name,
+                namespace="uncovered",
+                owner_references=[
+                    client.V1OwnerReference(
+                        api_version="batch/v1", kind="Job", name=job,
+                        uid="u", controller=True,
+                    )
+                ],
+            )
+        )
+
+    def _list(self, batch_api, api, jobs, pods=()):
+        batch_api.list_namespaced_job.return_value = client.V1JobList(items=list(jobs))
+        api.list_namespaced_pod.return_value = client.V1PodList(items=list(pods))
+        return k8s.list_jobs("uncovered")
+
+    def test_reports_the_deadline_reason_and_the_deadline_itself(
+        self, batch_api, api
+    ):
+        # The reason alone is unreadable: "DeadlineExceeded" does not say what
+        # deadline, and the number is only on the spec.
+        job = self._job(
+            conditions=[
+                self._condition("FailureTarget", "DeadlineExceeded",
+                                "Job was active longer than specified deadline"),
+                self._condition("Failed", "DeadlineExceeded",
+                                "Job was active longer than specified deadline"),
+            ],
+            failed=1, deadline=20, backoff=0,
+        )
+        result = self._list(batch_api, api, [job])["nightly-rollup"]
+
+        assert result["status"] == "Failed"
+        assert result["reason"] == "DeadlineExceeded"
+        assert result["active_deadline_seconds"] == 20
+        assert "longer than specified deadline" in result["message"]
+
+    def test_reports_the_backoff_limit_that_was_reached(self, batch_api, api):
+        job = self._job(
+            name="schema-migrate",
+            conditions=[
+                self._condition("Failed", "BackoffLimitExceeded",
+                                "Job has reached the specified backoff limit")
+            ],
+            failed=2, backoff=1,
+        )
+        result = self._list(batch_api, api, [job])["schema-migrate"]
+
+        assert result["reason"] == "BackoffLimitExceeded"
+        assert result["backoff_limit"] == 1
+        assert result["failed_pods"] == 2
+
+    def test_a_completed_job_carries_no_failure_reason(self, batch_api, api):
+        # The counter for the two tests above. Without it they pass on a
+        # projection that stamps "reason" onto everything it sees.
+        job = self._job(
+            conditions=[self._condition("Complete", "", "")],
+            succeeded=1,
+        )
+        result = self._list(batch_api, api, [job])["nightly-rollup"]
+
+        assert result["status"] == "Complete"
+        assert "reason" not in result
+        assert result["completions"] == "1/1"
+
+    def test_a_running_job_is_not_reported_as_failed(self, batch_api, api):
+        # A Job with no terminal condition has not failed, and "still running"
+        # is a different answer from "failed" even at 0 successes.
+        result = self._list(batch_api, api, [self._job()])["nightly-rollup"]
+
+        assert result["status"] == "Running"
+        assert "reason" not in result
+        assert result["completions"] == "0/1"
+
+    def test_failure_target_alone_is_not_yet_a_failure(self, batch_api, api):
+        # Measured on kind: FailureTarget is set ~30s before Failed settles,
+        # with the same reason. Taking the first condition that carries a
+        # reason would report a Job as Failed while kubectl still shows it
+        # Running.
+        job = self._job(
+            conditions=[
+                self._condition("FailureTarget", "DeadlineExceeded", "not yet")
+            ],
+        )
+        assert self._list(batch_api, api, [job])["nightly-rollup"]["status"] == "Running"
+
+    def test_a_condition_that_is_false_is_not_terminal(self, batch_api, api):
+        job = self._job(
+            conditions=[
+                self._condition("Failed", "DeadlineExceeded", "no", status="False")
+            ],
+        )
+        assert self._list(batch_api, api, [job])["nightly-rollup"]["status"] == "Running"
+
+    def test_a_suspended_job_says_so(self, batch_api, api):
+        job = self._job(suspend=True)
+        assert (
+            self._list(batch_api, api, [job])["nightly-rollup"]["status"] == "Suspended"
+        )
+
+    def test_pods_remaining_is_zero_when_the_deadline_deleted_them(
+        self, batch_api, api
+    ):
+        # The whole reason this tool exists. A Job in this state appears in no
+        # pod listing, so a namespace scan that finds nothing has not shown
+        # the namespace is healthy.
+        job = self._job(
+            conditions=[
+                self._condition("Failed", "DeadlineExceeded", "deadline")
+            ],
+            failed=1, deadline=20,
+        )
+        result = self._list(batch_api, api, [job], pods=[])["nightly-rollup"]
+        assert result["pods_remaining"] == 0
+
+    def test_pods_remaining_counts_only_this_jobs_pods(self, batch_api, api):
+        # Two-sided: a count that ignored ownership would report 3 here, and
+        # "0 pods left" is the signal the deadline case turns on.
+        job = self._job(name="schema-migrate", conditions=[
+            self._condition("Failed", "BackoffLimitExceeded", "backoff")
+        ], failed=2, backoff=1)
+        pods = [
+            self._owned_pod("schema-migrate-a", "schema-migrate"),
+            self._owned_pod("schema-migrate-b", "schema-migrate"),
+            self._owned_pod("nightly-rollup-z", "nightly-rollup"),
+        ]
+        result = self._list(batch_api, api, [job], pods=pods)["schema-migrate"]
+        assert result["pods_remaining"] == 2
+
+    def test_the_reason_survives_a_pod_listing_that_fails(self, batch_api, api):
+        # The Job's status is the point; the pod count is a convenience. A
+        # namespace where pods cannot be listed must still report why the Job
+        # failed rather than returning an error for the whole call.
+        batch_api.list_namespaced_job.return_value = client.V1JobList(
+            items=[self._job(conditions=[
+                self._condition("Failed", "DeadlineExceeded", "deadline")
+            ], deadline=20)]
+        )
+        api.list_namespaced_pod.side_effect = ApiException(status=403)
+
+        result = k8s.list_jobs("uncovered")["nightly-rollup"]
+        assert result["reason"] == "DeadlineExceeded"
+        assert "pods_remaining" not in result
+
+    def test_no_jobs_is_distinguished_from_no_namespace(self, batch_api, api):
+        batch_api.list_namespaced_job.return_value = client.V1JobList(items=[])
+        api.list_namespaced_pod.return_value = client.V1PodList(items=[])
+
+        with patch.object(k8s, "_namespace_absent", return_value=False):
+            assert "result" in k8s.list_jobs("uncovered")
+        with patch.object(k8s, "_namespace_absent", return_value=True):
+            assert "error" in k8s.list_jobs("nope")
+
+    def test_an_api_failure_is_reported_not_raised(self, batch_api, api):
+        batch_api.list_namespaced_job.side_effect = ApiException(status=403)
+        assert "error" in k8s.list_jobs("uncovered")
+
+    def test_the_projection_stays_small(self, batch_api, api):
+        # This file's standing rule: a projection that starts returning raw
+        # objects blows the model's context window.
+        job = self._job(
+            conditions=[self._condition("Failed", "DeadlineExceeded", "x" * 5000)],
+            failed=1, deadline=20, backoff=0,
+        )
+        result = self._list(batch_api, api, [job])
+        assert len(json.dumps(result)) < 800
 
 class TestServiceEndpoints:
     def _service(self):

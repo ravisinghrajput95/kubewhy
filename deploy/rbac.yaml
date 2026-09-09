@@ -58,6 +58,15 @@ rules:
     resources: ["endpointslices"]
     verbs: ["get", "list"]
 
+  # Jobs, for list_jobs. A Job is the one workload whose failure reason is on
+  # no pod: DeadlineExceeded and BackoffLimitExceeded are recorded by the Job
+  # controller on the Job's own conditions, and the pods are then deleted or
+  # abandoned. Without this grant a scheduled workload that ran out of time is
+  # unreadable, and a Job whose pods are gone is invisible entirely.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list"]
+
   # Reference targets for scan_references. All list-only, and all chosen
   # because a broken reference to one of them leaves every pod Running and
   # Ready -- which is exactly what nothing else here can see.

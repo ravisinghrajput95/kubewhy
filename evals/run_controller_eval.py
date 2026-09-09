@@ -72,7 +72,8 @@ CASES = [
 # of performing it.
 TOOL_NAMES = (
     "scan_cluster", "list_pods", "describe_pod", "get_pod_events", "get_pod_logs",
-    "list_nodes", "list_deployments", "get_service_endpoints", "scan_references",
+    "list_nodes", "list_deployments", "list_jobs", "get_service_endpoints",
+    "scan_references",
 )
 
 

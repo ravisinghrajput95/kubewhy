@@ -168,7 +168,8 @@ def _same_workload(name, target_name):
 _WORKLOAD_ARG = {"list_pods": "workload", "scan_cluster": "workload"}
 _POD_ARG = ("describe_pod", "get_pod_logs", "get_pod_events")
 _NAMESPACE_ARG = ("list_pods", "describe_pod", "get_pod_events", "get_pod_logs",
-                  "list_deployments", "get_service_endpoints", "scan_references")
+                  "list_deployments", "list_jobs", "get_service_endpoints",
+                  "scan_references")
 
 
 def enforce(target, tool, arguments):

@@ -39,6 +39,7 @@ from routers.k8s_pods_info import (
     get_pod_logs,
     list_nodes,
     list_deployments,
+    list_jobs,
     get_service_endpoints,
     scan_references,
 )
@@ -107,6 +108,7 @@ TOOLS = {
     "get_pod_logs": get_pod_logs,
     "list_nodes": list_nodes,
     "list_deployments": list_deployments,
+    "list_jobs": list_jobs,
     "get_service_endpoints": get_service_endpoints,
     "scan_references": scan_references,
 }
@@ -155,6 +157,16 @@ kernel's out-of-memory killer, Error when it was anything else, and the
 kubelet sets it every time. So if you are about to say a container ran out of
 memory, check that reason says OOMKilled. If it says Error, something else
 killed the container and the reason it was killed is in the events.
+
+For anything described as a job, a batch run or a scheduled task, call
+list_jobs before you conclude anything from its pods. A Job is the one
+workload whose failure reason is on no pod at all: the Job controller enforces
+activeDeadlineSeconds and backoffLimit itself and records DeadlineExceeded or
+BackoffLimitExceeded on the Job. A Job killed by its own deadline was stopped
+on purpose -- its container reports exit 137 and reason Error like any other
+kill, and reporting that as a crash sends the reader to debug code that did
+nothing wrong. The pods of such a Job are usually deleted, so finding no pod
+for a job is not evidence that it is fine.
 
 For a service that is unreachable, start with get_service_endpoints: a service
 with no ready endpoints has nowhere to send traffic, and the matching pods are

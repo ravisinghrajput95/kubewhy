@@ -315,7 +315,8 @@ def _entity_index(tool_outputs):
     Two shapes cover every collector here. A document that names its subject
     (describe_pod, get_pod_logs, get_service_endpoints) belongs wholly to that
     subject. A document that is a mapping of name to detail (list_pods,
-    scan_cluster, list_nodes, list_deployments) contributes one entry per key.
+    scan_cluster, list_nodes, list_deployments, list_jobs) contributes one
+    entry per key.
 
     scan_cluster keys look like "namespace/workload", so the trailing segment
     is registered too -- an answer usually says "bad-image", not

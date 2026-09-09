@@ -71,6 +71,13 @@ def _build_bundle(requested):
     return {
         "core": client.CoreV1Api(api_client),
         "apps": client.AppsV1Api(api_client),
+        # BatchV1Api, for Jobs and CronJobs. A Job is the one workload whose
+        # failure reason is not on any pod: activeDeadlineSeconds and
+        # backoffLimit are enforced by the Job controller, which records
+        # DeadlineExceeded or BackoffLimitExceeded on the Job's own conditions
+        # and then deletes or abandons the pods. Without this client the
+        # commonest scheduled-workload failures are unreadable.
+        "batch": client.BatchV1Api(api_client),
         "discovery": client.DiscoveryV1Api(api_client),
         # Read-only, and only ever listed -- these exist for scan_references,
         # which compares objects against each other rather than reading any
@@ -262,6 +269,11 @@ def _api():
 def _apps_api():
     """AppsV1Api, for deployments."""
     return _bundle()["apps"]
+
+
+def _batch_api():
+    """BatchV1Api, for Jobs."""
+    return _bundle()["batch"]
 
 
 def _discovery_api():
@@ -1271,6 +1283,105 @@ def list_deployments(namespace: str = "default"):
         return {"result": f"no deployments in namespace {namespace}"}
     return result
 
+
+
+def list_jobs(namespace: str = "default"):
+    """
+    Returns Jobs with the reason each one failed, which no pod carries.
+
+    Use this for any question about a job, a batch run or a scheduled task,
+    and use it *before* concluding anything from the pods a Job left behind.
+    A Job is the one workload whose failure reason lives nowhere else: the
+    Job controller enforces `activeDeadlineSeconds` and `backoffLimit`
+    itself, records the outcome on the Job's own conditions, and then stops.
+    describe_pod and get_pod_events cannot see any of it.
+
+    Two failures here are routinely misdiagnosed as a broken container, and
+    both send an on-call reader to debug code that did nothing wrong:
+
+    - **DeadlineExceeded** -- the Job ran past `activeDeadlineSeconds` and was
+      terminated on purpose by its own spec. The container was killed from
+      outside; its exit code says SIGKILL and means nothing about the
+      application. Report the deadline, not a crash.
+    - **BackoffLimitExceeded** -- the Job's pods failed, it retried up to
+      `backoff_limit` times and gave up. Here the container *did* fail, and
+      the pod logs are worth reading -- but the Job stopping is the limit
+      being reached, not a new fault.
+
+    `pods_remaining` is 0 when the Job's pods have been deleted, which is the
+    normal end state for a deadline kill and for any Job with a TTL. Those
+    Jobs appear in no pod listing at all, so a scan that finds nothing in a
+    namespace has not shown that the namespace is healthy.
+    Args: namespace -- which namespace to inspect, defaults to "default".
+    """
+    try:
+        jobs = _batch_api().list_namespaced_job(namespace, _request_timeout=TIMEOUT)
+    except Exception as exc:
+        return _handle(exc)
+
+    try:
+        pods = _api().list_namespaced_pod(namespace, _request_timeout=TIMEOUT).items
+    except Exception:
+        # The Job's own status is the point of this tool; a pod count is a
+        # convenience. Losing it is not worth losing the reason as well.
+        pods = None
+
+    result = {}
+    for job in jobs.items:
+        spec, status = job.spec, job.status
+        name = job.metadata.name
+
+        entry = {
+            "completions": f"{status.succeeded or 0}/{spec.completions or 1}",
+            "failed_pods": status.failed or 0,
+        }
+
+        # Conditions carry the verdict. Failed and Complete are terminal;
+        # anything else means the Job is still going, and "still going" is a
+        # different answer from "failed" even when nothing has succeeded yet.
+        terminal = None
+        for condition in status.conditions or []:
+            # FailureTarget is set before Failed and repeats its reason. Take
+            # the settled one so the reported state matches `kubectl get job`.
+            if condition.type in ("Failed", "Complete") and condition.status == "True":
+                terminal = condition
+                break
+
+        if terminal is None:
+            entry["status"] = "Suspended" if spec.suspend else "Running"
+        elif terminal.type == "Complete":
+            entry["status"] = "Complete"
+        else:
+            entry["status"] = "Failed"
+            # The reason is the whole reason this tool exists.
+            entry["reason"] = terminal.reason
+            if terminal.message:
+                entry["message"] = terminal.message[:300]
+
+        # The limits, reported whether or not they fired: a Job that failed on
+        # DeadlineExceeded is unreadable without the number it exceeded, and a
+        # Job still running is worth comparing against the deadline it is
+        # heading for.
+        if spec.active_deadline_seconds is not None:
+            entry["active_deadline_seconds"] = spec.active_deadline_seconds
+        if spec.backoff_limit is not None:
+            entry["backoff_limit"] = spec.backoff_limit
+
+        if pods is not None:
+            entry["pods_remaining"] = sum(
+                1 for pod in pods
+                if any(ref.kind == "Job" and ref.name == name
+                       for ref in (pod.metadata.owner_references or []))
+            )
+
+        entry["images"] = [c.image for c in spec.template.spec.containers]
+        result[name] = entry
+
+    if not result:
+        if _namespace_absent(namespace):
+            return {"error": f"namespace {namespace!r} does not exist"}
+        return {"result": f"no jobs in namespace {namespace}"}
+    return result
 
 def scan_references(namespace: str = "default"):
     """
