@@ -184,9 +184,43 @@ _PROSPECTIVE = re.compile(
     r"\b(avoid|avoiding|prevent|preventing|risk of|guard against|"
     r"protect against|in case of|so it does not|to stop|reduce the chance)\b")
 
-# How far back to look. A negator further away than this is usually governing
-# a different part of the sentence.
-_NEGATION_WINDOW = 40
+# How far back to look, in characters, within one clause -- _asserted is only
+# ever handed a single clause from grounding._claims.
+#
+# **78, from measurement, and both bounds are real.** At 40 this rule was
+# firing on the exact sentence the system prompt asks the model to write. The
+# prompt says: if you are about to say a container ran out of memory, check
+# that last_termination.reason says OOMKilled, and if it says Error then
+# something else killed it. Six recorded clauses do precisely that and were
+# all scored as *asserting* the OOM kill they were denying:
+#
+#   "the kubelet did **not** attribute the crash to the kernel's OOM killer"
+#                                                          42 characters back
+#   "we can't definitively confirm the presence of a bug in the application"
+#                                                          43
+#   "shows `"Error"`, not `"OOMKilled"`, meaning the kubelet did not ..."
+#                                                          48
+#   "**no memory or CPU limits** defined, ruling out OOMKilled"
+#                                                          46
+#   "did **not** report the termination as being caused by the ... OOM killer"
+#                                                          63
+#   "shows **"Error"**, not "OOMKilled" (which the kubelet explicitly ...)"
+#                                                          69
+#
+# The upper bound is equally measured, and it is why this is not simply "look
+# anywhere in the clause". One recorded clause carries a negator that governs
+# a different part of the sentence entirely:
+#
+#   "The node is not under memory pressure, but the container's lack of
+#    limits allows it to trigger the OOM killer independently."
+#                                                          87
+#
+# That one is a genuine contradiction -- the answer does claim an OOM kill
+# against a measured reason of Error -- and a whole-clause window silences it.
+# Replayed over 1683 records: 40 moves 60, 69-86 moves 65, and 87 or wider
+# moves 66 by losing that true positive. 78 is the middle of the band, nine
+# characters clear of each bound.
+_NEGATION_WINDOW = 78
 
 
 def _asserted(lowered, phrase):

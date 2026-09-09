@@ -294,6 +294,92 @@ class TestWhatMustNotBeCalledAContradiction:
         assert grounding.check(answer, ev(HEALTHY_POD))["contradictions"] == []
 
 
+
+class TestTheNegationWindowHasTwoBounds:
+    """
+    _NEGATION_WINDOW is 78, and both ends of that are measured rather than
+    chosen. Every clause below is real, taken from `results/` in 2026-09.
+
+    The lower bound: at 40 this rule fired on the exact sentence the system
+    prompt asks for. The prompt tells the model that exit 137 names the signal
+    and not the sender, and that a `last_termination.reason` of Error means
+    something other than the OOM killer did it. Six recorded clauses say so,
+    and all six were scored as *asserting* the OOM kill they were denying --
+    the checker penalising the behaviour the prompt teaches.
+
+    The upper bound is why this is not "look anywhere in the clause". One
+    recorded clause carries a negator governing a different part of the
+    sentence, and a whole-clause window silences a genuine contradiction.
+    """
+
+    # (distance to the governing negator, clause, the phrase under test)
+    DENIALS = [
+        (42, "this means the kubelet did **not** attribute the crash to the "
+             "kernel's oom killer.", "oom kill"),
+        (43, "thus, while we see evidence of it crashing because of resource "
+             "limits, we can't definitively confirm the presence of a bug in "
+             "the application code.", "bug in the application"),
+        (46, "- the container has **no memory or cpu limits** defined, ruling "
+             "out oomkilled or resource exhaustion as the cause.", "oomkilled"),
+        (48, 'however, the `last_termination.reason` field shows `"error"`, '
+             'not `"oomkilled"`, meaning the kubelet did not explicitly '
+             'attribute the termination to the oom killer.', "oom kill"),
+        (63, "- the kubelet did **not** report the termination as being "
+             "caused by the **kernel's oom killer**.", "oom kill"),
+        (69, 'however, the kubelet\'s `last_termination.reason` field shows '
+             '**"error"**, not "oomkilled" (which the kubelet explicitly sets '
+             'when the kernel\'s oom killer terminates a container).',
+             "oom kill"),
+    ]
+
+    # The negator here is about the *node*; the clause still claims the OOM
+    # killer ran, against a measured reason of Error.
+    GOVERNING_SOMETHING_ELSE = (
+        87,
+        "the node is not under memory pressure, but the container's lack of "
+        "limits allows it to trigger the oom killer independently.",
+        "oom kill",
+    )
+
+    def _distance(self, clause, phrase):
+        """Characters from the nearest preceding negator to the phrase."""
+        start = clause.find(phrase)
+        assert start >= 0, f"{phrase!r} is not in the clause"
+        hits = list(contradiction._NEGATORS.finditer(clause[:start]))
+        assert hits, "this clause has no negator, so it tests nothing"
+        return start - hits[-1].start()
+
+    @pytest.mark.parametrize("distance,clause,phrase", DENIALS)
+    def test_a_denial_is_not_read_as_a_claim(self, distance, clause, phrase):
+        # The distance is asserted too. Without it a reworded clause could
+        # drift inside 40 and the case would pass while testing nothing.
+        assert self._distance(clause, phrase) == distance
+        assert not contradiction._asserted(clause, phrase)
+
+    def test_a_negator_governing_another_clause_does_not_deny(self):
+        distance, clause, phrase = self.GOVERNING_SOMETHING_ELSE
+        assert self._distance(clause, phrase) == distance
+        assert contradiction._asserted(clause, phrase)
+
+    def test_the_window_sits_inside_the_band_those_two_bounds_define(self):
+        """
+        The bounds, as a range rather than as a number. A future retune that
+        keeps the tests above passing individually can still land on an edge;
+        this says where the room is.
+        """
+        furthest_denial = max(d for d, _, _ in self.DENIALS)
+        nearest_false_negator = self.GOVERNING_SOMETHING_ELSE[0]
+
+        assert furthest_denial <= contradiction._NEGATION_WINDOW
+        assert contradiction._NEGATION_WINDOW < nearest_false_negator
+
+    def test_an_ordinary_assertion_is_still_an_assertion(self):
+        # The counter. Every test above passes on an _asserted() that returns
+        # False for everything.
+        assert contradiction._asserted(
+            "the container was oomkilled after exceeding its memory limit",
+            "oomkilled")
+
 class TestTheOomSpellingsTheModelActuallyUses:
     """
     The tuple carried "oom killed" and "oom-killed" and nothing else in that

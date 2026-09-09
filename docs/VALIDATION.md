@@ -2539,6 +2539,66 @@ What is not luck is that the pre-existing set scored 97% under identical
 conditions, and that all three failures landed on their predicted wrong answer.
 The value needs `--repeat`; the direction does not.
 
+### 45. The contradiction checker penalised the sentence the prompt asks for
+
+**Problem.** `contradiction._asserted` decides whether a clause *claims* a
+phrase or *denies* it, by looking for a negator in the 40 characters before
+it. 40 characters is shorter than ordinary hedged English, so a denial whose
+negator sat further back was scored as an assertion — and then contradicted
+against the evidence it was agreeing with.
+
+The sentences this hit are the ones `agent.SYSTEM_PROMPT` explicitly asks for.
+The prompt says an exit code names the signal and never the sender, that
+`last_termination.reason` is the field naming it, and that a reason of `Error`
+means something other than the OOM killer did the killing. Six recorded
+clauses say exactly that, and all six were read as asserting the OOM kill they
+were denying:
+
+| distance | clause |
+|---|---|
+| 42 | "the kubelet did **not** attribute the crash to the kernel's OOM killer" |
+| 43 | "we can't definitively confirm the presence of a bug in the application" |
+| 46 | "**no memory or CPU limits** defined, ruling out OOMKilled" |
+| 48 | "shows `\"Error\"`, not `\"OOMKilled\"`, meaning the kubelet did not ..." |
+| 63 | "did **not** report the termination as being caused by the ... OOM killer" |
+| 69 | "shows **\"Error\"**, not \"OOMKilled\" (which the kubelet explicitly sets ...)" |
+
+**The upper bound is measured too, and it is why the answer is not "look
+anywhere in the clause".** One recorded clause carries a negator 87 characters
+back that governs a different part of the sentence:
+
+> "The node is **not** under memory pressure, but the container's lack of
+> limits allows it to trigger the OOM killer independently."
+
+That is a real contradiction — the clause does claim an OOM kill against a
+measured reason of `Error` — and a whole-clause window silences it. It is also
+the verdict defect 44 credited the checker with getting right.
+
+**Replayed over 1683 records** with `evals/replay_grounding.py`, after
+`--self-check` reported 1701 of 1701 detected against a perturbed checker:
+
+| window | moved | what changed |
+|---|---|---|
+| 40 (before) | 60 | — |
+| 60 | 64 | four of the six denials |
+| 69–86 | **65** | all six, and the true positive survives |
+| 87+ | 66 | the true positive is silenced |
+
+Not one record moved in the other direction at any width. `_NEGATION_WINDOW`
+is **78**, the middle of the 69–86 band, nine characters clear of each bound.
+
+**A collapsing fix was tried first and is worth recording as a dead end.** The
+original diagnosis was that a marked-up entity name spends 25 of the 40
+characters, so the window was widened by substituting `_MARKED_UP` spans away
+before measuring. Replay put three *new* records into `contradicted`, all one
+case. Reading them showed why: on a clause the splitter had cut mid-markup,
+`` `"Error"` `` leaves a stray backtick, and the regex paired it with the one
+opening `` `OOMKilled` `` — so `` `, not ` `` matched as a marked-up span and
+the substitution ate the negator. The module's own comment already warns that
+this delimiter can mis-pair. Widening the window needs no text rewriting and
+has no such failure mode.
+
+
 ## Reproducing
 
 ```bash
