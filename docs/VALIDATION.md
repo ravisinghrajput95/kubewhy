@@ -2008,6 +2008,47 @@ message naming the cause, and a dev tag and a later release both render. The
 five pre-existing shared-state cases now pass an explicit tag, and the comment
 on that tuple says why.
 
+**Closed 2026-09-09 by v0.2.1.** The guard was `semverCompare "<=0.2.0"`, so
+the fix was a release rather than a code change: 0.2.1 is the first version it
+lets through, and `main` has had the Postgres store and the renewal fix since
+defect 36.
+
+Verified from the registry and from the published artefacts, not from the
+workflow log — this repo shipped the wrong image under a right-looking tag
+once, and the check that catches it is comparing digests:
+
+| tag | linux/amd64 |
+|---|---|
+| `0.2.1` | `sha256:872a794ebe4ab989783…` |
+| `0.2.1-ui` | `sha256:20ca315a158e91b0df1…` |
+| `latest` | `sha256:872a794ebe4ab989783…` |
+
+Different digests for `:X` and `:X-ui` mean the `target: base` trap has not
+returned; `latest` matching `0.2.1` means the right one was promoted.
+
+Then the acceptance test that actually matters, against the **published**
+chart pulled from `oci://ghcr.io/ravisinghrajput95/charts/kubewhy` rather than
+the working tree:
+
+```
+helm template t kubewhy --set sharedState.enabled=true \
+    --set sharedState.existingSecret=kubewhy-state --set sharedState.replicas=2
+```
+
+renders `replicas: 2` with `TRIAGE_STATE_DB` from the Secret and
+`image: ghcr.io/ravisinghrajput95/kubewhy:0.2.1`, with no `image.tag` override
+anywhere. The same chart still refuses `image.tag=0.2.0`, so the guard survived
+the bump rather than being bypassed by it.
+
+**One thing the bump exposed, and it is the more useful half.** The guard's own
+test called `refuses(sharedState.enabled=true, ...)` with no `image.tag`, so it
+rode on the chart's own appVersion — which happened to be an image without
+shared state. It read correctly and asserted nothing about the guard: it would
+have passed with the guard deleted for as long as the two coincided, and it
+would have failed on this release for a reason unrelated to the behaviour it
+names. A test that depends on a version number agreeing with it by accident is
+not testing the version check. It now pins 0.2.0 and 0.1.8 explicitly.
+
 ### 36. Two healthy replicas, both diagnosing everything
 
 **Problem.** The lease is what makes a second controller replica a standby
