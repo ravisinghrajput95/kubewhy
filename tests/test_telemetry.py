@@ -97,6 +97,71 @@ class TestHistogram:
         assert edges == ["0.5", "1", "30", "+Inf"]
 
 
+class TestTheDurationBucketsAreAContract:
+    """
+    Every one of the ten bucket edges survived the survey, because nothing
+    asserts the boundaries themselves -- the histogram cases all observe a
+    value and check which bucket it lands in, which stays true when a boundary
+    moves and the value moves with it.
+
+    Buckets are a monitoring contract, not an implementation detail. A
+    dashboard's p95 and an alert's threshold are both computed from these
+    edges, so moving one silently changes what an existing alert fires on
+    without changing a line of the alert.
+    """
+
+    def test_the_edges_are_the_ones_the_recorded_latencies_need(self):
+        """
+        The comment above them gives the reasoning and the measurements: qwen3
+        has a median of 63.5s with thinking on and 9.0s with it off, and a p95
+        of 183.9s. Buckets stopping at 10 would put every thinking-on run in
+        +Inf and report nothing; these span a warm 1-second reply to a run
+        about to hit the 300s timeout.
+        """
+        assert telemetry.DURATION_BUCKETS == (
+            0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600)
+
+    def test_the_edges_are_ascending_and_span_the_timeout(self):
+        """
+        The properties a reader relies on, stated separately from the literal:
+        cumulative `le` buckets are meaningless unsorted, and an upper edge
+        below the 300s provider timeout would file every timed-out run in
+        +Inf -- which is exactly the run worth seeing.
+        """
+        edges = telemetry.DURATION_BUCKETS
+
+        assert list(edges) == sorted(edges)
+        assert len(set(edges)) == len(edges)
+        assert edges[-1] >= 300
+
+
+class TestAMalformedSeriesFailsLoudly:
+    """
+    `zip(..., strict=True)` in both `samples()` methods. The public path cannot
+    produce a mismatch -- `_key` refuses a partial label set -- so these are
+    the last guard on an invariant, and `strict=False` would render the
+    corrupted series instead of raising.
+
+    That matters more than a crash usually does. The failure it prevents is a
+    metric quietly emitting a *different* time series from the one it names,
+    and a dashboard cannot tell that from a real change in the system.
+    """
+
+    def test_a_counter_with_a_wrong_length_key_refuses_to_render(self):
+        counter = telemetry.Counter("kubewhy_test_total", "help", ("mode",))
+        counter.values[("local", "extra")] = 1
+
+        with pytest.raises(ValueError):
+            counter.samples()
+
+    def test_a_histogram_with_a_wrong_length_key_refuses_to_render(self):
+        histogram = telemetry.Histogram("kubewhy_test_seconds", "help", ("mode",))
+        histogram.values[("local", "extra")] = ([0] * len(histogram.buckets), 0.0, 0)
+
+        with pytest.raises(ValueError):
+            histogram.samples()
+
+
 class TestExposition:
     def test_every_metric_declares_help_and_type(self):
         rendered = telemetry.render()
