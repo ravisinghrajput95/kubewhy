@@ -1691,7 +1691,12 @@ def scan(explain=0):
     truncated = findings.pop("_truncated", None)
     width = max(len(key) for key in findings)
     for key, entry in findings.items():
-        print(f"{key:<{width}}  {entry['status']:<20} {entry['pods']} pod(s)")
+        # The reason is printed because a Job row's "0 pod(s)" says nothing on
+        # its own -- DeadlineExceeded is the entire finding.
+        reason = f"  {entry['reason']}" if entry.get("reason") else ""
+        print(
+            f"{key:<{width}}  {entry['status']:<20} {entry['pods']} pod(s){reason}"
+        )
     if truncated:
         print(f"\n{truncated}")
 
@@ -1703,15 +1708,20 @@ def scan(explain=0):
         # Read the logs before the diagnosis rather than during it. For a
         # CronJob the example pod is routinely collected mid-chain, and the
         # model then has nothing to reason from -- see capture_pod_logs.
+        # A failed Job whose pods the deadline deleted has no example pod, and
+        # that is a complete finding rather than a broken one. scoped_question
+        # already takes pod=None; capture_pod_logs would 404 on a name that is
+        # not there, so it is skipped rather than asked.
+        example = entry.get("example")
         result = ask(
             scoped_question(
                 "Find the root cause and say what should change.",
                 key.split(":", 1)[0],
                 namespace,
-                entry["example"],
+                example,
             ),
             verbose=True,
-            prefetched=capture_pod_logs(entry["example"], namespace),
+            prefetched=capture_pod_logs(example, namespace) if example else [],
         )
         print(result["answer"])
         _report_unverified(result)

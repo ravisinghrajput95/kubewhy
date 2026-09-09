@@ -803,7 +803,7 @@ if findings:
         findings = {
             key: entry
             for key, entry in findings.items()
-            if needle in key.lower() or needle in entry["example"].lower()
+            if needle in key.lower() or needle in entry.get("example", "").lower()
         }
 
         if not findings:
@@ -839,7 +839,12 @@ if findings:
                 # replica and ImagePullBackOff on another is one row.
                 "fault": entry.get("fault", "-"),
                 "pods": entry["pods"],
-                "example pod": entry["example"],
+                # A failed Job whose pods were deleted has none, and an empty
+                # cell says that better than a name that would 404.
+                "example pod": entry.get("example") or "—",
+                # Only a Job row carries this, and for a Job row it is the
+                # whole finding: "Failed, 0 pods" alone says nothing.
+                "reason": entry.get("reason", "-"),
             }
             for key, entry in findings.items()
         ],
@@ -891,6 +896,24 @@ if findings:
         # workload carries two faults at once.
         namespace, _, rest = choice.partition("/")
         workload_name = rest.split(":", 1)[0]
+
+        # A failed Job whose pods the deadline deleted has nothing to drill
+        # into, and three tabs of 404s would read as the console being broken
+        # rather than as the pods being gone. The reason is the finding.
+        if not entry.get("example"):
+            st.info(
+                f"**{workload_name}** failed with "
+                f"**{entry.get('reason', 'no reason recorded')}**, and its pods "
+                "are gone — a Job that hits its deadline deletes them. There is "
+                "no pod to inspect; the reason above is the whole finding. Ask "
+                "below for the rest of the Job's state."
+            )
+            st.session_state["subject"] = {
+                "namespace": namespace,
+                "workload": f"{namespace}/{workload_name}",
+                "pod": None,
+            }
+            st.stop()
 
         # A Deployment is its replicas. Showing only the example pod and
         # calling it the workload's story is wrong when three replicas fail

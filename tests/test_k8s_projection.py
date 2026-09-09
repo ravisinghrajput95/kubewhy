@@ -1117,6 +1117,198 @@ class TestNodes:
         assert result["conditions"] == ["KernelDeadlock"]
 
 
+
+class TestScanClusterSeesFailedJobs:
+    """
+    A failed Job is reachable through no pod, so the scan has to read it.
+
+    Measured on kind 2026-09-09: a namespace holding a Job that had failed
+    30 seconds earlier on activeDeadlineSeconds scanned completely clean.
+    The Job controller deletes the pods, so there was nothing for the pod
+    pass to group. An empty scan that is confidently wrong is the worst
+    result this tool can produce.
+    """
+
+    def _failed_job(self, name, namespace, reason, type_="Failed", status="True"):
+        return client.V1Job(
+            metadata=client.V1ObjectMeta(name=name, namespace=namespace),
+            spec=client.V1JobSpec(
+                template=client.V1PodTemplateSpec(
+                    spec=client.V1PodSpec(
+                        containers=[client.V1Container(name="w", image="busybox")]
+                    )
+                )
+            ),
+            status=client.V1JobStatus(conditions=[
+                client.V1JobCondition(
+                    type=type_, status=status, reason=reason, message=reason
+                )
+            ]),
+        )
+
+    def _job_pod(self, name, job, namespace):
+        """A pod owned by a Job, which is not the ReplicaSet shape `crashing`
+        builds: workload_of trims a ReplicaSet hash and keeps a Job name."""
+        pod = crashing(name, job, namespace)
+        pod.metadata.owner_references = [
+            client.V1OwnerReference(
+                api_version="batch/v1", kind="Job", name=job,
+                uid=f"uid-{job}", controller=True,
+            )
+        ]
+        return pod
+
+    def _scan(self, api, batch_api, pods=(), jobs=(), **kwargs):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=list(pods)
+        )
+        api.list_namespaced_pod.return_value = client.V1PodList(items=list(pods))
+        batch_api.list_job_for_all_namespaces.return_value = client.V1JobList(
+            items=list(jobs)
+        )
+        batch_api.list_namespaced_job.return_value = client.V1JobList(items=list(jobs))
+        return k8s.scan_cluster(**kwargs)
+
+    def test_a_job_whose_pods_are_gone_is_still_reported(self, api, batch_api):
+        result = self._scan(
+            api, batch_api, pods=[],
+            jobs=[self._failed_job("nightly-rollup", "batch", "DeadlineExceeded")],
+        )
+        entry = result["batch/nightly-rollup"]
+
+        assert entry["status"] == "Failed"
+        assert entry["reason"] == "DeadlineExceeded"
+        assert entry["pods"] == 0
+        # No pod to drill into, and saying so is the honest shape. Consumers
+        # branch on this rather than calling describe_pod("").
+        assert "example" not in entry
+
+    def test_an_empty_namespace_is_not_reported_as_clean_when_a_job_failed(
+        self, api, batch_api
+    ):
+        # The counter, and the defect in one line: without the Job pass this
+        # returns {"result": "no unhealthy workloads in any namespace"}.
+        result = self._scan(
+            api, batch_api, pods=[],
+            jobs=[self._failed_job("nightly-rollup", "batch", "DeadlineExceeded")],
+        )
+        assert "result" not in result
+
+    def test_a_job_with_surviving_pods_gains_a_reason_and_not_a_second_row(
+        self, api, batch_api
+    ):
+        # BackoffLimitExceeded leaves its pods behind, so the workload is
+        # already a row from the pod pass. Two rows would report one problem
+        # twice; no reason at all would leave the row saying "Error", which is
+        # the pod's story and not the Job's.
+        pods = [self._job_pod("schema-migrate-abc", "schema-migrate", "batch")]
+        result = self._scan(
+            api, batch_api, pods=pods,
+            jobs=[self._failed_job("schema-migrate", "batch", "BackoffLimitExceeded")],
+        )
+
+        assert list(result) == ["batch/schema-migrate"]
+        assert result["batch/schema-migrate"]["reason"] == "BackoffLimitExceeded"
+        assert result["batch/schema-migrate"]["example"] == "schema-migrate-abc"
+
+    def test_a_cronjob_run_does_not_produce_two_rows_for_one_failure(
+        self, api, batch_api
+    ):
+        # The pod pass groups a CronJob's pods under the CronJob -- workload_of
+        # trims the schedule slot -- while the Job object is named for the slot.
+        # Before job_workload_name was shared, these disagreed and one failure
+        # came out as both "batch/nightly-sync" and "batch/nightly-sync-28123456".
+        pods = [self._job_pod(
+            "nightly-sync-28123456-xyz", "nightly-sync-28123456", "batch"
+        )]
+        result = self._scan(
+            api, batch_api, pods=pods,
+            jobs=[self._failed_job(
+                "nightly-sync-28123456", "batch", "BackoffLimitExceeded"
+            )],
+        )
+
+        assert list(result) == ["batch/nightly-sync"]
+        assert result["batch/nightly-sync"]["reason"] == "BackoffLimitExceeded"
+
+    def test_a_cronjob_run_with_no_pods_left_is_keyed_by_the_cronjob(
+        self, api, batch_api
+    ):
+        # Same trim on the other branch: an hourly CronJob whose runs are
+        # cleaned up would otherwise file every failure under a new name, and
+        # a job failing hourly reports hourly forever.
+        result = self._scan(
+            api, batch_api, pods=[],
+            jobs=[self._failed_job(
+                "nightly-sync-28123456", "batch", "DeadlineExceeded"
+            )],
+        )
+        assert list(result) == ["batch/nightly-sync"]
+
+    def test_a_completed_job_is_not_a_finding(self, api, batch_api):
+        result = self._scan(
+            api, batch_api, pods=[],
+            jobs=[self._failed_job("nightly-rollup", "batch", "", type_="Complete")],
+        )
+        assert "result" in result
+
+    def test_failure_target_alone_is_not_yet_a_finding(self, api, batch_api):
+        # Same ~30s window as list_jobs: reporting on FailureTarget would put
+        # a Job in the scan while kubectl still shows it Running.
+        result = self._scan(
+            api, batch_api, pods=[],
+            jobs=[self._failed_job(
+                "nightly-rollup", "batch", "DeadlineExceeded", type_="FailureTarget"
+            )],
+        )
+        assert "result" in result
+
+    def test_the_namespace_filter_applies_to_jobs_too(self, api, batch_api):
+        jobs = [
+            self._failed_job("nightly-rollup", "batch", "DeadlineExceeded"),
+            self._failed_job("other-job", "elsewhere", "DeadlineExceeded"),
+        ]
+        result = self._scan(api, batch_api, pods=[], jobs=jobs, namespaces="batch")
+        assert list(result) == ["batch/nightly-rollup"]
+
+    def test_the_workload_filter_applies_to_jobs_too(self, api, batch_api):
+        jobs = [
+            self._failed_job("nightly-rollup", "batch", "DeadlineExceeded"),
+            self._failed_job("schema-migrate", "batch", "BackoffLimitExceeded"),
+        ]
+        result = self._scan(api, batch_api, pods=[], jobs=jobs, workload="nightly-rollup")
+        assert list(result) == ["batch/nightly-rollup"]
+
+    def test_a_cluster_that_refuses_to_list_jobs_still_scans_its_pods(
+        self, api, batch_api
+    ):
+        # An install whose ClusterRole predates the batch grant 403s here. It
+        # loses the Job rows and must keep everything else -- a scan that
+        # failed outright would be a worse regression than the gap this
+        # closes.
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=[crashing("web-abc123-xyz", "web-abc123", "prod")]
+        )
+        batch_api.list_job_for_all_namespaces.side_effect = ApiException(status=403)
+
+        result = k8s.scan_cluster()
+        assert list(result) == ["prod/web"]
+
+    def test_the_scan_stays_small_with_many_failed_jobs(self, api, batch_api):
+        jobs = [
+            self._failed_job(f"rollup-{i}", f"ns-{i}", "DeadlineExceeded")
+            for i in range(30)
+        ]
+        result = self._scan(api, batch_api, pods=[], jobs=jobs)
+
+        # Job rows go through the same limit and truncation as pod rows: 30
+        # failed CronJob runs on a real cluster must not each cost a line of
+        # the model's context.
+        assert "_truncated" in result
+        assert len(result) == 21  # 20 rows plus the notice
+        tokens = len(json.dumps(result)) // 4
+        assert tokens < 500, f"projection grew to {tokens} tokens"
+
 class TestDeployments:
     def _deployment(self, desired, ready):
         return client.V1Deployment(

@@ -1,0 +1,806 @@
+[
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 61.9,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:04:31",
+  "load_before": 1.96,
+  "load_after": 1.83,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "memory-hog"
+   },
+   {
+    "name": "memory-hog-bc76968c6-fmclg",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-fmclg\": {\"status\": \"OOMKilled\", \"ready\": \"0/1\", \"restarts\": 6, \"node\": \"kubewhy-9-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-fmclg\", \"namespace\": \"demo\", \"status\": \"OOMKilled\", \"node\": \"kubewhy-9-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 6, \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod `memory-hog-bc76968c6-fmclg` is restarting because it's being killed by the OOM (out-of-memory) killer. Here's why:\n\n- **Memory Limits Are Too Low**: The container's memory limit is set to **64Mi**, but the application (likely `polinux/stress`) is using more memory than allowed. When it exceeds the limit, the kernel terminates it with `SIGKILL` (exit code 137), triggering Kubernetes to restart the pod.\n\n- **OOMKilled Termination**: The `last_termination.reason` field explicitly states `OOMKilled`, confirming the pod was killed by the OOM killer due to memory pressure.\n\n### Fix\nIncrease the memory limit in the pod's resource configuration (e.g., in the Deployment or Pod spec). For example:\n```yaml\nresources:\n  limits:\n    memory: \"256Mi\"\n```\nThis prevents the OOM killer from terminating the pod and avoids unnecessary restarts.",
+  "answer": "The pod `memory-hog-bc76968c6-fmclg` is restarting because it's being killed by the OOM (out-of-memory) killer. Here's why:\n\n- **Memory Limits Are Too Low**: The container's memory limit is set to **64Mi**, but the application (likely `polinux/stress`) is using more memory than allowed. When it exceeds the limit, the kernel terminates it with `SIGKILL` (exit code 137), triggering Kubernetes to restart the pod.\n\n- **OOMKilled Termination**: The `last_termination.reason` field explicitly states `OOMKilled`, confirming the pod was killed by the OOM killer due to memory pressure.\n\n### Fix\nIncrease the memory limit in the pod's resource configuration (e.g., in the Deployment or Pod spec). For example:\n```yaml\nresources:\n  limits:\n    memory: \"256Mi\"\n```\nThis prevents the OOM killer from terminating the pod and avoids unnecessary restarts.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 61914.8,
+   "tool_ms": 20.6,
+   "rounds": 3,
+   "round_ms": [
+    17235.5,
+    20084.7,
+    24594.6
+   ],
+   "slowest_round_ms": 24594.6,
+   "model_share": 1.0,
+   "wall_ms": 61938.1,
+   "unaccounted_ms": 2.7,
+   "slept_ms": 1.3
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "6",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-fmclg.restarts",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "76968",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "76968"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-fmclg.status",
+       "value": "oomkilled"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-fmclg.status",
+       "value": "oomkilled"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "021c913f85d8",
+  "target": {
+   "kind": "workload",
+   "name": "memory-hog",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "crashloop_root_cause",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 90.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:05:33",
+  "load_before": 1.83,
+  "load_after": 1.87,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "crasher",
+    "namespace": "demo",
+    "only_unhealthy": true
+   },
+   {
+    "name": "crasher-5964d99948-r5rbq",
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-r5rbq",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "namespace": "demo",
+    "tail": 20,
+    "name": "crasher-5964d99948-r5rbq"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"crasher-5964d99948-r5rbq\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 6, \"node\": \"kubewhy-9-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-r5rbq\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-9-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 6, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-r5rbq_demo(de23c716-f374-4355-9de0-4343ad76f9c6)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"crasher-5964d99948-r5rbq\", \"events\": [{\"reason\": \"BackOff\", \"count\": 11, \"age\": \"13s\", \"message\": \"Back-off restarting failed container crasher in pod crasher-5964d99948-r5rbq_demo(de23c716-f374-4355-9de0-4343ad76f9c6)\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-r5rbq\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"}"
+   }
+  ],
+  "draft": "The **crasher pod** is failing because its container is unable to connect to the database. Here's the breakdown:\n\n- **Root Cause**: The container attempts to connect to a database on port `5432` (likely PostgreSQL), but the connection is refused. This indicates the database service is either:\n  - Not running,\n  - Not reachable from the pod's network, or\n  - Misconfigured (e.g., incorrect host/port).\n\n- **Next Steps**:\n  1. Verify the database service is running and accessible (e.g., check its pods/endpoints).\n  2. Ensure the database port (`5432`) is open and correctly exposed.\n  3. Confirm the database credentials/secrets are properly configured in the pod's environment or volumes.\n  4. Check for network policies or firewalls blocking the connection.\n\nThe container itself is healthy (busybox image), but the application inside it cannot reach the database, causing it to crash.",
+  "answer": "The **crasher pod** is failing because its container is unable to connect to the database. Here's the breakdown:\n\n- **Root Cause**: The container attempts to connect to a database on port `5432` (likely PostgreSQL), but the connection is refused. This indicates the database service is either:\n  - Not running,\n  - Not reachable from the pod's network, or\n  - Misconfigured (e.g., incorrect host/port).\n\n- **Next Steps**:\n  1. Verify the database service is running and accessible (e.g., check its pods/endpoints).\n  2. Ensure the database port (`5432`) is open and correctly exposed.\n  3. Confirm the database credentials/secrets are properly configured in the pod's environment or volumes.\n  4. Check for network policies or firewalls blocking the connection.\n\nThe container itself is healthy (busybox image), but the application inside it cannot reach the database, causing it to crash.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 90737.3,
+   "tool_ms": 34.6,
+   "rounds": 5,
+   "round_ms": [
+    16150.8,
+    13726.1,
+    22766.9,
+    17464.1,
+    20629.4
+   ],
+   "slowest_round_ms": 22766.9,
+   "model_share": 1.0,
+   "wall_ms": 90774.9,
+   "unaccounted_ms": 2.9,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "be63c8081a87",
+  "target": {
+   "kind": "workload",
+   "name": "crasher",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 50.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:07:04",
+  "load_before": 1.87,
+  "load_after": 1.88,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "bad-image"
+   },
+   {
+    "name": "bad-image-647c5576d5-k8bbc",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"bad-image-647c5576d5-k8bbc\": {\"status\": \"ImagePullBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"bad-image-647c5576d5-k8bbc\", \"namespace\": \"demo\", \"status\": \"ImagePullBackOff\", \"node\": \"kubewhy-9-control-plane\", \"containers\": {\"bad-image\": {\"image\": \"nginx:this-tag-does-not-exist\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ImagePullBackOff\", \"waiting_message\": \"Back-off pulling image \\\"nginx:this-tag-does-not-exist\\\": ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack image \\\"docker.io/library/nginx:this-tag-does-not-exist\\\": failed to resolve reference \\\"docker.io/library/nginx:this-tag-does-not-exist\\\": docker.io/library/nginx:this-tag-d\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod `bad-image` in the `demo` namespace fails to start because the container image `nginx:this-tag-does-not-exist` cannot be pulled. The image tag `this-tag-does-not-exist` is invalid or does not exist in the registry. \n\n**Solution**:  \nUpdate the image tag in your deployment configuration to a valid tag (e.g., `nginx:latest` or a specific version like `nginx:1.21.1`). If using a private registry, ensure the correct credentials are configured via image pull secrets. \n\nExample fix:  \n```yaml\ncontainers:\n  - name: bad-image\n    image: nginx:latest\n``` \n\nThis will resolve the `ImagePullBackOff` error.",
+  "answer": "The pod `bad-image` in the `demo` namespace fails to start because the container image `nginx:this-tag-does-not-exist` cannot be pulled. The image tag `this-tag-does-not-exist` is invalid or does not exist in the registry. \n\n**Solution**:  \nUpdate the image tag in your deployment configuration to a valid tag (e.g., `nginx:latest` or a specific version like `nginx:1.21.1`). If using a private registry, ensure the correct credentials are configured via image pull secrets. \n\nExample fix:  \n```yaml\ncontainers:\n  - name: bad-image\n    image: nginx:latest\n``` \n\nThis will resolve the `ImagePullBackOff` error.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 50254.1,
+   "tool_ms": 16.9,
+   "rounds": 3,
+   "round_ms": [
+    17200.4,
+    14937.8,
+    18115.9
+   ],
+   "slowest_round_ms": 18115.9,
+   "model_share": 1.0,
+   "wall_ms": 50272.4,
+   "unaccounted_ms": 1.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "bad-image-647c5576d5-k8bbc.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "6c880e527eaf",
+  "target": {
+   "kind": "workload",
+   "name": "bad-image",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 215.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:07:54",
+  "load_before": 1.88,
+  "load_after": 2.66,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "name": "crasher-svc",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "only_unhealthy": true
+   },
+   {
+    "name": "crasher-5964d99948-r5rbq",
+    "namespace": "demo"
+   },
+   {
+    "limit": 5,
+    "name": "crasher-5964d99948-r5rbq",
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-r5rbq",
+    "namespace": "demo",
+    "container": "crasher",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_service_endpoints",
+    "result": "{\"service\": \"crasher-svc\", \"namespace\": \"demo\", \"type\": \"ClusterIP\", \"selector\": {\"app\": \"crasher\"}, \"ports\": [{\"port\": 80, \"target_port\": \"8080\"}], \"ready_endpoints\": [], \"not_ready_endpoints\": [\"10.244.0.11\"], \"diagnosis\": \"no ready endpoints: 1 pod(s) match the selector but none are ready -- inspect those pods, they are crashing or failing a readiness probe\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"bad-image-647c5576d5-k8bbc\": {\"status\": \"ImagePullBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"crasher-5964d99948-r5rbq\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 6, \"node\": \"kubewhy-9-control-plane\"}, \"log-shipper-kglrg\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 6, \"node\": \"kubewhy-9-control-plane\"}, \"memory-hog-bc76968c6-fmclg\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 6, \"node\": \"kubewhy-9-control-plane\"}, \"needs-db-758f45b6c9-69s5j\": {\"status\": \"Init:CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"never-ready-848784c697-w75nv\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"nightly-sync-29816310-qrjw8\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"nightly-sync-29816315-jttkz\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"slow-starter-7c4f8c9965-vlfnv\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 7, \"node\": \"kubewhy-9-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-r5rbq\", \"namespace\": \"demo\", \"status\": \"Error\", \"node\": \"kubewhy-9-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 7, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"crasher-5964d99948-r5rbq\", \"events\": [{\"reason\": \"BackOff\", \"count\": 14, \"age\": \"56s\", \"message\": \"Back-off restarting failed container crasher in pod crasher-5964d99948-r5rbq_demo(de23c716-f374-4355-9de0-4343ad76f9c6)\"}]}"
+   },
+   {
+    "id": "tool-5",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-r5rbq\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\", \"container\": \"crasher\"}"
+   }
+  ],
+  "draft": "The `crasher-svc` service is unreachable because its pod `crasher-5964d99948-r5rbq` is crashing with exit code `1`, and the root cause is a **database connection failure**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n- **Container Crash**: The `crasher` container (using `busybox:1.36`) crashes on startup due to a failed database connection. The logs show:\n  ```\n  connecting to database...\n  FATAL: could not connect to db:5432: connection refused\n  ```\n  This indicates the app inside the container cannot reach the database at `db:5432`.\n\n---\n\n### **Why the Service Is Unreachable**\n1. **No Ready Endpoints**:  \n   The `crasher-svc` service has **0 ready endpoints** (from `get_service_endpoints`), meaning:\n   - The selector (`app: crasher`) matches the pod, but the pod is not ready.\n   - The pod is in a `CrashLoopBackOff` state, repeatedly crashing and restarting.\n\n2. **Database Connection Refused**:  \n   The pod's logs explicitly show it cannot connect to the database. Possible reasons:\n   - The database service is not running.\n   - The database service is in a different namespace (e.g., `default` vs. `demo`).\n   - The database is running but not listening on port `5432` (common for PostgreSQL).\n   - Network policies or firewalls block the connection.\n\n3. **No Logs from Previous Runs**:  \n   The current container logs only show the crash (no prior output), suggesting the app fails immediately on startup. This could be due to:\n   - Missing dependencies (e.g., the database binary is not installed).\n   - Incorrect configuration (e.g., wrong database hostname, username, or password).\n   - The database service is not yet available when the pod starts (e.g., startup order issues).\n\n---\n\n### **Next Steps to Fix**\n1. **Verify Database Availability**:\n   - Check if the database service (e.g., `postgres` or `mysql`) is running in the same namespace (`demo`).\n   - Use `kubectl get svc` and `kubectl get pods` in the `demo` namespace to confirm the database is up and listening on port `5432`.\n\n2. **Check Network Policies**:\n   - Ensure there are no network policies or firewalls blocking traffic between the crasher pod and the database.\n\n3. **Inspect Pod Configuration**:\n   - Verify the environment variables or config maps used by the `crasher` container to connect to the database. Ensure the hostname, port, username, and password are correct.\n\n4. **Debug the Container**:\n   - If the container is a custom image, rebuild it to include debugging tools (e.g., `strace`, `gdb`) and inspect the crash.\n   - Use `kubectl exec` to debug the container if it starts successfully (e.g., by temporarily disabling the database connection check).\n\n5. **Ensure Database Is Ready**:\n   - If the database is a dependency, use Kubernetes init containers or readiness probes to delay the crasher pod's startup until the database is available.\n\n---\n\n### **Summary**\nThe service is unreachable because the pod crashes immediately upon startup due to a database connection failure. The database is either not running, misconfigured, or unreachable. Fixing the database connection or ensuring the app waits for the database to be ready will resolve the issue.",
+  "answer": "The `crasher-svc` service is unreachable because its pod `crasher-5964d99948-r5rbq` is crashing with exit code `1`, and the root cause is a **database connection failure**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n- **Container Crash**: The `crasher` container (using `busybox:1.36`) crashes on startup due to a failed database connection. The logs show:\n  ```\n  connecting to database...\n  FATAL: could not connect to db:5432: connection refused\n  ```\n  This indicates the app inside the container cannot reach the database at `db:5432`.\n\n---\n\n### **Why the Service Is Unreachable**\n1. **No Ready Endpoints**:  \n   The `crasher-svc` service has **0 ready endpoints** (from `get_service_endpoints`), meaning:\n   - The selector (`app: crasher`) matches the pod, but the pod is not ready.\n   - The pod is in a `CrashLoopBackOff` state, repeatedly crashing and restarting.\n\n2. **Database Connection Refused**:  \n   The pod's logs explicitly show it cannot connect to the database. Possible reasons:\n   - The database service is not running.\n   - The database service is in a different namespace (e.g., `default` vs. `demo`).\n   - The database is running but not listening on port `5432` (common for PostgreSQL).\n   - Network policies or firewalls block the connection.\n\n3. **No Logs from Previous Runs**:  \n   The current container logs only show the crash (no prior output), suggesting the app fails immediately on startup. This could be due to:\n   - Missing dependencies (e.g., the database binary is not installed).\n   - Incorrect configuration (e.g., wrong database hostname, username, or password).\n   - The database service is not yet available when the pod starts (e.g., startup order issues).\n\n---\n\n### **Next Steps to Fix**\n1. **Verify Database Availability**:\n   - Check if the database service (e.g., `postgres` or `mysql`) is running in the same namespace (`demo`).\n   - Use `kubectl get svc` and `kubectl get pods` in the `demo` namespace to confirm the database is up and listening on port `5432`.\n\n2. **Check Network Policies**:\n   - Ensure there are no network policies or firewalls blocking traffic between the crasher pod and the database.\n\n3. **Inspect Pod Configuration**:\n   - Verify the environment variables or config maps used by the `crasher` container to connect to the database. Ensure the hostname, port, username, and password are correct.\n\n4. **Debug the Container**:\n   - If the container is a custom image, rebuild it to include debugging tools (e.g., `strace`, `gdb`) and inspect the crash.\n   - Use `kubectl exec` to debug the container if it starts successfully (e.g., by temporarily disabling the database connection check).\n\n5. **Ensure Database Is Ready**:\n   - If the database is a dependency, use Kubernetes init containers or readiness probes to delay the crasher pod's startup until the database is available.\n\n---\n\n### **Summary**\nThe service is unreachable because the pod crashes immediately upon startup due to a database connection failure. The database is either not running, misconfigured, or unreachable. Fixing the database connection or ensuring the app waits for the database to be ready will resolve the issue.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 215725.4,
+   "tool_ms": 50.5,
+   "rounds": 7,
+   "round_ms": [
+    11574.9,
+    19209.7,
+    32104.5,
+    42020.1,
+    30244.1,
+    23730.2,
+    56842.0
+   ],
+   "slowest_round_ms": 56842.0,
+   "model_share": 1.0,
+   "wall_ms": 215785.3,
+   "unaccounted_ms": 9.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_service_endpoints",
+       "field": "not_ready_endpoints[0]",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "5",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5"
+      }
+     ]
+    },
+    {
+     "claim": "5964",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5964"
+      }
+     ]
+    },
+    {
+     "claim": "99948",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "99948"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.crasher.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_service_endpoints",
+       "field": "ports[0].port",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "crasher-5964d99948-r5rbq.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "e7238b338607",
+  "target": {
+   "kind": "service",
+   "name": "crasher-svc",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 61.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:11:30",
+  "load_before": 2.66,
+  "load_after": 5.98,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "name": "typo-svc"
+   },
+   {
+    "namespace": "demo",
+    "only_unhealthy": true
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_service_endpoints",
+    "result": "{\"service\": \"typo-svc\", \"namespace\": \"demo\", \"type\": \"ClusterIP\", \"selector\": {\"app\": \"web-frontend\"}, \"ports\": [{\"port\": 80, \"target_port\": \"8080\"}], \"ready_endpoints\": [], \"not_ready_endpoints\": [], \"diagnosis\": \"no ready endpoints: the selector matches no pods at all -- check the selector against the pod labels\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"bad-image-647c5576d5-k8bbc\": {\"status\": \"ImagePullBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"crasher-5964d99948-r5rbq\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 7, \"node\": \"kubewhy-9-control-plane\"}, \"log-shipper-kglrg\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 7, \"node\": \"kubewhy-9-control-plane\"}, \"memory-hog-bc76968c6-fmclg\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 7, \"node\": \"kubewhy-9-control-plane\"}, \"needs-db-758f45b6c9-69s5j\": {\"status\": \"Init:CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"never-ready-848784c697-w75nv\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"nightly-sync-29816310-qrjw8\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"nightly-sync-29816315-jttkz\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"nightly-sync-29816320-tw9tp\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-9-control-plane\"}, \"slow-starter-7c4f8c9965-vlfnv\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 7, \"node\": \"kubewhy-9-control-plane\"}}"
+   }
+  ],
+  "draft": "The `typo-svc` service in the `demo` namespace has no endpoints because **its selector `app=web-frontend` matches no pods**. None of the listed pods in the namespace have that label, so the service has no pods to route traffic to.\n\n### Next Steps:\n1. **Verify pod labels**: Check if any pods in the `demo` namespace are labeled `app=web-frontend`. If not, the service cannot find endpoints.\n2. **Correct the service selector**: Ensure the service's selector matches the actual labels of the target pods. For example, if the pods are labeled `app=web-backend`, update the service's selector to `app=web-backend`.\n3. **Check pod status**: Some pods (like `never-ready-848784c697-w75nv`) are `Running` but not ready. Investigate their readiness probes or configuration issues.\n\nWithout matching pods, the service remains unreachable.",
+  "answer": "The `typo-svc` service in the `demo` namespace has no endpoints because **its selector `app=web-frontend` matches no pods**. None of the listed pods in the namespace have that label, so the service has no pods to route traffic to.\n\n### Next Steps:\n1. **Verify pod labels**: Check if any pods in the `demo` namespace are labeled `app=web-frontend`. If not, the service cannot find endpoints.\n2. **Correct the service selector**: Ensure the service's selector matches the actual labels of the target pods. For example, if the pods are labeled `app=web-backend`, update the service's selector to `app=web-backend`.\n3. **Check pod status**: Some pods (like `never-ready-848784c697-w75nv`) are `Running` but not ready. Investigate their readiness probes or configuration issues.\n\nWithout matching pods, the service remains unreachable.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 60952.2,
+   "tool_ms": 19.8,
+   "rounds": 3,
+   "round_ms": [
+    19490.8,
+    12445.8,
+    29015.6
+   ],
+   "slowest_round_ms": 29015.6,
+   "model_share": 1.0,
+   "wall_ms": 60974.2,
+   "unaccounted_ms": 2.3,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "75",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "697",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "848784",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "has no endpoints",
+     "kind": "absence",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_service_endpoints",
+       "field": "ready_endpoints, not_ready_endpoints"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "082ff547f419",
+  "target": {
+   "kind": "service",
+   "name": "typo-svc",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "healthy_not_reported_broken",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 36.6,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:12:31",
+  "load_before": 5.98,
+  "load_after": 4.28,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:this-tag-does-not-exist\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The `healthy-web` deployment in the `demo` namespace is working correctly. It has **2 desired replicas**, all **ready (2/2)**, and **available (2/2)**. The deployment is marked as healthy, and its containers use the valid `nginx:1.27-alpine` image. No further action is needed.",
+  "answer": "The `healthy-web` deployment in the `demo` namespace is working correctly. It has **2 desired replicas**, all **ready (2/2)**, and **available (2/2)**. The deployment is marked as healthy, and its containers use the valid `nginx:1.27-alpine` image. No further action is needed.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 36589.3,
+   "tool_ms": 9.2,
+   "rounds": 2,
+   "round_ms": [
+    14788.3,
+    21801.0
+   ],
+   "slowest_round_ms": 21801.0,
+   "model_share": 1.0,
+   "wall_ms": 36599.1,
+   "unaccounted_ms": 0.6,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "healthy-web.desired",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "1.27",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "healthy-web.images[0]",
+       "value": "1.27"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "3524a455ac25",
+  "target": {
+   "kind": "workload",
+   "name": "healthy-web",
+   "namespace": "demo"
+  }
+ }
+]

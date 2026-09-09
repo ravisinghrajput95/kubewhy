@@ -192,7 +192,7 @@ def named_in(answer, entry):
     strict check here would fold two different defects into one number.
     """
     lowered = answer.lower()
-    for form in (entry["workload"], entry["key"], entry["example"]):
+    for form in (entry["workload"], entry["key"], entry["example"] or ""):
         if form and form.lower() in lowered:
             return True
     return False

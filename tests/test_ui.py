@@ -1087,6 +1087,92 @@ class TestChoosingBetweenReplicas:
             FINDINGS["staging/payments-api"]["example"]
 
 
+
+class TestAFailedJobWithNoPodToInspect:
+    """
+    scan_cluster reports a failed Job whose pods the deadline deleted, and
+    that row carries no example pod. The console assumed every row had one:
+    `entry["example"]` in three places, and the Detail/Events/Logs tabs would
+    each have called a collector with an empty pod name.
+
+    A page of three 404s reads as the console being broken. What is true is
+    that the pods are gone and the reason is the whole finding.
+    """
+
+    JOB = {
+        "batch/nightly-rollup": {
+            "status": "Failed",
+            "pods": 0,
+            "reason": "DeadlineExceeded",
+        },
+    }
+
+    def test_the_page_renders_at_all(self):
+        # The counter for everything below: before the guard this raised.
+        app = run(dict(self.JOB))
+        assert not app.exception, [str(e.value) for e in app.exception]
+
+
+    def test_the_table_shows_no_example_pod_rather_than_an_empty_name(self):
+        app = run(dict(self.JOB))
+        rows = app.dataframe[0].value
+        row = rows[0] if isinstance(rows, list) else rows.to_dict("records")[0]
+
+        assert row["example pod"] == "—"
+        assert row["reason"] == "DeadlineExceeded"
+
+    def test_a_row_that_does_have_a_pod_still_names_it(self):
+        # Two-sided. Without this the assertion above passes on a table that
+        # has stopped showing pod names at all.
+        app = run(dict(FINDINGS))
+        rows = app.dataframe[0].value
+        rows = rows if isinstance(rows, list) else rows.to_dict("records")
+        names = {r["example pod"] for r in rows}
+
+        assert "payments-api-66df957946-2hl47" in names
+        assert "—" not in names
+
+    def test_selecting_it_offers_no_pod_and_says_why(self):
+        import streamlit as st
+
+        st.cache_data.clear()
+        with patch.object(k8s, "scan_cluster", return_value=dict(self.JOB)), \
+             patch.object(k8s, "list_nodes", return_value={}):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.session_state["workload_choice"] = "batch/nightly-rollup"
+            app.run()
+
+        assert not app.exception, [str(e.value) for e in app.exception]
+        assert app.session_state["subject"]["pod"] is None
+        assert any("pods are gone" in str(el.value) for el in app.info)
+
+    def test_the_search_filter_does_not_trip_over_the_missing_pod(self):
+        """
+        ui.py filtered on `entry["example"].lower()`; a row without one raised
+        before the page had rendered anything.
+
+        The search term must NOT match the Job's own key. `or` short-circuits,
+        so searching "nightly" satisfies the key half and never evaluates the
+        pod half -- the first version of this test did exactly that and passed
+        against the unguarded code.
+        """
+        import streamlit as st
+
+        st.cache_data.clear()
+        findings = dict(self.JOB)
+        findings.update(FINDINGS)
+        with patch.object(k8s, "scan_cluster", return_value=findings), \
+             patch.object(k8s, "list_nodes", return_value={}):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.run()
+            # By label: text_input[0] is the Ask panel's question box.
+            next(t for t in app.text_input if t.label == "Filter") \
+                .set_value("payments").run()
+
+        assert not app.exception, [str(e.value) for e in app.exception]
+        # And it filtered rather than merely surviving: the Job row is gone.
+        assert list(app.dataframe[0].value["workload"]) == ["staging/payments-api"]
+
 class TestTheContainerPickerFollowsThePod:
     """
     Sidecars make "the pod's logs" ambiguous, and picking silently shows the

@@ -189,10 +189,25 @@ def no_test_reaches_a_cluster():
 
             return unreachable
 
+    class RefusingBundle(dict):
+        """
+        Unreachable for every client, including one added tomorrow.
+
+        The keys were hand-listed here until 2026-09-10, when `batch` was
+        added to `_build_bundle` for list_jobs and was simply not in the list.
+        `_bundle()["batch"]` then raised KeyError rather than the
+        ConnectionError this fixture exists to raise, and the new tool's
+        caller swallowed it -- so a test that looked isolated was isolated by
+        accident, and one whose caller did not swallow it would have failed
+        with a message about a missing dict key. Deriving the answer instead
+        of listing it means the next client is covered on the day it lands.
+        """
+
+        def __missing__(self, key):
+            return Unreachable()
+
     def refuse(requested):
-        bundle = {key: Unreachable() for key in
-                  ("core", "apps", "discovery", "networking",
-                   "autoscaling", "policy", "storage")}
+        bundle = RefusingBundle()
         bundle["active"] = "no-cluster-in-tests"
         return bundle
 

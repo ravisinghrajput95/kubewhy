@@ -491,6 +491,24 @@ def _is_healthy(pod):
     )
 
 
+def job_workload_name(name):
+    """
+    The workload a Job belongs to: itself, or the CronJob that scheduled it.
+
+    A CronJob names each run after its schedule slot -- nightly-sync-28123456
+    -- so without trimming every scheduled run is a new workload, the cooldown
+    never applies, and a job failing hourly reports hourly forever.
+
+    Extracted from workload_of on 2026-09-10 so scan_cluster's Job pass and
+    its pod pass cannot disagree. They did: the pod pass groups a CronJob's
+    pods under the trimmed name and the Job pass had the Job's own name, so a
+    failed CronJob run came out as two rows for one problem. Two parsers on
+    one string agree only by coincidence.
+    """
+    head, _, tail = name.rpartition("-")
+    return head if head and tail.isdigit() else name
+
+
 def workload_of(pod):
     """
     The owning workload, so ten crashing replicas count as one problem.
@@ -513,8 +531,7 @@ def workload_of(pod):
             return ref.name.rsplit("-", 1)[0]
 
         if ref.kind == "Job":
-            head, _, tail = ref.name.rpartition("-")
-            return head if head and tail.isdigit() else ref.name
+            return job_workload_name(ref.name)
 
         if ref.kind == "Node":
             name = pod.metadata.name
@@ -663,6 +680,13 @@ def scan_cluster(
     example pod: pass that to describe_pod, get_pod_events or get_pod_logs.
     This tool tells you where to look and never why -- the cause always needs
     a follow-up call on the example pod.
+
+    A failed Job is the exception, and it is reported here because it is
+    reachable no other way: its pods are usually deleted, so it appears in no
+    pod listing. Such an entry carries "reason" -- DeadlineExceeded,
+    BackoffLimitExceeded -- and no example pod, because there is no pod left
+    to read. Call list_jobs for the rest of it. An entry with a reason and no
+    example is not an incomplete result; it is the whole result.
     To answer "is X healthy?" pass workload -- it reports that workload's state
     whether or not anything is wrong with it, which is the only way to say a
     thing is fine. Never answer about a different workload than the one asked
@@ -758,6 +782,46 @@ def scan_cluster(
             # repetition in context.
             entry["fault"] = fault
 
+    # -- failed Jobs, which the pod pass above cannot always see -------------
+    #
+    # A Job killed by activeDeadlineSeconds deletes its pods, so it appears in
+    # no pod listing at all. Measured on kind 2026-09-09: a namespace holding
+    # a Job that had failed 30 seconds earlier scanned completely clean. That
+    # is the worst shape a scan can have -- not a wrong answer but a confident
+    # empty one.
+    #
+    # Two outcomes, and the difference is whether any pod survived:
+    #   pods remain  -- the workload is already a row, from its pods. Attach
+    #                   the reason, which is on the Job and nowhere else, and
+    #                   do not add a second row for one problem.
+    #   pods gone    -- add the row. It carries no `example`, because there is
+    #                   no pod to drill into; every consumer of this output
+    #                   treats a missing `example` as "nothing further to
+    #                   read", which is the truth here.
+    for namespace, job_name, reason in _failed_jobs(wanted):
+        # The name the pod pass would have grouped this Job's pods under. A
+        # CronJob run is named for its schedule slot and its pods group under
+        # the CronJob; keying the row by the raw Job name puts one failure on
+        # the page twice.
+        name = job_workload_name(job_name)
+        if workload and workload.lower() not in (
+            name.lower(), job_name.lower(),
+            f"{namespace}/{name}".lower(), f"{namespace}/{job_name}".lower()
+        ):
+            continue
+
+        existing = [key for key in groups if key[0] == namespace and key[1] == name]
+        if existing:
+            for key in existing:
+                groups[key]["reason"] = reason
+            continue
+
+        groups[(namespace, name, "job-failed")] = {
+            "status": "Failed",
+            "pods": 0,
+            "reason": reason,
+        }
+
     if not groups:
         if workload:
             # Distinct from "it is healthy", which now returns a row.
@@ -793,6 +857,45 @@ def scan_cluster(
 
     return result
 
+
+
+def _failed_jobs(namespaces=()):
+    """
+    (namespace, name, reason) for every Job in a terminal Failed state.
+
+    Separate from list_jobs because scan_cluster wants one line per Job and
+    list_jobs wants the whole projection, and because this one must never
+    raise: a cluster whose ClusterRole predates the batch grant would
+    otherwise have every scan fail on a 403 instead of returning the pod
+    findings it has always returned. An install that cannot list Jobs loses
+    the Job rows and keeps everything else.
+    """
+    try:
+        if len(namespaces) == 1:
+            jobs = _batch_api().list_namespaced_job(
+                namespaces[0], _request_timeout=TIMEOUT
+            ).items
+        else:
+            jobs = _batch_api().list_job_for_all_namespaces(
+                _request_timeout=TIMEOUT
+            ).items
+    except Exception:  # noqa: BLE001
+        return []
+
+    found = []
+    for job in jobs:
+        if namespaces and job.metadata.namespace not in namespaces:
+            continue
+        for condition in job.status.conditions or []:
+            # Failed only, and only settled. FailureTarget carries the same
+            # reason up to ~30s earlier, and reporting on it would put a Job
+            # in a cluster scan while kubectl still calls it Running.
+            if condition.type == "Failed" and condition.status == "True":
+                found.append(
+                    (job.metadata.namespace, job.metadata.name, condition.reason)
+                )
+                break
+    return found
 
 def describe_pod(name: str, namespace: str = "default"):
     """

@@ -2546,6 +2546,68 @@ class TestTheScanCommand:
         assert pod == "memory-hog-abc"
         assert ask.call_args.kwargs["verbose"] is True
 
+
+    JOB_ONLY = {
+        "batch/nightly-rollup": {"status": "Failed", "pods": 0,
+                                 "reason": "DeadlineExceeded"},
+    }
+
+    def test_a_job_row_prints_its_reason(self, capsys):
+        """
+        "Failed  0 pod(s)" says nothing on its own. For a Job whose pods the
+        deadline deleted, the reason is the entire finding, and the listing is
+        the only place the CLI shows it without paying for a model.
+        """
+        with patch.object(agent, "scan_cluster", lambda: dict(self.JOB_ONLY)):
+            assert agent.scan() == 0
+
+        printed = capsys.readouterr().out
+        assert "batch/nightly-rollup" in printed
+        assert "DeadlineExceeded" in printed
+
+    def test_a_pod_row_prints_no_reason_column(self, capsys):
+        # Two-sided: the reason is appended only where there is one, so the
+        # listing does not grow a trailing blank on every ordinary row.
+        with patch.object(agent, "scan_cluster", lambda: dict(self.BROKEN)):
+            assert agent.scan() == 0
+
+        line = next(
+            line for line in capsys.readouterr().out.splitlines()
+            if "demo/crasher" in line
+        )
+        assert line == line.rstrip()
+
+    def test_explaining_a_job_row_asks_without_a_pod(self):
+        """
+        There is no pod, so scoped_question is given None -- it already takes
+        that -- and capture_pod_logs is not called at all. Calling it with an
+        absent name spends an API round trip to 404 and hands the model an
+        empty prefetch that reads as "the logs were empty".
+        """
+        spy = MagicMock(side_effect=agent.scoped_question)
+        answer = {"answer": "the job hit its deadline", "unverified": []}
+        with patch.object(agent, "scan_cluster", lambda: dict(self.JOB_ONLY)), \
+             patch.object(agent, "scoped_question", spy), \
+             patch.object(agent, "capture_pod_logs") as capture, \
+             patch.object(agent, "ask", return_value=answer) as ask:
+            assert agent.scan(explain=1) == 0
+
+        capture.assert_not_called()
+        _, workload, namespace, pod = spy.call_args.args
+        assert (namespace, workload, pod) == ("batch", "batch/nightly-rollup", None)
+        assert ask.call_args.kwargs["prefetched"] == []
+
+    def test_a_row_that_has_a_pod_still_captures_its_logs(self):
+        # The counter. Without it the assertion above passes on a scan() that
+        # has stopped capturing logs for anything.
+        with patch.object(agent, "scan_cluster", lambda: dict(self.BROKEN)), \
+             patch.object(agent, "capture_pod_logs", return_value=[]) as capture, \
+             patch.object(agent, "ask",
+                          return_value={"answer": "a", "unverified": []}):
+            assert agent.scan(explain=1) == 0
+
+        capture.assert_called_once_with("memory-hog-abc", "demo")
+
     def test_an_explained_answer_is_checked_for_unverified_claims(self):
         with patch.object(agent, "scan_cluster", lambda: dict(self.BROKEN)), \
              patch.object(agent, "capture_pod_logs", lambda pod, namespace: []), \
