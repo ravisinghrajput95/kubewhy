@@ -638,6 +638,54 @@ class TestExpectationsThatTheQuestionAlreadySatisfies:
         assert _echo_satisfiable(case)
 
 
+
+class TestEveryExpectedToolExists:
+    """
+    A case that expects a tool the agent does not have can never pass.
+
+    `expect_tools` is conjunctive -- run_eval appends "never called X" for
+    every entry missing from the trace -- so a name that no longer resolves
+    fails the case on every run, forever, and reads as a diagnostic failure
+    rather than as a broken expectation.
+
+    This is the eval-side twin of test_mcp_server's registry check, which
+    caught list_jobs missing from the MCP surface within one run of adding it.
+    It would NOT have caught the defect that prompted it: `expect_tools` on
+    job_killed_by_its_own_deadline named describe_pod, a tool that exists but
+    cannot see that case's evidence, because the deadline kill deletes the
+    pod. That one needed a cluster. This guard covers the cheaper half --
+    renames, typos and a tool being dropped from the registry.
+    """
+
+    def test_no_case_expects_a_tool_that_is_not_registered(self):
+        import agent
+        from evals.cases import CASES
+
+        unknown = sorted({
+            (case["name"], tool)
+            for case in CASES
+            for key in ("expect_tools", "forbid_tools")
+            for tool in case.get(key, [])
+            if tool not in agent.TOOLS
+        })
+        assert unknown == [], (
+            "these cases name a tool that is not in agent.TOOLS: " f"{unknown}"
+        )
+
+    def test_the_guard_fails_on_a_tool_that_does_not_exist(self):
+        # The counter. Without it this passes just as well over a CASES list
+        # the loop never actually reached.
+        import agent
+
+        cases = [{"name": "invented", "expect_tools": ["read_the_job_object"]}]
+        unknown = [
+            (case["name"], tool)
+            for case in cases
+            for tool in case.get("expect_tools", [])
+            if tool not in agent.TOOLS
+        ]
+        assert unknown == [("invented", "read_the_job_object")]
+
 class TestAPayloadMustReachTheModel:
     """
     F-07. `injection_in_annotations_is_data` asserted the agent resists an

@@ -71,7 +71,12 @@ UNCOVERED_CASES = [
         # container will find nothing wrong with it.
         "forbid": ["crashloop", "out of memory", "oomkilled",
                    "the container crashed", "exited with an error"],
-        "expect_tools": ["describe_pod"],
+        # list_jobs, not describe_pod. This case shipped expecting describe_pod
+        # and could not have passed: measured on kind 2026-09-09, the deadline
+        # kill deletes the pod, so there is nothing for describe_pod to read
+        # and both of this case's required_evidence strings exist only on the
+        # Job object. The expectation demanded a call that cannot succeed.
+        "expect_tools": ["list_jobs"],
         "require_grounded": True,
     },
     {

@@ -163,10 +163,10 @@ list_jobs before you conclude anything from its pods. A Job is the one
 workload whose failure reason is on no pod at all: the Job controller enforces
 activeDeadlineSeconds and backoffLimit itself and records DeadlineExceeded or
 BackoffLimitExceeded on the Job. A Job killed by its own deadline was stopped
-on purpose -- its container reports exit 137 and reason Error like any other
-kill, and reporting that as a crash sends the reader to debug code that did
+on purpose: reporting that as a crash sends the reader to debug code that did
 nothing wrong. The pods of such a Job are usually deleted, so finding no pod
-for a job is not evidence that it is fine.
+for a job is not evidence that it is fine -- and with no pod there is no exit
+code, so do not state one. Say the deadline was reached and stop.
 
 For a service that is unreachable, start with get_service_endpoints: a service
 with no ready endpoints has nowhere to send traffic, and the matching pods are
