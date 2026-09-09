@@ -466,3 +466,137 @@ class TestTheServiceAsymmetryIsDeliberate:
             self.SERVICE, "get_service_endpoints", {"namespace": "demo"})
 
         assert violation is None
+
+
+class TestTheQuestionIsParsedTheWayItIsWritten:
+    """
+    Eight survivors in `targeting.py`, the module whose whole job is that the
+    agent may choose HOW to investigate but not WHAT. Each of these is a place
+    where a mutation makes it target something the question did not name.
+    """
+
+    def test_both_ways_of_writing_a_namespace_are_read(self):
+        """
+        `match.group(1) or match.group(2)` -- the two alternatives in the
+        namespace pattern. Only one phrasing was ever asserted, so the pattern
+        could have been reading the same group twice and half the questions
+        people write would have lost their namespace.
+        """
+        assert targeting.target_of(
+            "why is crasher failing in the demo namespace?")["namespace"] == "demo"
+        assert targeting.target_of(
+            "why is crasher failing in namespace demo?")["namespace"] == "demo"
+
+    def test_the_name_and_the_kind_are_not_swapped(self):
+        """
+        The group-index table: `(_NAME_FIRST, 1, 2), (_KIND_FIRST, 2, 1)`. Both
+        orderings have to read the name from their own name group. Swapping
+        them makes the *kind* the target -- which is the failure recorded above
+        the table, where kind-first ran first and "service unreachable" made
+        the adjective the target.
+        """
+        for question in ("is the crasher deployment unhealthy?",
+                         "is the deployment crasher unhealthy?"):
+            target = targeting.target_of(question)
+            assert target["name"] == "crasher", question
+            assert target["kind"] == "workload"
+
+    def test_a_bare_kind_word_is_not_a_workload_name(self):
+        """
+        `candidate in _ALL_KINDS or candidate == namespace`. "the deployment"
+        with no name after it is a category, not an object, and targeting a
+        workload literally called `deployment` sends every tool call at
+        something no cluster has.
+        """
+        for question in ("is the deployment failing?",
+                         "why is the statefulset broken?",
+                         "is the cronjob unhealthy?"):
+            assert targeting.target_of(question) is None, question
+
+    def test_a_namespaced_name_compares_against_its_bare_half(self):
+        """
+        `parts[1] if len(parts) == 2 else value.lower()`. A tool asked about
+        `demo/crasher` is asking about the same workload as `crasher`; taking
+        the wrong half, or the wrong length, makes the guard retarget a call
+        that was already correct.
+        """
+        assert targeting._same_workload("demo/crasher", "crasher") is True
+        assert targeting._same_workload("demo/crasher", "log-shipper") is False
+        # Three parts is not a namespace/name pair, so it falls through to a
+        # full compare rather than guessing which segment is the name.
+        assert targeting._same_workload("a/b/c", "c") is False
+
+    def test_a_name_is_listed_once_however_often_it_is_asked_about(self):
+        """
+        `name in _NOT_A_NAME or name in _ALL_KINDS or name in seen`, joined by
+        `or` so any one of them is enough to skip. Joined by `and` a name has
+        to be all three, and a question mentioning one workload twice offers it
+        as two candidates -- which `confirm` then refuses as ambiguous, so the
+        run loses its target because the question repeated itself.
+        """
+        names = targeting.candidate_names(
+            "why is log-shipper failing, and is log-shipper related to web-1?")
+
+        assert names == ["log-shipper", "web-1"]
+
+    def test_the_kind_is_read_from_the_kind_group(self):
+        """
+        Sharper than the case above, and it took a measurement to find out why.
+        `_kind_of` returns "workload" for anything it does not recognise, so
+        reading the kind from the *name* group still yields "workload" for an
+        ordinary workload question and the swap is invisible. A service is what
+        distinguishes them: read from the wrong group, `crasher-svc` is not a
+        recognised kind and the target comes back a workload.
+        """
+        for question in ("is the crasher-svc service unreachable?",
+                         "is the service crasher-svc unreachable?"):
+            target = targeting.target_of(question)
+            assert target["kind"] == "service", question
+            assert target["name"] == "crasher-svc"
+
+    def test_a_kind_word_in_the_name_position_is_still_not_a_name(self):
+        """
+        `candidate in _ALL_KINDS`, reached only when the pattern actually
+        matches a name/kind pair. "the pod deployment" matches with `pod` in
+        the name position, and `pod` is a category however it is written.
+        """
+        assert targeting.target_of("is the pod deployment unhealthy?") is None
+
+    def test_an_unscoped_call_is_scoped_and_a_scoped_one_is_left_alone(self):
+        """
+        `if not given` in `enforce`. Inverted, the guard fills in an argument
+        the model already supplied and leaves an empty one empty -- so a call
+        that was correctly scoped gets rewritten, and the unscoped call this
+        exists to catch goes out unscoped. Both directions, because only the
+        pair distinguishes them.
+        """
+        target = {"kind": "workload", "name": "crasher", "namespace": "demo"}
+
+        arguments, note = targeting.enforce(
+            target, "list_pods", {"namespace": "demo"})
+        assert arguments["workload"] == "crasher"
+        assert note["action"] == "retargeted"
+        assert "not scoped" in note["reason"]
+
+        arguments, note = targeting.enforce(
+            target, "list_pods", {"namespace": "demo", "workload": "crasher"})
+        assert arguments["workload"] == "crasher"
+        assert note is None, "a call already scoped to the target was rewritten"
+
+    def test_a_second_resolving_candidate_stops_the_lookups(self):
+        """
+        `if len(found) > 1: return None` inside the loop. The outcome is
+        already guarded after it -- `len(found) != 1` refuses the same case --
+        so what this line buys is not the refusal but the *short circuit*: once
+        two candidates have resolved the answer is settled, and every further
+        `resolver` call is a cluster lookup whose result cannot change it.
+        """
+        calls = []
+
+        def resolver(name):
+            calls.append(name)
+            return {"kind": "workload", "namespace": "demo"}
+
+        assert targeting.confirm(["a-one", "b-two", "c-three"], resolver) is None
+        assert calls == ["a-one", "b-two"], (
+            "it kept resolving after the answer was settled")
