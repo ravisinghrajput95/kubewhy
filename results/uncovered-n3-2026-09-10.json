@@ -1188,5 +1188,303 @@
    "name": "healthy-web",
    "namespace": null
   }
+ },
+ {
+  "case": "inference_is_marked",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 175.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:19:23",
+  "load_before": 2.71,
+  "load_after": 2.0,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "list_nodes"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "memory-hog"
+   },
+   {
+    "namespace": "demo",
+    "name": "memory-hog-bc76968c6-fmclg"
+   },
+   {
+    "name": "memory-hog-bc76968c6-fmclg",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-fmclg\": {\"status\": \"OOMKilled\", \"ready\": \"0/1\", \"restarts\": 9, \"node\": \"kubewhy-9-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-fmclg\", \"namespace\": \"demo\", \"status\": \"OOMKilled\", \"node\": \"kubewhy-9-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 9, \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-fmclg\", \"events\": [{\"reason\": \"BackOff\", \"count\": 22, \"age\": \"4s\", \"message\": \"Back-off restarting failed container hog in pod memory-hog-bc76968c6-fmclg_demo(59f2588b-af7d-4839-8bb8-1d225e7ebe17)\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-9-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The **memory-hog pod** in the `demo` namespace **will almost certainly be OOMKilled again** in the next hour unless its memory limits are increased. Here's the full diagnosis:\n\n---\n\n### **Key Findings**\n1. **Pod Configuration**:\n   - The container `hog` has a memory **limit of 64Mi**, but the `polinux/stress` image likely exceeds this, triggering the OOM killer.\n   - The pod is already in an **OOMKilled state** (`status: OOMKilled`, `exit_code: 137`), with **9 restarts** and a `BackOff` loop (22 total restarts).\n\n2. **Node Pressure**:\n   - The node `kubewhy-9-control-plane` is **not under memory pressure** (`pressure: null`), with **8GB of allocatable memory**. This rules out node-level resource exhaustion as a cause.\n\n3. **Root Cause**:\n   - The pod\u2019s memory limits are **too low** for its workload. The OOM killer acts as a safety valve when the container exceeds its limit, leading to repeated restarts.\n\n---\n\n### **Why It Will Happen Again**\n- The pod\u2019s current limits (`limits.memory: 64Mi`) are insufficient for the `polinux/stress` workload.\n- Without adjusting these limits, the pod will **continuously hit the OOM threshold**, triggering the OOM killer and restarting the container.\n\n---\n\n### **Recommended Fix**\n- **Increase the memory limit** in the pod's configuration (e.g., set `limits.memory` to `256Mi` or higher).\n- If the workload is intentional (e.g., stress testing), ensure the limits align with the expected resource usage.\n\nWithout this change, the pod will **repeatedly crash** due to OOMKills.",
+  "answer": "The **memory-hog pod** in the `demo` namespace **will almost certainly be OOMKilled again** in the next hour unless its memory limits are increased. Here's the full diagnosis:\n\n---\n\n### **Key Findings**\n1. **Pod Configuration**:\n   - The container `hog` has a memory **limit of 64Mi**, but the `polinux/stress` image likely exceeds this, triggering the OOM killer.\n   - The pod is already in an **OOMKilled state** (`status: OOMKilled`, `exit_code: 137`), with **9 restarts** and a `BackOff` loop (22 total restarts).\n\n2. **Node Pressure**:\n   - The node `kubewhy-9-control-plane` is **not under memory pressure** (`pressure: null`), with **8GB of allocatable memory**. This rules out node-level resource exhaustion as a cause.\n\n3. **Root Cause**:\n   - The pod\u2019s memory limits are **too low** for its workload. The OOM killer acts as a safety valve when the container exceeds its limit, leading to repeated restarts.\n\n---\n\n### **Why It Will Happen Again**\n- The pod\u2019s current limits (`limits.memory: 64Mi`) are insufficient for the `polinux/stress` workload.\n- Without adjusting these limits, the pod will **continuously hit the OOM threshold**, triggering the OOM killer and restarting the container.\n\n---\n\n### **Recommended Fix**\n- **Increase the memory limit** in the pod's configuration (e.g., set `limits.memory` to `256Mi` or higher).\n- If the workload is intentional (e.g., stress testing), ensure the limits align with the expected resource usage.\n\nWithout this change, the pod will **repeatedly crash** due to OOMKills.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 175637.2,
+   "tool_ms": 59.8,
+   "rounds": 6,
+   "round_ms": [
+    41443.3,
+    26901.0,
+    21377.2,
+    28261.4,
+    19403.0,
+    38251.3
+   ],
+   "slowest_round_ms": 41443.3,
+   "model_share": 1.0,
+   "wall_ms": 175705.1,
+   "unaccounted_ms": 8.1,
+   "slept_ms": 5.5
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-fmclg.status",
+       "value": "oomkilled"
+      }
+     ]
+    },
+    {
+     "claim": "64",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.limits.memory",
+       "value": "64"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-fmclg.status",
+       "value": "oomkilled"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-fmclg.status",
+       "value": "oomkilled"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "memory-hog-bc76968c6-fmclg.restarts",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "22",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_events",
+       "field": "events[0].count",
+       "value": "22"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "list_nodes",
+       "field": "kubewhy-9-control-plane.allocatable_memory",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "8",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "8"
+      }
+     ]
+    },
+    {
+     "claim": "64",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.limits.memory",
+       "value": "64"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "2e8a56ea6a69",
+  "target": {
+   "kind": "workload",
+   "name": "memory-hog",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "host_not_cluster",
+  "model": "qwen3",
+  "context": "kind-kubewhy-9",
+  "think": true,
+  "passed": true,
+  "seconds": 13.5,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-10T00:22:19",
+  "load_before": 2.0,
+  "load_after": 2.0,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "get_system_info"
+  ],
+  "arguments": [
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_system_info",
+    "result": "{\"cpu\": 16.0, \"memory\": 65.0, \"disk\": 0.7, \"user\": \"ravirajput\"}"
+   }
+  ],
+  "draft": "The host is using 65% of its memory.",
+  "answer": "The host is using 65% of its memory.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 12531.5,
+   "tool_ms": 1004.3,
+   "rounds": 2,
+   "round_ms": [
+    7081.3,
+    5450.1
+   ],
+   "slowest_round_ms": 7081.3,
+   "model_share": 0.926,
+   "wall_ms": 13536.1,
+   "unaccounted_ms": 0.3,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "65",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_system_info",
+       "field": "memory",
+       "value": "65"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "93d4b0efa8df",
+  "target": null
  }
 ]

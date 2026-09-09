@@ -890,30 +890,36 @@ if findings:
             "or its pods may have completed. It is still the selected target; "
             "pick another workload to move on."
         )
-    if choice and choice in findings:
+    # A failed Job whose pods the deadline deleted has nothing to drill into,
+    # and three tabs of 404s would read as the console being broken rather
+    # than as the pods being gone. The reason is the finding.
+    #
+    # Not st.stop(): that halts the whole script, and the Ask panel this
+    # message points at is further down the page. It would have taken the one
+    # remaining way to learn anything about the Job away, while telling the
+    # reader to use it.
+    if choice and choice in findings and not findings[choice].get("example"):
+        entry = findings[choice]
+        namespace, _, rest = choice.partition("/")
+        workload_name = rest.split(":", 1)[0]
+        st.info(
+            f"**{workload_name}** failed with "
+            f"**{entry.get('reason', 'no reason recorded')}**, and its pods "
+            "are gone — a Job that hits its deadline deletes them. There is "
+            "no pod to inspect; the reason above is the whole finding. Ask "
+            "below for the rest of the Job's state."
+        )
+        st.session_state["subject"] = {
+            "namespace": namespace,
+            "workload": f"{namespace}/{workload_name}",
+            "pod": None,
+        }
+    elif choice and choice in findings:
         entry = findings[choice]
         # Keys are "namespace/workload", or "namespace/workload:fault" when one
         # workload carries two faults at once.
         namespace, _, rest = choice.partition("/")
         workload_name = rest.split(":", 1)[0]
-
-        # A failed Job whose pods the deadline deleted has nothing to drill
-        # into, and three tabs of 404s would read as the console being broken
-        # rather than as the pods being gone. The reason is the finding.
-        if not entry.get("example"):
-            st.info(
-                f"**{workload_name}** failed with "
-                f"**{entry.get('reason', 'no reason recorded')}**, and its pods "
-                "are gone — a Job that hits its deadline deletes them. There is "
-                "no pod to inspect; the reason above is the whole finding. Ask "
-                "below for the rest of the Job's state."
-            )
-            st.session_state["subject"] = {
-                "namespace": namespace,
-                "workload": f"{namespace}/{workload_name}",
-                "pod": None,
-            }
-            st.stop()
 
         # A Deployment is its replicas. Showing only the example pod and
         # calling it the workload's story is wrong when three replicas fail

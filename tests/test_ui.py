@@ -1146,6 +1146,42 @@ class TestAFailedJobWithNoPodToInspect:
         assert app.session_state["subject"]["pod"] is None
         assert any("pods are gone" in str(el.value) for el in app.info)
 
+        # The message points at the Ask panel, so the Ask panel has to be on
+        # the page. The first version of this branch called st.stop(), which
+        # halts the whole script: it removed the one remaining way to learn
+        # anything about the Job while telling the reader to use it.
+        assert any(t.label == "Question" for t in app.text_input), \
+            "the Ask panel this message points at did not render"
+
+    def test_asking_about_it_scopes_to_the_workload_with_no_pod(self):
+        """
+        pod=None reaches scoped_question and scoped_target, which both already
+        take it -- but nothing had ever passed None through this path before,
+        because every scan row used to carry an example pod.
+        """
+        import streamlit as st
+        import agent as agent_mod
+
+        st.cache_data.clear()
+
+        def fake_stream(asked, *args, **kwargs):
+            yield {"type": "answer", **ANSWER}
+
+        with patch.object(k8s, "scan_cluster", return_value=dict(self.JOB)), \
+             patch.object(k8s, "list_nodes", return_value={}), \
+             patch.object(agent_mod, "scoped_target",
+                          side_effect=agent_mod.scoped_target) as target, \
+             patch.object(agent_mod, "stream", fake_stream):
+            app = AppTest.from_file(UI, default_timeout=60)
+            app.session_state["workload_choice"] = "batch/nightly-rollup"
+            app.run()
+            next(t for t in app.text_input if t.label == "Question") \
+                .set_value("why did it fail?")
+            app.button[0].click().run()
+
+        assert not app.exception, [str(e.value) for e in app.exception]
+        assert target.call_args.args == ("batch/nightly-rollup", "batch", None)
+
     def test_the_search_filter_does_not_trip_over_the_missing_pod(self):
         """
         ui.py filtered on `entry["example"].lower()`; a row without one raised
