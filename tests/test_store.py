@@ -7,6 +7,7 @@ the failure mode a null object invites.
 """
 
 import os
+import sqlite3
 from unittest.mock import patch
 
 import pytest
@@ -728,3 +729,199 @@ class TestAFailedWriteLeavesNothingBehind:
         db.record_report("demo/crasher", at=1.0)
 
         assert db.reports_since(0) == 1
+
+
+class TestTheBackendsAgreeOnTheirDefaults:
+    """
+    Three implementations of one interface, and every default value in them
+    survived pass 1 *and* a pass 2 against test_controller.py and test_api.py.
+
+    A default that differs between backends is a behaviour change nobody
+    writes down: the same call returns a different page, or takes a lease for a
+    different length of time, depending on which store the deployment happens
+    to be configured for. These assert the values and that all three agree.
+    """
+
+    BACKENDS = ("MemoryStore", "SqliteStore", "PostgresStore")
+
+    def _default(self, cls_name, method, arg):
+        import inspect
+        cls = getattr(store, cls_name)
+        return inspect.signature(getattr(cls, method)).parameters[arg].default
+
+    def test_every_backend_lists_twenty_five_by_default(self):
+        defaults = {c: self._default(c, "list_jobs", "limit") for c in self.BACKENDS}
+
+        assert set(defaults.values()) == {25}, (
+            f"the console's Recent panel would show a different number of rows "
+            f"depending on the configured store: {defaults}")
+
+    def test_every_backend_takes_the_lease_for_the_same_time(self):
+        """
+        And the same time the controller asks for. `controller.LEASE_TTL` is
+        the number the whole HA bound is built on -- 135s is `ttl` 120 plus the
+        15s poll -- so a store defaulting to something else gives a caller that
+        omits the argument a lease of a different length from the one every
+        measurement was taken against.
+        """
+        import controller
+
+        defaults = {c: self._default(c, "claim_lease", "ttl") for c in self.BACKENDS}
+
+        assert set(defaults.values()) == {120}, defaults
+        assert set(defaults.values()) == {controller.LEASE_TTL}
+
+    def test_the_default_limit_is_what_a_caller_actually_gets(self, state):
+        """
+        The counter for the signature check above: a default nothing reads is
+        not a default. Runs against all three backends through the `state`
+        fixture, which is why it needs Postgres up.
+        """
+        for i in range(30):
+            state.create_job(f"j{i}", f"q{i}", at=float(i))
+
+        assert len(state.list_jobs()) == 25
+
+    def test_a_stale_lease_is_taken_over_and_a_live_one_is_not(self, tmp_path):
+        """
+        The default TTL as a duration rather than a number. MemoryStore is
+        excluded on purpose: it always grants the lease and ignores `ttl`
+        entirely, so the value cannot be observed there and only the signature
+        check above can hold it.
+        """
+        db = store.SqliteStore(str(tmp_path / "lease.db"))
+
+        assert db.claim_lease("first", at=1000.0) is True
+        # 119 seconds later the holder is still live.
+        assert db.claim_lease("second", at=1119.0) is False
+        # 121 seconds later it is not.
+        assert db.claim_lease("second", at=1121.0) is True
+
+    def test_jobs_are_kept_for_a_day(self):
+        """
+        `JOB_TTL_SECONDS` is what the purge sweep measures against. Jobs are
+        answers to questions somebody asked minutes ago, not records -- a day
+        is generous for that and short enough that the table stays small.
+        """
+        assert store.JOB_TTL_SECONDS == 24 * 60 * 60
+
+    def test_a_job_with_no_creation_time_sorts_last_rather_than_raising(self):
+        """
+        `j.get("created_at") or 0`. Sorting a listing that contains a job
+        written before `created_at` existed must not raise, and the fallback
+        has to be lower than any real timestamp or the oldest job jumps to the
+        top of the console's Recent panel.
+        """
+        db = store.MemoryStore()
+        db.create_job("has-time", "q", at=100.0)
+        db.create_job("no-time", "q", at=200.0)
+        db._jobs["no-time"]["created_at"] = None
+
+        assert [j["id"] for j in db.list_jobs()] == ["has-time", "no-time"]
+
+
+class TestTheConnectionSettingsAreDeliberate:
+    """
+    Three numbers nothing read: SQLite's busy timeout and the Postgres pool's
+    bounds. All are arguments passed at construction rather than behaviour with
+    an observable result, so they are asserted where they are set.
+    """
+
+    def test_sqlite_waits_for_the_writer_rather_than_failing_immediately(self, tmp_path):
+        """
+        `sqlite3.connect(timeout=10)` is how long a reader waits on a locked
+        database before raising. WAL means a reader is not blocked by the
+        writer, but a second *writer* still is -- the controller recording a
+        finding while the API purges -- and a timeout of 0 turns a moment of
+        contention into an error the caller sees.
+        """
+        seen = {}
+        real = sqlite3.connect
+
+        def capture(path, **kwargs):
+            seen.update(kwargs)
+            return real(path, **kwargs)
+
+        with patch.object(store.sqlite3, "connect", capture):
+            store.SqliteStore(str(tmp_path / "s.db"))
+
+        assert seen["timeout"] == 10
+
+    def test_the_postgres_pool_is_bounded_at_both_ends(self):
+        """
+        The watch thread, the worker and the API all touch this concurrently,
+        so the pool hands each caller its own connection. `min_size` above zero
+        keeps one warm -- the point of a pool over a connect-per-call is not
+        paying for a TCP connect and an auth round trip on every dedup check --
+        and `max_size` is what stops a burst opening unbounded connections
+        against a server with its own limit.
+        """
+        import inspect
+
+        params = inspect.signature(store.PostgresStore.__init__).parameters
+
+        assert params["min_size"].default == 1
+        assert params["max_size"].default == 8
+
+
+class TestARowOfTheWrongWidthIsRefused:
+    """
+    `dict(zip(names, row, strict=True))` in PostgresStore's `get_job` and
+    `list_jobs`. The column list in the SQL and the name tuple beside it are
+    written twice and have to stay in step; `strict=True` is what notices when
+    a schema change moves one and not the other.
+
+    Without it the mismatch is silent. `zip` stops at the shorter side, so a
+    job comes back missing its last fields -- served to the API and the
+    console as though those values simply were not set, which is a different
+    and false claim from "this query is wrong".
+    """
+
+    class _Cursor:
+        def __init__(self, one, many):
+            self._one, self._many = one, many
+
+        def fetchone(self):
+            return self._one
+
+        def fetchall(self):
+            return self._many
+
+    class _Connection:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def execute(self, *args, **kwargs):
+            return self._cursor
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _Pool:
+        def __init__(self, connection):
+            self._connection = connection
+
+        def connection(self):
+            return self._connection
+
+    def _narrow(self, db, one, many):
+        cursor = self._Cursor(one, many)
+        db._pool = self._Pool(self._Connection(cursor))
+
+    def test_a_short_row_raises_rather_than_dropping_fields(self, pg_dsn):
+        db = store.PostgresStore(pg_dsn)
+        real = db._pool
+        try:
+            # get_job names seven columns; list_jobs names five.
+            self._narrow(db, ("id", "done", "why?"), [("id", "done")])
+
+            with pytest.raises(ValueError):
+                db.get_job("any")
+            with pytest.raises(ValueError):
+                db.list_jobs()
+        finally:
+            db._pool = real
+            db.close()
