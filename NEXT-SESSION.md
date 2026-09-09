@@ -41,11 +41,19 @@ Two modules `--all` structurally cannot reach (defect 31): `app.py` 23/42 and
 `routers/k8s_pods_info.py` 191/262.
 
 **Every row is a pass 1** — `--all` uses the default test set, which is the
-module's own test file — so every survivor count is an upper bound, and the low
-rows are not news: `backends.py` reads 22/39 and is 76% after a pass 2,
-`controller.py` reads 60/102 and is 73%. The lowest rows now are
-`controller.py` 58.8%, `backends.py` 56.4%, `telemetry.py` 62.1% and `ui.py`
-72.6%.
+module's own test file — so every survivor count is an upper bound and **a low
+row is not evidence of a gap**. Four of the lowest already have deeper figures
+measured against the files that really drive them:
+
+| module | `--all` row | measured wider | survivors |
+|---|---|---|---|
+| `backends.py` | 22/39 (56.4%) | **76%** after pass 2 | — |
+| `controller.py` | 60/102 (58.8%) | **73%** after pass 2 | — |
+| `ui.py` | 122/168 (72.6%) | **126/168 (75.0%)**, `ui-2026-09-02.json` | 42, **classified** (defect 29) |
+| `contradiction.py` | 108/117 (92.3%) | — | 9, **classified** (defect 28) |
+
+`telemetry.py` was the only genuinely unexamined low row and is now **28/29
+(96.6%)**, its one survivor a proven dead store.
 
 **One discrepancy, stated so nobody trips over it.** The survey puts
 `grounding.py` at 111/118 and the table above says 112/118. Both are right: the
@@ -322,12 +330,18 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    run.** Check the tags from the registry afterwards, not from the workflow
    log; this repo has shipped the wrong image under a right-looking tag once.
 
-2. **The lowest pass-1 rows, in order.** `--all` was re-run 2026-09-08 and the
-   number to improve is no longer a mystery: `backends.py` 22/39 (56.4%),
-   `controller.py` 60/102 (58.8%), `telemetry.py` 18/29 (62.1%), `ui.py`
-   122/168 (72.6%). The first two already have pass-2 figures of 76% and 73%,
-   so their real gaps are smaller than they read; `telemetry.py` and `ui.py`
-   have never had one.
+2. **The modules that have genuinely never had a wider-test-set pass.**
+   `--all` was re-run 2026-09-08, and the thing to be careful of is that a low
+   row is not a gap: `backends.py`, `controller.py`, `ui.py` and
+   `contradiction.py` all read lower there than they are, and `ui.py`'s 42
+   survivors are already classified in defect 29. **Check for an existing
+   `results/mutation/<module>-*.json` before starting** — I very nearly re-did
+   `ui.py`'s classified work on the strength of its 72.6% row.
+
+   What is actually unexamined, by `--all` row: `store.py` 41/53 (77.4%),
+   `podcache.py` 15/18 (83.3%), `targeting.py` 66/74 (89.2%),
+   `tool_schema.py` 5/7, `sinks.py` 36/40, `slack_socket.py` 14/16,
+   `limits.py` 27/28.
 
    The method that worked twice this week, in order: run a pass 2 to find out
    whether the module is driven from elsewhere, then **read the survivors**,
