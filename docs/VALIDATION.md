@@ -39,7 +39,7 @@ and does not support. Four words are used and they mean specific things:
 | In-cluster inference | **PARTIALLY PROVEN** | Ollama, and the `vllm` provider against a real OpenAI-protocol server |
 | AKS runtime | **PARTIALLY PROVEN** | non-AAD single node |
 | Model comparison | **UNDETERMINED** | p = 0.3438, paired, n=5 |
-| Generalized diagnostic accuracy | **NOT TESTED** | one cluster, one prompt configuration |
+| Generalized diagnostic accuracy | **NOT TESTED**, and now with a number behind the words | one cluster, one prompt configuration — and measured 2026-09-09: **28/29 (97%) on the cases the prompts were written against, 2/5 (40%) on five fault types they were not**. n=1, so 40% has a wide interval; the split is the point, not the value. See defect 44 |
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
@@ -2459,6 +2459,55 @@ credential in the output) and was never coverage of `entry["ready"] = False`,
 which stayed alive through two passes. A provider that could not be reached
 could have been reported **Ready**, which is the pod-takes-traffic-it-cannot-
 serve shape this project has now shipped in three different forms.
+
+### 44. The suite scored 88%, and the number meant something narrower
+
+**Problem.** Every accuracy figure this project has published was computed over
+`evals/cases.py` — 29 scenarios written here, against fixtures written here, to
+exercise prompts written here. That is a closed loop, and a number from it
+answers "how well does the agent do on the faults its author thought of",
+which is not the question anybody reads it as.
+
+**Measured 2026-09-09**, qwen3 via Ollama, one run per case, against a kind
+cluster with every fixture applied. Five new cases were added first, for fault
+types the corpus had never once produced (defect 45), and the run was scored
+with them mixed in:
+
+| set | score |
+|---|---|
+| headline, all 34 cases | 30/34, **88%** |
+| the 29 pre-existing cases | 28/29, **97%** |
+| the 5 the prompts had never seen | 2/5, **40%** |
+
+The headline hides both halves. Split by whether the prompt had ever seen the
+fault type, the figure more than halves.
+
+**The three failures were each the specific wrong answer the case forbade**,
+which is what says they are the fault type and not bad luck:
+
+- `malformed_image_reference` — never called `describe_pod` at all. It answered
+  about a pod it had not read.
+- `job_killed_by_its_own_deadline` — reported the container as failing. The Job
+  hit `activeDeadlineSeconds` and was stopped by its own spec; the container did
+  nothing wrong. This is the failure that sends an on-call reader to debug
+  healthy code.
+- `poststart_hook_not_the_app` — verdict `contradicted`, with a fabricated
+  `137`. It read CrashLoopBackOff, assumed a SIGKILL, and invented the exit code
+  to match. The real cause is `FailedPostStartHook` and it exists only in the
+  events.
+
+**What the grounding layer did and did not do.** It caught the third — a
+`contradicted` verdict is the checker working, on a claim traced to evidence
+that says otherwise. It caught neither of the first two, and the reason is
+structural rather than a bug: a confident wrong *cause* assembled from real
+evidence is grounded. Grounding tests whether the values in an answer came from
+a tool result. It cannot test whether the conclusion drawn from them is right.
+
+**Limits, stated so the 40% is not quoted as though it were solid.** n=1, five
+cases, one model, one cluster. The interval is enormous and 2/5 could be luck.
+What is not luck is that the pre-existing set scored 97% under identical
+conditions, and that all three failures landed on their predicted wrong answer.
+The value needs `--repeat`; the direction does not.
 
 ## Reproducing
 
