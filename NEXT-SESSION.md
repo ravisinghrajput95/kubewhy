@@ -30,8 +30,8 @@ and none of these is a composed figure:
 a separately measured 17-mutant block. Defect 37 carries its pass table;
 defects 41 to 43 carry the other two.
 
-**The 18-module `--all` survey, re-run 2026-09-08: 1002 mutants, 834 killed,
-83.2%** (`results/mutation/all-2026-09-08.json`), with Postgres up and
+**The 18-module `--all` survey, re-run 2026-09-09: 1002 mutants, 874 killed,
+87.2%** (`results/mutation/all-2026-09-09.json`), with Postgres up and
 `test_store.py` confirmed reporting no skips first. It replaces
 979/764/78.0%, which was stale in two rows and measuring a *different file* in
 four more — `controller.py` had grown 89 to 102 sites, `sinks.py` 31 to 40,
