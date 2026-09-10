@@ -413,6 +413,54 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    bound (`ttl` 120 + poll 15). They are not interchangeable, and only the
    middle one is comparable to the bound.
 
+## Where this actually stands, 2026-09-10
+
+Asked for a rating and giving an honest one, because a number that flatters
+this project is the one thing it has spent 46 defects learning not to publish.
+
+**7.5 of 10 overall, and the average hides a split** — which is the thing
+defect 44 was about, so it should not be quoted without both halves.
+
+**Engineering discipline: 9.** 12,792 lines of module code against 22,968
+lines of tests, and the tests are not decorative: mutation testing lives in
+the repo, a grounding replay runs in CI, and the house rule that every new
+test is verified by *breaking the mechanism it covers* caught three worthless
+tests on 2026-09-10 alone — one of which passed because `or` short-circuited
+before reaching the thing under test. The defect log records measurement
+methods, sample sizes, and several entries that say the author's prediction
+was wrong and what corrected it. This half is not the problem.
+
+**Product completeness: 6.** The tool diagnoses roughly half of what
+Kubernetes can break — **23 of 49** enumerated failure reasons on a live
+cluster, measured 2026-09-10. Its headline HA feature has never shipped in an
+image. Median diagnosis ~54s, p95 ~133s, which is slow for something an
+on-call engineer reaches for. Proven against one model and mostly one cluster
+type.
+
+**What stands between this and a 9, in order:**
+
+1. **The generalization number.** This is the whole thing. A diagnostic tool
+   scoring 97% on faults its author wrote and an unknown number on faults it
+   has not seen is not yet a diagnostic tool — it is a well-tested demo. The
+   2026-09-10 session closed the *structural* half of that gap and made the
+   question answerable; it did not answer it. Item 1 of "Pick up" is the
+   difference between "we believe" and "we measured".
+2. **Ship the HA release.** A chart feature with no image behind it is a
+   promise, not a capability.
+3. **Latency.** Nobody has attacked this. 54s median has never been treated
+   as a design constraint, only reported as a measurement.
+
+**And one thing that is not on any roadmap: the documentation has become an
+archive.** 324KB across README.md, this file and VALIDATION.md, with this file
+alone at 111KB. The 2026-09-10 session read perhaps 15% of it and could not be
+confident the rest was still true — and it found two stale claims in the state
+block *of this file* while editing it. That is the failure mode this project
+guards against everywhere else. Two candidate fixes, neither taken: split the
+history out of this file so the handoff is the handoff, or add a test that
+greps the state block's figures against a measured source the way
+`test_documented_measurements.py` already does for RUNBOOK.md. The second is
+more in this project's character.
+
 ## Pick up, in order
 
 1. **Finish the re-measurement that was stopped 24 runs in.** This is the one
@@ -489,7 +537,29 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
 5. Generalized diagnostic accuracy stays NOT TESTED. The n=10
    `insufficient_no_such_workload` rerun; build the counter first.
 
-6. **A gap worth considering, not yet evidence.** `list_deployments` covers
+6. **Latency has never been treated as a constraint.** Median run ~54s, p95
+   ~133s, and one recorded `service_unreachable_chain` run took 215.8s. Every
+   figure this project publishes reports latency and none of them tries to
+   move it. `tool_ms` is ~0.5% of runtime (measured on GKE: median 331ms tool
+   against 66,768ms model), so the cost is entirely model rounds — which
+   means the levers are round count and prompt size, not the Kubernetes
+   calls. **Measure where the rounds go before optimising anything:** the
+   re-ask mechanisms (nudges, evidence, coverage) each cost a full round and
+   are already counted per run in the eval records.
+
+7. **The documentation has become an archive, and it is now producing the
+   errors it exists to prevent.** 324KB across README.md, this file and
+   VALIDATION.md; this file alone is 111KB. Rewriting the state block on
+   2026-09-10 left it saying 1711 and 1699 about the same tree in adjacent
+   paragraphs, and pointing at defects 37-40 as "the last session" when it was
+   45 — both caught by re-reading, neither by anything automatic. The fix in
+   this project's character is a test: `test_documented_measurements.py`
+   already recomputes RUNBOOK.md's figures from `results/`, and the state
+   block's suite count and defect range are the same kind of claim. Splitting
+   the history out of this file is the alternative and is less valuable —
+   sprawl is the symptom, unverified claims are the defect.
+
+8. **A gap worth considering, not yet evidence.** `list_deployments` covers
    one of four workload controllers and `list_jobs` now covers a second.
    StatefulSets and DaemonSets have no equivalent — but unlike a Job they do
    not delete their pods, so the pods stay visible and this is a convenience
