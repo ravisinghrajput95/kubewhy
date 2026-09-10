@@ -7,15 +7,27 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-08 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1659 tests pass, 0
-skipped** (46s, with Postgres up; without it 32 of those skip *silently*, see
-Environment), CI green, tags through v0.2.0. Nothing of this project is
-running: the GKE cluster was created and deleted inside the 2026-09-05
-session, zero clusters, disks or Artifact Registry repositories remain. The
-suite figure needs Postgres up — with it down the same tree reads **1627
-passed, 32 skipped**, and those 32 are the shared-state cases. Both measured
-2026-09-08 on the same tree, minutes apart.**
+**State: `main` at the 2026-09-10 head — `git log --oneline -1` is the
+authority, not this line — tree clean and pushed, **1711 passed, 34 skipped**
+(46s), CI green including a new `types` job, tags through v0.2.0.
+
+That figure is **with Postgres down**, because the session ended by tearing
+the local stack down. The 34 are the shared-state cases and they skip
+*silently* — see Environment. The with-Postgres figure was not taken on the
+final tree: an earlier run that day read 1733 passed with
+`test_documented_measurements.py` excluded, so the full suite with a database
+up should read 1745 and 0 skipped. **Measure it rather than quoting that
+arithmetic**; this file has published a derived count before.
+Nothing of this project is running: the kind cluster `kubewhy-9` and the
+Postgres container were created and deleted inside the 2026-09-10 session, and
+the qwen3 model was unloaded from Ollama. Zero clusters, zero containers. The
+suite figure needs Postgres up — with it down the same tree reads **1699
+passed, 34 skipped**, and those 34 are the shared-state cases. Both measured
+2026-09-10 on the same tree, minutes apart.**
+
+**mypy is at zero across 85 files and CI gates on it** (`types` job in
+tests.yml). ruff is at 129, all triaged, and runs `continue-on-error` in the
+same job. Turn that off when it reaches zero.
 
 **Mutation coverage.** Three modules are measured properly, on one base each,
 and none of these is a composed figure:
@@ -81,6 +93,80 @@ that all patched out the function the CLI calls.
 
 Then "Pick up, in order" below. Everything under "What changed on 2026-08-26 /
 27" is history.
+
+## What landed on 2026-09-09/10: the Job gap, and two bounds
+
+**Defect 44's attribution was wrong for one of its three failures, and
+measuring is what showed it.** Every one of the five never-before-seen faults
+was applied to a live kind cluster and every tool was called against it by
+hand. `job_killed_by_its_own_deadline` was **not a model failure**: the Job
+controller deletes the pods when `activeDeadlineSeconds` fires, so
+`list_pods`, `describe_pod` and `get_pod_events` had nothing to return, and
+`scan_cluster` reported the namespace **clean**. `DeadlineExceeded` lives on
+the Job's own `status.conditions` and nothing here could read a Job. No prompt
+could have fixed it. Fifth time on this project that a symptom filed against
+the model was the harness.
+
+`list_jobs` is the fifteenth tool. It reports status, the failure reason and
+message, the spec limit that produced it, and `pods_remaining`. The limit is
+not decoration — "DeadlineExceeded" does not say *what* deadline. Wired to all
+six surfaces plus both RBAC files; `test_mcp_server` caught the MCP drift on
+the first run. `grounding._entity_index` needed no change and was **checked
+rather than assumed**: it dispatches on output shape.
+
+**`scan_cluster` reports failed Jobs now**, attached to the workload's
+existing row when pods survive and as a row of its own — reason, 0 pods, **no
+`example`** — when they do not. Three consumers assumed every row had an
+example pod and none had a test that would notice. `job_workload_name()` is
+shared between the pod pass and the Job pass because a CronJob run is named
+for its schedule slot: two parsers on one string agreed only by coincidence
+and produced two rows for one failure.
+
+**Two defects I introduced, both caught before they shipped.** I wrote "exit
+137" into the new prompt paragraph; the model restated it as measurement for a
+Job that has no pod and therefore no exit code, and grounding flagged
+`unverified claims: ['137']`. Removing the digit is what took the case from
+0/1 to 3/3. And the UI branch ended in `st.stop()`, which halts the whole
+script — it removed the Ask panel the message on screen was pointing at.
+**A number in a prompt is a number the model can state without measuring it.**
+
+**Defect 45: the contradiction checker was firing on the sentence the system
+prompt asks for.** `_asserted` looked for a negator in the 40 characters
+before a phrase; that is shorter than hedged English. Six recorded clauses
+saying "the kubelet did **not** attribute the crash to the OOM killer" — the
+exact check the prompt teaches — were scored as *asserting* the OOM kill.
+Replayed over 1683 records: 40 moves 60, 69–86 moves 65, 87+ moves 66 by
+silencing a genuine contradiction whose negator governs a different part of
+the sentence. `_NEGATION_WINDOW = 78`, mid-band. **A collapsing fix was tried
+first and is written up as a dead end** — it substituted marked-up spans away
+and ate the negator in `` `, not ` `` on a clause cut mid-markup.
+
+**Defect 43's two open decisions are taken.** `Target.build()` is deleted —
+not because it was unused but because it bypassed the timeout clamp
+`Gateway._backend` applies, so it was a live defect waiting for a caller.
+`Broken` now defines `probe()`, and that mattered more than tidiness: without
+it the failed-probe test drove an `AttributeError`, which carries neither the
+credential nor the endpoint, so **both of its no-leak assertions had nothing
+to find**. Measured as a pair — introduce a real credential leak into
+`/readyz` and the test passes without the fix and fails with it.
+
+**A running eval turns CI red, and that is now fixed at the filename.**
+`run_eval.py` writes after every run so an interruption keeps its evidence;
+`tests/test_documented_measurements.py` globs `results/*.json`. A set 14 runs
+into 102 satisfied that glob and three runners failed with "RUNBOOK.md says
+1973 grounded runs; results/ now has 1985". Writes go to `<path>.json.partial`
+now. **While an eval is running, stage explicitly — never `git add -A`.**
+
+**The re-measurement did not finish and its question is still open.** A
+34-case n=3 set was started and stopped at the user's request 24 runs in,
+during round 1. What it says: **23 of 24 passed**, so nothing in this session's
+prompt change regressed the pre-existing cases. What it does **not** say:
+round 1 had not reached the five new cases, so defect 44's 40% is still an
+n=1 figure. The partial set is at
+`results/uncovered-n3-2026-09-10.json.partial`, gitignored, with `draft` and
+`evidence` retained. The one failure was `unschedulable_node_affinity`,
+"never called get_pod_events", grounded and with no unverified claims — a
+tool-expectation miss rather than a wrong answer.
 
 ## What landed on 2026-09-07/08: grounding and inference
 
@@ -273,6 +359,13 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
 
 ## Do not let these be misreported
 
+0. **Defect 44's 40% is stale in both directions, and 88% was never the
+   number.** The split it recorded — 97% on the 29 cases the prompts had seen,
+   40% on the five they had not — was n=1, and one of those three failures has
+   since been shown not to be a model failure at all: `list_jobs` did not
+   exist, so no answer was reachable. Do not quote 40% as the current
+   generalization figure and do not quote 88% as anything; the re-measurement
+   is item 1 of "Pick up".
 1. **A skip is a result you have to go and look for.** Measured as a pair on
    2026-09-02: the same `store.py` survey, same 53 mutants, same test file,
    killed **25** with `TRIAGE_TEST_PG_DSN` unset and **33** with it pointed at
@@ -319,80 +412,92 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
 
 ## Pick up, in order
 
-1. **Tag a release that carries shared state.** This is the loose end
-   defect 35 leaves, and it is the only thing standing between the HA work
-   and anyone being able to use it. `sharedState.enabled` has been in the
-   chart since 2026-09-01 and there has never been an image with the code in
-   it; the chart now refuses that combination instead of crashlooping, which
-   is better and is not a fix. A release also needs `version.py`, `Chart.yaml`
-   `version` and `appVersion` moved together — a test asserts they agree.
-   **This is a publish, so it is a decision to take rather than a task to
-   run.** Check the tags from the registry afterwards, not from the workflow
-   log; this repo has shipped the wrong image under a right-looking tag once.
+1. **Finish the re-measurement that was stopped 24 runs in.** This is the one
+   open *question*, as opposed to open work. Defect 44 split the suite 97% on
+   the 29 cases the prompts had seen against **40% on the five they had not**,
+   at n=1 — and the direction, not the value, was what it claimed. Since then
+   the structural half of that 40% is fixed (`list_jobs`), so the figure is
+   stale in a way that flatters and understates at the same time and nobody
+   knows which dominates.
 
-2. **The modules that have genuinely never had a wider-test-set pass.**
-   `--all` was re-run 2026-09-08, and the thing to be careful of is that a low
-   row is not a gap: `backends.py`, `controller.py`, `ui.py` and
+   ```
+   kind create cluster --name kubewhy-corpus
+   kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \
+                 -f demo/tricky-pods.yaml -f demo/adversarial.yaml \
+                 -f demo/uncovered-faults.yaml
+   nohup env TRIAGE_INFERENCE_MODE=local TRIAGE_MODEL=qwen3 PYTHONPATH=. \
+     caffeinate -is .venv/bin/python -u evals/run_eval.py --repeat 3 \
+     --context kind-kubewhy-corpus --json results/uncovered-n3.json \
+     > results/uncovered-n3.log 2>&1 & disown
+   ```
+
+   **Budget three to four hours** and do not run the test suite against the
+   same machine while it goes: measured 2026-09-10, runs took ~2 minutes each
+   with the laptop otherwise idle and noticeably longer when a 50-second
+   pytest run was competing for the CPU. Report the two halves separately —
+   see [[grounded-is-not-insufficient-evidence]] for why a headline that hides
+   a split is the thing defect 44 was about.
+
+   The stopped set is at `results/uncovered-n3-2026-09-10.json.partial`,
+   gitignored, `draft` and `evidence` retained so it can feed a replay. It got
+   23 of 24 in round 1 and never reached the five new cases.
+
+2. **Tag a release that carries shared state.** Unchanged and still the loose
+   end defect 35 leaves. `sharedState.enabled` has been in the chart since
+   2026-09-01 and no image has ever had the code; the chart refuses that
+   combination rather than crashlooping, which is better and is not a fix. A
+   release moves `version.py`, `Chart.yaml` `version` and `appVersion`
+   together — a test asserts they agree. **This is a publish, so it is a
+   decision to take rather than a task to run.** Check the tags from the
+   registry afterwards, not from the workflow log.
+
+   One thing this release now also carries: `list_jobs` needs `batch/jobs` in
+   the ClusterRole. Both RBAC files have it. An install whose role predates it
+   loses the Job rows and keeps every other finding — `_failed_jobs` swallows
+   the 403 deliberately — so the upgrade is safe in either order, but the
+   release notes should say to re-apply RBAC.
+
+3. **The modules that have genuinely never had a wider-test-set pass.** A low
+   `--all` row is not a gap: `backends.py`, `controller.py`, `ui.py` and
    `contradiction.py` all read lower there than they are, and `ui.py`'s 42
    survivors are already classified in defect 29. **Check for an existing
-   `results/mutation/<module>-*.json` before starting** — I very nearly re-did
-   `ui.py`'s classified work on the strength of its 72.6% row.
+   `results/mutation/<module>-*.json` before starting.**
 
-   What is actually unexamined, by `--all` row: `store.py` 41/53 (77.4%),
+   Actually unexamined, by `--all` row: `store.py` 41/53 (77.4%),
    `podcache.py` 15/18 (83.3%), `targeting.py` 66/74 (89.2%),
    `tool_schema.py` 5/7, `sinks.py` 36/40, `slack_socket.py` 14/16,
    `limits.py` 27/28.
 
-   The method that worked twice this week, in order: run a pass 2 to find out
-   whether the module is driven from elsewhere, then **read the survivors**,
-   which is what actually moves the number. Classify before the run that
-   confirms it, and check whether the mutated value is ever *read* — a dead
-   store and a redundant argument both look killable and are not.
+   **`routers/k8s_pods_info.py` has grown and its row is stale.** `list_jobs`
+   and `_failed_jobs` added ~110 lines on 2026-09-10 and the module has never
+   been surveyed since. Check module size before trusting any old row.
 
-3. **Two survivors are decisions rather than gaps**, both recorded in defect
-   43 and neither taken unilaterally:
+   The method that worked repeatedly: run a pass 2 to find out whether the
+   module is driven from elsewhere, then **read the survivors**, which is what
+   actually moves the number. Check whether the mutated value is ever *read* —
+   a dead store and a redundant argument both look killable and are not.
 
-   - **`inference.Target.build()` has no callers.** `grep` finds none in the
-     repository and `Gateway._backend` does the same construction with a cache.
-     Its mutant is unkillable because the method is dead. Delete it, or keep it
-     deliberately and say so.
-   - **`test_a_failed_probe_reports_the_class_and_not_its_message` does not
-     exercise a failed probe.** It drives `Broken`, which inherits `Recorder`
-     and defines no `probe`, so what it catches is an `AttributeError` from the
-     missing method. The test is correct for what it asserts and was never
-     coverage of the branch it appears to cover; a new case now holds
-     `ready is False`. Decide whether the old one should raise from `probe()`
-     instead.
+4. **Turn ruff's gate on.** 129 findings, all triaged, none live defects. The
+   `types` job in tests.yml already runs it with `continue-on-error: true`;
+   removing that line is the whole change once the count is zero. 78 are
+   auto-fixable and most of the rest are import ordering, so this is one
+   mechanical commit and one careful read of what `--unsafe-fixes` wants to do.
 
-4. **`_NEGATION_WINDOW = 40`**, found and not fixed. It is measured in
-   characters and a marked-up entity name spends 15-20 of them, so "Nothing
-   suggests the pod \`x-abc123\` does not exist" puts the negator one
-   character outside the window and the absence rule fires on a correct
-   answer. Changing it is a tuning change and needs `evals/replay_grounding.py`
-   over the corpus to say what it costs. Baseline: 1650 records, 60 moved.
-
-5. **Slack link conversion is done** (2026-09-08). `[text](url)` becomes
-   `<url|text>` for http, https and mailto, and for nothing else — `<...|...>`
-   is also how Slack spells a **channel mention**, so a general conversion
-   would turn a model's `[the section](#root-cause)` into something Slack reads
-   as a channel reference. Images and code spans are excluded too.
-
-   **It could not be verified by mutation and that is a property of the change,
-   not an omission.** The logic is a regex, a regex is a string literal, and
-   `evals/mutate.py` enumerates the same 40 sites in `sinks.py` before and
-   after. Both directions were measured by breaking the mechanism instead:
-   removing the `_LINK.sub` call fails the two positive cases, and widening the
-   regex to any target fails the anchor and image cases. Worth copying whenever
-   a change lands entirely inside a literal — three of those five tests assert
-   *non*-conversion and cannot fail on a missing feature at all, so only the
-   second counter proves they do their job.
-
-6. **Finish what the linter found.** 164 ruff and 20 mypy findings, all
-   triaged in the commit that added `pyproject.toml`, none of them live
-   defects. The 12 mypy `var-annotated` ones would let mypy gate CI.
-
-7. Generalized diagnostic accuracy stays NOT TESTED. The n=10
+5. Generalized diagnostic accuracy stays NOT TESTED. The n=10
    `insufficient_no_such_workload` rerun; build the counter first.
+
+6. **A gap worth considering, not yet evidence.** `list_deployments` covers
+   one of four workload controllers and `list_jobs` now covers a second.
+   StatefulSets and DaemonSets have no equivalent — but unlike a Job they do
+   not delete their pods, so the pods stay visible and this is a convenience
+   gap rather than the structural one Jobs turned out to be. **Measure before
+   building**: apply a broken StatefulSet and a DaemonSet that cannot schedule
+   on some nodes, then call every tool by hand, which is exactly how the Job
+   gap was found and is cheaper than reasoning about it.
+
+   The same method said no for storage and reference faults: `scan_references`
+   already reports the PVC bound to a missing StorageClass and the HPA that
+   cannot scale, verified live on 2026-09-10.
 
 ## Environment
 
@@ -428,7 +533,24 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
 - **Docker Desktop was down at the start of the 2026-09-05 session** despite
   the previous handoff saying it was up. `open -a Docker` and poll
   `docker info`; it came up in ~20s.
-- **Docker Desktop is UP with 0 containers and 38 images.**
+- **Docker Desktop is UP with 0 containers of this project's.** The 2026-09-10
+  session created `kubewhy-pg` and a kind cluster `kubewhy-9` and removed both;
+  it also unloaded qwen3 from Ollama, which a `--repeat` run leaves resident
+  for 24 hours at 10GB.
+- **Postgres for the suite: the port is 55433 and the DSN must be proved.**
+  See the entry below. Measured on the final 2026-09-10 tree with the database
+  **down**: **1711 passed, 34 skipped**. The skip count has grown three times
+  now (17, then 26, now 34), so re-measure rather than trusting this line, and
+  check `pytest tests/test_store.py -q` reports no `s` before believing a
+  green run means the shared-state cases ran.
+- **Do not run the test suite while an eval is running.** Two reasons, both
+  measured on 2026-09-10. It competes for the CPU — eval runs took ~2 minutes
+  idle and noticeably longer with a 50-second pytest run alongside. And an
+  in-flight results file used to satisfy `results/*.json` and turn
+  `test_documented_measurements.py` red; that is fixed at the filename now
+  (`<path>.json.partial`), but **stage explicitly rather than `git add -A`**
+  while one runs, or the partial goes into a commit.
+- **Docker Desktop was UP with 0 containers and 38 images.**
 - **Something on this machine removes containers, and it has now been seen
   twice.** At 23:24 on 2026-09-01 `docker ps` showed `mlops-project-mlflow-1`
   and `mlops-project-postgres-1`, both "Up About an hour (healthy)". At 23:36
