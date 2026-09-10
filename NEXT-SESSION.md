@@ -18,12 +18,12 @@ final tree: an earlier run that day read 1733 passed with
 `test_documented_measurements.py` excluded, so the full suite with a database
 up should read 1745 and 0 skipped. **Measure it rather than quoting that
 arithmetic**; this file has published a derived count before.
-Nothing of this project is running: the kind cluster `kubewhy-9` and the
-Postgres container were created and deleted inside the 2026-09-10 session, and
-the qwen3 model was unloaded from Ollama. Zero clusters, zero containers. The
-suite figure needs Postgres up — with it down the same tree reads **1699
-passed, 34 skipped**, and those 34 are the shared-state cases. Both measured
-2026-09-10 on the same tree, minutes apart.**
+
+Nothing of this project is running. The kind cluster `kubewhy-9` and the
+`kubewhy-pg` container were created and deleted inside the 2026-09-10 session,
+qwen3 was unloaded from Ollama, and Docker Desktop went down on its own
+afterwards — see the Environment note about this machine. Zero clusters, zero
+containers.**
 
 **mypy is at zero across 85 files and CI gates on it** (`types` job in
 tests.yml). ruff is at 129, all triaged, and runs `continue-on-error` in the
@@ -85,8 +85,11 @@ against the wider test set's 5.
 is pass 2; summing the two bases is exactly how 692/282 came to be quoted for
 a fortnight.
 
-**Read `docs/VALIDATION.md` first — defects 37 to 40 are the last session,
-35 and 36 the one before it, 27 to 34 the two before that.** 39 and 40 are the
+**Read `docs/VALIDATION.md` first — defect 45 is the last session, 44 the one
+before it, 41 to 43 the one before that.** 45 is worth reading whatever you are
+touching: the contradiction checker was penalising the exact sentence the
+system prompt asks the model to write, and both bounds of the fix came from
+replaying 1683 records rather than from judgement. 39 and 40 are the
 two worth reading even if you are not touching `agent.py`: a one-sided
 assertion that admitted a value which was not a share, and eleven CLI tests
 that all patched out the function the CLI calls.
