@@ -408,9 +408,12 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    measured is the *controller* lease on GKE 2026-09-05: failover 115.4s,
    15m41s of stable holding, both numbers in `results/ha/`. What was **not**:
    the console at more than one replica, the owner-scoped restart sweep under
-   two live API replicas, and any of it on a *released* image — no tag carries
-   shared state (defect 35), so this ran on a build of `main`. Do not quote
-   the failover number as though a `helm install` of v0.2.0 would produce it.
+   two live API replicas, and any of it on a *released* image — the HA run used
+   a build of `main`. Do not quote the failover number as though a
+   `helm install` would produce it. **Corrected 2026-09-12: the "no tag
+   carries shared state" half of this is out of date.** `0.2.1` does, verified
+   from the registry — see item 2 of "Pick up". What stays true is that no HA
+   measurement has ever run on a released image.
 9. **The lease numbers are two different measurements, and neither
    recomputes from what is committed.** 115.4s is kill -> takeover; 125.95s is
    the holder's last renewal -> takeover, and 135s is the bound (`ttl` 120 +
@@ -525,14 +528,35 @@ more in this project's character.
    gitignored, `draft` and `evidence` retained so it can feed a replay. It got
    23 of 24 in round 1 and never reached the five new cases.
 
-2. **Tag a release that carries shared state.** Unchanged and still the loose
-   end defect 35 leaves. `sharedState.enabled` has been in the chart since
-   2026-09-01 and no image has ever had the code; the chart refuses that
-   combination rather than crashlooping, which is better and is not a fix. A
-   release moves `version.py`, `Chart.yaml` `version` and `appVersion`
-   together — a test asserts they agree. **This is a publish, so it is a
-   decision to take rather than a task to run.** Check the tags from the
-   registry afterwards, not from the workflow log.
+2. **This is already done, and it was done the day before this file was
+   written.** Checked 2026-09-12 from the registry, which is what this item
+   itself said to do:
+
+   - **`v0.2.1` was tagged 2026-09-09** and its `release` workflow run
+     (34358571532) succeeded. `version.py`, `Chart.yaml` `version` and
+     `appVersion` all read 0.2.1 and agree.
+   - **`v0.2.1`'s tree carries the Postgres store.** `store.py` at that tag
+     matches `psycopg|postgresql` four times; at `v0.2.0` it matches none.
+     `requirements.txt` carries `psycopg[binary,pool]~=3.2`, and the
+     Dockerfile's `base` stage installs `requirements.txt`.
+   - **The published image is the right one.** ghcr.io names tags without the
+     `v`, so the tags are `0.2.1` and `0.2.1-ui`. Read from the registry, the
+     amd64 config of `0.2.1` has
+     `Cmd: ["fastapi","run","app.py","--host","0.0.0.0","--port","8000"]`
+     built 2026-09-09T13:41:01Z, and `0.2.1-ui` has the `streamlit run ui.py`
+     command built at 13:45:28Z. **The target:base trap did not recur.**
+   - The chart's guard is `semverCompare "<=0.2.0"`, so it refuses
+     `sharedState.enabled` up to 0.2.0 and permits 0.2.1 — correctly, now.
+
+   So "no image has ever had the code" stopped being true on 2026-09-09, and
+   the sentence survived into a handoff written on 2026-09-10.
+
+   **What is still open is the proof, not the release.** Nothing has run a
+   `helm install` of 0.2.1 with `sharedState.enabled=true` at two replicas
+   against a real Postgres. The HA measurement on GKE 2026-09-05 ran on a
+   build of `main`, so "HA on a released image" remains untested — that half of
+   defect 35's loose end is real and this item should be rewritten as *prove
+   the release*, which is a cluster task rather than a publish decision.
 
    One thing this release now also carries: `list_jobs` needs `batch/jobs` in
    the ClusterRole. Both RBAC files have it. An install whose role predates it

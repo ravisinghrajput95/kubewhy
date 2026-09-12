@@ -30,7 +30,7 @@ and does not support. Four words are used and they mean specific things:
 | Audit trail (Slack) | **NOT TESTED** | needs a workspace. The unit tests were also not evidence: they mocked the sink, and the surface could not deliver an answer at all until 2026-09-01 — see defect 23 |
 | Restart-interrupted jobs | **PROVEN** | SIGKILL mid-run, restarted against the same state file |
 | Shared state (Postgres) | **PROVEN** | full store contract + lease race against a real Postgres 17, and run as two replicas against an in-cluster Postgres 17 on GKE 2026-09-05 |
-| High availability | **PARTIALLY PROVEN** | GKE 2026-09-05, two replicas: holder force-deleted, standby took over in **115.4s**, inside the 135s bound; one holder for 15m41s across 24 renewals with zero spurious handovers. **Recomputed 2026-09-12 from `results/ha/lease-gke-2026-09-05-after.csv`, the only committed artefact, those three figures come out as: kill -> takeover not derivable at all (no kill timestamp is recorded), last renewal -> takeover 121.52s against the published 125.95s, and the stable hold 960.1s = 16m00s across 25 distinct `renewed_at` values against 15m41s/24. The CSV also shows two more handovers than the prose describes, including a 25s window with no holder.** The differences are small enough that the live session probably measured them a second way that was not committed, which is the problem rather than the gap: the next HA run must record the kill timestamp so all three come from one artefact. This is what found defects 35 and 36 — before the fix the lease changed hands 6 times in 14m with nothing wrong. Measured on a build of `main`, not a release: no tagged image carries shared state (defect 35). Console replicas and the owner-scoped restart sweep are still unit-proven only |
+| High availability | **PARTIALLY PROVEN** | GKE 2026-09-05, two replicas: holder force-deleted, standby took over in **115.4s**, inside the 135s bound; one holder for 15m41s across 24 renewals with zero spurious handovers. **Recomputed 2026-09-12 from `results/ha/lease-gke-2026-09-05-after.csv`, the only committed artefact, those three figures come out as: kill -> takeover not derivable at all (no kill timestamp is recorded), last renewal -> takeover 121.52s against the published 125.95s, and the stable hold 960.1s = 16m00s across 25 distinct `renewed_at` values against 15m41s/24. The CSV also shows two more handovers than the prose describes, including a 25s window with no holder.** The differences are small enough that the live session probably measured them a second way that was not committed, which is the problem rather than the gap: the next HA run must record the kill timestamp so all three come from one artefact. This is what found defects 35 and 36 — before the fix the lease changed hands 6 times in 14m with nothing wrong. Measured on a build of `main`, not a release. **Corrected 2026-09-12: a tagged image does carry shared state now** — `0.2.1`, tagged 2026-09-09, whose tree matches `psycopg` in `store.py` and whose published amd64 config reads `Cmd: ["fastapi","run","app.py",...]`, verified from ghcr.io rather than the workflow log. What remains untested is HA *on* that image: no `helm install` of 0.2.1 with `sharedState.enabled=true` has been run at two replicas. Console replicas and the owner-scoped restart sweep are still unit-proven only |
 | Read-only RBAC | **PROVEN** | runtime validated on GKE by attempting operations |
 | GKE runtime | **PROVEN** | released chart, real cluster |
 | GKE / Calico NetworkPolicy | **PROVEN** | dataplane-enforced egress |
@@ -2617,6 +2617,53 @@ opening `` `OOMKilled` `` — so `` `, not ` `` matched as a marked-up span and
 the substitution ate the negator. The module's own comment already warns that
 this delimiter can mis-pair. Widening the window needs no text rewriting and
 has no such failure mode.
+
+
+### 46. The digit was removed from one paragraph and left in another
+
+**Problem.** Defect 44's write-up records the mechanism as settled: *a number
+in a prompt is a number the model can state without measuring it.* The
+2026-09-10 session had written "exit 137" into the new Job paragraph, watched
+the model restate it as measurement for a Job whose pods no longer exist, and
+removed it — `5e81ddf`, "drop a number the prompt was inviting the model to
+invent". The case went 0/1 to 3/3.
+
+`137` is still in `agent.SYSTEM_PROMPT`, once, at `agent.py:153`:
+
+> An exit code names the signal, never the sender. **137 is SIGKILL**: it says
+> the container was killed and says nothing about who killed it.
+
+That sentence arrived in `820353d`, well before the Job work, so `5e81ddf`
+removed the occurrence it had just added and left the older one teaching the
+same digit.
+
+**Measured 2026-09-12**, in round 1 of the n=3 re-measurement, on
+`job_killed_by_its_own_deadline` — the case the removal was verified against:
+
+> The **nightly-rollup** job in the *uncovered* namespace failed due to
+> **DeadlineExceeded**. This means the job ran longer than the
+> `activeDeadlineSeconds` (20 seconds) ... The container's exit code (`137`:
+> SIGKILL) is not diagnostic of the application's health
+
+`list_jobs` was called, the reason and the spec limit are both right, and the
+answer explicitly says the exit code is not diagnostic. The run fails on
+`unverified claims: ['137']` and nothing else. **The tool gap is closed and
+the prompt defect is not.**
+
+**Why this is not a one-line delete.** The sentence is doing useful work: it
+is what makes the model say the exit code is not diagnostic, which is the
+conclusion the case wants. Removing the numeral may remove the lesson with it.
+The two candidate fixes — teach the rule without a numeral ("an exit code
+above 128 names a signal"), or keep it and accept that grounding will flag it
+— are a trade, and this project does not take trades on argument. **The fix is
+whichever one measures better on this case at n>=3, and the prompt was left
+alone while the set that found it was still running**, so the set stays graded
+under one prompt.
+
+**What the 3/3 on 2026-09-10 actually established** is narrower than it read:
+that removing the Job paragraph's digit was enough for three consecutive runs,
+not that the prompt had stopped supplying the number. n=3 against a model that
+volunteers `128+9` from its own knowledge cannot separate those.
 
 
 ## Where a run's 74 seconds go
