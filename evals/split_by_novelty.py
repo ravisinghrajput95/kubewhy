@@ -25,13 +25,20 @@ import math
 import os
 import sys
 from collections import defaultdict
+from typing import Any, cast
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from evals.cases import CASES, UNCOVERED_CASES  # noqa: E402
 
-NOVEL = {c["name"] for c in UNCOVERED_CASES}
-PRE_EXISTING = {c["name"] for c in CASES} - NOVEL
+# cases.py is a list of heterogeneous dict literals, so mypy infers its
+# elements as `object` and indexing one is an error. The cast says what the
+# file has always contained -- dictionaries keyed by string, with a `name`
+# that is a name -- without annotating 700 lines of case data to say it.
+_Case = dict[str, Any]
+NOVEL: set[str] = {str(c["name"]) for c in cast("list[_Case]", UNCOVERED_CASES)}
+PRE_EXISTING: set[str] = {
+    str(c["name"]) for c in cast("list[_Case]", CASES)} - NOVEL
 
 
 def wilson(passes, total, z=1.96):
