@@ -26,7 +26,8 @@ qwen3 was unloaded from Ollama, and Docker Desktop went down on its own
 afterwards — see the Environment note about this machine. Zero clusters, zero
 containers.**
 
-**mypy is at zero across 85 files and CI gates on it** (`types` job in
+**mypy is at zero across 87 files and CI gates on it** (85 before the two
+scripts this session added) (`types` job in
 tests.yml). ruff is at **131** (measured 2026-09-12; this line said 129),
 all triaged, and runs `continue-on-error` in the
 same job. Turn that off when it reaches zero.
@@ -410,10 +411,37 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    two live API replicas, and any of it on a *released* image — no tag carries
    shared state (defect 35), so this ran on a build of `main`. Do not quote
    the failover number as though a `helm install` of v0.2.0 would produce it.
-9. **The lease numbers are two different measurements.** 115.4s is kill ->
-   takeover; 125.95s is the holder's last renewal -> takeover, and 135s is the
-   bound (`ttl` 120 + poll 15). They are not interchangeable, and only the
-   middle one is comparable to the bound.
+9. **The lease numbers are two different measurements, and neither
+   recomputes from what is committed.** 115.4s is kill -> takeover; 125.95s is
+   the holder's last renewal -> takeover, and 135s is the bound (`ttl` 120 +
+   poll 15). They are not interchangeable, and only the middle one is
+   comparable to the bound.
+
+   **Checked 2026-09-12 against `results/ha/lease-gke-2026-09-05-after.csv`,
+   which is the only artefact behind them.** It samples `wall_iso, epoch,
+   holder, renewed_at` every few seconds, 196 rows, and it yields:
+
+   | published | recomputed from the CSV |
+   |---|---|
+   | failover **115.4s**, kill -> takeover | **not derivable** — no kill timestamp is recorded anywhere in the file |
+   | **125.95s**, last renewal -> takeover | **121.52s** |
+   | stable hold **15m41s across 24 renewals** | **960.1s = 16m00s across 25 distinct `renewed_at` values**, interval ~40s |
+
+   The 24-against-25 reconciles if "renewals" means the intervals rather than
+   the values. The other two do not, and they are small differences — 121.52
+   against 125.95 — so the likely explanation is that the live session
+   measured them by a second method, such as an operator's own poll, that was
+   not committed. **That is the problem rather than the gap:** these are the
+   numbers that would go into the release notes for item 2, and the project's
+   own standard is that a figure nobody can recompute stops being recomputed.
+   The next HA run should record the kill timestamp in the CSV so all three
+   numbers come out of one artefact. Until then, quote the CSV's figures and
+   say they are the CSV's.
+
+   The lease also changed hands twice more than the prose implies: a 21s hold
+   by the original pod, a 25s window with **no holder at all**, the 16m00s
+   hold, and a final 29s hold by a third pod. The unheld window is the
+   interesting one and nothing describes it.
 
 ## Where this actually stands, 2026-09-10
 
