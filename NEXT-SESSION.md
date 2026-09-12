@@ -1976,6 +1976,24 @@ no entry for `TRIAGE_STATE_DB`.
   the sorted arm, where it sits at index 6 of 7–8. The fix works in both (it
   removes the shape), but *why* sorted order protected that entry is open.
 
+  **A residual rate, measured 2026-09-12 at n=110.** Over every recorded
+  `cluster_wide_scan` run dated on or after 2026-08-19 that retains both a
+  recorded answer and its failure reasons: **98 of 110 passed, and a required
+  workload was dropped from the summary in 9 of 110 — 8.2% [4.4-14.8] 95%
+  CI.** Across those 9 runs the names dropped were `crasher` 7 times,
+  `memory-hog` 6 and `bad-image` 3. The other three failures were grounding
+  verdicts. So the fix held and the defect is still open at roughly one run in
+  twelve.
+
+  **A before/after cannot be recomputed from the corpus, and the first attempt
+  at one was wrong.** Filtering only on date gave 20/105 before against 98/142
+  after, which reads as a 19% to 69% jump and is an artefact: almost every
+  pre-fix record stores no answer and no failure reasons, so those runs cannot
+  show a dropped name and count as failures for a reason that has nothing to do
+  with the tool. On the graded subset there are **11** pre-fix runs, at 91%,
+  against 110 after at 89% — too few to compare. The Fisher tests above remain
+  the evidence for the fix; the corpus supports only the residual.
+
   **Worth testing next, cheaply: list length.** Pooled over the three shuffled
   arms, every run that saw nine entries dropped something (3/3) against 16/53
   at eight or fewer, p=0.035. Entry count was ruled out at 7 against 8, a
