@@ -2599,6 +2599,62 @@ this delimiter can mis-pair. Widening the window needs no text rewriting and
 has no such failure mode.
 
 
+## Where a run's 74 seconds go
+
+Every latency figure this project has published is a report. None of them said
+what to change, and item 6 of the handoff has asked for that measurement
+before any optimisation for three sessions. `evals/round_budget.py` is it.
+
+**Method: 851 recorded runs, qwen3, `think` on, read off `timing.rounds`,
+`timing.round_ms`, `nudges` and `policies` in `results/*.json`.** Observational
+over a corpus accumulated across many dates, clusters and machine states — not
+a controlled experiment, and the round-7 and round-8 cells (n=64 and n=22) are
+thin enough that the +66.9s step into round 7 and the −0.8s step into round 8
+are both inside their own noise.
+
+**Round count is the lever, and it is close to linear.** Median wall clock by
+round count: 2 rounds 23.7s, 3 rounds 53.5s, 4 rounds 80.8s, 5 rounds 107.3s,
+6 rounds 138.6s. Each round after the second costs **26.5s to 31.3s** at the
+median. `tool_ms` is 24ms at the median against that, so nothing in the
+Kubernetes calls is worth attacking.
+
+**Later rounds cost more than earlier ones, which is a second lever and not
+the same one.** Median duration by *position*: round 1 16.2s, round 3 21.5s,
+round 5 25.0s, round 8 42.4s — **2.6x from position alone**, on the same model
+and the same arm. That is prompt growth: each round carries every previous
+tool result. The two levers compound, and they point at different fixes —
+cutting a round saves more the later it sits, and shrinking what a tool result
+contributes to the prompt pays on every round after it.
+
+**The re-ask mechanisms fire on one run in three, and never twice.** Nudges on
+170 of 851, policies on 159 of 851, both exactly 0 or 1. Pricing every re-ask
+at the last round of its run — the most expensive position, so an upper bound
+twice over — puts them at **12,635s of 75,434s, 16.7%** of the corpus's wall
+clock.
+
+**But most of what a re-ask looks like it costs is not the re-ask.** Pooled,
+runs where one fired take 137.2s at the median against 54.3s where none did,
+which reads as an 83s mechanism. Controlling for round count removes most of
+it: at 4 rounds it is 79.9s against 82.5s, at 5 rounds 106.6s against 107.9s.
+A re-ask adds about one round at the position it fires — 25s to 40s — and the
+rest of the gap is that it fires on runs that were already going badly. Those
+runs also pass less often: **83% (217/263) where a re-ask fired against 93%
+(547/588) where none did.** Removing the mechanism to save 83s would save
+about a third of that and cost accuracy on exactly the runs that needed help.
+
+**The arm filter is not optional, and measuring is what showed why.** The
+first version of this analysis pooled every qwen3 record and produced a table
+where six-round runs were *faster* than five-round ones — 28.7s against 99.4s.
+42 of those 72 six-round runs were `think: False`, an arm already measured at
+roughly 7x faster. Pooling had buried a 7x variable inside a 1.2x effect and
+returned a plausible table rather than an error. `round_budget.py` defaults to
+one arm, refuses to pool unless asked, and excludes the 618 records written
+before the `think` field existed rather than guessing at them. Its
+`--self-check` builds a two-arm corpus 10x apart and fails if selecting one
+arm returns both; removing the filter line makes it fail, which is how it was
+verified.
+
+
 ## Reproducing
 
 ```bash
