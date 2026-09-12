@@ -435,9 +435,11 @@ was wrong and what corrected it. This half is not the problem.
 **Product completeness: 6.** The tool diagnoses roughly half of what
 Kubernetes can break — **23 of 49** enumerated failure reasons on a live
 cluster, measured 2026-09-10. Its headline HA feature has never shipped in an
-image. Median diagnosis ~54s, p95 ~133s, which is slow for something an
-on-call engineer reaches for. Proven against one model and mostly one cluster
-type.
+image. **Median diagnosis 75.0s, p95 229.0s** on the arm that ships — qwen3
+with thinking on, n=853, recomputed 2026-09-12 — which is slow for something
+an on-call engineer reaches for. This line said ~54s/~133s; see the note
+below, because the 54 and the 133 come from different places and one of them
+comes from nowhere. Proven against one model and mostly one cluster type.
 
 **What stands between this and a 9, in order:**
 
@@ -560,15 +562,40 @@ more in this project's character.
 5. Generalized diagnostic accuracy stays NOT TESTED. The n=10
    `insufficient_no_such_workload` rerun; build the counter first.
 
-6. **Latency has never been treated as a constraint.** Median run ~54s, p95
-   ~133s, and one recorded `service_unreachable_chain` run took 215.8s. Every
-   figure this project publishes reports latency and none of them tries to
-   move it. `tool_ms` is ~0.5% of runtime (measured on GKE: median 331ms tool
-   against 66,768ms model), so the cost is entirely model rounds — which
-   means the levers are round count and prompt size, not the Kubernetes
-   calls. **Measure where the rounds go before optimising anything:** the
-   re-ask mechanisms (nudges, evidence, coverage) each cost a full round and
-   are already counted per run in the eval records.
+6. **Latency has been measured now, and the figures this item used to quote
+   were three different populations.** Recomputed 2026-09-12 over every
+   recorded run in `results/`:
+
+   | population | n | median | p95 |
+   |---|---|---|---|
+   | every recorded run — what RUNBOOK.md quotes and a test checks | 2679 | 44.7s | 185.3s |
+   | qwen3, both arms pooled | 1978 | 54.7s | 201.5s |
+   | **qwen3, thinking on — what ships** | 853 | **75.0s** | **229.0s** |
+   | qwen3, thinking off | 416 | 8.4s | 46.9s |
+   | gpt-4o-mini | 396 | 6.3s | 14.9s |
+
+   The old "~54s" is the qwen3-pooled row, which averages an 8.4s arm with a
+   75.0s one. **The old "p95 ~133s" is reproducible from no population in the
+   corpus** and should not be quoted again. RUNBOOK's 44.7s is tested and
+   correct for what it says, and what it says pools two models whose medians
+   differ by 12x — true, and not an answer to "how long does a diagnosis
+   take".
+
+   "One recorded `service_unreachable_chain` run took 215.8s" also understated
+   the tail: **83 of 2674 runs exceed 215.8s**, and the slowest genuine run is
+   **581.7s**. Five runs above 600s are excluded because RUNBOOK already
+   attributes all five to the laptop sleeping, and they predate `slept_ms`, so
+   they carry no way to prove it per-record — do not quote the 2216.9s one.
+
+   **Where the time goes is now measured too — `evals/round_budget.py`, and
+   the section in VALIDATION.md.** Round count is near-linear at 26.5–31.3s
+   per round after the second, and a round's cost grows 2.6x with its position
+   (16.2s at round 1, 42.4s at round 8) because each carries every previous
+   tool result. Those are two levers with two different fixes. `tool_ms` is
+   24ms at the median, so nothing in the Kubernetes calls is worth attacking.
+   The re-ask mechanisms look like an 83s tax and are not: at matched round
+   counts the gap is 79.9s against 82.5s at four rounds. They fire on runs
+   already going badly, which pass 83% against 93%.
 
 7. **The documentation has become an archive, and it is now producing the
    errors it exists to prevent.** 324KB across README.md, this file and

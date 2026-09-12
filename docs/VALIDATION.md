@@ -2662,6 +2662,36 @@ runs also pass less often: **83% (217/263) where a re-ask fired against 93%
 (547/588) where none did.** Removing the mechanism to save 83s would save
 about a third of that and cost accuracy on exactly the runs that needed help.
 
+**Which population a latency figure describes turned out to matter more than
+any of this.** Three documents quoted three different numbers for "how long a
+diagnosis takes", and recomputing every population in the corpus on 2026-09-12
+explains all three:
+
+| population | n | median | p95 |
+|---|---|---|---|
+| every recorded run — RUNBOOK.md, and a test checks it | 2679 | 44.7s | 185.3s |
+| qwen3, both arms pooled | 1978 | 54.7s | 201.5s |
+| **qwen3, thinking on — the arm that ships** | 853 | **75.0s** | **229.0s** |
+| qwen3, thinking off | 416 | 8.4s | 46.9s |
+| gpt-4o-mini | 396 | 6.3s | 14.9s |
+
+The handoff's "~54s" is the qwen3-pooled row, averaging an 8.4s arm with a
+75.0s one. **Its "p95 ~133s" is reproducible from no population here** and
+should not be quoted again. RUNBOOK's 44.7s is tested and true of what it
+says, and what it says pools two models whose medians differ by 12x.
+
+The table above reads 853 runs at 75.0s where this section's own figures are
+851 at 74.3s. Both are right and the difference is the filter: `round_budget.py`
+requires `timing.rounds` and a usable `wall_ms`, and two records carry a
+duration without a timing block.
+
+The tail was understated as well. "One recorded `service_unreachable_chain` run
+took 215.8s" is true and **83 of 2674 runs exceed it**, the slowest genuine run
+being **581.7s**. Five runs above 600s are excluded on purpose: RUNBOOK already
+attributes all five to the laptop sleeping, and they predate `slept_ms`, so no
+record proves it — the 2216.9s one is not a diagnosis time and must not be
+quoted as the worst case.
+
 **The arm filter is not optional, and measuring is what showed why.** The
 first version of this analysis pooled every qwen3 record and produced a table
 where six-round runs were *faster* than five-round ones — 28.7s against 99.4s.
