@@ -402,7 +402,19 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    file's earlier row, and it came out at exactly the 42 that was predicted
    from three individual `--sites` kills, which is the only reason the
    prediction is worth mentioning.
-6. `limits.py:140` is an equivalent mutant, not "the standing proof".
+6. **The equivalent mutant is `tool_schema.py:55`, not `limits.py:140`.**
+   Corrected 2026-09-12. `9326fee` says it in its own body — "podcache 3/3,
+   sinks 4/4, slack_socket 2/2, **limits 1/1**, tool_schema 1/2" — so
+   `limits.py:140` was *killed* on the commit that declared an equivalent
+   mutant, by the observation that `retry_after`'s second floor is only
+   reachable with a limit of **zero**. `all-2026-09-09.json` agrees: limits.py
+   is 28/28 with no survivors, and tool_schema.py is 6/7 with one.
+
+   The survivor that really is equivalent is `tool_schema.py:55`,
+   `doc.split("\n\n", 1)[0]` mutated to maxsplit 2 — the first element of a
+   split is the same for any maxsplit of 1 or more, so no test can distinguish
+   them. That argument is sound; the one this item used to make pointed at a
+   mutant that no longer exists and left the real one unnamed.
 7. Generalized diagnostic accuracy stays NOT TESTED.
 8. **HA is PARTIALLY PROVEN, and the qualifier is not decoration.** What was
    measured is the *controller* lease on GKE 2026-09-05: failover 115.4s,
