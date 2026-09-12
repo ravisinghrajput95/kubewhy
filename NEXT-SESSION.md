@@ -9,7 +9,8 @@ via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-10 head — `git log --oneline -1` is the
 authority, not this line — tree clean and pushed, **1711 passed, 34 skipped**
-(46s), CI green including a new `types` job, tags through v0.2.0.
+(46s), CI green including a new `types` job, tags through **v0.2.1**
+(2026-09-09; this line said v0.2.0, which is 2026-08-26).
 
 That figure is **with Postgres down**, because the session ended by tearing
 the local stack down. The 34 are the shared-state cases and they skip
@@ -26,7 +27,8 @@ afterwards — see the Environment note about this machine. Zero clusters, zero
 containers.**
 
 **mypy is at zero across 85 files and CI gates on it** (`types` job in
-tests.yml). ruff is at 129, all triaged, and runs `continue-on-error` in the
+tests.yml). ruff is at **131** (measured 2026-09-12; this line said 129),
+all triaged, and runs `continue-on-error` in the
 same job. Turn that off when it reaches zero.
 
 **Mutation coverage.** Three modules are measured properly, on one base each,
@@ -514,10 +516,30 @@ more in this project's character.
    survivors are already classified in defect 29. **Check for an existing
    `results/mutation/<module>-*.json` before starting.**
 
-   Actually unexamined, by `--all` row: `store.py` 41/53 (77.4%),
-   `podcache.py` 15/18 (83.3%), `targeting.py` 66/74 (89.2%),
-   `tool_schema.py` 5/7, `sinks.py` 36/40, `slack_socket.py` 14/16,
-   `limits.py` 27/28.
+   **Corrected 2026-09-12: this list was quoting the 2026-09-03 survey, and
+   the authority is `all-2026-09-09.json`.** Recomputed from both files, the
+   seven modules it named read as follows — 2026-09-03 first, 2026-09-09
+   second:
+
+   | module | 2026-09-03 | 2026-09-09 |
+   |---|---|---|
+   | `store.py` | 41/53 (77.4%) | **52/53 (98.1%)** |
+   | `podcache.py` | 15/18 (83.3%) | **18/18 (100%)** |
+   | `targeting.py` | 66/74 (89.2%) | **74/74 (100%)** |
+   | `tool_schema.py` | 5/7 (71.4%) | **6/7 (85.7%)** |
+   | `sinks.py` | 27/31 (87.1%) | **40/40 (100%)** |
+   | `slack_socket.py` | 15/17 (88.2%) | **16/16 (100%)** |
+   | `limits.py` | 27/28 (96.4%) | **28/28 (100%)** |
+
+   **Five of the seven are at 100% on a pass 1, and that closes them rather
+   than merely improving them:** a pass 2 measures what a wider test set adds,
+   and nothing can be added to a row where the module's own test file already
+   kills every mutant. `store.py` has one survivor and `tool_schema.py` one.
+   So this item is substantially done, and what it used to point at no longer
+   exists. What is actually left is the four rows the handoff already says read
+   lower than they are — `backends.py` 22/39, `controller.py` 60/102, `ui.py`
+   122/168, `contradiction.py` 108/117, all with deeper figures or classified
+   survivors — plus the two `--all` cannot reach.
 
    **`routers/k8s_pods_info.py` has grown and its row is stale.** `list_jobs`
    and `_failed_jobs` added ~110 lines on 2026-09-10 and the module has never
@@ -528,7 +550,8 @@ more in this project's character.
    actually moves the number. Check whether the mutated value is ever *read* —
    a dead store and a redundant argument both look killable and are not.
 
-4. **Turn ruff's gate on.** 129 findings, all triaged, none live defects. The
+4. **Turn ruff's gate on.** **131** findings measured 2026-09-12, all
+   triaged, none live defects. 80 are auto-fixable. The
    `types` job in tests.yml already runs it with `continue-on-error: true`;
    removing that line is the whole change once the count is zero. 78 are
    auto-fixable and most of the rest are import ordering, so this is one

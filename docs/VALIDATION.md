@@ -13,7 +13,7 @@ and does not support. Four words are used and they mean specific things:
 | Property | Status | Evidence |
 |---|---|---|
 | Automated test suite | **PROVEN** | 1696 passing, **0 skipped**, in 46s; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
-| Grounding replay | **PROVEN** | 1489 recorded runs, reproducible from the repository |
+| Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
 | Grounding + contradiction | **PROVEN** | caught a genuine wrong claim live, 5/5 reproducibly |

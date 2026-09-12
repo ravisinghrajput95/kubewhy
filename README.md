@@ -199,7 +199,7 @@ Details: [docs/INFERENCE.md](docs/INFERENCE.md).
 | Capability | Evidence |
 |---|---|
 | Automated tests | 1696 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
-| Grounding replay | 907 recorded runs, no regressions |
+| Grounding replay | 1683 recorded runs, no regressions (counted 2026-09-12; this row said 907) |
 | AI evaluation | 29 scenarios × 5 runs per configuration |
 | GKE runtime | Validated |
 | GKE / Calico NetworkPolicy | Validated |
