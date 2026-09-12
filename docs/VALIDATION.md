@@ -2512,15 +2512,35 @@ with them mixed in:
 The headline hides both halves. Split by whether the prompt had ever seen the
 fault type, the figure more than halves.
 
-**The three failures were each the specific wrong answer the case forbade**,
-which is what says they are the fault type and not bad luck:
+**The three failures were each the specific wrong answer the case forbade** —
+which is what said they were the fault type and not bad luck, and is the
+sentence the 2026-09-12 re-reading of the records qualifies. Two of the three
+have since been reattributed: one to a missing tool and one to the grader's
+phrase list. Only `poststart_hook_not_the_app` is still a plain model failure:
 
-- `malformed_image_reference` — never called `describe_pod` at all. It answered
-  about a pod it had not read.
-- `job_killed_by_its_own_deadline` — reported the container as failing. The Job
-  hit `activeDeadlineSeconds` and was stopped by its own spec; the container did
-  nothing wrong. This is the failure that sends an on-call reader to debug
-  healthy code.
+- `malformed_image_reference` — failed its expectation list. **Corrected
+  2026-09-12 by reading the records rather than the write-up**: this bullet
+  originally said the case never called `describe_pod` and answered about a pod
+  it had not read. The record says otherwise. It called `list_pods` and
+  `describe_pod`, came back `grounded` with no unverified claims, and answered
+  "the container image name is invalid … contains invalid colons in the tag
+  portion, which violates Kubernetes' image naming rules". That is the fault.
+  What failed is `expect_any`, whose synonyms are `invalidimagename`,
+  `invalid image`, `not a valid`, `syntactically` and `malformed reference` —
+  none of which is a substring of the sentence the model actually wrote. And
+  because `forbid` is conditional on the expectations being met, the aside
+  "if using a private registry, verify the pull secret is correctly configured"
+  was then scored as the confident wrong answer rather than recorded as a note.
+  **The case as written cannot distinguish a correct answer phrased differently
+  from a wrong one**, which is the same class as the `OOM killer` phrase-list
+  miss. Left unchanged while the n=3 re-measurement runs, so that set is graded
+  by the rules it started under; the fix belongs in a regrade afterwards.
+- `job_killed_by_its_own_deadline` — reported the container as failing, and
+  **this** is the case that never called `describe_pod`: `list_pods` was the
+  only tool it reached, because the Job controller had already deleted the
+  pods. The Job hit `activeDeadlineSeconds` and was stopped by its own spec;
+  the container did nothing wrong. This is the failure that sends an on-call
+  reader to debug healthy code.
 - `poststart_hook_not_the_app` — verdict `contradicted`, with a fabricated
   `137`. It read CrashLoopBackOff, assumed a SIGKILL, and invented the exit code
   to match. The real cause is `FailedPostStartHook` and it exists only in the
