@@ -72,6 +72,58 @@ def partition(runs):
     return groups
 
 
+# What a failure was, because "failed" is not one thing and the halves are
+# not comparable without it. A run that named the right root cause and fell
+# short of the grounding bar is a different product from one that named the
+# wrong cause: the first is a checker that wants evidence the answer did not
+# cite, the second sends an on-call reader to debug healthy code. Four
+# verdicts exist for the same reason -- see the note in `grounding.py` -- and
+# summing two of them into one number is the mistake this file is built
+# against.
+FAILURE_KINDS = (
+    ("wrong answer", ("none of ", "missing ", "wrongly claimed ")),
+    ("tool expectation", ("never called ", "should not have called ")),
+    ("grounding verdict", ("grounding verdict ",)),
+    ("unverified claim", ("unverified claims: ",)),
+    ("harness", ("payload ",)),
+)
+
+
+def classify(failure):
+    for kind, prefixes in FAILURE_KINDS:
+        if failure.startswith(prefixes):
+            return kind
+    return "unrecognised"
+
+
+def failure_breakdown(runs, out, indent="  "):
+    """
+    How the failures in a group divide, and how many of them left the root
+    cause intact.
+    """
+    failed = [r for r in runs if not r.get("passed")]
+    if not failed:
+        return
+
+    kinds = defaultdict(int)
+    substantive = 0
+    for run in failed:
+        reasons = run.get("failures") or []
+        seen = {classify(f) for f in reasons} or {"unrecognised"}
+        for kind in seen:
+            kinds[kind] += 1
+        if seen & {"wrong answer", "unrecognised"}:
+            substantive += 1
+
+    print(f"{indent}{len(failed)} failed: "
+          + ", ".join(f"{n} {k}" for k, n in sorted(kinds.items(),
+                                                    key=lambda kv: -kv[1])),
+          file=out)
+    print(f"{indent}{substantive} of those named the wrong cause; "
+          f"{len(failed) - substantive} named the right one and missed a bar "
+          "around it", file=out)
+
+
 def line(label, runs):
     passes = sum(1 for r in runs if r.get("passed"))
     total = len(runs)
@@ -94,7 +146,9 @@ def report(runs, out=sys.stdout):
     say("  -- and the headline is the average of these two, so do not quote "
         "it alone:")
     say(line("pre-existing", groups["pre-existing"]))
+    failure_breakdown(groups["pre-existing"], out, indent="               ")
     say(line("never seen", groups["never seen"]))
+    failure_breakdown(groups["never seen"], out, indent="               ")
 
     if groups["unclassified"]:
         names = sorted({r.get("case") for r in groups["unclassified"]})
