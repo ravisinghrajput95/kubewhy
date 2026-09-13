@@ -387,9 +387,14 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    Fisher p = 0.0020 against defect 44's p = 0.0064 at n=1. **Quote both
    halves or neither**; 84.3% is the average of two different products and is
    the thing defect 44 exists to stop being published on its own. Do not quote
-   the old 97%/40% at all, and do not quote 88% as anything. **53.3% has a
-   45-point interval** — its lower bound is 30.1%, and that is the honest
-   summary of it.
+   88% as anything. **53.3% has a 45-point interval** — its lower bound is
+   30.1%, and that is the honest summary of it.
+
+   **And do not quote the old 40% either, in either direction.** Regraded
+   under the corrected `malformed_image_reference` phrase list, defect 44's
+   own set reads 3/5, **60.0%**, not 2/5, 40% — so that figure was depressed
+   by a grader that could not recognise a correct answer. The corrected n=1
+   value is *above* this session's 53.3%, and the two are consistent.
 
    Use `evals/split_by_novelty.py` rather than recomputing by hand; it takes
    membership from `UNCOVERED_CASES` and reproduces defect 44's original split
@@ -541,16 +546,18 @@ more in this project's character.
 
    What it opened, in the order worth doing:
 
-   - **`malformed_image_reference` cannot distinguish a right answer from a
-     wrong one.** 1/3, and both failures hit `expect_any`, whose five synonyms
-     match none of the sentences the model actually wrote — "the container
-     image name is invalid", "its specified image is invalid … multiple
-     colons". `forbid` is conditional on the expectations being met, so a
-     hedged "verify the pull secret" aside then scored as the confident wrong
-     answer. **Regrade over the recorded answers rather than re-running**
-     (`evals/regrade.py`); one of the two failures also has a real
-     `never called describe_pod`, so a widened list cannot flip more than one
-     run and the regrade bounds the effect rather than fixing the score.
+   - **`malformed_image_reference`'s phrase list is fixed and replayed —
+     done, and it moves nothing here.** Its `expect_any` matched none of the
+     sentences the model actually writes for this fault. Widened with six
+     terms naming the fault rather than the question, then replayed with
+     `evals/regrade.py`: the 2026-09-12 set is **86/102 before and after**,
+     because both of its failures on that case carry a second reason the
+     widening does not touch. **The headline, both halves and p = 0.0020 stand
+     as measured.** What moved is defect 44's own set — 30/34 to 31/34, its
+     never-seen half from 2/5 (40%) to **3/5, 60.0% [23.1–88.2]**. So part of
+     that 40% was the grader, and the corrected n=1 value sits *above* this
+     session's 53.3%; 60% at n=5 and 53.3% at n=15 are consistent, which is
+     the reading defect 44 asked for all along.
    - **Defect 46**: `137` is still in `SYSTEM_PROMPT` at `agent.py:153` and
      cost `job_killed_by_its_own_deadline` one run in three. The fix is a
      trade, not a delete — that sentence is what makes the model say the exit
