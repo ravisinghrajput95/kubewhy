@@ -2740,6 +2740,79 @@ a slower run returns the same answer, so no latency figure is quoted from this
 set.
 
 
+### 48. A workload whose pods were never created reads as a clean namespace
+
+**Problem.** Defect 44's Job gap was structural: the Job controller deletes the
+pods when `activeDeadlineSeconds` fires, so every pod-level tool had nothing to
+return and `scan_cluster` called the namespace clean. `list_jobs` closed it.
+Item 8 of the handoff asked whether StatefulSets and DaemonSets have the same
+problem and predicted they do not — "unlike a Job they do not delete their
+pods, so the pods stay visible and this is a convenience gap rather than the
+structural one Jobs turned out to be." **That prediction is wrong, and the
+thing it is wrong about is not the controller kind.**
+
+Any workload whose pods are *rejected at admission* has the Job's shape. The
+ReplicaSet records the rejection, the Deployment carries a `ReplicaFailure`
+condition, and no pod is ever created. The ordinary form of this on a real
+cluster is an exhausted namespace quota.
+
+**Measured 2026-09-13** on kind, `demo/controller-faults.yaml`: a namespace
+with `ResourceQuota hard: {pods: "0"}`, a 2-replica Deployment and a DaemonSet
+in it, and — in a second namespace with no quota — a StatefulSet whose volume
+claim names a StorageClass that does not exist, as the control.
+
+What Kubernetes reports:
+
+```
+ReplicaFailure=True FailedCreate: pods "quota-blocked-5cbb6d88bb-6v9xf" is
+forbidden: exceeded quota: no-pods-allowed, requested: pods=1, used: pods=0,
+limited: pods=0
+DaemonSet node-agent: desired=1 current=0 ready=0
+```
+
+What every tool reports, called by hand:
+
+| tool | result |
+|---|---|
+| `list_pods` | `no matching pods in namespace controller-faults` |
+| `describe_pod` | nothing to name |
+| `get_pod_events` | nothing to name |
+| `list_jobs` | `no jobs in namespace controller-faults` |
+| **`scan_cluster`** | **`no unhealthy workloads in namespace(s) controller-faults`** |
+| `list_deployments` | `desired 2, ready 0, available 0, healthy false` — **and no reason** |
+
+**`scan_cluster` calls the namespace clean while a Deployment has none of its
+two replicas and a DaemonSet none of its one.** That is worse than the Job gap,
+which at least left the workload absent rather than reported as fine.
+`list_deployments` is the only tool that sees anything, and it reads replica
+counts and images only: `ReplicaFailure`, `FailedCreate` and the quota message
+all live on `deployment.status.conditions`, which nothing reads. Confirmed by
+reading — `status.conditions` is consumed for Jobs, Nodes and HPAs and never
+for Deployments — and then by measuring.
+
+**The DaemonSet is reachable by no tool at all.** The surface is
+`describe_pod, get_pod_events, get_pod_logs, get_service_endpoints,
+list_contexts, list_deployments, list_jobs, list_namespaces, list_nodes,
+list_pods, scan_cluster, scan_references`. There is no `list_daemonsets` and no
+`list_statefulsets`.
+
+**The control is what makes this precise.** The StatefulSet's pod *does* exist,
+stuck `Pending` on the missing StorageClass, and everything sees it:
+`scan_cluster` returns `controller-faults-b/ledger` with `status: Pending` and
+`example: ledger-0`, and `describe_pod` and `list_pods` both answer. So the gap
+is **not** that StatefulSets and DaemonSets lack tools of their own — it is
+that *no pod exists to read*. Controller kind is irrelevant; pod existence is
+the whole variable. A Deployment, which does have a tool, is just as blind here
+as the DaemonSet that does not.
+
+**Not fixed, deliberately.** The fix is a design decision with at least two
+shapes — teach `scan_cluster` to report a controller with unmet replicas and no
+pods, the way `_failed_jobs` already does, or read `status.conditions` in
+`list_deployments` — and this session ends with the fixture committed and the
+behaviour measured rather than with an untested change. `demo/controller-faults.yaml`
+reproduces it in about twenty seconds.
+
+
 ## Where a run's 74 seconds go
 
 Every latency figure this project has published is a report. None of them said

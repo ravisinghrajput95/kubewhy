@@ -1,0 +1,145 @@
+# Workloads whose pods were never created at all.
+#
+# The Job gap (defect 44) was structural rather than a prompt problem: the Job
+# controller deletes the pods when `activeDeadlineSeconds` fires, so every
+# pod-level tool had nothing to return and scan_cluster reported the namespace
+# clean. The failure reason lived on the Job's own status.conditions.
+#
+# This fixture asks whether that shape is unique to Jobs. It is not obviously
+# so: any controller whose pods are *rejected at admission* has the same
+# problem. The ReplicaSet records the rejection, the Deployment carries a
+# `ReplicaFailure` condition, and no pod ever exists.
+#
+# Predicted before measuring, from reading the code on 2026-09-12:
+#
+#   list_pods          nothing -- no pod was created
+#   describe_pod       nothing to name
+#   get_pod_events     nothing to name
+#   scan_cluster       the namespace reads clean; it iterates pods and failed
+#                      Jobs and never reads a Deployment
+#   list_deployments   desired 2, ready 0, healthy false -- and no reason,
+#                      because it reads replica counts and images only
+#
+# If that holds, "healthy: false with no reason anywhere" is what an operator
+# gets, which is one step better than the Job gap and still not an answer.
+# Measure it rather than trusting the paragraph above.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: controller-faults
+---
+# Permits no pods at all. A quota that forbids pod creation is the ordinary
+# form of this on a real cluster -- a team's namespace quota is exhausted, and
+# every new rollout stops at admission with nothing to inspect.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: no-pods-allowed
+  namespace: controller-faults
+spec:
+  hard:
+    pods: "0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quota-blocked
+  namespace: controller-faults
+  labels:
+    app: quota-blocked
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: quota-blocked
+  template:
+    metadata:
+      labels:
+        app: quota-blocked
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+---
+# The same question for a DaemonSet, which is the other controller with no
+# tool of its own. A DaemonSet under the same quota creates no pods either,
+# and its status carries the count it wanted against the count it got.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-agent
+  namespace: controller-faults
+  labels:
+    app: node-agent
+spec:
+  selector:
+    matchLabels:
+      app: node-agent
+  template:
+    metadata:
+      labels:
+        app: node-agent
+    spec:
+      containers:
+        - name: agent
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+---
+# The control, and it needs its own namespace: the quota above is namespace-
+# wide, so a StatefulSet next to it would be blocked at admission for the same
+# reason and would prove nothing about StatefulSets.
+#
+# Here the volume claim names a StorageClass that does not exist, so the
+# StatefulSet *does* create a pod and the pod stays Pending. That is what says
+# whether the gap is about the controller kind or about whether a pod exists
+# to read. scan_references already reports a PVC bound to a missing
+# StorageClass, verified live 2026-09-10.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: controller-faults-b
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ledger
+  namespace: controller-faults-b
+  labels:
+    app: ledger
+spec:
+  serviceName: ledger
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ledger
+  template:
+    metadata:
+      labels:
+        app: ledger
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: no-such-storage-class
+        resources:
+          requests:
+            storage: 1Gi

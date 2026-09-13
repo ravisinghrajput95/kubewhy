@@ -700,14 +700,42 @@ more in this project's character.
    the history out of this file is the alternative and is less valuable —
    sprawl is the symptom, unverified claims are the defect.
 
-8. **A gap worth considering, not yet evidence.** `list_deployments` covers
-   one of four workload controllers and `list_jobs` now covers a second.
-   StatefulSets and DaemonSets have no equivalent — but unlike a Job they do
-   not delete their pods, so the pods stay visible and this is a convenience
-   gap rather than the structural one Jobs turned out to be. **Measure before
-   building**: apply a broken StatefulSet and a DaemonSet that cannot schedule
-   on some nodes, then call every tool by hand, which is exactly how the Job
-   gap was found and is cheaper than reasoning about it.
+8. **Measured 2026-09-13, and the prediction in this item was wrong — defect
+   48.** It said StatefulSets and DaemonSets are a convenience gap because
+   "unlike a Job they do not delete their pods, so the pods stay visible". The
+   structural gap is real and it is not about the controller kind at all: it is
+   about **whether a pod exists to read**.
+
+   `demo/controller-faults.yaml` is the fixture — a namespace with
+   `ResourceQuota hard: {pods: "0"}`, a 2-replica Deployment and a DaemonSet in
+   it, and a StatefulSet in a quota-free namespace as the control. Every tool
+   called by hand against the quota'd namespace:
+
+   | tool | result |
+   |---|---|
+   | `list_pods`, `describe_pod`, `get_pod_events` | nothing — no pod was created |
+   | `list_jobs` | not a Job |
+   | **`scan_cluster`** | **`no unhealthy workloads`** — the namespace reads clean |
+   | `list_deployments` | `desired 2, ready 0, healthy false` — **and no reason** |
+
+   Kubernetes has the reason and nothing reads it: `ReplicaFailure=True
+   FailedCreate: pods ... is forbidden: exceeded quota`, on
+   `deployment.status.conditions`. `status.conditions` is consumed for Jobs,
+   Nodes and HPAs and never for Deployments. The DaemonSet is reachable by no
+   tool at all — there is no `list_daemonsets` and no `list_statefulsets`.
+
+   **The control is what makes it precise.** The StatefulSet's pod *does*
+   exist, `Pending` on a missing StorageClass, and everything sees it —
+   `scan_cluster` returns `controller-faults-b/ledger` with `example:
+   ledger-0`. So a Deployment, which has a tool, is exactly as blind as the
+   DaemonSet that has none. **`scan_cluster` reporting a namespace clean while
+   a Deployment has none of its two replicas is worse than the Job gap was**,
+   which at least left the workload absent rather than reported as fine.
+
+   Deliberately not fixed. Two shapes: teach `scan_cluster` to report a
+   controller with unmet replicas and no pods the way `_failed_jobs` already
+   does, or read `status.conditions` in `list_deployments`. The fixture
+   reproduces it in about twenty seconds.
 
    The same method said no for storage and reference faults: `scan_references`
    already reports the PVC bound to a missing StorageClass and the HPA that
