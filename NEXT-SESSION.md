@@ -7,18 +7,27 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-10 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1711 passed, 34 skipped**
-(46s), CI green including a new `types` job, tags through **v0.2.1**
-(2026-09-09; this line said v0.2.0, which is 2026-08-26).
+**State: `main` at the 2026-09-12/13 head — `git log --oneline -1` is the
+authority, not this line — tree clean and pushed, **1749 passed, 0 skipped**
+(50s), CI green including a new `types` job, tags through **v0.2.1**
+(2026-09-09).
 
-That figure is **with Postgres down**, because the session ended by tearing
-the local stack down. The 34 are the shared-state cases and they skip
-*silently* — see Environment. The with-Postgres figure was not taken on the
-final tree: an earlier run that day read 1733 passed with
-`test_documented_measurements.py` excluded, so the full suite with a database
-up should read 1745 and 0 skipped. **Measure it rather than quoting that
-arithmetic**; this file has published a derived count before.
+**That figure is measured, with Postgres up**, on the tree this session ends
+on: `docker start kubewhy-pg`, DSN proved, `pytest tests/test_store.py`
+confirmed 113 passed and no `s` first. The previous line said 1711 passed and
+34 skipped, and predicted 1745 with a database up "measure it rather than
+quoting that arithmetic" — the arithmetic was right about the method and the
+count has since moved anyway, because this session added tests.
+
+**A test now checks this claim rather than trusting it.**
+`tests/test_documented_measurements.py::TestTheDocumentedSuiteCountMatchesTheTree`
+collects the tree in a subprocess and requires *passed + skipped* to equal the
+collected count in all three documents that state one — README.md's capability
+table, VALIDATION.md's summary row, and this block. The sum rather than the
+pass count, because the skip count moves with whether Postgres is up and only
+the total is invariant. It found README.md and VALIDATION.md at 1696/0 against
+a tree that collected 1745, stale by 49, which is exactly the drift item 7
+describes and nothing automatic had caught.
 
 Nothing of this project is running. The kind cluster `kubewhy-9` and the
 `kubewhy-pg` container were created and deleted inside the 2026-09-10 session,
