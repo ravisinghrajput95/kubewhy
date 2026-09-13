@@ -49,8 +49,13 @@ rules:
     verbs: ["get"]
 
   # Deployments, for degraded-workload detection.
+  # daemonsets and statefulsets are for the zero-pod scan (defect 48): a
+  # workload whose pods were rejected at admission appears in no pod listing,
+  # so scan_cluster has to find it on its controller or report the namespace
+  # clean. An install whose role predates this grant loses those rows and
+  # keeps every other finding -- _stalled_controllers swallows the 403.
   - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets"]
+    resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
     verbs: ["get", "list"]
 
   # EndpointSlices, for service-reachability diagnosis.

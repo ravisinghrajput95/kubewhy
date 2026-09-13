@@ -8,8 +8,8 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-12/13 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1749 passed, 0 skipped**
-(50s), CI green including a new `types` job, tags through **v0.2.1**
+authority, not this line — tree clean and pushed, **1759 passed, 0 skipped**
+(49s), CI green including a new `types` job, tags through **v0.2.1**
 (2026-09-09).
 
 **That figure is measured, with Postgres up**, on the tree this session ends
@@ -758,10 +758,22 @@ more in this project's character.
    a Deployment has none of its two replicas is worse than the Job gap was**,
    which at least left the workload absent rather than reported as fine.
 
-   Deliberately not fixed. Two shapes: teach `scan_cluster` to report a
-   controller with unmet replicas and no pods the way `_failed_jobs` already
-   does, or read `status.conditions` in `list_deployments`. The fixture
-   reproduces it in about twenty seconds.
+   **Fixed 2026-09-13, and both shapes were needed.** `_stalled_controllers()`
+   returns Deployments, DaemonSets and StatefulSets with **zero pods** only —
+   where pods exist the pod pass already covers them. `scan_cluster` adds rows
+   with `kind`, `desired` and a `reason` where the controller-manager gave
+   one, and no `example`, exactly as a failed Job does; `list_deployments`
+   carries the same reason. Both RBAC files gain `daemonsets` and
+   `statefulsets`, and the 403 is swallowed so an older role loses only these
+   rows. Verified live, and on a cluster also running `broken-pods.yaml` and
+   `config-faults.yaml` exactly two of sixteen rows are `NoPods`.
+
+   Two defects in the fix, both caught first: `collect()` outside its `except`
+   broke the never-raise contract and made the **suite hang past 600s** rather
+   than fail, via the Streamlit AppTest mechanism `conftest.py` documents; and
+   the test written for that contract could not fail until its third version,
+   because the class's `_scan` helper overwrites the `apps_api` return value
+   the test had just sabotaged.
 
    The same method said no for storage and reference faults: `scan_references`
    already reports the PVC bound to a missing StorageClass and the HPA that

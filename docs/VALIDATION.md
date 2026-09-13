@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1749 passing, **0 skipped**, in 50s; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1759 passing, **0 skipped**, in 49s; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -2830,12 +2830,60 @@ that *no pod exists to read*. Controller kind is irrelevant; pod existence is
 the whole variable. A Deployment, which does have a tool, is just as blind here
 as the DaemonSet that does not.
 
-**Not fixed, deliberately.** The fix is a design decision with at least two
-shapes — teach `scan_cluster` to report a controller with unmet replicas and no
-pods, the way `_failed_jobs` already does, or read `status.conditions` in
-`list_deployments` — and this session ends with the fixture committed and the
-behaviour measured rather than with an untested change. `demo/controller-faults.yaml`
-reproduces it in about twenty seconds.
+**Fixed 2026-09-13, and both shapes were needed rather than either.**
+`_stalled_controllers()` reads Deployments, DaemonSets and StatefulSets and
+returns only those with **zero pods** — where pods exist the pod pass already
+reports them with far more detail, and a second row would put one problem on
+the page twice. `scan_cluster` adds those as rows carrying `kind`, `desired`
+and, where the controller-manager gave one, `reason`; like a failed Job they
+carry **no `example`**, because no pod exists to drill into. `list_deployments`
+carries the same `reason`, so a Deployment that reads `healthy: false` now says
+why. Both RBAC files gain `daemonsets` and `statefulsets`, and
+`_stalled_controllers` swallows a 403 the way `_failed_jobs` does, so an
+install whose role predates the grant loses these rows and keeps every other
+finding.
+
+Verified live on kind against the fixture:
+
+```
+controller-faults/quota-blocked  NoPods  Deployment  desired 2
+  reason: FailedCreate: pods "..." is forbidden: exceeded quota: no-pods-allowed
+controller-faults/node-agent     NoPods  DaemonSet   desired 1
+```
+
+and the control is untouched — `controller-faults-b/ledger` still reports
+`Pending` with `example: ledger-0` from the pod pass, with no second row. On a
+cluster also running `broken-pods.yaml` and `config-faults.yaml` the scan
+returns 16 rows and exactly those two are `NoPods`.
+
+**A controller is reported on its counts, so a Deployment whose pods have not
+been created yet appears for the second or two before they are.** That matches
+the pod pass, which reports `ContainerCreating` with the same honesty, and it
+is why the reason is carried when there is one: a row with `FailedCreate` is
+stuck, a row without one may simply be new. A Deployment scaled to zero is not
+reported, and there is a test for it — a pass that makes every quiet namespace
+look broken is how a scan stops being read.
+
+**Two defects in the fix, both caught before it shipped, and the second nearly
+hid the first.** `collect()` sat one line below its `except`, so a listing that
+returned something unreadable raised *through* `scan_cluster` rather than being
+swallowed — breaking the never-raise contract the docstring states. What that
+cost is recorded in `conftest.py`: an exception of an unexpected shape inside a
+Streamlit AppTest means the page never finishes rendering, so **the full suite
+ran past 600 seconds having passed every file that does not render a page**,
+which reads as a hang rather than a failure. Fetching a list and reading it are
+the same promise and belong in the same `try`.
+
+The test written for that contract then **could not fail**, twice. The first
+version returned a bare `object()`, whose missing `.items` raises on attribute
+access — inside the `try` either way. The second set an unreadable return value
+and then called the class's `_scan` helper, which overwrites every `apps_api`
+return value it knows about, so the payload never reached the code. Both passed
+against the bug reintroduced. The third stubs by hand and asserts the lister was
+actually called. **That is the second time in this session an adversarial test
+passed while its payload never arrived** — the first is recorded in defect 47's
+`malformed_image_reference` analysis, and the pattern is the same one
+`injection_in_annotations_is_data` established.
 
 
 ## Where a run's 74 seconds go

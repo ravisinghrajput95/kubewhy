@@ -687,6 +687,16 @@ def scan_cluster(
     BackoffLimitExceeded -- and no example pod, because there is no pod left
     to read. Call list_jobs for the rest of it. An entry with a reason and no
     example is not an incomplete result; it is the whole result.
+
+    A workload whose pods were never created is the other exception, and reads
+    "status": "NoPods" with the controller "kind" and how many replicas it
+    "desired". There is no example pod for the same reason -- none exists --
+    and describe_pod, get_pod_events and get_pod_logs can tell you nothing
+    about it at all. Where the controller-manager gave a cause it is on
+    "reason", usually FailedCreate with the admission error that rejected the
+    pods; report that, not a container fault, because no container ever ran.
+    For a Deployment, list_deployments carries the same reason alongside the
+    replica counts.
     To answer "is X healthy?" pass workload -- it reports that workload's state
     whether or not anything is wrong with it, which is the only way to say a
     thing is fine. Never answer about a different workload than the one asked
@@ -822,6 +832,37 @@ def scan_cluster(
             "reason": reason,
         }
 
+    # Controllers with no pods at all -- defect 48. Same contract as the Job
+    # pass above and for the same reason: no `example`, because there is no
+    # pod to drill into. `list_deployments` carries the rest for a Deployment;
+    # a DaemonSet and a StatefulSet have no tool of their own, so for those
+    # this row is the only place the workload appears anywhere.
+    for namespace, name, kind, desired, reason in _stalled_controllers(wanted):
+        if workload and workload.lower() not in (
+            name.lower(), f"{namespace}/{name}".lower()
+        ):
+            continue
+
+        rows = [row for row in groups if row[0] == namespace and row[1] == name]
+        if rows:
+            # Defensive: a zero-pod controller should not already be grouped,
+            # since the pod pass has nothing to group. If some owner name
+            # collides, attach rather than add a second row for one problem.
+            if reason:
+                for row in rows:
+                    groups[row].setdefault("reason", reason)
+            continue
+
+        entry = {
+            "status": "NoPods",
+            "pods": 0,
+            "kind": kind,
+            "desired": desired,
+        }
+        if reason:
+            entry["reason"] = reason
+        groups[(namespace, name, "no-pods")] = entry
+
     if not groups:
         if workload:
             # Distinct from "it is healthy", which now returns a row.
@@ -901,6 +942,106 @@ def _failed_jobs(namespaces=()):
                 )
                 break
     return found
+
+def _replica_failure(conditions):
+    """
+    The `ReplicaFailure` reason and message, when a controller carries one.
+
+    This is where the kubelet has nothing to say and the controller-manager
+    does: a pod rejected at admission never exists, so no pod status, no pod
+    event and no log can name the cause. `FailedCreate` plus its message --
+    "is forbidden: exceeded quota" -- is the whole answer and it lives only
+    here.
+    """
+    for condition in conditions or []:
+        if condition.type == "ReplicaFailure" and condition.status == "True":
+            message = (condition.message or "").strip()
+            reason = condition.reason or "ReplicaFailure"
+            return f"{reason}: {message}" if message else reason
+    return None
+
+
+def _stalled_controllers(namespaces=()):
+    """
+    (namespace, name, kind, desired, reason) for controllers with *no pods*.
+
+    Defect 48. `scan_cluster` groups pods by owner, so a workload whose pods
+    were never created is not a small entry in the scan -- it is absent from
+    it, and the namespace reads clean. Measured on kind 2026-09-13: a
+    2-replica Deployment and a DaemonSet under a `pods: 0` ResourceQuota
+    produced `no unhealthy workloads`, while Kubernetes was reporting
+    `ReplicaFailure=True FailedCreate: pods ... is forbidden: exceeded quota`.
+
+    This is the same shape as the Job gap and not the same cause: a Job's pods
+    are deleted after running, these were never admitted. What the two share
+    is that **the pod is the only thing the rest of this module can read**, so
+    a workload without one has to be found from its controller or not at all.
+
+    Only zero-pod controllers are returned. Where pods exist the pod pass
+    already reports them, with far more detail, and a second row would put one
+    problem on the page twice.
+
+    Like `_failed_jobs` this must never raise: an install whose ClusterRole
+    predates the `daemonsets`/`statefulsets` grant loses these rows and keeps
+    every other finding.
+
+    A controller is reported on its counts, so a Deployment whose pods have
+    not been created *yet* appears for the second or two before they are. That
+    matches the pod pass, which reports `ContainerCreating` with the same
+    honesty, and it is why the reason is carried when there is one: a row with
+    `FailedCreate` is stuck, a row without one may simply be new.
+    """
+    found = []
+
+    def collect(kind, items, desired_of, existing_of):
+        for item in items:
+            namespace = item.metadata.namespace
+            if namespaces and namespace not in namespaces:
+                continue
+            desired = desired_of(item) or 0
+            if desired <= 0 or (existing_of(item) or 0) > 0:
+                continue
+            found.append((
+                namespace, item.metadata.name, kind, desired,
+                _replica_failure(getattr(item.status, "conditions", None)),
+            ))
+
+    single = namespaces[0] if len(namespaces) == 1 else None
+    for kind, lister, all_lister, desired_of, existing_of in (
+        ("Deployment",
+         "list_namespaced_deployment", "list_deployment_for_all_namespaces",
+         lambda d: d.spec.replicas, lambda d: d.status.replicas),
+        ("DaemonSet",
+         "list_namespaced_daemon_set", "list_daemon_set_for_all_namespaces",
+         lambda d: d.status.desired_number_scheduled,
+         lambda d: d.status.current_number_scheduled),
+        ("StatefulSet",
+         "list_namespaced_stateful_set", "list_stateful_set_for_all_namespaces",
+         lambda d: d.spec.replicas, lambda d: d.status.replicas),
+    ):
+        # The collect() call belongs inside the try, and that is not tidiness.
+        # The contract above is "must never raise", and reading the items is
+        # as able to raise as fetching them -- a stub whose `.items` is not a
+        # list raises on iteration, not on the call. conftest.py records what
+        # that costs: an exception of an unexpected shape inside a Streamlit
+        # AppTest makes the page never finish rendering, so the suite hangs
+        # instead of failing. Measured here on 2026-09-13, with collect()
+        # one line lower: the full suite ran past 600s having passed every
+        # file that does not render a page.
+        try:
+            api = _apps_api()
+            if single is not None:
+                items = getattr(api, lister)(
+                    single, _request_timeout=TIMEOUT).items
+            else:
+                items = getattr(api, all_lister)(
+                    _request_timeout=TIMEOUT).items
+            collect(kind, items, desired_of, existing_of)
+        except Exception:  # noqa: BLE001
+            continue
+
+    return found
+
 
 def describe_pod(name: str, namespace: str = "default"):
     """
@@ -1377,13 +1518,24 @@ def list_deployments(namespace: str = "default"):
         desired = dep.spec.replicas or 0
         ready = status.ready_replicas or 0
 
-        result[dep.metadata.name] = {
+        entry = {
             "desired": desired,
             "ready": ready,
             "available": status.available_replicas or 0,
             "healthy": ready == desired,
             "images": [c.image for c in dep.spec.template.spec.containers],
         }
+
+        # Why it is degraded, when the controller-manager says so. Without
+        # this the tool reported `healthy: false` and nothing else, and for a
+        # Deployment whose pods were rejected at admission there was no pod to
+        # ask instead -- defect 48. `ReplicaFailure` carries the rejection and
+        # its message carries the cause, and both live only here.
+        reason = _replica_failure(status.conditions)
+        if reason:
+            entry["reason"] = reason
+
+        result[dep.metadata.name] = entry
 
     if not result:
         if _namespace_absent(namespace):

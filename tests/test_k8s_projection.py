@@ -2606,3 +2606,306 @@ class TestTheReadyFractionCountsContainers:
             ])])
 
         assert k8s.list_pods("demo", only_unhealthy=False)["up"]["ready"] == "2/2"
+
+
+class TestScanClusterSeesControllersWithNoPods:
+    """
+    Defect 48. A workload whose pods were never created is not a small entry
+    in the scan -- it is absent from it, and the namespace reads clean.
+
+    Measured on kind 2026-09-13: a 2-replica Deployment and a DaemonSet under
+    a `pods: 0` ResourceQuota produced `no unhealthy workloads in namespace(s)
+    controller-faults`, while Kubernetes was reporting `ReplicaFailure=True
+    FailedCreate: pods ... is forbidden: exceeded quota`. That is worse than
+    the Job gap it resembles, because the Job at least vanished rather than
+    being reported as fine.
+    """
+
+    def _deployment(self, name, namespace, replicas=2, existing=None,
+                    reason=None, message=None):
+        conditions = []
+        if reason:
+            conditions.append(client.V1DeploymentCondition(
+                type="ReplicaFailure", status="True",
+                reason=reason, message=message,
+            ))
+        return client.V1Deployment(
+            metadata=client.V1ObjectMeta(name=name, namespace=namespace),
+            spec=client.V1DeploymentSpec(
+                replicas=replicas,
+                selector=client.V1LabelSelector(match_labels={"app": name}),
+                template=client.V1PodTemplateSpec(
+                    spec=client.V1PodSpec(containers=[
+                        client.V1Container(name="app", image="busybox:1.36")
+                    ])
+                ),
+            ),
+            status=client.V1DeploymentStatus(
+                replicas=existing, conditions=conditions or None),
+        )
+
+    def _daemonset(self, name, namespace, desired=1, current=0):
+        return client.V1DaemonSet(
+            metadata=client.V1ObjectMeta(name=name, namespace=namespace),
+            spec=client.V1DaemonSetSpec(
+                selector=client.V1LabelSelector(match_labels={"app": name}),
+                template=client.V1PodTemplateSpec(
+                    spec=client.V1PodSpec(containers=[
+                        client.V1Container(name="a", image="busybox:1.36")
+                    ])
+                ),
+            ),
+            status=client.V1DaemonSetStatus(
+                desired_number_scheduled=desired,
+                current_number_scheduled=current,
+                number_ready=0, number_misscheduled=0,
+            ),
+        )
+
+    def _scan(self, api, apps_api, batch_api, pods=(), deployments=(),
+              daemonsets=(), statefulsets=(), **kwargs):
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(
+            items=list(pods))
+        api.list_namespaced_pod.return_value = client.V1PodList(items=list(pods))
+        batch_api.list_job_for_all_namespaces.return_value = client.V1JobList(items=[])
+        batch_api.list_namespaced_job.return_value = client.V1JobList(items=[])
+        for single, every, items, kind in (
+            ("list_namespaced_deployment", "list_deployment_for_all_namespaces",
+             deployments, client.V1DeploymentList),
+            ("list_namespaced_daemon_set", "list_daemon_set_for_all_namespaces",
+             daemonsets, client.V1DaemonSetList),
+            ("list_namespaced_stateful_set", "list_stateful_set_for_all_namespaces",
+             statefulsets, client.V1StatefulSetList),
+        ):
+            getattr(apps_api, single).return_value = kind(items=list(items))
+            getattr(apps_api, every).return_value = kind(items=list(items))
+        return k8s.scan_cluster(**kwargs)
+
+    def test_a_deployment_with_no_pods_is_reported_with_its_reason(
+            self, api, apps_api, batch_api):
+        result = self._scan(
+            api, apps_api, batch_api, pods=[],
+            deployments=[self._deployment(
+                "quota-blocked", "shop", replicas=2, existing=None,
+                reason="FailedCreate",
+                message='pods "x" is forbidden: exceeded quota: no-pods',
+            )],
+        )
+
+        entry = result["shop/quota-blocked"]
+        assert entry["status"] == "NoPods"
+        assert entry["pods"] == 0
+        assert entry["kind"] == "Deployment"
+        assert entry["desired"] == 2
+        assert "exceeded quota" in entry["reason"]
+        # No example, for the same reason a failed Job carries none: there is
+        # no pod to drill into, and a consumer that offers one sends the
+        # reader to describe_pod on a name that does not exist.
+        assert "example" not in entry
+
+    def test_a_daemonset_with_no_pods_is_reported_even_without_a_reason(
+            self, api, apps_api, batch_api):
+        """
+        A DaemonSet carries no conditions at all -- verified on kind
+        2026-09-13, its status is counts only. Reporting it without a reason
+        is still the difference between a workload appearing and a namespace
+        reading clean, and it is the only place a DaemonSet appears anywhere:
+        there is no list_daemonsets.
+        """
+        result = self._scan(
+            api, apps_api, batch_api, pods=[],
+            daemonsets=[self._daemonset("node-agent", "shop", desired=3)],
+        )
+
+        entry = result["shop/node-agent"]
+        assert entry["status"] == "NoPods"
+        assert entry["kind"] == "DaemonSet"
+        assert entry["desired"] == 3
+        assert "reason" not in entry
+
+    def test_a_controller_whose_pods_exist_is_left_to_the_pod_pass(
+            self, api, apps_api, batch_api):
+        """
+        The control, and the reason this pass is restricted to zero pods: the
+        pod pass reports a workload with far more detail, and a second row
+        would put one problem on the page twice.
+        """
+        result = self._scan(
+            api, apps_api, batch_api,
+            pods=[crashing("web-abc123-1", "web", "shop")],
+            deployments=[self._deployment(
+                "web", "shop", replicas=2, existing=1, reason="FailedCreate",
+                message="something")],
+        )
+
+        assert result["shop/web"]["pods"] == 1
+        assert result["shop/web"]["status"] != "NoPods"
+        assert not any(v.get("status") == "NoPods"
+                       for v in result.values() if isinstance(v, dict))
+
+    def test_a_deployment_scaled_to_zero_is_not_a_fault(
+            self, api, apps_api, batch_api):
+        """
+        Scaling to zero is a thing people do on purpose. A pass that reports
+        it makes every quiet namespace look broken, which is how a scan stops
+        being read.
+        """
+        result = self._scan(
+            api, apps_api, batch_api, pods=[],
+            deployments=[self._deployment("paused", "shop", replicas=0,
+                                          existing=None)],
+        )
+
+        assert result == {"result": "no unhealthy workloads in any namespace"}
+
+    def test_a_healthy_deployment_is_not_reported(
+            self, api, apps_api, batch_api):
+        result = self._scan(
+            api, apps_api, batch_api, pods=[],
+            deployments=[self._deployment("web", "shop", replicas=2,
+                                          existing=2)],
+        )
+
+        assert result == {"result": "no unhealthy workloads in any namespace"}
+
+    def test_a_listing_that_raises_loses_only_its_own_rows(
+            self, api, apps_api, batch_api):
+        """
+        An install whose ClusterRole predates the daemonsets grant must keep
+        every other finding, exactly as _failed_jobs does for batch.
+        """
+        apps_api.list_daemon_set_for_all_namespaces.side_effect = Exception("403")
+        result = self._scan(
+            api, apps_api, batch_api, pods=[],
+            deployments=[self._deployment("quota-blocked", "shop", replicas=2,
+                                          existing=None, reason="FailedCreate",
+                                          message="forbidden")],
+            daemonsets=[self._daemonset("node-agent", "shop")],
+        )
+
+        assert result["shop/quota-blocked"]["status"] == "NoPods"
+        assert "shop/node-agent" not in result
+
+    def test_the_never_raise_contract_covers_reading_the_items_too(
+            self, api, apps_api, batch_api):
+        """
+        The bug this caught, written up because it cost an hour, and the
+        second bug on top of it, written up because it nearly hid the first.
+
+        `collect()` sat one line below the `except`, so a listing that
+        returned something unreadable raised *through* scan_cluster instead of
+        being swallowed. conftest.py records what an exception of an
+        unexpected shape does inside a Streamlit AppTest: the page never
+        finishes rendering and the suite hangs rather than failing. Measured
+        2026-09-13 -- the full suite ran past 600s having passed every file
+        that does not render a page.
+
+        The first two versions of this test could not fail. One returned a
+        bare `object()`, whose missing `.items` raises on attribute access,
+        inside the try either way. The second set an unreadable return value
+        and then called `self._scan`, which **overwrites every apps_api
+        return value it knows about** -- so the payload never reached the
+        code. Hence the stubbing here is done by hand, and the last assertion
+        proves the lister was actually called.
+        """
+        class ItemsThatCannotBeIterated:
+            """`.items` exists and is not iterable, so the failure lands on
+            iteration rather than on attribute access."""
+            items = object()
+
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(items=[])
+        batch_api.list_job_for_all_namespaces.return_value = client.V1JobList(items=[])
+        apps_api.list_daemon_set_for_all_namespaces.return_value = (
+            client.V1DaemonSetList(items=[
+                self._daemonset("node-agent", "shop", desired=1)]))
+        apps_api.list_stateful_set_for_all_namespaces.return_value = (
+            client.V1StatefulSetList(items=[]))
+        apps_api.list_deployment_for_all_namespaces.return_value = (
+            ItemsThatCannotBeIterated())
+
+        result = k8s.scan_cluster()
+
+        # The DaemonSet is listed after the Deployment, so it only appears if
+        # the unreadable Deployment listing was swallowed rather than raised.
+        assert result["shop/node-agent"]["status"] == "NoPods"
+        assert apps_api.list_deployment_for_all_namespaces.called, (
+            "the unreadable listing was never requested, so this test did not "
+            "exercise the contract it is named for")
+
+
+class TestListDeploymentsSaysWhyItIsDegraded:
+    def test_a_replica_failure_reason_is_carried(self, apps_api):
+        """
+        Before defect 48 this tool reported `healthy: false` and nothing else,
+        and for a Deployment whose pods were rejected at admission there was
+        no pod to ask instead.
+        """
+        apps_api.list_namespaced_deployment.return_value = client.V1DeploymentList(
+            items=[client.V1Deployment(
+                metadata=client.V1ObjectMeta(name="web", namespace="shop"),
+                spec=client.V1DeploymentSpec(
+                    replicas=2,
+                    selector=client.V1LabelSelector(match_labels={"app": "web"}),
+                    template=client.V1PodTemplateSpec(
+                        spec=client.V1PodSpec(containers=[
+                            client.V1Container(name="a", image="busybox")])),
+                ),
+                status=client.V1DeploymentStatus(
+                    ready_replicas=0,
+                    conditions=[client.V1DeploymentCondition(
+                        type="ReplicaFailure", status="True",
+                        reason="FailedCreate",
+                        message='pods "web-1" is forbidden: exceeded quota',
+                    )],
+                ),
+            )]
+        )
+
+        entry = k8s.list_deployments(namespace="shop")["web"]
+        assert entry["healthy"] is False
+        assert entry["reason"] == (
+            'FailedCreate: pods "web-1" is forbidden: exceeded quota')
+
+    def test_a_healthy_deployment_carries_no_reason(self, apps_api):
+        apps_api.list_namespaced_deployment.return_value = client.V1DeploymentList(
+            items=[client.V1Deployment(
+                metadata=client.V1ObjectMeta(name="web", namespace="shop"),
+                spec=client.V1DeploymentSpec(
+                    replicas=1,
+                    selector=client.V1LabelSelector(match_labels={"app": "web"}),
+                    template=client.V1PodTemplateSpec(
+                        spec=client.V1PodSpec(containers=[
+                            client.V1Container(name="a", image="busybox")])),
+                ),
+                status=client.V1DeploymentStatus(ready_replicas=1),
+            )]
+        )
+
+        assert "reason" not in k8s.list_deployments(namespace="shop")["web"]
+
+    def test_a_stale_replica_failure_condition_is_not_read(self, apps_api):
+        """
+        `status: "False"` means the controller recovered. Reporting the reason
+        from a condition that is no longer true would put a fixed problem in
+        front of a reader as a current one.
+        """
+        apps_api.list_namespaced_deployment.return_value = client.V1DeploymentList(
+            items=[client.V1Deployment(
+                metadata=client.V1ObjectMeta(name="web", namespace="shop"),
+                spec=client.V1DeploymentSpec(
+                    replicas=1,
+                    selector=client.V1LabelSelector(match_labels={"app": "web"}),
+                    template=client.V1PodTemplateSpec(
+                        spec=client.V1PodSpec(containers=[
+                            client.V1Container(name="a", image="busybox")])),
+                ),
+                status=client.V1DeploymentStatus(
+                    ready_replicas=1,
+                    conditions=[client.V1DeploymentCondition(
+                        type="ReplicaFailure", status="False",
+                        reason="FailedCreate", message="was forbidden")],
+                ),
+            )]
+        )
+
+        assert "reason" not in k8s.list_deployments(namespace="shop")["web"]
