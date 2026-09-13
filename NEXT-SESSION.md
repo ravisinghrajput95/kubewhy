@@ -485,13 +485,16 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
    hold, and a final 29s hold by a third pod. The unheld window is the
    interesting one and nothing describes it.
 
-## Where this actually stands, 2026-09-10
+## Where this actually stands, 2026-09-13
 
 Asked for a rating and giving an honest one, because a number that flatters
-this project is the one thing it has spent 46 defects learning not to publish.
+this project is the one thing it has spent 48 defects learning not to publish.
 
 **7.5 of 10 overall, and the average hides a split** — which is the thing
-defect 44 was about, so it should not be quoted without both halves.
+defect 44 was about, so it should not be quoted without both halves. The
+number is unchanged from 2026-09-10 and both halves moved under it: the
+generalization figure is measured now rather than asserted, and one item on
+the list below turned out to have been finished before the list was written.
 
 **Engineering discipline: 9.** 12,792 lines of module code against 22,968
 lines of tests, and the tests are not decorative: mutation testing lives in
@@ -504,8 +507,11 @@ was wrong and what corrected it. This half is not the problem.
 
 **Product completeness: 6.** The tool diagnoses roughly half of what
 Kubernetes can break — **23 of 49** enumerated failure reasons on a live
-cluster, measured 2026-09-10. Its headline HA feature has never shipped in an
-image. **Median diagnosis 75.0s, p95 229.0s** on the arm that ships — qwen3
+cluster, measured 2026-09-10 — and that denominator is the kubelet's own
+reason list, so controller-level failures like `ReplicaFailure` are not in it
+at all. **Its headline HA feature did ship**: `0.2.1` carries the shared-state
+code, verified from the registry 2026-09-12, and what was never done is
+running HA *on* that image. **Median diagnosis 75.0s, p95 229.0s** on the arm that ships — qwen3
 with thinking on, n=853, recomputed 2026-09-12 — which is slow for something
 an on-call engineer reaches for. This line said ~54s/~133s; see the note
 below, because the 54 and the 133 come from different places and one of them
@@ -513,9 +519,22 @@ comes from nowhere. Proven against one model and mostly one cluster type.
 
 **What stands between this and a 9, in order:**
 
-1. **The generalization number.** This is the whole thing. A diagnostic tool
-   scoring 97% on faults its author wrote and an unknown number on faults it
-   has not seen is not yet a diagnostic tool — it is a well-tested demo. The
+1. **The generalization number — measured 2026-09-13, and it is the whole
+   thing still.** **89.7% [81.5–94.5] on the faults the prompts were written
+   against, 53.3% [30.1–75.2] on five they were not**, n=102, Fisher
+   p = 0.0020 (defect 47). The gap is real and it is 36.4 points. A tool that
+   is right nine times in ten on its author's faults and roughly one time in
+   two on everything else is no longer a well-tested demo with an unknown — it
+   is a measured instrument with a known weakness, which is a better place to
+   be and not a good one.
+
+   **The next move on it is more fault types, not more repeats.** Five is too
+   few to say what 53.3% means, and the interval says so: 45 points wide. The
+   cheapest honest improvement is to write five more never-seen cases from
+   `reason_coverage.py`'s gap list and run them, rather than to take the
+   existing five to n=10.
+
+   *Superseded reasoning, kept because the prediction was half right:* The
    2026-09-10 session closed the *structural* half of that gap and made the
    question answerable; it did not answer it. Item 1 of "Pick up" is the
    difference between "we believe" and "we measured".
