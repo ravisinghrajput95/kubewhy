@@ -161,7 +161,7 @@ class TestEnforcement:
 
     def test_host_tools_are_untouched(self):
         """The host collectors have no entity to scope."""
-        arguments, violation = targeting.enforce(
+        _arguments, violation = targeting.enforce(
             self.TARGET, "get_system_info", {}
         )
 

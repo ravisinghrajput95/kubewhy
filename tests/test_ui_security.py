@@ -51,7 +51,10 @@ def render(env=None, scan=None, answer=None):
     import streamlit as st
 
     st.cache_data.clear()
-    inference._GATEWAY = None if hasattr(inference, "_GATEWAY") else None
+    # Was `None if hasattr(inference, "_GATEWAY") else None`, whose branches
+    # are the same value: the guard read as "only clear it if it exists" and
+    # an assignment creates the attribute either way, so it never did that.
+    inference._GATEWAY = None
     with patch.dict(os.environ, env or {}, clear=False), \
          patch.object(k8s, "scan_cluster", return_value=scan or SCAN), \
          patch.object(k8s, "list_nodes", return_value={}), \

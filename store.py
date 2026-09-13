@@ -33,11 +33,13 @@ the next process, and persisting one would have the restart read every
 cooldown as expired or eternal depending on uptime.
 """
 
+import contextlib
 import json
 import os
 import sqlite3
 import threading
 import time
+import uuid
 
 # A job in one of these states has a thread behind it, or had one. After a
 # restart it has neither, and nothing will move it along.
@@ -47,7 +49,6 @@ _INTERRUPTED = (
     "the process restarted while this investigation was running; it was not "
     "resumed. Ask again."
 )
-import uuid
 
 STATE_DB = os.getenv("TRIAGE_STATE_DB", "")
 
@@ -96,10 +97,8 @@ class MemoryStore:
             # Any emission with this timestamp will do -- they are counted,
             # never identified, so removing "some row at this instant" and
             # removing "our row" are the same operation.
-            try:
+            with contextlib.suppress(ValueError):
                 self._emissions.remove(at)
-            except ValueError:
-                pass
             # Only if the slot is still ours. With a zero cooldown the same
             # key can be spent again before we get here, and restoring the
             # older value would then suppress a report that was legitimately

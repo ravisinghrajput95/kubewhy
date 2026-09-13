@@ -235,9 +235,7 @@ def _asserted(lowered, phrase):
     if start < 0:
         return False
     window = lowered[max(0, start - _NEGATION_WINDOW):start]
-    if _NEGATORS.search(window) or _PROSPECTIVE.search(window):
-        return False
-    return True
+    return not (_NEGATORS.search(window) or _PROSPECTIVE.search(window))
 
 
 # An identifier the answer set apart from the surrounding prose: quoted,

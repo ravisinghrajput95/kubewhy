@@ -186,7 +186,7 @@ class TestContextIsPerSession:
         import ui
 
         for name in ("_scan", "_namespaces", "_workload_pods", "_describe", "_events", "_logs", "_nodes"):
-            first = list(inspect.signature(getattr(ui, name)).parameters)[0]
+            first = next(iter(inspect.signature(getattr(ui, name)).parameters))
             assert first == "context", f"{name} is cached without the context in its key"
 
 

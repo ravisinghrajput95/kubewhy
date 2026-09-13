@@ -706,7 +706,7 @@ class TestWhatCountsAsAClaim:
         verdict = grounding.check(answer, [self.OOM])
         assert verdict["unverified"] == ["512"], "the fixture must flag 512"
 
-        text, edits = grounding.verify(answer, verdict, [self.OOM])
+        text, _edits = grounding.verify(answer, verdict, [self.OOM])
 
         assert text == "The memory limit is 64Mi (observed).\nRaise it to 512Mi."
 

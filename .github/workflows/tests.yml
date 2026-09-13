@@ -159,20 +159,21 @@ jobs:
           path: replay.json
 
   types:
-    # mypy gates; ruff does not, and the asymmetry is deliberate.
+    # Both gate as of 2026-09-13. The asymmetry this comment used to describe
+    # is gone: ruff reached zero and its `continue-on-error` came off.
     #
-    # mypy is at zero across 85 files as of 2026-09-10, so it can fail the
+    # mypy is at zero across 87 files, so it can fail the
     # build and every failure will be new. Getting there was mostly renaming
     # loop variables that shadowed a parameter or rebound a name to a second
     # type -- none of them live defects, but one of the shadows was in
     # scan_cluster and sat two statements from a parameter that a later commit
     # started reading. That is the class this job is here to catch.
     #
-    # ruff still reports 129 findings, all triaged when pyproject.toml landed
-    # and none of them live defects. Gating on it today would mean either a
-    # permanently red build or a 129-change commit nobody can review, so it
-    # runs for the record and does not fail. Turn `continue-on-error` off when
-    # the count reaches zero.
+    # ruff reached zero on 2026-09-13 and now gates. It ran
+    # `continue-on-error` from the day pyproject.toml landed until then,
+    # against 129 findings that were triaged and none of which were live
+    # defects -- gating earlier would have meant a permanently red build or an
+    # unreviewable commit.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -194,7 +195,6 @@ jobs:
         run: mypy .
 
       - name: ruff
-        continue-on-error: true
         run: ruff check .
 
   docker:

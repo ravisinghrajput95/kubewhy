@@ -456,7 +456,7 @@ class TestSummaryCoverage:
                 if isinstance(m, dict) and m.get("role") == "user"]
 
     def test_a_complete_summary_is_left_alone(self):
-        result, chat = self._run(
+        result, _chat = self._run(
             "memory-hog is OOMKilled, crasher is in Error, pricing is misconfigured.")
 
         assert result["coverage"] == 0

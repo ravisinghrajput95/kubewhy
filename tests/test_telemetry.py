@@ -191,8 +191,8 @@ class TestExposition:
     def test_a_label_value_with_a_quote_cannot_break_the_format(self):
         telemetry.INVESTIGATIONS.inc(outcome='we"ird\nvalue')
 
-        line = [l for l in telemetry.render().splitlines()
-                if l.startswith("kubewhy_investigations_total{")][0]
+        line = next(rendered for rendered in telemetry.render().splitlines()
+                    if rendered.startswith("kubewhy_investigations_total{"))
 
         # The quote is escaped rather than closing the label early, and the
         # newline never reaches the output -- a raw one would split this into

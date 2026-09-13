@@ -102,7 +102,8 @@ class TestTheLatencyFiguresMatchTheCorpus:
 
     def test_the_p95_and_p99(self, runs, runbook):
         values = self.durations(runs)
-        quantile = lambda q: values[min(int(len(values) * q), len(values) - 1)]
+        def quantile(q):
+            return values[min(int(len(values) * q), len(values) - 1)]
 
         p95 = float(re.search(r"p95\s+\*\*([\d.]+)s\*\*", runbook).group(1))
         p99 = float(re.search(r"p99\s+\*\*([\d.]+)s\*\*", runbook).group(1))

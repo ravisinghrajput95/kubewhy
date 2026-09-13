@@ -147,7 +147,7 @@ class TestAPlanAndAPostscriptAreNotTheSameThing:
     def test_a_wrong_answer_is_not_excused_by_naming_no_tools(self):
         """Missing substance fails on its own; the plan check is not load-bearing."""
         answer = "The pod is unhealthy."
-        ok, failures, notes = self._grade(answer, ["get_pod_logs"])
+        ok, failures, _notes = self._grade(answer, ["get_pod_logs"])
 
         assert ok is False
         assert any("missing" in f for f in failures)
@@ -451,7 +451,7 @@ class TestControllerGraderAcceptsEveryVerdict:
         for verdict in sorted(grounding.VERDICTS):
             finding = {"confidence": verdict, "diagnosis": "crasher cannot "
                        "reach the database", "tool_calls": ["get_pod_logs"]}
-            ok, failures, _ = grade(case, finding,
+            _ok, failures, _ = grade(case, finding,
                                     "crasher cannot reach the database")
             assert not any("no usable confidence" in f for f in failures), \
                 f"{verdict} was rejected"
@@ -597,7 +597,7 @@ class TestExpectationsThatTheQuestionAlreadySatisfies:
                 "confidence": "grounded",
                 "unverified": [],
             }
-            passed, reasons, _ = grade_answer(case, result)
+            passed, _reasons, _ = grade_answer(case, result)
             assert not passed, f"{case['name']} still passes on a missing pod"
 
     def test_a_correct_answer_still_passes(self):

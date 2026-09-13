@@ -183,7 +183,7 @@ class TestTheLabelMatchesTheChange:
         found = mutate.sites(source)
 
         mismatched = []
-        for index, site in enumerate(found):
+        for index, _site in enumerate(found):
             mutant = mutate.mutate(source, index)
             if mutant is None:
                 continue

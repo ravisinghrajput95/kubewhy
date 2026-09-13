@@ -163,12 +163,10 @@ class Apply(ast.NodeTransformer):
         return node
 
     def visit_Constant(self, node):
-        if isinstance(node.value, bool):
-            if self._take():
-                return ast.Constant(value=not node.value)
-        elif isinstance(node.value, int):
-            if self._take():
-                return ast.Constant(value=node.value + 1)
+        if isinstance(node.value, bool) and self._take():
+            return ast.Constant(value=not node.value)
+        if isinstance(node.value, int) and self._take():
+            return ast.Constant(value=node.value + 1)
         return node
 
 

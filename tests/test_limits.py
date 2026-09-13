@@ -159,8 +159,9 @@ class TestTheInvestigationCeiling:
 
     def test_it_refuses_past_the_ceiling(self, monkeypatch):
         monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "2")
-        limits.check("sre@example.com"); limits.record("sre@example.com")
-        limits.check("sre@example.com"); limits.record("sre@example.com")
+        for _ in range(2):  # two investigations, which is the ceiling
+            limits.check("sre@example.com")
+            limits.record("sre@example.com")
 
         with pytest.raises(limits.Refused) as refused:
             limits.check("sre@example.com")
@@ -175,14 +176,16 @@ class TestTheInvestigationCeiling:
         diagnose the incident it caused.
         """
         monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "1")
-        limits.check("robot"); limits.record("robot")
+        limits.check("robot")
+        limits.record("robot")
 
         limits.check("sre@example.com")          # raises if it does not
 
     def test_zero_disables_it(self, monkeypatch):
         monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "0")
         for _ in range(200):
-            limits.check("sre"); limits.record("sre")
+            limits.check("sre")
+            limits.record("sre")
 
     def test_a_typo_raises_rather_than_removing_the_ceiling(self, monkeypatch):
         monkeypatch.setenv("TRIAGE_MAX_INVESTIGATIONS_PER_HOUR", "sixty")

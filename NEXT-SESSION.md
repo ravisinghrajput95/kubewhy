@@ -35,11 +35,8 @@ qwen3 was unloaded from Ollama, and Docker Desktop went down on its own
 afterwards — see the Environment note about this machine. Zero clusters, zero
 containers.**
 
-**mypy is at zero across 87 files and CI gates on it** (85 before the two
-scripts this session added) (`types` job in
-tests.yml). ruff is at **131** (measured 2026-09-12; this line said 129),
-all triaged, and runs `continue-on-error` in the
-same job. Turn that off when it reaches zero.
+**mypy is at zero across 87 files and ruff is at zero, and CI gates on both**
+(`types` job in tests.yml, `continue-on-error` removed 2026-09-13).
 
 **Mutation coverage.** Three modules are measured properly, on one base each,
 and none of these is a composed figure:
@@ -669,12 +666,31 @@ more in this project's character.
    actually moves the number. Check whether the mutated value is ever *read* —
    a dead store and a redundant argument both look killable and are not.
 
-4. **Turn ruff's gate on.** **131** findings measured 2026-09-12, all
-   triaged, none live defects. 80 are auto-fixable. The
-   `types` job in tests.yml already runs it with `continue-on-error: true`;
-   removing that line is the whole change once the count is zero. 78 are
-   auto-fixable and most of the rest are import ordering, so this is one
-   mechanical commit and one careful read of what `--unsafe-fixes` wants to do.
+4. **Done 2026-09-13: ruff is at zero and the gate is on.** 131 to 0 in three
+   commits, and `--unsafe-fixes` was never needed.
+
+   **Four of the findings were or could have been defects**, which is the
+   answer to "none of them live defects": four `pytest.raises(Exception)` in
+   `test_inference.py`, where the real assertion is a timing or a log line and
+   a bare `Exception` would have kept them passing if `chat()` began raising
+   `TypeError` — defect 42's class exactly; six `zip()` calls with no
+   strictness, five of them equal-length invariants where a mismatch is a
+   defect, now `strict=True` and green, which says the invariant holds rather
+   than is hoped for; four `raise` without `from` inside `except`, losing the
+   cause on three HTTP translations and one config error; and one
+   `None if hasattr(...) else None` in `test_ui_security.py`, whose branches
+   are the same value, so the guard it read as never existed.
+
+   **Ten were ignored with reasons rather than fixed**, all `RUF001`
+   ambiguous-unicode in two files where the character *is* the data:
+   `evidence_read.py` normalises Unicode dashes and quotes to ASCII, so
+   `_DASHES` and `_QUOTES` must hold the real code points, and
+   `test_documented_measurements.py` matches RUNBOOK's own `2.0× the p99`.
+
+   **One thing to know for next time:** `str.replace(old, new, 1)` hits the
+   *first* match in the file, not the line the linter flagged. Two renames
+   landed on the wrong occurrence and produced `F821 undefined-name`, caught
+   by re-running ruff. Edit by line number when acting on a linter's location.
 
 5. Generalized diagnostic accuracy stays NOT TESTED. The n=10
    `insufficient_no_such_workload` rerun; build the counter first.

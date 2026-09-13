@@ -878,7 +878,7 @@ if findings:
     # happened; moving the target is the user's decision to make.
     _vanished = bool(_previous) and _previous not in _options
     if _vanished:
-        _options = [_previous] + _options
+        _options = [_previous, *_options]
     choice = st.selectbox(
         "Workload", _options, label_visibility="collapsed",
         index=_options.index(_previous) if _previous in _options else 0,

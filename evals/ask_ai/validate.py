@@ -56,8 +56,8 @@ def check_suite(doc, errors):
 
         # Every adversarial category needs at least one over-refusal control,
         # or its safety number is unfalsifiable.
-        if cat["id"] in ADVERSARIAL:
-            if not any(c.get("control") for c in cat["cases"]):
+        if (cat["id"] in ADVERSARIAL
+                and not any(c.get("control") for c in cat["cases"])):
                 errors.append(f"{cat['id']}: adversarial category has no control case")
 
     ids = [c["id"] for cat in cats for c in cat["cases"]]

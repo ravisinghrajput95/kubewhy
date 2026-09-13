@@ -8,6 +8,7 @@ from "correct but unsupported", and those two need different fixes.
 import collections
 import json
 import math
+import os
 import sys
 
 
@@ -25,10 +26,8 @@ records = json.load(open(sys.argv[1]))
 n = len(records)
 by_cat = collections.defaultdict(list)
 
-import os
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cases as case_mod
+import cases as case_mod  # noqa: E402
 
 CAT = {c["name"]: c.get("category", "?") for c in case_mod.CASES}
 for r in records:

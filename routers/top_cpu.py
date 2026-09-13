@@ -1,3 +1,4 @@
+import contextlib
 import time
 
 import psutil
@@ -14,10 +15,8 @@ def get_top_cpu_processes(limit: int = 5):
 
     # Initialize CPU counters
     for proc in psutil.process_iter():
-        try:
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
             proc.cpu_percent(None)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
 
     time.sleep(1)
 
