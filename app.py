@@ -160,6 +160,9 @@ def budgeted(request: Request):
         log.warning("rate_limited", extra={"principal": name,
                                            "reason": refused.reason,
                                            "path": request.url.path})
+        # `from refused` keeps the cause on the traceback. The client is told
+        # only the reason string, but whoever reads the server log at 3am wants
+        # to see which Refused produced the 429.
         raise HTTPException(
             status_code=429,
             detail=refused.reason,
@@ -167,7 +170,7 @@ def budgeted(request: Request):
             # caller told to wait an hour when it frees up in ninety seconds
             # will either give up or hammer, and both are worse than the truth.
             headers={"Retry-After": str(refused.retry_after)},
-        )
+        ) from refused
     limits.record(name)
 
 
@@ -362,7 +365,7 @@ def readyz():
             status_code=503,
             detail={"ready": False, "error": "inference_misconfigured",
                     "reason": str(exc)},
-        )
+        ) from exc
     if not report["ready"]:
         raise HTTPException(status_code=503, detail=report)
     return {"status": "ready", **report}
@@ -390,7 +393,7 @@ def inference_config():
         raise HTTPException(
             status_code=503,
             detail={"error": "inference_misconfigured", "reason": str(exc)},
-        )
+        ) from exc
 
 
 @app.get("/metrics", dependencies=[Depends(require_caller)], tags=["health"])

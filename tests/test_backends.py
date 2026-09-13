@@ -29,7 +29,7 @@ def ollama_reply(content="", calls=()):
     # MagicMock treats `name` as its own constructor kwarg, so it cannot be set
     # positionally -- the attribute has to be assigned afterwards or every tool
     # comes back named "<MagicMock id=...>".
-    for mock_call, (name, _) in zip(message.tool_calls, calls):
+    for mock_call, (name, _) in zip(message.tool_calls, calls, strict=True):
         mock_call.function.name = name
     response = MagicMock()
     response.message = message

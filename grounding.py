@@ -514,8 +514,16 @@ def check(answer, tool_outputs):
         scope_numbers = _numbers(scope)
         scope_lower = scope.lower()
 
-        def cite(value):
-            """Which result, and which field in it, carries this value."""
+        def cite(value, entries=entries):
+            """
+            Which result, and which field in it, carries this value.
+
+            `entries` is bound at definition rather than closed over. It is
+            called only inside this iteration, so the closure was correct --
+            but a closure that is correct because of where it happens to be
+            called is one refactor away from being wrong, and binding says
+            which `entries` is meant.
+            """
             for entry in entries:
                 source = entry["source"] or {}
                 try:

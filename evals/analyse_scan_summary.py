@@ -25,6 +25,7 @@ Separate from the probe on purpose -- the probe costs model time, and the
 questions worth asking of its output changed the first time it was read.
 """
 
+import itertools
 import json
 import sys
 from collections import Counter, defaultdict
@@ -145,7 +146,7 @@ def main(paths):
         adjacent = 0
         for record in multi:
             positions = sorted(e["position"] for e in record["dropped"])
-            if any(b - a == 1 for a, b in zip(positions, positions[1:])):
+            if any(b - a == 1 for a, b in itertools.pairwise(positions)):
                 adjacent += 1
         print(f"\nruns dropping more than one entry: {len(multi)}   "
               f"with two of the drops adjacent: {adjacent}")

@@ -26,7 +26,8 @@ class TestTheWholeRegistryDerives:
         # The model dispatches by the registry key. If a schema ever carried
         # __name__ instead and the two diverged, the model would call a name
         # the dispatcher does not know.
-        for name, schema in zip(agent.TOOLS, tool_schema.schemas_for(agent.TOOLS)):
+        for name, schema in zip(agent.TOOLS, tool_schema.schemas_for(agent.TOOLS),
+                                strict=True):
             assert schema["function"]["name"] == name
 
     def test_every_tool_carries_a_description(self):

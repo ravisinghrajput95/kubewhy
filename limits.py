@@ -63,10 +63,14 @@ def _int(name, default):
     try:
         value = int(raw)
     except ValueError:
+        # `from None`, not `from exc`: this message replaces the original
+        # entirely. "invalid literal for int() with base 10" adds nothing over
+        # naming the variable and its value, and chaining it puts two
+        # exceptions in front of an operator reading a config error.
         raise ValueError(
             f"{name}={raw!r} is not a number. Refusing to guess: a typo in a "
             "ceiling would silently remove it."
-        )
+        ) from None
     if value < 0:
         raise ValueError(f"{name}={value} is negative; use 0 for unlimited.")
     return value

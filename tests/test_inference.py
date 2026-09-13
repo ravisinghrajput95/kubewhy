@@ -1077,7 +1077,13 @@ class TestTheDeadlineIsSpentOnceAcrossProviders:
 
         gate = self._hanging_pair()
         began = _t.perf_counter()
-        with pytest.raises(Exception):
+        # ConnectionError, not Exception. What this test measures is `spent`,
+        # and a bare Exception would let it keep passing if chat() started
+        # raising TypeError because its signature moved -- the timing
+        # assertion below would then be measuring an argument error. Same
+        # class as defect 42: an assertion that cannot fail on a value which
+        # is not a value of that kind at all.
+        with pytest.raises(ConnectionError):
             gate.chat("m", [{"role": "user", "content": "q"}], [], False,
                       timeout=budget)
         spent = _t.perf_counter() - began
@@ -1103,7 +1109,7 @@ class TestTheDeadlineIsSpentOnceAcrossProviders:
                        target(provider="hang", model="fb", timeout=5),
                        fallback_enabled=True)
         began = _t.perf_counter()
-        with pytest.raises(Exception):
+        with pytest.raises(ConnectionError):
             gate.chat("m", [{"role": "user", "content": "q"}], [], False,
                       timeout=1.2)
         spent = _t.perf_counter() - began
@@ -1125,7 +1131,7 @@ class TestTheDeadlineIsSpentOnceAcrossProviders:
         gate = self._hanging_pair()
 
         with caplog.at_level("WARNING"):
-            with pytest.raises(Exception):
+            with pytest.raises(ConnectionError):
                 gate.chat("m", [{"role": "user", "content": "q"}], [], False,
                           timeout=0.4)
 
@@ -1156,7 +1162,7 @@ class TestTheDeadlineIsSpentOnceAcrossProviders:
         gate = self._hanging_pair()
 
         with caplog.at_level("WARNING"):
-            with pytest.raises(Exception):
+            with pytest.raises(ConnectionError):
                 gate.chat("m", [{"role": "user", "content": "q"}], [], False,
                           timeout=0.4)
 

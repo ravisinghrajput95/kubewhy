@@ -62,7 +62,8 @@ class TestEachMutationIsExactlyOne:
         """
         original = ast.unparse(ast.parse(SOURCE)).splitlines()
         mutated = mutate.mutate(SOURCE, 0).splitlines()
-        differing = [i for i, (a, b) in enumerate(zip(original, mutated)) if a != b]
+        differing = [i for i, (a, b) in enumerate(zip(original, mutated, strict=True))
+                     if a != b]
 
         assert len(differing) == 1
 
@@ -186,7 +187,8 @@ class TestTheLabelMatchesTheChange:
             mutant = mutate.mutate(source, index)
             if mutant is None:
                 continue
-            changed = [n for n, (a, b) in enumerate(zip(baseline, mutant.splitlines()))
+            changed = [n for n, (a, b)
+                       in enumerate(zip(baseline, mutant.splitlines(), strict=True))
                        if a != b]
             if len(changed) != 1:
                 mismatched.append(f"{module} site {index} changed {len(changed)} lines")
@@ -218,7 +220,8 @@ class TestTheLabelMatchesTheChange:
             if mutant is None:
                 continue
             lines = mutant.splitlines()
-            changed = [n for n, (a, b) in enumerate(zip(baseline, lines)) if a != b]
+            changed = [n for n, (a, b) in enumerate(zip(baseline, lines, strict=True))
+                       if a != b]
             if changed and mark not in lines[changed[0]]:
                 wrong.append(f"{module} site {index}: says {site['what']!r}, "
                              f"line reads {lines[changed[0]].strip()!r}")
