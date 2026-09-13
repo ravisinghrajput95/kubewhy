@@ -759,12 +759,56 @@ class TestScanCluster:
 
         assert "fault" not in k8s.scan_cluster(only_unhealthy=False)["demo/healthy"]
 
-    def test_ignores_terminating_pods(self, api):
+    def test_ignores_a_pod_that_is_still_shutting_down(self, api):
+        """
+        The original reasoning, kept: on a busy cluster pods mid-shutdown are
+        most of the non-Running ones and none of them is a fault.
+
+        A real datetime, not the ISO string this test used to pass. The client
+        deserialises the field, so a string was a shape the code never meets --
+        and it mattered: the string made the whole assertion rest on the
+        timestamp never being read at all.
+        """
         pod = crashing("web-abc123-xyz", "web-abc123", "prod")
-        pod.metadata.deletion_timestamp = "2026-01-01T00:00:00Z"
+        pod.metadata.deletion_timestamp = dt.datetime.now(dt.UTC)
+        pod.metadata.deletion_grace_period_seconds = 30
         api.list_pod_for_all_namespaces.return_value = client.V1PodList(items=[pod])
 
         assert "result" in k8s.scan_cluster()
+
+    def test_reports_a_pod_stuck_past_its_grace_period(self, api):
+        """
+        Defect 49, and the behaviour change. Measured on kind 2026-09-13: a pod
+        held by a finalizer nothing removes sat with its grace period spent, and
+        the scan omitted it, `scan_cluster(workload=...)` said it did not exist,
+        and list_pods called it `Error` with nothing saying it was being
+        deleted. A pod that will never leave is the fault, not the noise.
+        """
+        pod = crashing("web-abc123-xyz", "web-abc123", "prod")
+        pod.metadata.deletion_timestamp = (
+            dt.datetime.now(dt.UTC) - dt.timedelta(minutes=5))
+        pod.metadata.deletion_grace_period_seconds = 30
+        pod.metadata.finalizers = ["example.com/never-removed"]
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(items=[pod])
+
+        entry = k8s.scan_cluster()["prod/web"]
+        assert entry["terminating"]["past_grace"] is True
+        # The finalizer is the answer, not a detail: "stuck terminating" is the
+        # symptom and this names the cause.
+        assert entry["terminating"]["finalizers"] == ["example.com/never-removed"]
+
+    def test_an_absent_grace_period_does_not_hide_a_stuck_pod(self, api):
+        """
+        `deletionGracePeriodSeconds` is counted down by the API server and is
+        absent once spent. Treating absent as infinite would make exactly the
+        pod this defect is about invisible forever.
+        """
+        pod = crashing("web-abc123-xyz", "web-abc123", "prod")
+        pod.metadata.deletion_timestamp = dt.datetime.now(dt.UTC)
+        pod.metadata.deletion_grace_period_seconds = None
+        api.list_pod_for_all_namespaces.return_value = client.V1PodList(items=[pod])
+
+        assert "prod/web" in k8s.scan_cluster()
 
     def test_reports_a_clean_cluster(self, api, healthy_pod):
         api.list_pod_for_all_namespaces.return_value = client.V1PodList(

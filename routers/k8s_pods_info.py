@@ -388,6 +388,61 @@ FAULT_CLASS = {
 }
 
 
+def _terminating(pod):
+    """
+    Whether this pod is being deleted, and whether it is stuck.
+
+    Defect 49. `scan_cluster` used to skip every pod carrying a
+    `deletionTimestamp`, on the reasoning -- correct as far as it goes -- that
+    on a busy cluster those are most of the non-Running pods and a pod shutting
+    down is not a fault. What that misses is the pod that never finishes.
+
+    Measured on kind 2026-09-13: a pod with a finalizer nothing removes, whose
+    preStop hook also exited non-zero, sat with `deletionTimestamp` set and
+    `deletionGracePeriodSeconds` down to 0. `scan_cluster` omitted it,
+    `scan_cluster(workload="drain-hook")` answered "no workload named
+    drain-hook exists in this cluster", and `list_pods` reported
+    `status: Error` with nothing saying it was being deleted at all. A pod that
+    will never leave is exactly the fault an operator brings to this tool.
+
+    The grace period is what separates the two. Inside it the pod is shutting
+    down and the old reasoning holds. Past it the kubelet is finished and the
+    object is still there, which means something is holding it -- a finalizer
+    waiting on a controller that does not exist, most often. `finalizers` is
+    returned because it is the answer, not a detail: "stuck terminating" is the
+    symptom and the name of the finalizer is the cause.
+    """
+    when = pod.metadata.deletion_timestamp
+    if when is None:
+        return None
+
+    # The client deserialises this to a datetime. A string is accepted anyway
+    # because this runs inside scan_cluster, and a type surprise there would
+    # take down the whole scan rather than one row -- the same reasoning as
+    # _failed_jobs swallowing a 403.
+    if isinstance(when, str):
+        try:
+            when = dt.datetime.fromisoformat(when.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.UTC)
+    elapsed = max(int((dt.datetime.now(dt.UTC) - when).total_seconds()), 0)
+    # The API server counts this down as the grace period runs out, so 0 means
+    # spent. None means the field is absent, which is treated as spent rather
+    # than as infinite: an absent grace period must not make a stuck pod
+    # invisible forever.
+    grace = pod.metadata.deletion_grace_period_seconds
+    grace = 0 if grace is None else int(grace)
+
+    return {
+        "since": _age(pod.metadata.deletion_timestamp),
+        "grace_seconds": grace,
+        "past_grace": elapsed >= grace,
+        "finalizers": list(pod.metadata.finalizers or []) or None,
+    }
+
+
 def _pod_status(pod):
     """
     The status a human would recognise, matching what kubectl displays.
@@ -595,6 +650,10 @@ def list_pods(
             "ready": f"{ready}/{len(statuses)}",
             "restarts": restarts,
             "node": pod.spec.node_name,
+            # A pod being deleted reports whatever its container last did --
+            # "Error", "Completed", even "Running" -- and nothing in that says
+            # it is on its way out. Defect 49.
+            **({"terminating": leaving} if (leaving := _terminating(pod)) else {}),
         }))
 
     if not rows:
@@ -740,9 +799,12 @@ def scan_cluster(
     for pod in pods:
         if wanted and pod.metadata.namespace not in wanted:
             continue
-        # A pod that is already terminating is not a fault to report; on a
-        # busy cluster these are the majority of the non-Running pods.
-        if pod.metadata.deletion_timestamp:
+        # A pod shutting down is not a fault to report; on a busy cluster
+        # those are most of the non-Running pods. A pod that never finishes
+        # shutting down is the opposite -- see _terminating and defect 49 --
+        # so the skip lasts only as long as the grace period does.
+        leaving = _terminating(pod)
+        if leaving and not leaving["past_grace"]:
             continue
 
         namespace = pod.metadata.namespace
@@ -791,6 +853,14 @@ def scan_cluster(
             # class is just the status again, and the model pays for the
             # repetition in context.
             entry["fault"] = fault
+        if leaving:
+            # Only a pod past its grace period reaches here, so this row is a
+            # pod that will not leave. Without it the row shows whatever the
+            # container last did -- "Error" for the fixture this was measured
+            # on -- and the answer becomes "the container failed" for a pod
+            # whose container exited an hour ago and whose problem is a
+            # finalizer.
+            entry["terminating"] = leaving
 
     # -- failed Jobs, which the pod pass above cannot always see -------------
     #
@@ -1124,6 +1194,15 @@ def describe_pod(name: str, namespace: str = "default"):
     pull_secrets = [s.name for s in (pod.spec.image_pull_secrets or []) if s.name]
     if pull_secrets:
         projected["image_pull_secrets"] = pull_secrets
+
+    # Whether this pod is on its way out, and what is holding it. Unlike the
+    # scan, this reports a pod still inside its grace period too: the scan is
+    # deciding what to show unprompted, and this was asked about by name.
+    # Somebody calling describe_pod on a pod that is mid-deletion needs to know
+    # that before reading anything else in here -- defect 49.
+    leaving = _terminating(pod)
+    if leaving:
+        projected["terminating"] = leaving
 
     return projected
 

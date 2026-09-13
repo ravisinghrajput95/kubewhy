@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1759 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1761 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -2884,6 +2884,74 @@ actually called. **That is the second time in this session an adversarial test
 passed while its payload never arrived** — the first is recorded in defect 47's
 `malformed_image_reference` analysis, and the pattern is the same one
 `injection_in_annotations_is_data` established.
+
+
+### 49. A pod that will never finish terminating was reported as not existing
+
+**Problem.** `scan_cluster` skipped every pod carrying a `deletionTimestamp`,
+with a reason that is correct as far as it goes: *"on a busy cluster these are
+the majority of the non-Running pods"*, and a pod shutting down is not a fault.
+What it misses is the pod that never finishes shutting down — among the most
+common things an operator actually brings to a tool like this, and something
+the corpus had no fixture for.
+
+**Measured on kind 2026-09-13** with `demo/uncovered-faults-2.yaml`: a pod
+carrying a finalizer nothing will ever remove, whose `preStop` hook also exited
+non-zero. After deletion it sat with `deletionTimestamp` set,
+`deletionGracePeriodSeconds` counted down to 0, phase `Failed`, and
+`FailedPreStopHook` in its events. What the tools said:
+
+| tool | before |
+|---|---|
+| `scan_cluster(namespaces=...)` | the pod is absent |
+| `scan_cluster(workload="drain-hook")` | **"no workload named drain-hook exists in this cluster"** |
+| `list_pods` | `status: "Error"` — nothing saying it is being deleted |
+| `describe_pod` | no mention of the deletion or the finalizer |
+
+The second row is the worst thing in this defect log so far: not an empty
+answer, an actively false one, about a pod that exists and will exist
+indefinitely.
+
+**The fix is a threshold, not a removal.** `_terminating(pod)` reports the
+deletion, and **the grace period is what separates the two cases**: inside it
+the pod is shutting down and the original reasoning holds, so the scan still
+skips it; past it the kubelet has finished and the object is still there, which
+means something is holding it. `scan_cluster`, `list_pods` and `describe_pod`
+now carry a `terminating` block with how long, the grace period, whether it is
+spent, and **the finalizers — which are the answer rather than a detail**:
+"stuck terminating" is the symptom and the finalizer's name is the cause.
+`describe_pod` reports it inside the grace period too, because the scan is
+deciding what to show unprompted and `describe_pod` was asked by name.
+
+Verified live, on the same pod:
+
+```
+uncovered2/drain-hook  status Error  fault crash
+  terminating: since 2m, grace_seconds 0, past_grace true,
+               finalizers ["example.com/never-removed"]
+```
+
+**An absent `deletionGracePeriodSeconds` is treated as spent, not infinite.**
+The API server counts the field down and drops it once used, so reading absence
+as "no deadline" would make exactly the pod this defect is about invisible
+forever. There is a test for that, and breaking it to `10**9` fails it.
+
+**The fixture this was found with was wrong first, and the correction is the
+interesting half.** It originally held the pod in Terminating with
+`terminationGracePeriodSeconds: 3600`. That pod is not stuck — it is inside a
+legal, if strange, grace period, and any rule that flags it also flags every
+workload that shuts down slowly on purpose. A finalizer is what an operator
+actually hits. **Had the fixture not been corrected, the threshold this fix
+turns on could not have been tested by it.**
+
+**And the test that guarded the old behaviour could not have caught the
+change.** `test_ignores_terminating_pods` set `deletion_timestamp` to the ISO
+*string* `"2026-01-01T00:00:00Z"`, a shape the client never produces — it
+deserialises the field to a datetime. The assertion therefore rested on the
+timestamp never being read at all, and reading it raised `AttributeError:
+'str' object has no attribute 'tzinfo'`. It is now three tests over real
+datetimes: one for a pod inside its grace period, one past it, one with the
+field absent.
 
 
 ## Where a run's 74 seconds go

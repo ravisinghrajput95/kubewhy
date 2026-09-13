@@ -1,0 +1,209 @@
+# A second round of faults the corpus has never produced.
+#
+# Written 2026-09-13 against `evals/reason_coverage.py`'s gap list, which named
+# 23 of Kubernetes' 49 enumerated reasons as absent. Defect 47 measured the
+# never-seen half at 8/15, 53.3% [30.1-75.2] -- a 45-point interval, which says
+# the honest next move is more fault *types* rather than more repeats of five.
+#
+# Candidates only. Which of these a live cluster actually emits is measured
+# with `reason_coverage.py --cluster` before any case is written against them,
+# because the grep and the cluster do not agree: `ErrImagePull` is named all
+# over the corpus and a kind cluster settles to `ImagePullBackOff` within
+# seconds and never reports it.
+#
+# Every one is chosen for a specific *near-miss* -- a fault that reads like one
+# already in the corpus and is not it. That resemblance is the point: a tool
+# that says "image problem" for all four image faults has learned the word and
+# not the cause.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: uncovered2
+---
+# ErrImageNeverPull. imagePullPolicy: Never with an image that is not on the
+# node. The near-miss is every other image fault in the corpus: nothing was
+# pulled, no registry was contacted, and no credential is involved -- the
+# kubelet refused to pull because it was told not to. "Check your pull secret"
+# is the wrong answer and the tempting one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-only
+  namespace: uncovered2
+  labels:
+    app: local-only
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: local-only
+  template:
+    metadata:
+      labels:
+        app: local-only
+    spec:
+      containers:
+        - name: app
+          image: an-image-that-was-never-loaded:v3
+          imagePullPolicy: Never
+---
+# ProvisioningFailed. A PVC naming a StorageClass whose provisioner does not
+# exist on this cluster. The near-miss is the corpus's existing unbound-PVC
+# case, where the StorageClass itself is missing: here the class exists, is
+# named correctly, and the thing that cannot answer is the provisioner behind
+# it. "Create the StorageClass" is the wrong fix.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ghost-provisioner
+provisioner: example.com/no-such-csi-driver
+volumeBindingMode: Immediate
+reclaimPolicy: Delete
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ledger-data
+  namespace: uncovered2
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ghost-provisioner
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ledger-writer
+  namespace: uncovered2
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: ledger-data
+---
+# A pod stuck in Terminating, which is among the most common things an
+# operator actually complains about and the corpus has nothing for. Two faults
+# in one pod, deliberately, because they co-occur in the real complaint:
+#
+#   * the preStop hook exits non-zero, so `FailedPreStopHook` is in the events
+#   * a finalizer nothing will ever remove, so the pod never goes away
+#
+# **The finalizer is the mechanism, and the first version of this fixture got it
+# wrong.** It used `terminationGracePeriodSeconds: 3600` to hold the pod in
+# Terminating long enough to diagnose. That pod is not *stuck* -- it is inside
+# a legal, if strange, grace period, and any rule that flags it also flags
+# every pod shutting down slowly on purpose. A finalizer is what an operator
+# actually hits: the grace period elapses, the kubelet is done, and the object
+# stays because the API server is waiting for a controller that does not exist.
+#
+# The near-miss is "the application crashed". The app exited perfectly well and
+# was then told to stop. A bare Pod, not a Deployment, so nothing recreates it
+# and the evidence stays put.
+#
+# Teardown note: `kubectl delete namespace uncovered2` will hang on this pod.
+# Remove the finalizer first, or delete the whole kind cluster.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: drain-hook
+  namespace: uncovered2
+  labels:
+    app: drain-hook
+  finalizers:
+    - example.com/never-removed
+spec:
+  terminationGracePeriodSeconds: 5
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      lifecycle:
+        preStop:
+          exec:
+            command: ["sh", "-c", "exit 9"]
+---
+# Preempting. A low-priority pod holding most of the node, then a
+# high-priority pod that cannot fit beside it. The near-miss is the corpus's
+# existing unschedulable cases: this pod is not unschedulable, it is being
+# thrown off to make room, and the cause lives on the *other* pod's priority.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: low-batch
+value: 1
+globalDefault: false
+description: "Evictable filler for the preemption fixture."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-urgent
+value: 1000000
+globalDefault: false
+description: "Preempts the filler."
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filler
+  namespace: uncovered2
+  labels:
+    app: filler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: filler
+  template:
+    metadata:
+      labels:
+        app: filler
+    spec:
+      priorityClassName: low-batch
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          resources:
+            requests:
+              # Measured 2026-09-13: a kind node here has 15 allocatable CPUs,
+              # so the 1500m this first asked for left both pods running side
+              # by side and produced no preemption at all. 9 each means only
+              # one fits.
+              cpu: "9"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: urgent
+  namespace: uncovered2
+  labels:
+    app: urgent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: urgent
+  template:
+    metadata:
+      labels:
+        app: urgent
+    spec:
+      priorityClassName: high-urgent
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          resources:
+            requests:
+              cpu: "9"
