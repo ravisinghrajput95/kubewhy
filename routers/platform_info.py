@@ -1,6 +1,8 @@
 import platform
-import psutil
 from datetime import datetime
+
+import psutil
+
 
 def get_platform_info():
     """
@@ -18,14 +20,14 @@ def get_platform_info():
     boot_time_timestamp = psutil.boot_time()
     boot_time = datetime.fromtimestamp(boot_time_timestamp)
     uptime = datetime.now() - boot_time
-    
+
     platform_info = {
         "OS" : os_details,
         "Hostname" : hostname,
         "Boot_time" : boot_time.isoformat(timespec="seconds"),
         "Uptime" : str(uptime).split(".")[0]
     }
-    
+
     return platform_info
 
 if __name__ == "__main__":

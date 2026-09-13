@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 import controller
 import store
 
-
 # A real server, never a fake: the Postgres path exists so two replicas can
 # share state, and nothing about that is exercised by a stub. CI runs one as a
 # service container, so this is configured there and skipped only on a

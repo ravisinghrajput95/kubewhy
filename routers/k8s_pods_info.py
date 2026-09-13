@@ -355,9 +355,9 @@ def _age(when):
     if when is None:
         return None
     if when.tzinfo is None:
-        when = when.replace(tzinfo=dt.timezone.utc)
+        when = when.replace(tzinfo=dt.UTC)
 
-    seconds = max(int((dt.datetime.now(dt.timezone.utc) - when).total_seconds()), 0)
+    seconds = max(int((dt.datetime.now(dt.UTC) - when).total_seconds()), 0)
     if seconds < 60:
         return f"{seconds}s"
     if seconds < 3600:

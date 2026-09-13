@@ -20,29 +20,28 @@ import uuid
 
 import audit
 import backends  # noqa: F401  -- re-exported for callers that name a backend
-
 import grounding
 import inference
 import targeting
 import telemetry
-from routers.platform_info import get_platform_info
-from routers.system_info import get_system_info
-from routers.process_info import get_processes
-from routers.top_cpu import get_top_cpu_processes
-from routers.top_memory import get_top_memory_processes
 from routers.k8s_pods_info import (
-    service_namespace,
-    scan_cluster,
-    list_pods,
     describe_pod,
     get_pod_events,
     get_pod_logs,
-    list_nodes,
+    get_service_endpoints,
     list_deployments,
     list_jobs,
-    get_service_endpoints,
+    list_nodes,
+    list_pods,
+    scan_cluster,
     scan_references,
+    service_namespace,
 )
+from routers.platform_info import get_platform_info
+from routers.process_info import get_processes
+from routers.system_info import get_system_info
+from routers.top_cpu import get_top_cpu_processes
+from routers.top_memory import get_top_memory_processes
 
 # OLLAMA_HOST is read by the ollama client itself; in a container it needs to
 # point back at the host, e.g. http://host.docker.internal:11434

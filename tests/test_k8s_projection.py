@@ -14,11 +14,11 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
+from conftest import container_status, make_pod
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from routers import k8s_pods_info as k8s
-from conftest import container_status, make_pod
 
 
 @pytest.fixture
@@ -434,7 +434,7 @@ class TestEventAge:
             reason="FailedScheduling",
             count=1,
             message="0/1 nodes are available",
-            last_timestamp=dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=27),
+            last_timestamp=dt.datetime.now(dt.UTC) - dt.timedelta(minutes=27),
         )
         api.list_namespaced_event.return_value = client.CoreV1EventList(items=[event])
 
@@ -2475,7 +2475,7 @@ class TestTheAgeStringChangesUnitOnTheBoundary:
 
     @staticmethod
     def age(seconds):
-        when = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=seconds)
+        when = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=seconds)
         return k8s._age(when)
 
     @pytest.mark.parametrize("seconds,expected", [
@@ -2495,7 +2495,7 @@ class TestTheAgeStringChangesUnitOnTheBoundary:
         Clock skew between the API server and this process is ordinary. An age
         of `-3s` in a projection reads as a broken tool rather than a clock.
         """
-        ahead = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=30)
+        ahead = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=30)
 
         assert k8s._age(ahead) == "0s"
 
@@ -2505,7 +2505,7 @@ class TestTheAgeStringChangesUnitOnTheBoundary:
         recorded fixture or a hand-built event may not, and subtracting a
         naive one raises rather than returning a wrong answer.
         """
-        naive = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+        naive = dt.datetime.now(dt.UTC).replace(tzinfo=None)
 
         assert k8s._age(naive) == "0s"
 

@@ -216,9 +216,22 @@ class Record:
     record of -- and at that point there is no answer event to build one from.
     """
 
-    __slots__ = ("run_id", "question", "prompted", "model", "started", "target",
-                 "tools", "namespaces", "sensitive", "verdict", "termination",
-                 "outcome", "error", "_emitted")
+    __slots__ = (
+        "_emitted",
+        "error",
+        "model",
+        "namespaces",
+        "outcome",
+        "prompted",
+        "question",
+        "run_id",
+        "sensitive",
+        "started",
+        "target",
+        "termination",
+        "tools",
+        "verdict",
+    )
 
     def __init__(self, question, model):
         self.run_id = ""
@@ -315,7 +328,7 @@ class Record:
             # carried no time at all, which for an audit trail is most of the
             # point missing. "Who read that namespace's logs" always has "and
             # when" attached to it.
-            "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+            "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
             "run_id": self.run_id,
             "cluster": _cluster(),
             **current(),

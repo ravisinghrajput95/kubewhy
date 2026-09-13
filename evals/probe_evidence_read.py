@@ -47,15 +47,15 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import agent  # noqa: E402
-import controller  # noqa: E402
-import routers.k8s_pods_info as k8s  # noqa: E402
-import store  # noqa: E402
-
 import evidence_read  # noqa: E402
 from host_state import low_power_mode  # noqa: E402
 from run_controller_eval import CaptureSink, find_pod  # noqa: E402
 from summarise import wilson  # noqa: E402
+
+import agent  # noqa: E402
+import controller  # noqa: E402
+import routers.k8s_pods_info as k8s  # noqa: E402
+import store  # noqa: E402
 
 # The two fixtures whose root cause is in the log and nowhere else. See
 # evidence_read.FACTS for why the other four are not here.

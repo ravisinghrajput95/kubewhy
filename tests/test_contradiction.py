@@ -371,7 +371,7 @@ class TestTheNegationWindowHasTwoBounds:
         nearest_false_negator = self.GOVERNING_SOMETHING_ELSE[0]
 
         assert furthest_denial <= contradiction._NEGATION_WINDOW
-        assert contradiction._NEGATION_WINDOW < nearest_false_negator
+        assert nearest_false_negator > contradiction._NEGATION_WINDOW
 
     def test_an_ordinary_assertion_is_still_an_assertion(self):
         # The counter. Every test above passes on an _asserted() that returns

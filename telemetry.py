@@ -251,7 +251,7 @@ class timer:
     those apart; a metric only wants the honest one.
     """
 
-    __slots__ = ("started", "seconds")
+    __slots__ = ("seconds", "started")
 
     def __enter__(self):
         self.started = time.perf_counter()

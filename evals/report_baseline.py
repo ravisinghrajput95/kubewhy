@@ -26,8 +26,10 @@ n = len(records)
 by_cat = collections.defaultdict(list)
 
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cases as case_mod
+
 CAT = {c["name"]: c.get("category", "?") for c in case_mod.CASES}
 for r in records:
     by_cat[CAT.get(r["case"], "?")].append(r)
@@ -68,9 +70,9 @@ print(f"   (inferences, correctly marked as such: {inf})")
 
 # 5 verdicts
 verdicts = collections.Counter(r.get("confidence") for r in records)
-print(f"\n5. GROUNDING VERDICTS")
+print("\n5. GROUNDING VERDICTS")
 for v, c in verdicts.most_common():
-    print(f"     {str(v):<24} {c}")
+    print(f"     {v!s:<24} {c}")
 
 # 6-9 performance
 secs = sorted(r["seconds"] for r in records)
@@ -95,12 +97,12 @@ print(f"9. RE-ASKS                 named-tool {re_asks['nudges']}, "
 
 # 10 termination
 term = collections.Counter(r.get("termination") or "answered" for r in records)
-print(f"\n10. TERMINATION")
+print("\n10. TERMINATION")
 for t, c in term.most_common():
     print(f"     {t:<24} {c}")
 
 # by category
-print(f"\nBY CATEGORY")
+print("\nBY CATEGORY")
 for cat in sorted(by_cat):
     rs = by_cat[cat]
     # `passes`, not `k`: `k` is the re-asks loop variable a few lines up, and
@@ -109,7 +111,7 @@ for cat in sorted(by_cat):
     print(f"   {cat:<24} {passes}/{len(rs)}")
 
 # entity scoping, checked rather than assumed
-print(f"\nENTITY SCOPING (target recorded on each answer)")
+print("\nENTITY SCOPING (target recorded on each answer)")
 scoped = [r for r in records if r.get("target")]
 print(f"   runs with a target extracted : {len(scoped)}/{n}")
 for r in scoped:

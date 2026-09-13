@@ -76,7 +76,7 @@ for c in cases:
         rows.append((c, ka, na, kb, nb))
 
 p = sign_test(wins, losses)
-print(f"\n  SCENARIO-LEVEL PAIRING")
+print("\n  SCENARIO-LEVEL PAIRING")
 print(f"    {A_NAME} better on : {wins}")
 print(f"    {B_NAME} better on : {losses}")
 print(f"    identical          : {ties}")
@@ -87,7 +87,7 @@ verdict = ("DIFFERENT (p < 0.05)" if p < 0.05
 print(f"    VERDICT: {verdict}")
 
 if rows:
-    print(f"\n  SCENARIOS THAT DIFFER")
+    print("\n  SCENARIOS THAT DIFFER")
     print(f"    {'scenario':<44} {A_NAME:>12} {B_NAME:>12}")
     for c, ka, na, kb, nb in sorted(rows, key=lambda r: (r[3]/r[4]) - (r[1]/r[2])):
         print(f"    {c:<44} {ka}/{na:<10} {kb}/{nb}")
@@ -120,7 +120,7 @@ def metrics(recs):
     }
 
 ma, mb = metrics(a_recs), metrics(b_recs)
-print(f"\n  METRICS, REPORTED SEPARATELY")
+print("\n  METRICS, REPORTED SEPARATELY")
 print(f"    {'':<34}{A_NAME:>14}{B_NAME:>16}")
 for label, key in (("evidence-supported claims", "obs"),
                    ("contradicted claims", "con"),
@@ -135,9 +135,9 @@ for re_ask in ("nudges", "policies", "coverage"):
     print(f"    {'re-asks: ' + re_ask:<34}"
           f"{ma['re_asks'][re_ask]:>14}{mb['re_asks'][re_ask]:>16}")
 
-print(f"\n  GROUNDING VERDICTS")
+print("\n  GROUNDING VERDICTS")
 for v in sorted(set(ma["verdicts"]) | set(mb["verdicts"]), key=str):
-    print(f"    {str(v):<34}{ma['verdicts'][v]:>14}{mb['verdicts'][v]:>16}")
+    print(f"    {v!s:<34}{ma['verdicts'][v]:>14}{mb['verdicts'][v]:>16}")
 
 # --- entity scoping ----------------------------------------------------------
 def scoping(recs):

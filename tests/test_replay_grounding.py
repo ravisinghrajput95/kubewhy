@@ -17,8 +17,9 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "evals"))
 
-import replay_grounding as replay          # noqa: E402
-import grounding                            # noqa: E402
+import replay_grounding as replay  # noqa: E402
+
+import grounding  # noqa: E402
 
 
 def record(draft, evidence, confidence, case="a_case", answer=None):

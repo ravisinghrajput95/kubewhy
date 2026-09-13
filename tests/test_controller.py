@@ -14,15 +14,15 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from conftest import container_status, make_pod
 from kubernetes import client
 
 import controller as ctrl
 import store
-from conftest import container_status, make_pod
 
 # Fixed, and timezone-aware because the Kubernetes client returns aware
 # datetimes -- subtracting a naive one raises rather than being wrong quietly.
-NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.timezone.utc)
+NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
 
 
 def owned_pod(name="web-abc123-xyz", owner="web-abc123", **kwargs):
@@ -574,7 +574,7 @@ class TestThePodMayBeGoneAlready:
                           statuses=[container_status(ready=False, terminated_reason="Error")])
         newer = owned_pod(name="nightly-sync-2",
                           statuses=[container_status(ready=False, terminated_reason="Error")])
-        base = dt.datetime(2026, 8, 10, 12, 0, tzinfo=dt.timezone.utc)
+        base = dt.datetime(2026, 8, 10, 12, 0, tzinfo=dt.UTC)
         older.metadata.creation_timestamp = base
         newer.metadata.creation_timestamp = base + dt.timedelta(minutes=1)
 

@@ -120,7 +120,7 @@ def _model_check(wanted, names):
 class ToolCall:
     """One tool the model asked for, in provider-neutral form."""
 
-    __slots__ = ("name", "arguments", "id", "raw")
+    __slots__ = ("arguments", "id", "name", "raw")
 
     def __init__(self, name, arguments, id=None, raw=None):
         self.name = name
@@ -135,7 +135,7 @@ class ToolCall:
 class Reply:
     """One model turn: what it said, what it wants to call, and what it was."""
 
-    __slots__ = ("content", "tool_calls", "think_used", "raw", "usage")
+    __slots__ = ("content", "raw", "think_used", "tool_calls", "usage")
 
     def __init__(self, content, tool_calls, think_used, raw, usage=None):
         self.content = content or ""

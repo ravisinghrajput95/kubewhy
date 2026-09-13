@@ -19,7 +19,6 @@ import backends
 import grounding
 import telemetry
 
-
 # A cluster with nothing wrong in it. Used wherever a loop test calls a pod
 # tool it does not care about the result of -- otherwise the test reads
 # whatever cluster is running on the machine, and the evidence policy reacts

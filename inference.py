@@ -59,8 +59,8 @@ import urllib.parse
 import httpx
 
 import backends
-import redaction
 import limits
+import redaction
 import telemetry
 
 log = logging.getLogger("triage.inference")
@@ -245,7 +245,7 @@ def _host(endpoint):
 class Target:
     """One place inference can happen: mode, provider, endpoint, model."""
 
-    __slots__ = ("mode", "provider", "endpoint", "model", "api_key", "timeout")
+    __slots__ = ("api_key", "endpoint", "mode", "model", "provider", "timeout")
 
     def __init__(self, mode, provider=None, endpoint=None, model=None,
                  api_key="", timeout=None):
@@ -315,7 +315,7 @@ class Policy:
 class Config:
     """A primary, an optional fallback, and the policy governing both."""
 
-    __slots__ = ("primary", "fallback", "policy")
+    __slots__ = ("fallback", "policy", "primary")
 
     def __init__(self, primary, fallback=None, policy=None):
         self.primary = primary

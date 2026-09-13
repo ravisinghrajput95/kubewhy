@@ -63,8 +63,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.append(ROOT)
 
-import grounding          # noqa: E402
-import contradiction      # noqa: E402
+import contradiction  # noqa: E402
+import grounding  # noqa: E402
 
 
 def _fingerprint(module):

@@ -21,7 +21,7 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "evals"))
 
-import mutate                                    # noqa: E402
+import mutate  # noqa: E402
 
 SOURCE = '''
 def f(a, b):

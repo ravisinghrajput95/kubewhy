@@ -111,7 +111,7 @@ class Principal:
     a dict invites callers to add fields to it that then differ per surface.
     """
 
-    __slots__ = ("name", "email", "groups", "source")
+    __slots__ = ("email", "groups", "name", "source")
 
     def __init__(self, name="", email="", groups=(), source="anonymous"):
         self.name = name

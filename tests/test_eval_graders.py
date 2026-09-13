@@ -8,8 +8,8 @@ treats the suite as code; this treats the scoring the same way.
 No cluster and no model: the graders are pure functions over a finding dict.
 """
 
-import importlib.util
 import glob
+import importlib.util
 import json
 import os
 

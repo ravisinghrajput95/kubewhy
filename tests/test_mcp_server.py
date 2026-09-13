@@ -97,6 +97,7 @@ class TestVersionIsReported:
     def test_the_chart_agrees_with_the_package(self):
         import os
         import re
+
         from version import __version__
 
         chart = os.path.join(

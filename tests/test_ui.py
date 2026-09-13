@@ -619,6 +619,7 @@ def run_form(seen, question=None, scoped=True, scan=None):
     something else".
     """
     import streamlit as st
+
     import agent as agent_mod
 
     st.cache_data.clear()
@@ -711,6 +712,7 @@ class TestTheHistoryRecordsWhatAPersonTyped:
         earlier test had already put a row in it.
         """
         import streamlit as st
+
         import agent as agent_mod
 
         st.cache_data.clear()
@@ -775,6 +777,7 @@ class TestAnInvestigationThatDoesNotSucceed:
         able to try again without reloading.
         """
         import streamlit as st
+
         import agent as agent_mod
 
         st.cache_data.clear()
@@ -1160,6 +1163,7 @@ class TestAFailedJobWithNoPodToInspect:
         because every scan row used to carry an example pod.
         """
         import streamlit as st
+
         import agent as agent_mod
 
         st.cache_data.clear()
@@ -1877,8 +1881,9 @@ class TestAHistoryEntryThatCannotBeReplayed:
             pass
 
     def _click_the_history_button(self):
-        import store as store_mod
         import streamlit as st
+
+        import store as store_mod
 
         st.cache_data.clear()
         # _history() is a cache_resource, shared for the life of the process,

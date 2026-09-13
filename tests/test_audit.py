@@ -23,7 +23,6 @@ import agent
 import audit
 import inference
 
-
 SECRET_LOG = "db password=hunter2 and AKIAIOSFODNN7EXAMPLE"
 
 

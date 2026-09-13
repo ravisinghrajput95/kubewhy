@@ -13,9 +13,10 @@ import pytest
 
 pytest.importorskip("slack_sdk")
 
+from slack_sdk.socket_mode.request import SocketModeRequest
+
 import sinks
 import slack_socket
-from slack_sdk.socket_mode.request import SocketModeRequest
 
 
 def request(event, kind="events_api"):

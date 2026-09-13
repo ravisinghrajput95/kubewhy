@@ -19,28 +19,28 @@ is one the MCP server already exposes to untrusted clients; this surface adds
 no capability, only a way to look at it.
 """
 
-import html
-import grounding
 import datetime as dt
+import html
 import time
 
 import streamlit as st
 
 import agent
 import audit
+import grounding
 import identity
 import store
 from routers.k8s_pods_info import (
     active_context,
-    list_contexts,
-    list_namespaces,
-    use_context,
-    workload_pods,
     describe_pod,
     get_pod_events,
     get_pod_logs,
+    list_contexts,
+    list_namespaces,
     list_nodes,
     scan_cluster,
+    use_context,
+    workload_pods,
 )
 
 # Short enough that a page you are watching during an incident stays honest,

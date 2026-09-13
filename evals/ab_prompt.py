@@ -30,10 +30,11 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import agent  # noqa: E402
-from ollama_state import resident  # noqa: E402
 from cases import CASES  # noqa: E402
+from ollama_state import resident  # noqa: E402
 from run_eval import grade  # noqa: E402
+
+import agent  # noqa: E402
 
 DEFAULT_MARKER = "Never state an inference as if you measured it."
 

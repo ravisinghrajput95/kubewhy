@@ -127,7 +127,7 @@ class Fact:
     phrase cannot be reached without having read the line.
     """
 
-    __slots__ = ("name", "source", "accept")
+    __slots__ = ("accept", "name", "source")
 
     def __init__(self, name, source, accept):
         self.name = name

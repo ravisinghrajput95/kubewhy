@@ -1,5 +1,6 @@
 import psutil
 
+
 def get_system_info():
     """
     Returns overall host utilisation right now: cpu percent, memory percent,
@@ -11,23 +12,23 @@ def get_system_info():
     """
 
     cpu_usage = psutil.cpu_percent(interval=1)
-    
+
     memory = psutil.virtual_memory()
     memory_usage = memory.percent
-    
+
     disk = psutil.disk_usage('/')
     disk_usage = disk.percent
-    
+
     users = psutil.users()
     current_user = users[0].name if users else None
-    
+
     system_info = {
         "cpu" : cpu_usage,
         "memory" : memory_usage,
         "disk" : disk_usage,
         "user" : current_user
     }
-    
+
     return system_info
 
 if __name__ == "__main__":

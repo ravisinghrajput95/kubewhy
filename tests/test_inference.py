@@ -14,7 +14,6 @@ it declines for the right reason is to check the reason.
 """
 
 import json
-
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 

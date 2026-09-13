@@ -14,10 +14,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from conftest import make_pod
 from kubernetes import client
 
 import podcache
-from conftest import make_pod
 
 
 @pytest.fixture

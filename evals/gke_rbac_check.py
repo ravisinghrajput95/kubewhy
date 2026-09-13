@@ -59,7 +59,8 @@ def api_for(token):
     configuration.host = server
     configuration.api_key = {"authorization": f"Bearer {token}"}
     if ca:
-        import base64, tempfile
+        import base64
+        import tempfile
         handle = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")
         handle.write(base64.b64decode(ca))
         handle.close()

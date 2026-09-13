@@ -19,10 +19,10 @@ grouped by owning workload rather than pod, each workload has a cooldown, and
 there is a global hourly ceiling.
 """
 
+import contextlib
 import datetime as dt
 import logging
 import os
-import contextlib
 import queue
 import signal
 import threading
@@ -35,7 +35,7 @@ import audit
 import observability
 import sinks
 import store
-from routers.k8s_pods_info import _api, base_status, fault_of, _pod_status, workload_of
+from routers.k8s_pods_info import _api, _pod_status, base_status, fault_of, workload_of
 
 observability.configure()
 log = logging.getLogger("triage.controller")
@@ -204,7 +204,7 @@ class Controller:
         since = pod.status.start_time or pod.metadata.creation_timestamp
         if not since:
             return None
-        now = dt.datetime.now(dt.timezone.utc) if now is None else now
+        now = dt.datetime.now(dt.UTC) if now is None else now
         return (now - since).total_seconds()
 
     def stuck(self, pod, status, now=None):

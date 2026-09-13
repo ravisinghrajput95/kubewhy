@@ -13,10 +13,10 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from test_agent_loop import mock_chat, reply, tool_call
 
 import agent
 import targeting
-from test_agent_loop import mock_chat, reply, tool_call
 
 
 class TestTargetExtraction:

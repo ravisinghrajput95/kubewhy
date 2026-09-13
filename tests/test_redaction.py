@@ -7,7 +7,9 @@ cases are the shapes that actually leak.
 """
 
 import json
+
 import pytest
+
 import redaction
 
 

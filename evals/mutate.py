@@ -48,9 +48,9 @@ before a single mutation is applied.
 
 import argparse
 import ast
-import json
 import copy
 import glob
+import json
 import os
 import shutil
 import subprocess

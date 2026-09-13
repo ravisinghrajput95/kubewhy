@@ -38,10 +38,11 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import agent  # noqa: E402
-import routers.k8s_pods_info as k8s  # noqa: E402
 from cases import CASES  # noqa: E402
 from host_state import low_power_mode  # noqa: E402
+
+import agent  # noqa: E402
+import routers.k8s_pods_info as k8s  # noqa: E402
 
 CASE = "cluster_wide_scan"
 

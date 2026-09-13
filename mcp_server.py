@@ -35,19 +35,19 @@ from routers.k8s_pods_info import (
     get_pod_events,
     get_pod_logs,
     get_service_endpoints,
-    scan_references,
     list_deployments,
     list_jobs,
     list_nodes,
     list_pods,
     scan_cluster,
+    scan_references,
 )
-from version import __version__
 from routers.platform_info import get_platform_info
 from routers.process_info import get_processes
 from routers.system_info import get_system_info
 from routers.top_cpu import get_top_cpu_processes
 from routers.top_memory import get_top_memory_processes
+from version import __version__
 
 observability.configure()
 log = logging.getLogger("triage.mcp")

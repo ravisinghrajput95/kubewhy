@@ -9,11 +9,10 @@ TRIAGE_API_TOKEN before exposing it anywhere else.
 import json
 import logging
 import os
-import threading
 import secrets
+import threading
 import time
 import uuid
-
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -28,23 +27,23 @@ import observability
 import store
 import telemetry
 from agent import ask, scoped_question, stream
-from routers.platform_info import get_platform_info
-from routers.system_info import get_system_info
-from routers.process_info import get_processes
-from routers.top_cpu import get_top_cpu_processes
-from routers.top_memory import get_top_memory_processes
 from routers.k8s_pods_info import (
-    scan_cluster,
-    list_pods,
     describe_pod,
     get_pod_events,
     get_pod_logs,
-    list_nodes,
+    get_service_endpoints,
     list_deployments,
     list_jobs,
-    get_service_endpoints,
+    list_nodes,
+    list_pods,
+    scan_cluster,
     scan_references,
 )
+from routers.platform_info import get_platform_info
+from routers.process_info import get_processes
+from routers.system_info import get_system_info
+from routers.top_cpu import get_top_cpu_processes
+from routers.top_memory import get_top_memory_processes
 
 observability.configure()
 log = logging.getLogger("triage.api")
