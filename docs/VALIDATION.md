@@ -2722,6 +2722,31 @@ it.** Of the three values:
   without measuring it" explains one of these three, is inapplicable to the
   second and is disproven for the third.
 
+**The phrase list was corrected and replayed, and it moves nothing here.**
+`malformed_image_reference`'s `expect_any` held five synonyms, none of which is
+a substring of the sentences the model actually writes for this fault. Widened
+2026-09-13 with six terms that name the fault rather than the question, then
+replayed with `evals/regrade.py` over both recorded sets:
+
+| set | as graded | regraded |
+|---|---|---|
+| 2026-09-12, n=3, 102 runs | 86/102 | **86/102 — no change** |
+| 2026-09-09, n=1, 34 runs | 30/34 | **31/34** |
+
+**Nothing in the current set moves**, because both of its
+`malformed_image_reference` failures carry a second reason the widening does
+not touch — one `never called describe_pod`, one a grounding verdict of
+`insufficient_evidence`. So the headline, both halves and p = 0.0020 all stand
+exactly as measured.
+
+**What it does change is defect 44's own number, upward.** Regraded, that set
+reads 31/34 (91.2%) with the never-seen half at **3/5, 60.0% [23.1–88.2]**
+rather than 2/5, 40%. So part of the original 40% was the grader, and the
+corrected n=1 figure sits above this measurement's 53.3% rather than below it.
+The two are consistent — 60% at n=5 and 53.3% at n=15 — which says the original
+figure was noisy rather than wrong once its grader is fixed, and that the
+honest reading of defect 44 was always its direction.
+
 **One pre-existing case failed 3/3 and none of the three is a wrong answer.**
 `unschedulable_node_affinity` reached `list_pods`, `list_nodes` and
 `describe_pod` every time and `get_pod_events` once; two runs scored

@@ -46,8 +46,20 @@ UNCOVERED_CASES = [
         "expected_grounding": ["grounded", "partial"],
         "needs": "demo/uncovered-faults.yaml",
         "question": "The catalog-api deployment in the uncovered namespace will not start. Why?",
+        # Widened 2026-09-13, defect 47. The original five matched none of
+        # the sentences the model actually writes for this fault -- "the
+        # container image name is invalid", "its specified image is invalid
+        # ... multiple colons", "violates Kubernetes' image naming rules" --
+        # so the case could not tell a correct answer phrased differently
+        # from a wrong one, and `forbid` being conditional on the
+        # expectations then scored a hedged pull-secret aside as the
+        # confident wrong answer. Every added term names the *fault*, not the
+        # question: the question says only that the deployment will not start.
         "expect_any": ["invalidimagename", "invalid image", "not a valid",
-                       "syntactically", "malformed reference"],
+                       "syntactically", "malformed reference",
+                       "image name is invalid", "image is invalid",
+                       "invalid tag", "invalid reference", "naming rules",
+                       "malformed"],
         # The near-miss. This is NOT a pull failure: the kubelet rejected the
         # reference before any network call, so there is no registry to be
         # unreachable and no credential to be wrong.
