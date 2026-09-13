@@ -39,7 +39,7 @@ and does not support. Four words are used and they mean specific things:
 | In-cluster inference | **PARTIALLY PROVEN** | Ollama, and the `vllm` provider against a real OpenAI-protocol server |
 | AKS runtime | **PARTIALLY PROVEN** | non-AAD single node |
 | Model comparison | **UNDETERMINED** | p = 0.3438, paired, n=5 |
-| Generalized diagnostic accuracy | **NOT TESTED**, and now with a number behind the words | one cluster, one prompt configuration — and measured 2026-09-09: **28/29 (97%) on the cases the prompts were written against, 2/5 (40%) on five fault types they were not**. n=1, so 40% has a wide interval; the split is the point, not the value. See defect 44 |
+| Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — and measured 2026-09-12 at n=3, 102 runs: **78/87 (89.7%) [81.5–94.5] on the cases the prompts were written against, 8/15 (53.3%) [30.1–75.2] on five fault types they were not**, Fisher p = 0.0020. Supersedes the n=1 97%/40% of 2026-09-09: the direction defect 44 claimed holds, the gap is 36.4 points rather than 57, and four of the five never-seen cases are flaky rather than broken. The never-seen interval is still 45 points wide. See defect 47 |
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
@@ -2664,6 +2664,80 @@ under one prompt.
 that removing the Job paragraph's digit was enough for three consecutive runs,
 not that the prompt had stopped supplying the number. n=3 against a model that
 volunteers `128+9` from its own knowledge cannot separate those.
+
+
+### 47. The generalization gap, measured at n=3 instead of asserted at n=1
+
+**Problem.** Defect 44 split the suite 97% on the 29 cases the prompts were
+written against and 40% on five fault types they had never seen, at one run
+per case, and said explicitly that it claimed the direction and not the value.
+Since then `list_jobs` closed the structural half of that 40% — one of the
+three failures was a fault no tool could reach — so the figure was stale in
+both directions and nobody knew which dominated.
+
+**Measured 2026-09-12**, qwen3 via Ollama with thinking on, 34 cases at
+`--repeat 3` against a kind cluster with all five fixture files applied. Every
+one of the five never-seen faults was verified presenting on the cluster by
+hand before any model time was spent: `InvalidImageName`, a Job at
+`Failed/DeadlineExceeded` with its pods already deleted, `PostStartHookError`,
+`RunContainerError`, and a Job at `Failed/BackoffLimitExceeded`.
+
+| set | score | 95% CI |
+|---|---|---|
+| headline, all 34 cases | 86/102, **84.3%** | [76.0–90.1] |
+| the 29 the prompts had seen | 78/87, **89.7%** | [81.5–94.5] |
+| the 5 they had not | 8/15, **53.3%** | [30.1–75.2] |
+
+**Fisher p = 0.0020.** Defect 44's own table gives p = 0.0064 at n=1. **The
+direction holds and the value moved: the gap is 36.4 points, not 57.** The
+never-seen interval is still 45 points wide, so 53.3% is not a precise number —
+it is a number whose lower bound is 30.1% and which no longer rests on five
+runs.
+
+**Four of the five never-seen cases are flaky rather than broken**, which is a
+different finding from defect 44's. `entrypoint_that_does_not_exist` is 3/3;
+`job_killed_by_its_own_deadline` 2/3; `malformed_image_reference`,
+`poststart_hook_not_the_app` and `job_gave_up_after_retries` are 1/3 each. At
+n=1 every one of these reads as a clean pass or a clean failure, which is what
+made the 40% look like a property of the fault type.
+
+**What the failures actually are has changed.** Defect 44 recorded two of three
+failures as the specific wrong answer the case forbade. Here, of the 7 failures
+in the never-seen half, **3 named the wrong cause and 4 named the right one and
+missed a bar around it** — and the single largest kind is a fabricated value:
+`137`, `oomkilled`, `404`, four failures between them.
+
+**That does not mean the prompt is supplying them, and checking is what shows
+it.** Of the three values:
+
+- **`137` is in `SYSTEM_PROMPT`** and is gratuitous — defect 46.
+- **`OOMKilled` is in it three times and cannot be removed.** The prompt's
+  whole OOM lesson is "`last_termination.reason` is the field that names the
+  sender, and it says OOMKilled when it was the kernel". You cannot teach that
+  without the word. `poststart_hook_not_the_app` failed 2/3 with
+  `unverified claims: ['oomkilled']` and a `contradicted` verdict — the checker
+  working, on a claim the evidence refutes.
+- **`404` is not in the prompt at all.** So the model invents values with no
+  prompt source, and "a number in a prompt is a number the model can state
+  without measuring it" explains one of these three, is inapplicable to the
+  second and is disproven for the third.
+
+**One pre-existing case failed 3/3 and none of the three is a wrong answer.**
+`unschedulable_node_affinity` reached `list_pods`, `list_nodes` and
+`describe_pod` every time and `get_pod_events` once; two runs scored
+`insufficient_evidence` and two failed `never called get_pod_events`. The
+2026-09-10 partial recorded the same shape — grounded, no unverified claims,
+`never called get_pod_events` — so that is four observations across two dates
+of one behaviour. Its qwen3 history is 1/1, 4/5, 3/5, 1/1 and now 0/3; 0/3
+against a prior rate near 75% has probability 1.6%, which is suggestive and
+not conclusive at n=3.
+
+**Limits.** One model, one cluster type, one prompt configuration, 15 runs in
+the half that matters. Five runs of the set executed with a 1-minute load
+average between 11.2 and 18.2 because another process on the machine was
+competing — **that contaminates their latency and not their verdicts**, since
+a slower run returns the same answer, so no latency figure is quoted from this
+set.
 
 
 ## Where a run's 74 seconds go

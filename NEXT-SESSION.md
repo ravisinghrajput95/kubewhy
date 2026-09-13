@@ -374,13 +374,26 @@ agreed at the instant itself; a histogram dropped its own `le` edge; a timer's
 
 ## Do not let these be misreported
 
-0. **Defect 44's 40% is stale in both directions, and 88% was never the
-   number.** The split it recorded — 97% on the 29 cases the prompts had seen,
-   40% on the five they had not — was n=1, and one of those three failures has
-   since been shown not to be a model failure at all: `list_jobs` did not
-   exist, so no answer was reachable. Do not quote 40% as the current
-   generalization figure and do not quote 88% as anything; the re-measurement
-   is item 1 of "Pick up".
+0. **The generalization figure is measured now — 89.7% against 53.3% — and
+   the halves are still the only honest way to quote it.** Superseded
+   2026-09-12 at n=3, 102 runs, defect 47:
+
+   | set | score | 95% CI |
+   |---|---|---|
+   | headline, all 34 cases | 86/102, 84.3% | [76.0–90.1] |
+   | the 29 the prompts had seen | 78/87, **89.7%** | [81.5–94.5] |
+   | the 5 they had not | 8/15, **53.3%** | [30.1–75.2] |
+
+   Fisher p = 0.0020 against defect 44's p = 0.0064 at n=1. **Quote both
+   halves or neither**; 84.3% is the average of two different products and is
+   the thing defect 44 exists to stop being published on its own. Do not quote
+   the old 97%/40% at all, and do not quote 88% as anything. **53.3% has a
+   45-point interval** — its lower bound is 30.1%, and that is the honest
+   summary of it.
+
+   Use `evals/split_by_novelty.py` rather than recomputing by hand; it takes
+   membership from `UNCOVERED_CASES` and reproduces defect 44's original split
+   to the digit from that session's own file.
 1. **A skip is a result you have to go and look for.** Measured as a pair on
    2026-09-02: the same `store.py` survey, same 53 mutants, same test file,
    killed **25** with `TRIAGE_TEST_PG_DSN` unset and **33** with it pointed at
@@ -519,35 +532,40 @@ more in this project's character.
 
 ## Pick up, in order
 
-1. **Finish the re-measurement that was stopped 24 runs in.** This is the one
-   open *question*, as opposed to open work. Defect 44 split the suite 97% on
-   the 29 cases the prompts had seen against **40% on the five they had not**,
-   at n=1 — and the direction, not the value, was what it claimed. Since then
-   the structural half of that 40% is fixed (`list_jobs`), so the figure is
-   stale in a way that flatters and understates at the same time and nobody
-   knows which dominates.
+1. **Done 2026-09-12 — defect 47, and what it leaves open.** The set ran:
+   34 cases at `--repeat 3`, 102 runs, 2h46m, on a kind cluster with all five
+   fixture files and every never-seen fault verified presenting by hand first.
+   Result in misreporting item 0 above. **The question this item existed to ask
+   is answered**: the split defect 44 claimed is real at p = 0.0020, and the
+   never-seen half is 53.3% rather than 40%.
 
-   ```
-   kind create cluster --name kubewhy-corpus
-   kubectl apply -f demo/broken-pods.yaml -f demo/config-faults.yaml \
-                 -f demo/tricky-pods.yaml -f demo/adversarial.yaml \
-                 -f demo/uncovered-faults.yaml
-   nohup env TRIAGE_INFERENCE_MODE=local TRIAGE_MODEL=qwen3 PYTHONPATH=. \
-     caffeinate -is .venv/bin/python -u evals/run_eval.py --repeat 3 \
-     --context kind-kubewhy-corpus --json results/uncovered-n3.json \
-     > results/uncovered-n3.log 2>&1 & disown
-   ```
+   What it opened, in the order worth doing:
 
-   **Budget three to four hours** and do not run the test suite against the
-   same machine while it goes: measured 2026-09-10, runs took ~2 minutes each
-   with the laptop otherwise idle and noticeably longer when a 50-second
-   pytest run was competing for the CPU. Report the two halves separately —
-   see [[grounded-is-not-insufficient-evidence]] for why a headline that hides
-   a split is the thing defect 44 was about.
+   - **`malformed_image_reference` cannot distinguish a right answer from a
+     wrong one.** 1/3, and both failures hit `expect_any`, whose five synonyms
+     match none of the sentences the model actually wrote — "the container
+     image name is invalid", "its specified image is invalid … multiple
+     colons". `forbid` is conditional on the expectations being met, so a
+     hedged "verify the pull secret" aside then scored as the confident wrong
+     answer. **Regrade over the recorded answers rather than re-running**
+     (`evals/regrade.py`); one of the two failures also has a real
+     `never called describe_pod`, so a widened list cannot flip more than one
+     run and the regrade bounds the effect rather than fixing the score.
+   - **Defect 46**: `137` is still in `SYSTEM_PROMPT` at `agent.py:153` and
+     cost `job_killed_by_its_own_deadline` one run in three. The fix is a
+     trade, not a delete — that sentence is what makes the model say the exit
+     code is not diagnostic — so measure both variants at n>=3.
+   - **`unschedulable_node_affinity` failed 3/3 and none of the three is a
+     wrong answer.** Four observations across two dates of the same shape:
+     `get_pod_events` never reached, verdict `insufficient_evidence`. Its qwen3
+     history is 1/1, 4/5, 3/5, 1/1, now 0/3.
+   - **`poststart_hook_not_the_app` fabricates an OOM kill**, 2/3, caught as
+     `contradicted`. `OOMKilled` is in the prompt three times and cannot come
+     out — the OOM lesson is built on the word. `404`, which the Job retry case
+     invented, is **not** in the prompt at all, so the defect-46 mechanism
+     explains one fabrication, cannot apply to the second and is disproven for
+     the third.
 
-   The stopped set is at `results/uncovered-n3-2026-09-10.json.partial`,
-   gitignored, `draft` and `evidence` retained so it can feed a replay. It got
-   23 of 24 in round 1 and never reached the five new cases.
 
 2. **This is already done, and it was done the day before this file was
    written.** Checked 2026-09-12 from the registry, which is what this item

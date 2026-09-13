@@ -192,6 +192,13 @@ def whole_suite_claims(path, anchor):
     return SUITE_CLAIM.findall(region.group(0))
 
 
+try:
+    import streamlit as _streamlit  # noqa: F401
+    UI_EXTRA_INSTALLED = True
+except ImportError:
+    UI_EXTRA_INSTALLED = False
+
+
 def collected_tests():
     """
     How many tests this tree actually has, by asking pytest to collect them.
@@ -236,6 +243,24 @@ class TestTheDocumentedSuiteCountMatchesTheTree:
                              if isinstance(v, str) and v.endswith(".md") else "")
     def test_every_claim_sums_to_the_collected_count(self, path, anchor,
                                                      collected):
+        """
+        Only meaningful where the tree can collect all of itself.
+
+        Four modules are behind `pytest.importorskip("streamlit")` and are not
+        collected at all without the UI extra -- `test_ui.py` 115,
+        `test_investigation_identity.py` 20, `test_ui_auth.py` 12 and
+        `test_ui_security.py` 7, which is 154. CI installs
+        requirements-dev.txt and not requirements-ui.txt, so it collects 1595
+        where a full checkout collects 1749, and the first version of this
+        test failed there for a reason that had nothing to do with the
+        documents.
+
+        The documented figure is a full-environment claim, so this compares
+        against a full environment and defers to
+        `test_the_documents_agree_with_each_other` otherwise -- that one is
+        environment-independent, runs everywhere, and is what catches the
+        drift this was written for.
+        """
         claims = whole_suite_claims(path, anchor)
 
         # The vacuity guard, and it is not decoration: a regex that stops
@@ -248,6 +273,24 @@ class TestTheDocumentedSuiteCountMatchesTheTree:
 
         for passed, skipped in claims:
             total = int(passed.replace(",", "")) + int(skipped)
+
+            if total != collected and not UI_EXTRA_INSTALLED:
+                # Skip only in the direction the explanation predicts. A tree
+                # that collects MORE than the documents claim cannot be
+                # explained by a missing optional dependency, so that stays a
+                # failure rather than becoming an excuse.
+                assert collected < total, (
+                    f"{os.path.basename(path)} says {total} and the tree "
+                    f"collects {collected} without the UI extra installed. "
+                    "A missing optional dependency can only remove tests, so "
+                    "this is not that.")
+                pytest.skip(
+                    f"streamlit is not installed, so 154 tests in four "
+                    f"modules are not collected: the tree collects "
+                    f"{collected} against the documented {total}. "
+                    "test_the_documents_agree_with_each_other still checks "
+                    "these documents against each other.")
+
             assert total == collected, (
                 f"{os.path.basename(path)} says {passed} passed and {skipped} "
                 f"skipped ({total}); the tree collects {collected}. The skip "
