@@ -7,10 +7,12 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-12/13 head — `git log --oneline -1` is the
+**State: `main` at the 2026-09-13 head — `git log --oneline -1` is the
 authority, not this line — tree clean and pushed, **1761 passed, 0 skipped**
-(49s), CI green including a new `types` job, tags through **v0.2.1**
-(2026-09-09).
+(49s), CI green, tags through **v0.2.1** (2026-09-09). **mypy and ruff are both
+at zero and both gate**; `continue-on-error` came off the ruff step on
+2026-09-13. 49 defects recorded, 36 eval cases of which 7 are
+never-seen-fault-type cases.
 
 **That figure is measured, with Postgres up**, on the tree this session ends
 on: `docker start kubewhy-pg`, DSN proved, `pytest tests/test_store.py`

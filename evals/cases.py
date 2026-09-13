@@ -37,6 +37,75 @@ run.
 # like a fault the agent has already seen. That resemblance is the point: three
 # of the five read as CrashLoopBackOff or as an image problem from the status
 # alone, and the difference is only in the events or in the controller object.
+# --- a second round, added 2026-09-13 ------------------------------------
+#
+# Defect 47 measured the never-seen half at 8/15, 53.3% [30.1-75.2]. A
+# 45-point interval says the next move is more fault *types*, not more repeats
+# of five, so `demo/uncovered-faults-2.yaml` built six candidates from
+# `reason_coverage.py`'s gap list and each was measured on a live cluster
+# before a case was written for it. Two survived, and what happened to the
+# other four is the useful part:
+#
+#   mount-collision   two volumeMounts on one path -- did not error at all,
+#                     the pod ran. No fault, no case.
+#   not-executable    `command: ["/etc"]` gives RunContainerError, which the
+#                     corpus's entrypoint case already produces. A variation
+#                     on a covered fault pads the never-seen half and flatters
+#                     it; dropped deliberately.
+#   ghost provisioner a PVC whose StorageClass exists and whose provisioner
+#                     does not. **Not answerable**: scan_references reports
+#                     `unbound` exactly as it does for a missing StorageClass,
+#                     and the provisioner's name is in the PVC's own events,
+#                     which no tool reads. A case demanding that detail would
+#                     measure the harness -- the list_jobs lesson.
+#   preemption        a low-priority pod evicted by a high-priority one.
+#                     **Not answerable**: the `Preempted` event is on a pod
+#                     that no longer exists, and the replacement's event says
+#                     only `Insufficient cpu`, which points away from the
+#                     cause. No tool reports pod priority or preemption.
+UNCOVERED_CASES_2 = [
+    {
+        "name": "image_never_pulled_by_policy",
+        "category": "imagename",
+        "ground_truth": "imagePullPolicy is Never and the image is not on the node, so nothing was ever pulled",
+        "required_evidence": ["waiting_reason", "pull policy"],
+        "expected_grounding": ["grounded", "partial"],
+        "needs": "demo/uncovered-faults-2.yaml",
+        "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+        "expect_any": ["never", "not present", "errimageneverpull",
+                       "pull policy", "pullpolicy", "not on the node",
+                       "locally"],
+        # The near-miss, and it is every other image fault in the corpus. No
+        # registry was contacted, so there is nothing unreachable, no tag to
+        # be wrong and no credential to be missing. "Check your pull secret"
+        # is the tempting answer and it is the wrong one.
+        "forbid": ["pull secret", "registry is unreachable", "imagepullbackoff",
+                   "does not exist in the registry", "network"],
+        "expect_tools": ["describe_pod"],
+        "require_grounded": True,
+    },
+    {
+        "name": "stuck_terminating_finalizer",
+        "category": "lifecycle",
+        "ground_truth": "the pod is past its grace period and held by a finalizer nothing removes; its preStop hook also failed",
+        "required_evidence": ["terminating", "finalizers"],
+        "expected_grounding": ["grounded", "partial"],
+        "needs": "demo/uncovered-faults-2.yaml",
+        "question": "The drain-hook pod in the uncovered2 namespace will not go away. Why?",
+        "expect_any": ["finalizer", "terminating", "being deleted",
+                       "grace period", "prestop", "pre-stop"],
+        # The near-miss is the container's own last state. This pod reports
+        # `Error`, because its container exited when it was told to stop -- and
+        # answering "the container failed" sends the reader to debug an
+        # application that shut down exactly as asked. The cause is that
+        # nothing will remove the finalizer.
+        "forbid": ["the container crashed", "the application failed",
+                   "crashloop", "out of memory", "check the application logs"],
+        "expect_tools": ["describe_pod"],
+        "require_grounded": True,
+    },
+]
+
 UNCOVERED_CASES = [
     {
         "name": "malformed_image_reference",
@@ -709,3 +778,11 @@ CASES = [
 ]
 
 CASES.extend(UNCOVERED_CASES)
+CASES.extend(UNCOVERED_CASES_2)
+
+# Both rounds are "faults the prompts were never written against", which is the
+# split defect 44 and 47 measure. `split_by_novelty.py` reads UNCOVERED_CASES,
+# so the second round joins it rather than sitting beside it -- a case that is
+# never-seen and not in that set would land in the pre-existing half and
+# flatter it.
+UNCOVERED_CASES = UNCOVERED_CASES + UNCOVERED_CASES_2

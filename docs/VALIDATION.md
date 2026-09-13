@@ -2954,6 +2954,48 @@ datetimes: one for a pod inside its grace period, one past it, one with the
 field absent.
 
 
+### 50. Image faults are answered from the image string, not from the kubelet
+
+**Measured 2026-09-13**, qwen3, thinking on, n=3 on the new
+`image_never_pulled_by_policy` case: **0/3, and all three failed for the same
+reason — `never called describe_pod`.**
+
+```
+FAIL partial   ['list_deployments']              never called describe_pod, unverified ['2']
+FAIL partial   ['list_deployments']              never called describe_pod, unverified ['2', 'namespace uncovered2']
+FAIL grounded  ['list_deployments', 'list_pods'] never called describe_pod
+```
+
+**None of the three failed on the phrase list or on the `forbid` near-miss.**
+The answers were acceptable in substance; the model reached `list_deployments`,
+read `an-image-that-was-never-loaded:v3` out of its `images` field, and
+concluded from the name alone. It never asked the kubelet what happened.
+
+**This is the second case showing it.** `malformed_image_reference` in defect
+47's set did the same thing — one of its three runs answered from
+`list_deployments` with no `describe_pod` call, and was correct about the fault
+for the same reason: an obviously broken image string is diagnosable by reading
+it. So across two cases and four recorded runs the behaviour is consistent, and
+it is not a phrasing problem or a grounding problem.
+
+**Why it matters even though the answers were roughly right.** The two faults
+are distinguished *only* by the kubelet's verdict. `InvalidImageName` means the
+reference never parsed; `ErrImageNeverPull` means it parsed fine and the policy
+forbade fetching it; `ImagePullBackOff` means it was fetched and failed. All
+three are "the image is wrong" from the spec alone, and they have three
+different fixes. A tool that reads the image string and infers will get the
+family right and the member wrong, and it will do so confidently — `grounded`,
+on one of these three runs, because the image name it quoted *was* measured.
+
+**Not diagnosed further, and the obvious next step is not the obvious one.**
+The prompt already says to read the pod. Whether this is a prompt problem, a
+tool-description problem (`list_deployments` advertising `images` invites
+exactly this), or a case whose `expect_tools` is stricter than the answer needs,
+is open — and it should be settled by measurement rather than by editing the
+prompt and re-running once. The n=3 set on `stuck_terminating_finalizer` was
+interrupted before it ran and is the other half of this measurement.
+
+
 ## Where a run's 74 seconds go
 
 Every latency figure this project has published is a report. None of them said
