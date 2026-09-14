@@ -27,10 +27,16 @@ questions worth asking of its output changed the first time it was read.
 
 import itertools
 import json
+import os
 import sys
 from collections import Counter, defaultdict
 
-from summarise import wilson
+# Run as a script, Python puts evals/ on the path and this import works; run
+# with `-m` or imported from a test, it does not. Insert it explicitly, as the
+# other scripts here do.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from summarise import wilson  # noqa: E402
 
 
 def rate(count, total):
