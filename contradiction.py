@@ -246,7 +246,16 @@ _DENIED_AFTER = re.compile(
 #    "the absence of OOMKilled", "lack of OOMKilled confirmation". Directly --
 #    only markup may separate them -- which is what keeps "lack of limits
 #    allows it to trigger the OOM killer" asserted.
-_DENIED_BEFORE = re.compile(r"\b(?:lack|absence|instead|rather\s+than)(?:\s+of)?\s*$")
+_DENIED_BEFORE = re.compile(
+    r"\b(?:lack|absence|instead|rather\s+than)(?:\s+of)?\s*$"
+    # Defect 52's remainder: "This contradicts the earlier assumption of OOM
+    # termination." -- the phrase named only as the thing being overturned.
+    r"|\b(?:contradicts|rules\s+out|disproves|refutes|rejects)\b[^.]{0,30}?"
+    r"\b(?:assumption|claim|hypothesis|theory|idea|suggestion)\s+of\s*$"
+    # And a thing to go and look for is not a thing found: "Inspect
+    # `demo/nightly-sync` and `demo/memory-hog` for OOMKilled or exit code 1."
+    # Directly before, so "Check the logs: the container was OOMKilled" asserts.
+    r"|\b(?:check|inspect|look|search|verify|watch)\b[^.:;]{0,60}?\bfor\s*$")
 
 # 3. A concession: the phrase sits inside a leading "While/Although ..." clause,
 #    before its comma, and the sentence goes on to set it aside.
@@ -304,6 +313,18 @@ def _asserted(lowered, phrase):
 #    And the unconditional form, from the defect 46 A/B, whose records carry the
 #    flagged clause but not the draft, so it is covered by a test rather than
 #    by replay: "The kubelet sets `OOMKilled` explicitly for OOM kills."
+# A contrast that sets the phrase against the measured reason:
+#   "exit code 137, which typically indicates **OOMKilled** (Out-Of-Memory), but
+#    the `last_termination.reason` field explicitly states **"Error"**"
+# The phrase is what 137 is associated with; the clause's claim is the Error.
+# Only when the reason field itself is what the "but" introduces, so "was
+# OOMKilled, but the logs show nothing" still asserts.
+_REASON_CONTRAST = re.compile(
+    # Any character in the gaps, not [^.]: "`last_termination.reason`" carries a
+    # dot, and the first version of this pattern missed its own example on it.
+    r"\bbut\b.{0,40}?\breason\b.{0,40}?\berror\b")
+
+
 _OOM_RULE_STATEMENT = re.compile(
     r"\b(?:when|if|whenever)\s+(?:the\s+)?(?:kernel['\u2019]?s?\s+|linux\s+)?"
     r"oom[- ]?killer\s+(?:terminat|kill|end|stop)"
@@ -456,6 +477,32 @@ def facts(entries):
                     found["ready_endpoints_total"] = found.get(
                         "ready_endpoints_total", 0) + len(value)
     return found
+
+
+def _pods_detailed(entries):
+    """
+    Distinct subjects the scope carries per-pod detail for (describe_pod,
+    events, logs).
+
+    A workload and its pod are one subject: `slow-starter` and
+    `slow-starter-56c8f89495-c4qtf` are the same thing named at two levels, and
+    a model calls a tool with either. The first version counted them as two
+    pods and silenced the contradiction re-ask's own test -- a get_pod_logs
+    result named by workload beside a describe_pod named by pod. The corpus
+    replay could not have caught it; every recorded result there carries the
+    full pod name.
+    """
+    names = set()
+    for entry in entries:
+        try:
+            data = json.loads(entry["text"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("pod"), str):
+            names.add(data["pod"])
+    return {name for name in names
+            if not any(other != name and name.startswith(other + "-")
+                       for other in names)}
 
 
 def _entity_present(entries, name):
@@ -622,7 +669,17 @@ def scan(answer, tool_outputs):
         known = facts(entries)
 
         # --- termination reason vs claimed cause -------------------------
-        reason = known.get("termination_reason")
+        # Which pod's reason, when the scope holds more than one? Defect 52's
+        # remainder: a cluster-scan answer listed "**`demo/memory-hog`**" then
+        # "- **Fault**:" then "OOMKilled." -- correct -- and the bare fragment
+        # scoped to nightly-sync's describe_pod (reason Error) and another pod's
+        # events. facts() keeps the first reason it meets, so an entity-less
+        # clause was checked against whichever pod came first. Two distinct pods
+        # with per-pod detail in scope means the rule cannot say whose reason
+        # the clause contradicts, and a guess is exactly the wrong-entity finding
+        # this module is supposed to be unable to make.
+        reason = (known.get("termination_reason")
+                  if len(_pods_detailed(entries)) <= 1 else None)
         if reason in _IMPOSED_TERMINATIONS:
             hit = next((p for p in _APPLICATION_CAUSE
                             if p in lowered and _asserted(lowered, p)), None)
@@ -636,10 +693,13 @@ def scan(answer, tool_outputs):
             # the kernel. Only when no OOM appears anywhere in scope, so a pod
             # whose evidence genuinely mentions both is left alone.
             scope_text = " ".join(e["text"] for e in entries).lower()
+            contrast = _REASON_CONTRAST.search(lowered)
             if ("oomkilled" not in scope_text
                     and not _OOM_RULE_STATEMENT.search(lowered)):
                 hit = next((p for p in _MEMORY_CAUSE
-                                if p in lowered and _asserted(lowered, p)), None)
+                                if p in lowered and _asserted(lowered, p)
+                                and not (contrast and lowered.find(p) < contrast.start())),
+                           None)
                 if hit:
                     findings.append(_finding(
                         "termination_reason_vs_memory_cause", hit,

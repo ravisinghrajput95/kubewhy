@@ -198,7 +198,7 @@ Details: [docs/INFERENCE.md](docs/INFERENCE.md).
 
 | Capability | Evidence |
 |---|---|
-| Automated tests | 1807 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
+| Automated tests | 1815 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
 | Grounding replay | 1683 recorded runs, no regressions (counted 2026-09-12; this row said 907) |
 | AI evaluation | 29 scenarios × 5 runs per configuration |
 | GKE runtime | Validated |
@@ -232,7 +232,10 @@ live cluster:
 
 **Overall model comparison: UNDETERMINED.** Paired at the scenario level — both
 configurations see the same scenarios — 19 of 29 are identical and a two-sided
-sign test gives **p = 0.3438**. The sample does not separate them.
+sign test gives **p = 0.3438**. The sample does not separate them. *Regraded
+2026-09-15 under the current grounding checker, after defects 45 and 52 removed
+false contradictions: qwen3 130/145, gpt-4o-mini 132/145, 21 of 29 identical,
+p = 0.7266 — still undetermined. The table above is as recorded.*
 
 **91% is not a diagnostic accuracy figure and must not be read as one.** It is a
 pass rate on 29 hand-built scenarios, on one cluster, with one prompt

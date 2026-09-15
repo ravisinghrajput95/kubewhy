@@ -141,6 +141,9 @@ on the discordant scenarios.
 
 - qwen3 better on **3** scenarios, gpt-4o-mini on **7**, **19 identical**
 - 10 discordant, two-sided sign test **p = 0.3438**
+- *Regraded 2026-09-15 under the current checker (defects 45 and 52): qwen3
+  130/145 (90%) [84–94], gpt-4o-mini 132/145, 8 discordant, p = 0.7266 — still
+  undetermined. The table above is as recorded.*
 - Wilson intervals overlap substantially
 
 **The sample does not separate them on overall correctness.** 91% is a pass rate

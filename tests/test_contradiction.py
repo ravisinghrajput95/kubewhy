@@ -433,6 +433,15 @@ class TestDenialsTheBackwardWindowCannotSee:
         "sets `OOMKilled` when the OOM killer terminates a container).",
         '"OOMKilled"` only when the kernel\'s OOM killer terminates a container.',
         "The kubelet sets `OOMKilled` explicitly for OOM kills.",
+        # defect 52's remainder, 2026-09-15: a contrast with the measured
+        # reason, an assumption being overturned, and a thing to look for
+        "The **slow-starter deployment** in the `demo` namespace is restarting "
+        "due to a **container exit code 137**, which typically indicates "
+        "**OOMKilled** (Out-Of-Memory), but the `last_termination.reason` field "
+        'explicitly states **"Error"**.',
+        "- This contradicts the earlier assumption of OOM termination.",
+        "- Inspect `demo/nightly-sync` and `demo/memory-hog` for OOMKilled or "
+        "exit code 1.",
     ]
 
     CLAIMS = [
@@ -454,7 +463,45 @@ class TestDenialsTheBackwardWindowCannotSee:
         "While the node had free memory, the container was OOMKilled.",
         # "sets" without the OOM killer as the condition is not the rule.
         "The kubelet sets the reason, and this container was OOMKilled.",
+        # A "but" that introduces something other than the reason field.
+        "The container was OOMKilled, but the logs show no error at all.",
+        # "check" earlier in the clause, not directly before the phrase. One
+        # clause: the first version read "Check the logs: the container was
+        # OOMKilled.", which the splitter cuts at the colon, so "check" never
+        # shared a clause with the phrase and the anchor went untested.
+        "Check memory limits since the container was OOMKilled.",
     ]
+
+    def test_a_clause_about_one_of_two_pods_is_not_checked_against_either(self):
+        """
+        Defect 52's remainder. A cluster-scan answer named `demo/memory-hog`,
+        then a bare "OOMKilled." under it, and the fragment scoped to a
+        different pod's describe_pod -- whose reason was Error. With two pods'
+        details in scope the rule cannot know whose reason the clause is about.
+        """
+        other = ("describe_pod", {
+            "pod": "nightly-sync-1", "namespace": "demo", "status": "Error",
+            "containers": {"sync": {"last_termination": {"reason": "Error",
+                                                         "exit_code": 1}}}})
+        found = grounding.check("The container was OOM-killed.",
+                                ev(self.KILLED, other))["contradictions"]
+        assert found == []
+
+    def test_a_workload_and_its_pod_are_one_subject_not_two(self):
+        # A tool called with the workload name reports that name; describe_pod
+        # reports the pod's. Counting them as two pods silenced the re-ask.
+        logs = ("get_pod_logs", {"pod": "slow-starter", "logs": []})
+        found = grounding.check("The container was OOM-killed.",
+                                ev(self.KILLED, logs))["contradictions"]
+        assert found and found[0]["rule"] == "termination_reason_vs_memory_cause"
+
+    def test_the_same_clause_about_one_pod_is_still_checked(self):
+        # The counter: without it the test above passes on a rule that has
+        # stopped firing for multi-document evidence of any kind.
+        events = ("get_pod_events", {"pod": "slow-starter-1", "events": []})
+        found = grounding.check("The container was OOM-killed.",
+                                ev(self.KILLED, events))["contradictions"]
+        assert found and found[0]["rule"] == "termination_reason_vs_memory_cause"
 
     @pytest.mark.parametrize("clause", NOT_CLAIMS)
     def test_a_recorded_non_claim_is_not_a_contradiction(self, clause):

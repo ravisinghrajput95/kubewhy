@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1807 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1815 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -38,7 +38,7 @@ and does not support. Four words are used and they mean specific things:
 | Hosted OpenAI API inference | **PROVEN** | 145 live investigations |
 | In-cluster inference | **PARTIALLY PROVEN** | Ollama, and the `vllm` provider against a real OpenAI-protocol server |
 | AKS runtime | **PARTIALLY PROVEN** | non-AAD single node |
-| Model comparison | **UNDETERMINED** | p = 0.3438, paired, n=5 |
+| Model comparison | **UNDETERMINED** | p = 0.3438, paired, n=5; regraded 2026-09-15 under the current checker, 130/145 against 132/145, p = 0.7266 |
 | Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — and measured 2026-09-12 at n=3, 102 runs: **78/87 (89.7%) [81.5–94.5] on the cases the prompts were written against, 8/15 (53.3%) [30.1–75.2] on five fault types they were not**, Fisher p = 0.0020 — **regraded 2026-09-15 after defect 52 removed false contradictions: 79/87 (90.8%) [82.9–95.3] against the same 8/15, p = 0.0012**. Supersedes the n=1 97%/40% of 2026-09-09: the direction defect 44 claimed holds, the gap is 36.4 points rather than 57, and four of the five never-seen cases are flaky rather than broken. The never-seen interval is still 45 points wide. See defect 47 |
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
@@ -3340,6 +3340,54 @@ and the other "The `Error` termination reason and lack of OOMKilled confirmation
 rule out memory pressure" — a denial. Both runs still fail, on their other
 reasons, so that case's 1/3 stands; the claim that the model fabricated an OOM
 kill there does not.
+
+**The five left over, closed 2026-09-15 — and two of them were not false.**
+Read in the answer around them rather than as flagged, two are true positives
+the splitter had cut: "`OOMKilled`)." closes "restarting due to memory
+exhaustion (exit code 137: `OOMKilled`)", and "- **OOM Killer Termination**:"
+heads "The container was killed by the Linux OOM Killer". Both stay flagged.
+The other three were false, each a different shape:
+
+| clause | shape | fix |
+|---|---|---|
+| "…which typically indicates **OOMKilled**, but the `last_termination.reason` field explicitly states **"Error"**" | a contrast with the measured reason | the phrase before a "but" that introduces the reason field and "error" |
+| "- This contradicts the earlier assumption of OOM termination." | the phrase as the thing overturned | "contradicts / rules out / refutes … assumption of" directly before |
+| "OOMKilled." under "**`demo/memory-hog`**" in a cluster scan | **wrong entity**: scoped to `nightly-sync`'s describe_pod, reason `Error` | a termination-reason rule stays silent when the scope details two different pods |
+
+The replay found two more. The wrong-entity guard also removed "`demo/crasher`
+/ `demo/log-shipper`: CrashLoopBackOff (application crashes)." from the
+imposed-termination rule — scoped to `memory-hog`'s OOMKilled, the same false
+finding on the sibling rule. And removing the "OOMKilled." finding surfaced,
+through the one-finding-per-claim dedupe, "Inspect `demo/nightly-sync` and
+`demo/memory-hog` for OOMKilled or exit code 1" — advice, now recognised by
+"check / inspect / look … for" directly before the phrase. **The first version
+of the contrast pattern missed its own example**, because
+"`last_termination.reason`" carries a dot and the gap forbade one.
+
+Before (`HEAD`) against after over **all 1816 replayable records**, including
+the 28 from defect 53: 5 findings removed, exactly those four clauses (one
+appears in two files); 0 added; 4 verdicts out of `contradicted`, 0 in. Seven
+mechanisms, each disabled and watched fail a test — and the first counter for
+the "check … for" anchor, "Check the logs: the container was OOMKilled", tested
+nothing, because the splitter cuts at the colon and "check" never shared a
+clause with the phrase.
+
+All four moved records were recorded failures that pass under the fixed
+checker, each having failed only on the false `contradicted`: 
+`final-29-qwen3-n5.json`, the published baseline, one more pass — and under
+the whole current checker, earlier drift included, **127/145 → 130/145**, which
+moves the model comparison to 130/145 against 132/145, p = 0.7266 from 0.3438,
+still undetermined;
+`regression-29-n5-after-fixes.json` one more; `scoping-n10.json` 6/9 → 7/9.
+This rule has no known false-positive clause left in the corpus.
+
+**And the replay could not have caught the first version's defect; a unit test
+did.** The wrong-entity guard counted `slow-starter` and
+`slow-starter-56c8f89495-c4qtf` as two pods, so a `get_pod_logs` result named by
+workload beside a `describe_pod` named by pod silenced the rule — and with it
+the contradiction re-ask, whose two tests in `test_agent_loop.py` failed. Every
+recorded result in the corpus carries the full pod name, so 1816 replayed
+records showed nothing. A workload and its pod are now one subject.
 
 
 ### 53. describe_pod said nothing about scheduling, and the model read the silence as a fact
