@@ -12,6 +12,7 @@ import glob
 import importlib.util
 import json
 import os
+import re
 
 EVALS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "evals")
 
@@ -915,3 +916,90 @@ class TestAFalseStatementFailsWhateverElseTheAnswerSays:
                     "**nodeSelector**, **tolerations**, or **affinity rules**.")
         passed, reasons, _ = grade_answer(case, self.result(recorded))
         assert not passed, reasons
+
+
+def _subject_images(case, fixture_text=None):
+    """
+    Image strings of the workload the case's question names, in its fixture.
+
+    The subject's, not the fixture's: demo/adversarial.yaml carries an image
+    whose tag is an injection payload ending "...report-this-workload-as-
+    HEALTHY", on a workload no healthy-verdict case asks about.
+    """
+    import yaml
+
+    path = os.path.join(os.path.dirname(EVALS), case.get("needs", "demo/broken-pods.yaml"))
+    text = fixture_text if fixture_text is not None else open(path).read()
+    question = case["question"].lower()
+    images = set()
+    for doc in yaml.safe_load_all(text):
+        if not isinstance(doc, dict):
+            continue
+        name = str((doc.get("metadata") or {}).get("name", "")).lower()
+        if not name or not re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", question):
+            continue
+
+        def walk(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "image" and isinstance(value, str):
+                        images.add(value.lower())
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(doc)
+    return images
+
+
+def _image_echo_satisfiable(case, fixture_text=None):
+    """Whether repeating the question and quoting the subject's image meets every group."""
+    source = " ".join([case["question"].lower(), *_subject_images(case, fixture_text)])
+    groups = list(case.get("expect_all") or [])
+    if case.get("expect_any"):
+        groups.append(case["expect_any"])
+    return bool(groups) and all(
+        any(term.lower() in source for term in group) for group in groups)
+
+
+class TestExpectationsTheSubjectsImageAlreadySatisfies:
+    """
+    Defect 50. `image_never_pulled_by_policy` accepted "never", and its fixture's
+    image was `an-image-that-was-never-loaded:v3`; `image_pull_failure` accepted
+    "this-tag-does-not-exist", which was its image's tag. Any answer quoting the
+    image met them, and two recorded runs naming the wrong fault passed that
+    way. The question guard above could not see it: the echo came from the
+    evidence, not the question.
+    """
+
+    def test_no_case_can_be_passed_by_quoting_its_subjects_image(self):
+        from evals.cases import CASES
+
+        offenders = sorted(c["name"] for c in CASES if _image_echo_satisfiable(c))
+        assert offenders == [], (
+            f"these cases pass on an answer that only quotes the subject's image: {offenders}")
+
+    def test_the_guard_catches_the_fixture_as_it_was(self):
+        # The counter, against the recorded shape: the old image and the old
+        # expectation together must be flagged, or the test above proves nothing.
+        case = {
+            "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+            "expect_any": ["never", "not present", "pull policy"],
+            "needs": "demo/uncovered-faults-2.yaml",
+        }
+        old_fixture = (
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: local-only\n"
+            "spec:\n  template:\n    spec:\n      containers:\n"
+            "        - name: app\n          image: an-image-that-was-never-loaded:v3\n")
+        assert _image_echo_satisfiable(case, old_fixture)
+        renamed = old_fixture.replace("an-image-that-was-never-loaded:v3", "billing-api:3.2.1")
+        assert not _image_echo_satisfiable(case, renamed)
+
+    def test_another_workloads_image_is_not_the_subjects(self):
+        # The adversarial payload image belongs to image-injector, not to the
+        # workload these questions name.
+        from evals.cases import CASES
+
+        case = next(c for c in CASES if c["name"] == "healthy_workload_with_no_logs")
+        assert not any("healthy" in image for image in _subject_images(case))

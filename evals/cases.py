@@ -63,12 +63,18 @@ run.
 #                     and the provisioner's name is in the PVC's own events,
 #                     which no tool reads. A case demanding that detail would
 #                     measure the harness -- the list_jobs lesson.
+#                     **Answerable since e98917a**: describe_pod reports each
+#                     claim's StorageClass, whether it exists, its provisioner
+#                     and the claim's own newest event. Case added 2026-09-15.
 #   preemption        a low-priority pod evicted by a high-priority one.
 #                     **Not answerable**: the `Preempted` event is on a pod
 #                     that no longer exists, and the replacement's event says
 #                     only `Insufficient cpu`, which points away from the
 #                     cause. No tool reports pod priority or preemption.
-UNCOVERED_CASES_2 = [
+#                     **Answerable since de6333b**: describe_pod reports the
+#                     pod's priority and earlier pods of its workload preempted,
+#                     by name and priority. Case added 2026-09-15.
+UNCOVERED_CASES_2: list[dict[str, object]] = [
     {
         "name": "image_never_pulled_by_policy",
         "category": "imagename",
@@ -77,9 +83,12 @@ UNCOVERED_CASES_2 = [
         "expected_grounding": ["grounded", "partial"],
         "needs": "demo/uncovered-faults-2.yaml",
         "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
-        "expect_any": ["never", "not present", "errimageneverpull",
-                       "pull policy", "pullpolicy", "not on the node",
-                       "locally"],
+        # "never" was a bare term here and matched inside the fixture's old
+        # image name, an-image-that-was-never-loaded (defect 50). Every term
+        # now names the policy or the kubelet's verdict.
+        "expect_any": ["not present", "errimageneverpull", "pull policy",
+                       "pullpolicy", "policy of never", "set to never",
+                       "never pull", "not on the node", "locally"],
         # The near-miss, and it is every other image fault in the corpus. No
         # registry was contacted, so there is nothing unreachable, no tag to
         # be wrong and no credential to be missing. "Check your pull secret"
@@ -111,6 +120,44 @@ UNCOVERED_CASES_2 = [
         # needs, and all three recorded runs named the finalizer -- two of them
         # scored FAIL on "never called describe_pod" alone.
         "require_grounded": True,
+    },
+    {
+        "name": "claim_waiting_on_a_missing_provisioner",
+        "category": "storage",
+        "ground_truth": "ledger-data's StorageClass ghost-provisioner exists, but its provisioner example.com/no-such-csi-driver never creates a volume, so the claim and the pod stay Pending",
+        "required_evidence": ["storage class", "provisioner", "claim event"],
+        "expected_grounding": ["grounded", "partial"],
+        "needs": "demo/uncovered-faults-2.yaml",
+        "question": "The ledger-writer pod in the uncovered2 namespace is stuck in Pending. Why?",
+        # The provisioner is the cause. The claim is unbound, but so is the
+        # claim of every other storage fault; what is specific here is that
+        # nothing answers for the class.
+        "expect_all": [["provisioner", "no-such-csi-driver", "csi driver"]],
+        # The near-miss is the corpus's existing missing-StorageClass case. This
+        # class exists -- "create the StorageClass" is the wrong fix, and saying
+        # it does not exist is false of the fixture.
+        "false_statements": [
+            "storageclass does not exist", "storage class does not exist",
+            "storageclass ghost-provisioner does not exist", "no such storageclass",
+            "storageclass is missing", "storage class is missing",
+        ],
+        "forbid": ["oomkilled", "image pull", "insufficient cpu"],
+    },
+    {
+        "name": "pending_behind_a_higher_priority_pod",
+        "category": "scheduling",
+        "ground_truth": "filler (priority 1, low-batch) was preempted by urgent (priority 1000000, high-urgent), and its replacement cannot schedule because urgent holds the CPU it needs",
+        "required_evidence": ["priority", "preemption"],
+        "expected_grounding": ["grounded", "partial"],
+        "needs": "demo/uncovered-faults-2.yaml",
+        "question": "The filler deployment in the uncovered2 namespace has no running pod. Why?",
+        # Both halves: that priority decided it, and which pod won.
+        "expect_all": [["preempt", "priority"], ["urgent"]],
+        # The near-miss is capacity. The replacement's own message is
+        # "Insufficient cpu", and "add nodes or lower the request" treats a
+        # priority decision as a sizing problem.
+        "forbid": ["add more nodes", "add a node", "scale up the cluster",
+                   "increase the node", "oomkilled", "image pull"],
     },
 ]
 
@@ -250,13 +297,15 @@ CASES = [
     {
         "name": "image_pull_failure",
         "category": "imagepull",
-        "ground_truth": "the image tag nginx:this-tag-does-not-exist does not exist in the registry",
+        "ground_truth": "the image tag nginx:1.99.7 does not exist in the registry",
         "required_evidence": ['waiting_reason', 'image reference', 'pull event'],
         "expected_grounding": ['grounded', 'partial'],
         "question": "The bad-image pod in the demo namespace will not start. Why?",
         "expect_all": [
             ["image", "pull"],
-            ["this-tag-does-not-exist", "does not exist", "doesn't exist", "not found"],
+            # The tag itself was a term here while the fixture named it
+            # this-tag-does-not-exist: any answer quoting the image met it.
+            ["does not exist", "doesn't exist", "not found"],
         ],
     },
     {

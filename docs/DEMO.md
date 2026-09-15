@@ -40,7 +40,7 @@ intent.
 |---|---|---|---|---|
 | `memory-hog` | demo | OOMKilled, restarting | `last_termination.reason=OOMKilled`, `limits.memory=64Mi` | exceeded its 64Mi limit and was killed by the kernel |
 | `crasher` | demo | CrashLoopBackOff | `exit_code=1`, logs `could not connect to db:5432` | exits because it cannot reach the database |
-| `bad-image` | demo | ImagePullBackOff | `waiting_reason`, image `nginx:this-tag-does-not-exist` | the image tag does not exist in the registry |
+| `bad-image` | demo | ImagePullBackOff | `waiting_reason`, image `nginx:1.99.7` | the image tag does not exist in the registry |
 | `slow-starter` | demo | CrashLoopBackOff | `BackOff` event on container `web` | restarts before it finishes starting |
 | `log-shipper` | demo | Error (DaemonSet) | `last_termination.reason=Error` | container exits non-zero |
 | `needs-db` | demo | Init:CrashLoopBackOff | init container `wait-for-db` back-off | never starts; its init container fails |

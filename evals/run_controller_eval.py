@@ -48,7 +48,7 @@ CASES = [
     },
     {
         "workload": "bad-image",
-        "expect_all": [["image"], ["this-tag-does-not-exist", "not found", "does not exist"]],
+        "expect_all": [["image"], ["not found", "does not exist"]],
     },
     {
         "workload": "never-ready",
