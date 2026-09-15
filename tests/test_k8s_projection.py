@@ -1154,6 +1154,88 @@ class TestEvents:
         assert reasons == ["Recent", "Old"]
 
 
+def _event(kind, reason, message, when):
+    return client.CoreV1Event(
+        metadata=client.V1ObjectMeta(name=f"{reason}-{when.second}"),
+        involved_object=client.V1ObjectReference(name="gpu-scoring-1"),
+        type=kind, reason=reason, message=message, count=1, last_timestamp=when)
+
+
+_TAINT = ("0/1 nodes are available: 1 node(s) had untolerated taint(s). no new "
+          "claims to deallocate, preemption: 0/1 nodes are available: 1 "
+          "Preemption is not helpful for scheduling.")
+
+
+class TestSupersededSchedulingWarnings:
+    """
+    Defect 53. gpu-scoring kept a taint warning from the node's first seconds
+    beside the scheduler's current selector verdict, and both runs that read
+    the events blamed the taint. Ages 31s and 21s read as two live problems.
+    """
+
+    NOW = dt.datetime(2026, 9, 15, 12, 0, 30, tzinfo=dt.UTC)
+
+    def test_an_older_different_scheduling_verdict_is_marked(self, api):
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=[
+            _event("Warning", "FailedScheduling", _TAINT,
+                   self.NOW - dt.timedelta(seconds=10)),
+            _event("Warning", "FailedScheduling", _SELECTOR_MESSAGE, self.NOW),
+        ])
+
+        events = k8s.get_pod_events("gpu-scoring-1", "shop")["events"]
+
+        current, old = events  # newest first
+        assert "superseded" not in current
+        assert "untolerated taint" in old["message"]
+        assert "different reason" in old["superseded"]
+
+    def test_a_scheduling_warning_before_the_pod_was_scheduled_is_marked(self, api):
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=[
+            _event("Warning", "FailedScheduling", _TAINT,
+                   self.NOW - dt.timedelta(seconds=10)),
+            _event("Normal", "Scheduled", "assigned to node-1", self.NOW),
+        ])
+
+        (only,) = k8s.get_pod_events("gpu-scoring-1", "shop")["events"]
+
+        assert "scheduled after" in only["superseded"]
+
+    def test_the_same_verdict_repeated_is_not_superseded(self, api):
+        # A scheduler saying the same thing twice is still saying it.
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=[
+            _event("Warning", "FailedScheduling", _SELECTOR_MESSAGE,
+                   self.NOW - dt.timedelta(seconds=10)),
+            _event("Warning", "FailedScheduling", _SELECTOR_MESSAGE, self.NOW),
+        ])
+
+        events = k8s.get_pod_events("gpu-scoring-1", "shop")["events"]
+
+        assert all("superseded" not in e for e in events)
+
+    def test_two_different_verdicts_in_the_same_second_are_both_left_alone(self, api):
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=[
+            _event("Warning", "FailedScheduling", _TAINT, self.NOW),
+            _event("Warning", "FailedScheduling", _SELECTOR_MESSAGE, self.NOW),
+        ])
+
+        events = k8s.get_pod_events("gpu-scoring-1", "shop")["events"]
+
+        assert all("superseded" not in e for e in events)
+
+    def test_other_warnings_are_never_marked(self, api):
+        # Only a scheduler verdict can be overruled by a later one; an image
+        # pull failure followed by a Scheduled event is not history.
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=[
+            _event("Normal", "Scheduled", "assigned", self.NOW - dt.timedelta(seconds=20)),
+            _event("Warning", "Failed", "ErrImagePull", self.NOW - dt.timedelta(seconds=30)),
+            _event("Warning", "FailedScheduling", _TAINT, self.NOW),
+        ])
+
+        events = k8s.get_pod_events("gpu-scoring-1", "shop")["events"]
+
+        assert all("superseded" not in e for e in events)
+
+
 class TestLogs:
     def test_decodes_bytes_body(self, api):
         """The client returns a repr of bytes unless the raw body is read."""

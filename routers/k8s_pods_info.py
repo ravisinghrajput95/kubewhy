@@ -1455,7 +1455,10 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
     FailedScheduling warning for its whole life, so a warning here does not
     mean the pod is failing now. Check the age against the pod's status before
     concluding anything -- a 27-minute-old warning on a Running pod is
-    something that already resolved.
+    something that already resolved. A FailedScheduling warning the scheduler
+    has since overruled -- by a later attempt failing for a different reason,
+    or by scheduling the pod -- carries "superseded" saying which: it is not
+    a current cause.
     Args: name -- the pod name; namespace -- defaults to "default";
     limit -- how many events to return, default 10.
     """
@@ -1474,19 +1477,64 @@ def get_pod_events(name: str, namespace: str = "default", limit: int = 10):
     if not warnings:
         return {"result": f"no warning events for pod {name}"}
 
-    return {
-        "pod": name,
-        "events": [
-            {
-                "reason": e.reason,
-                "count": e.count,
-                "age": _age(e.last_timestamp or e.event_time),
-                # Events echo container args, which sometimes carry secrets.
-                "message": redact((e.message or "")[:300]),
-            }
-            for e in warnings[:limit]
-        ],
-    }
+    stale = _superseded_scheduling(events.items)
+
+    projected = []
+    for e in warnings[:limit]:
+        entry = {
+            "reason": e.reason,
+            "count": e.count,
+            "age": _age(e.last_timestamp or e.event_time),
+            # Events echo container args, which sometimes carry secrets.
+            "message": redact((e.message or "")[:300]),
+        }
+        if id(e) in stale:
+            entry["superseded"] = stale[id(e)]
+        projected.append(entry)
+    return {"pod": name, "events": projected}
+
+
+def _superseded_scheduling(items):
+    """
+    FailedScheduling warnings the scheduler has since overruled, by id().
+
+    Measured on kind 2026-09-15 (defect 53). A pod created while the node was
+    still coming up collected "1 node(s) had untolerated taint(s)" in its
+    first seconds, then "didn't match Pod's node affinity/selector" for the
+    rest of its life. Both came back from this tool, and both runs after the
+    describe_pod change that read the events blamed the taint -- which had not
+    applied for minutes. The age alone did not stop it: 31s against 21s reads
+    as two current problems.
+
+    Two ways a scheduling warning stops being the verdict:
+      - a later FailedScheduling said something else -- the newest one is the
+        scheduler's current reason, and an older one with a different message
+        is one it no longer gives;
+      - the pod was Scheduled after it -- a Normal event, which is why this
+        reads every event rather than the warnings.
+
+    Marked, not dropped: a superseded warning is still what happened, and
+    hiding it would make a flapping scheduler look steady.
+    """
+    def when(event):
+        return event.last_timestamp or event.event_time
+
+    scheduled = [when(e) for e in items if e.reason == "Scheduled" and when(e)]
+    scheduled_at = max(scheduled) if scheduled else None
+    failed = [e for e in items
+              if e.reason == "FailedScheduling" and e.type == "Warning" and when(e)]
+    newest = max(failed, key=when) if failed else None
+
+    stale = {}
+    for event in failed:
+        if scheduled_at is not None and when(event) <= scheduled_at:
+            stale[id(event)] = "the pod was scheduled after this"
+        # Strictly older: two different verdicts stamped the same second leave
+        # no way to say which is current, so neither is marked.
+        elif (when(event) < when(newest)
+              and (event.message or "") != (newest.message or "")):
+            stale[id(event)] = "a later scheduling attempt failed for a different reason"
+    return stale
 
 
 def _needs_container(exc):
