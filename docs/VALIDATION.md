@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1780 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1800 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -39,7 +39,7 @@ and does not support. Four words are used and they mean specific things:
 | In-cluster inference | **PARTIALLY PROVEN** | Ollama, and the `vllm` provider against a real OpenAI-protocol server |
 | AKS runtime | **PARTIALLY PROVEN** | non-AAD single node |
 | Model comparison | **UNDETERMINED** | p = 0.3438, paired, n=5 |
-| Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — and measured 2026-09-12 at n=3, 102 runs: **78/87 (89.7%) [81.5–94.5] on the cases the prompts were written against, 8/15 (53.3%) [30.1–75.2] on five fault types they were not**, Fisher p = 0.0020. Supersedes the n=1 97%/40% of 2026-09-09: the direction defect 44 claimed holds, the gap is 36.4 points rather than 57, and four of the five never-seen cases are flaky rather than broken. The never-seen interval is still 45 points wide. See defect 47 |
+| Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — and measured 2026-09-12 at n=3, 102 runs: **78/87 (89.7%) [81.5–94.5] on the cases the prompts were written against, 8/15 (53.3%) [30.1–75.2] on five fault types they were not**, Fisher p = 0.0020 — **regraded 2026-09-15 after defect 52 removed false contradictions: 79/87 (90.8%) [82.9–95.3] against the same 8/15, p = 0.0012**. Supersedes the n=1 97%/40% of 2026-09-09: the direction defect 44 claimed holds, the gap is 36.4 points rather than 57, and four of the five never-seen cases are flaky rather than broken. The never-seen interval is still 45 points wide. See defect 47 |
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
@@ -2733,6 +2733,12 @@ hand before any model time was spent: `InvalidImageName`, a Job at
 | the 29 the prompts had seen | 78/87, **89.7%** | [81.5–94.5] |
 | the 5 they had not | 8/15, **53.3%** | [30.1–75.2] |
 
+*Regraded 2026-09-15, after defect 52 removed false `contradicted` verdicts:
+87/102 headline, **79/87 (90.8%) [82.9–95.3]** on the half the prompts had
+seen, the never-seen half unchanged at 8/15, p = 0.0012. The table above is
+kept as graded. Defect 52 also corrects this section's reading of
+`poststart_hook_not_the_app` below.*
+
 **Fisher p = 0.0020.** Defect 44's own table gives p = 0.0064 at n=1. **The
 direction holds and the value moved: the gap is 36.4 points, not 57.** The
 never-seen interval is still 45 points wide, so 53.3% is not a precise number —
@@ -3113,7 +3119,7 @@ policy, with every image string from the run's own evidence masked first.
 image and replace the `never` term, not to edit the prompt. But
 `image_pull_failure` (`nginx:this-tag-does-not-exist`) and
 `leading_question_image_pull_is_not_oom` share the leak and sit in the
-*pre-existing* half, so renaming consistently moves the 89.7% as well as the
+*pre-existing* half, so renaming consistently moves the 90.8% as well as the
 never-seen figure, and re-measures cases whose records go back to 2026-08-04. That is a
 decision about which published numbers to break, and it is recorded here
 rather than taken.
@@ -3193,10 +3199,10 @@ meant to be part of a passing answer; they grade the same three runs 3/3 and
 
 | set | score | 95% CI |
 |---|---|---|
-| the 29 the prompts had seen (2026-09-12) | 78/87, 89.7% | [81.5–94.5] |
+| the 29 the prompts had seen (2026-09-12, regraded after defect 52) | 79/87, 90.8% | [82.9–95.3] |
 | the 7 they had not, pooled across three dates | 9/21, **42.9%** | [24.5–63.5] |
 
-Fisher p = 1.3e-5. **This pools across tool versions**: defects 48 and 49
+Fisher p = 6.3e-6 (1.3e-5 before defect 52's regrade). **This pools across tool versions**: defects 48 and 49
 changed tool output between the 2026-09-12 set and the two round-2 sets, while
 `SYSTEM_PROMPT` is unchanged across all three (verified by diff). So it is not
 one tree measured once, and defect 47's 8/15 remains the clean single-tree
@@ -3241,6 +3247,99 @@ before it was believed; defect 45's first attempt put three new records into
 `contradicted`. What it costs until then: any case that sets
 `expected_grounding` can fail a correct, denying answer, and a defect-46-style
 A/B that reads the case grader will undercount both arms.
+
+**Classified and fixed 2026-09-15.** The 51 above were the clauses *recorded*
+in `contradictions`, written by whichever checker ran at the time. The number
+that matters is what the *current* checker flags, so every replayable record
+(1788) was run through it and its findings kept per record: **83 findings, 66
+distinct clauses** on this rule. All 66 were classified by hand:
+
+| class | clauses | example |
+|---|---|---|
+| asserts an OOM kill — true positive | 48 | "killed by the OOM killer (exit code 137)" |
+| states the rule | 6 | "The kubelet only sets `OOMKilled` if the kernel's OOM killer terminated the container." |
+| denial, negator after the phrase | 2 | "The OOM killer is **not** responsible here." |
+| denial, negating noun directly before | 3 | "`Error` instead of `OOMKilled`", "lack of OOMKilled confirmation" |
+| concession, set aside | 2 | "While exit code 137 is often associated with OOM killers, the `Error` reason suggests …" |
+| not addressed — fragment, heading or a different mechanism | 5 | "`OOMKilled`)." cut by the splitter; "…, but the field explicitly states"; "This contradicts the earlier assumption of OOM termination." |
+
+**Why each fix is positional rather than a new negator word.** Adding `lack`
+to `_NEGATORS` would silence defect 45's protected true positive — "the
+container's **lack** of limits allows it to trigger the OOM killer" — which
+carries the word 40 characters before the phrase, about something else. So:
+
+- **After the phrase** (`_DENIED_AFTER`): the phrase's own word may finish,
+  one further word or a parenthetical may follow, then a copula and a negator.
+  A conjunction may not sit in that slot, so "OOM-killed and was not
+  restarted" still asserts.
+- **Directly before** (`_DENIED_BEFORE`): `lack of`, `absence of`,
+  `instead of`, `rather than`, with only markup between.
+- **A concession** (`_CONCESSION`): the phrase inside a leading
+  "While/Although …" clause, before its comma. After the comma it still asserts.
+- **The rule restated** (`_OOM_RULE_STATEMENT`, memory rule only): a
+  conditional whose subject is the OOM killer acting, or "sets `OOMKilled` …
+  for OOM kills" — the second from the defect 46 A/B.
+- **A question asserts nothing.** Found by the replay itself: removing a
+  rule-statement finding surfaced "### **Why the Confusion About OOMKilled?**"
+  in the same record, which had always matched and had been hidden by the
+  one-finding-per-claim dedupe.
+
+**Replayed, before against after over the same 1788 records:**
+
+| | |
+|---|---|
+| findings removed | 14, which is **exactly the 13 distinct clauses classified above** |
+| findings added | **0** |
+| findings changed on any other rule | **0** — `_asserted` is shared by every rule |
+| verdicts moved | 11: 10 `contradicted → partial`, 1 `contradicted → grounded` |
+| verdicts moved **into** `contradicted` | **0** |
+| defect 45's two protected true positives | both still flagged |
+
+`evals/replay_grounding.py` against the recorded verdicts reads 76 moved where
+the baseline read 65; the only rows that change are `contradicted → partial`
+4 → 14 and `contradicted → grounded` 7 → 8, and `--self-check` passes 1788 of
+1788 before and after. The 5 unaddressed clauses stay flagged and are the
+remaining known false-positive shapes on this rule.
+
+**Tested with recorded clauses, and every mechanism broken on purpose.**
+`TestDenialsTheBackwardWindowCannotSee`: 14 recorded non-claims must come back
+clear and 6 claims beside those shapes must still be caught. Disabling each of
+the after-negator, before-noun, concession, comma check, question guard,
+either rule-statement alternative and the conjunction exclusion fails at
+least one test. **The first conjunction counter tested nothing** — "OOM-killed
+*because it* is not limited" puts two words in a slot that admits one, so it
+stayed flagged with the guard deleted. Rewritten as "OOM-killed *and* was not
+restarted", it fails without the guard.
+
+**What it changes in published figures.** Graded under the old and the new
+checker with everything else held fixed, 9 recorded failures become passes, all
+on `scoping_quiet_workload_beside_loud_one`, and each had failed on nothing but
+a false `contradicted`:
+
+| set | as graded before | regraded |
+|---|---|---|
+| `uncovered-n3-2026-09-12.json` (defect 47) | 86/102; that case 2/3 | **87/102**; 3/3 |
+| `scoping-n10-prompt.json` | 4/10 | **8/10** |
+| `scoping-n10.json` (9 replayable) | 4/9 under the old checker | **6/9** |
+| `fix-scoping-n5-final.json` | 2/5 under the old checker | **3/5** |
+| `regression-29-n5-after-fixes.json` | that case 4/5 | **5/5** |
+
+**Defect 47's split, regraded: 79/87, 90.8% [82.9–95.3] on the faults the
+prompts were written against; 8/15, 53.3% [30.1–75.2] on those they were not;
+Fisher p = 0.0012.** The never-seen half does not move. The gap is 37.5 points
+rather than 36.4, so correcting a checker that penalised correct answers
+*widened* the generalization gap rather than closing it — and quoting 89.7%
+alone would now be stale as well as half the story.
+
+**And defect 47's reading of `poststart_hook_not_the_app` was wrong.** It
+recorded that case failing 2/3 "with `unverified claims: ['oomkilled']` and a
+`contradicted` verdict — the checker working, on a claim the evidence refutes".
+Neither `contradicted` was that. One flagged "The kubelet only sets `OOMKilled`
+as the reason if the kernel's OOM killer terminated the container" — the rule —
+and the other "The `Error` termination reason and lack of OOMKilled confirmation
+rule out memory pressure" — a denial. Both runs still fail, on their other
+reasons, so that case's 1/3 stands; the claim that the model fabricated an OOM
+kill there does not.
 
 
 ## Where a run's 74 seconds go

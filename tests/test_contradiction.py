@@ -380,6 +380,92 @@ class TestTheNegationWindowHasTwoBounds:
             "the container was oomkilled after exceeding its memory limit",
             "oomkilled")
 
+class TestDenialsTheBackwardWindowCannotSee:
+    """
+    Defect 52. Every clause below is recorded: the first eleven from `results/`,
+    classified by hand among the 66 distinct clauses this rule flagged over the
+    corpus on 2026-09-15; the last three from the defect 46 A/B, whose records
+    keep the flagged clause but not the draft.
+
+    None of them claims an OOM kill. They deny one with the negator *after* the
+    phrase, deny it with a noun directly before it, concede it and set it
+    aside, restate the rule the system prompt teaches, or ask a question.
+    Replayed, fixing them moved 11 verdicts out of `contradicted`, none in, and
+    removed no finding from any other clause.
+    """
+
+    KILLED = ("describe_pod", {
+        "pod": "slow-starter-1", "namespace": "demo",
+        "status": "CrashLoopBackOff",
+        "containers": {"web": {"ready": False, "restarts": 5, "limits": {},
+                               "last_termination": {"reason": "Error",
+                                                    "exit_code": 137}}}})
+
+    NOT_CLAIMS = [
+        # negator after the phrase
+        "The OOM killer is **not** responsible here.",
+        "The **OOM killer** (out-of-memory killer) is **not confirmed** as the "
+        "cause, since the kubelet only sets `OOMKilled` as the reason when the "
+        "kernel\u2019s OOM killer terminates a container.",
+        "The OOM killer is not the cause, as the termination reason is not "
+        '`"OOMKilled"`.',
+        # a negating noun directly before it
+        "However, the absence of OOMKilled in the logs suggests this is not the "
+        "direct cause.",
+        "Error` instead of `OOMKilled`.",
+        "The `Error` termination reason and lack of OOMKilled confirmation rule "
+        "out memory pressure as the direct cause.",
+        # a concession, set aside
+        "While exit code 137 strongly suggests a SIGKILL (commonly from the OOM "
+        "killer), the kubelet\u2019s logs do not explicitly confirm this.",
+        "While exit code 137 is often associated with OOM killers, the "
+        '`"Error"` reason suggests the termination was not explicitly caused by '
+        "the OOM killer.",
+        # the rule, restated
+        "The kubelet only sets `OOMKilled` if the kernel's OOM killer terminated "
+        "the container.",
+        "The kubelet explicitly sets `OOMKilled` as the reason **only when the "
+        "kernel\u2019s OOM killer terminates a container**.",
+        # a question
+        "### **Why the Confusion About OOMKilled?**",
+        # from the defect 46 A/B
+        "This means the **OOM killer was not the cause** (the kubelet explicitly "
+        "sets `OOMKilled` when the OOM killer terminates a container).",
+        '"OOMKilled"` only when the kernel\'s OOM killer terminates a container.',
+        "The kubelet sets `OOMKilled` explicitly for OOM kills.",
+    ]
+
+    CLAIMS = [
+        # The counter: without these, every test above passes on a rule that
+        # has stopped firing at all.
+        "The container was killed by the OOM killer.",
+        # A conjunction between the phrase and a later "was not" -- the
+        # after-negator must not reach across it. Exactly one word sits
+        # between, because the pattern admits one: the first version of this
+        # counter read "OOM-killed because it is not limited", two words, and
+        # kept passing with the conjunction guard deleted.
+        "The container was OOM-killed and was not restarted.",
+        # A comma ends the subject the after-negator is allowed to govern.
+        "The OOM killer terminated the container, which is not unusual.",
+        # Defect 45's true positive: "lack" 40 characters back is about limits.
+        "The node is not under memory pressure, but the container's lack of "
+        "limits allows it to trigger the OOM killer independently.",
+        # A concession whose phrase comes after the comma is still a claim.
+        "While the node had free memory, the container was OOMKilled.",
+        # "sets" without the OOM killer as the condition is not the rule.
+        "The kubelet sets the reason, and this container was OOMKilled.",
+    ]
+
+    @pytest.mark.parametrize("clause", NOT_CLAIMS)
+    def test_a_recorded_non_claim_is_not_a_contradiction(self, clause):
+        assert grounding.check(clause, ev(self.KILLED))["contradictions"] == []
+
+    @pytest.mark.parametrize("clause", CLAIMS)
+    def test_a_claim_beside_those_shapes_is_still_caught(self, clause):
+        found = grounding.check(clause, ev(self.KILLED))["contradictions"]
+        assert found and found[0]["rule"] == "termination_reason_vs_memory_cause"
+
+
 class TestTheOomSpellingsTheModelActuallyUses:
     """
     The tuple carried "oom killed" and "oom-killed" and nothing else in that

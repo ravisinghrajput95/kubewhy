@@ -222,20 +222,93 @@ _PROSPECTIVE = re.compile(
 # characters clear of each bound.
 _NEGATION_WINDOW = 78
 
+# Defect 52, three more ways to deny a phrase, each found by classifying all 66
+# distinct clauses termination_reason_vs_memory_cause flagged over the corpus on
+# 2026-09-15. Each is positional rather than a new negator word, and that is
+# forced: "lack" as a negator would silence defect 45's true positive, "the
+# container's lack of limits allows it to trigger the OOM killer", which carries
+# it 40 characters before the phrase and is about something else.
+#
+# 1. The negator comes AFTER the phrase, governing it as subject:
+#      "The OOM killer is **not** responsible here."
+#      "The **OOM killer** (out-of-memory killer) is **not confirmed** as the cause"
+#    The phrase's own word may finish ("kill|er"), one further word or a
+#    parenthetical may sit between, and then a copula and a negator. A
+#    conjunction may not: "was OOM-killed and was not restarted" asserts.
+_DENIED_AFTER = re.compile(
+    r"^[\w'\u2019-]*"
+    r"(?:\s*\([^)]{0,40}\))?"
+    r"(?:\s+(?!because\b|and\b|but\b|so\b|which\b|since\b|as\b|while\b|when\b"
+    r"|if\b|it\b|that\b|this\b)[\w'\u2019-]+)?"
+    r"\s*\)?\s*(?:is|was|were|are|has\s+been)\s+(?:not|never)\b")
+
+# 2. A negating noun directly before it: "instead of `OOMKilled`",
+#    "the absence of OOMKilled", "lack of OOMKilled confirmation". Directly --
+#    only markup may separate them -- which is what keeps "lack of limits
+#    allows it to trigger the OOM killer" asserted.
+_DENIED_BEFORE = re.compile(r"\b(?:lack|absence|instead|rather\s+than)(?:\s+of)?\s*$")
+
+# 3. A concession: the phrase sits inside a leading "While/Although ..." clause,
+#    before its comma, and the sentence goes on to set it aside.
+#      "While exit code 137 is often associated with OOM killers, the "Error"
+#       reason suggests the termination was not explicitly caused by the OOM killer."
+_CONCESSION = re.compile(r"^\W*(?:while|although|though|even though)\b")
+
+_MARKUP_CHARS = "`\"'*_( "
+
 
 def _asserted(lowered, phrase):
     """
     Whether `phrase` is claimed rather than denied.
 
-    Looks only at the text immediately before it, so a phrase that carries its
+    Looks first at the text immediately before it, so a phrase that carries its
     own "not" -- "does not exist", "is not ready" -- is not mistaken for a
-    denial of itself.
+    denial of itself. Then at the three positional denials above.
     """
     start = lowered.find(phrase)
     if start < 0:
         return False
+    # A question asserts nothing. "### **Why the Confusion About OOMKilled?**"
+    # was the only clause holding one recorded answer at contradicted once the
+    # three denials below were recognised -- it had always matched, hidden
+    # behind a rule statement by the one-finding-per-claim dedupe.
+    if lowered.rstrip(_MARKUP_CHARS + "#").endswith("?"):
+        return False
     window = lowered[max(0, start - _NEGATION_WINDOW):start]
-    return not (_NEGATORS.search(window) or _PROSPECTIVE.search(window))
+    if _NEGATORS.search(window) or _PROSPECTIVE.search(window):
+        return False
+
+    before = lowered[:start].rstrip(_MARKUP_CHARS)
+    if _DENIED_BEFORE.search(before):
+        return False
+
+    tail = lowered[start + len(phrase):start + len(phrase) + 80]
+    tail = tail.replace("*", "").replace("`", "").replace('"', "")
+    if _DENIED_AFTER.match(tail):
+        return False
+
+    if _CONCESSION.match(lowered):
+        comma = lowered.find(",")
+        if comma < 0 or start < comma:
+            return False
+    return True
+
+
+# 4. A statement of the rule rather than a claim about this container:
+#      "The kubelet only sets `OOMKilled` if the kernel's OOM killer terminated
+#       the container."
+#    It is the sentence SYSTEM_PROMPT teaches, and defect 45 already recorded
+#    this checker penalising the sentences the prompt asks for. Recognised by a
+#    conditional whose subject is the OOM killer acting; memory-cause only,
+#    because that is the one rule whose lesson is phrased this way.
+#    And the unconditional form, from the defect 46 A/B, whose records carry the
+#    flagged clause but not the draft, so it is covered by a test rather than
+#    by replay: "The kubelet sets `OOMKilled` explicitly for OOM kills."
+_OOM_RULE_STATEMENT = re.compile(
+    r"\b(?:when|if|whenever)\s+(?:the\s+)?(?:kernel['\u2019]?s?\s+|linux\s+)?"
+    r"oom[- ]?killer\s+(?:terminat|kill|end|stop)"
+    r"|\b(?:sets?|writes?|records?|uses?)\b[^.]{0,30}?oomkilled\W{0,3}"
+    r"(?:\s+\w+)?\s+for\s+(?:an?\s+)?oom[- ]?kill")
 
 
 # An identifier the answer set apart from the surrounding prose: quoted,
@@ -563,7 +636,8 @@ def scan(answer, tool_outputs):
             # the kernel. Only when no OOM appears anywhere in scope, so a pod
             # whose evidence genuinely mentions both is left alone.
             scope_text = " ".join(e["text"] for e in entries).lower()
-            if "oomkilled" not in scope_text:
+            if ("oomkilled" not in scope_text
+                    and not _OOM_RULE_STATEMENT.search(lowered)):
                 hit = next((p for p in _MEMORY_CAUSE
                                 if p in lowered and _asserted(lowered, p)), None)
                 if hit:

@@ -8,7 +8,7 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-15 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1780 passed, 0 skipped**
+authority, not this line — tree clean and pushed, **1800 passed, 0 skipped**
 (49s), CI green, tags through **v0.2.1** (2026-09-09). **mypy and ruff are both
 at zero and both gate**; `continue-on-error` came off the ruff step on
 2026-09-13. 52 defects recorded, 36 eval cases of which 7 are
@@ -521,7 +521,9 @@ comes from nowhere. Proven against one model and mostly one cluster type.
 1. **The generalization number — measured 2026-09-13, and it is the whole
    thing still.** **89.7% [81.5–94.5] on the faults the prompts were written
    against, 53.3% [30.1–75.2] on five they were not**, n=102, Fisher
-   p = 0.0020 (defect 47). The gap is real and it is 36.4 points. A tool that
+   p = 0.0020 (defect 47). The gap is real and it is 36.4 points. *Regraded
+   2026-09-15 after defect 52: 90.8% [82.9–95.3] against the same 53.3%,
+   p = 0.0012 — the gap is 37.5 points.* A tool that
    is right nine times in ten on its author's faults and roughly one time in
    two on everything else is no longer a well-tested demo with an unknown — it
    is a measured instrument with a known weakness, which is a better place to
@@ -562,18 +564,21 @@ section); the defect 46 A/B on both cases at n=5 (defect 46's new section);
 Everything for those A/Bs is under `results/ab/`, which the corpus glob does not
 read — criteria, drivers, records and logs.
 
-1. **Defect 52: the contradiction checker flags denials and restated rules.**
-   Four of four `contradicted` verdicts in the defect 46 liveness A/B were
-   false. Classify the 51 distinct clauses `termination_reason_vs_memory_cause`
-   has ever flagged by hand first (a regex puts 12 in the two shapes), then
-   fix, then replay with `evals/replay_grounding.py` — nothing may move the
-   other way. Until then, a case with `expected_grounding` undercounts correct
-   denying answers.
+1. **Done 2026-09-15 — defect 52 is fixed and replayed.** 66 distinct clauses
+   classified by hand, 13 false positives in four shapes plus a question
+   heading the replay surfaced; before against after over 1788 records, 14
+   findings removed (exactly those), 0 added, 0 on any other rule, 11 verdicts
+   out of `contradicted` and none in. 9 recorded failures regrade to passes;
+   defect 47's split is now **79/87 (90.8%) against 8/15, p = 0.0012**. Five
+   known false-positive clauses remain on that rule (splitter fragments and a
+   "…, but" contrast), listed in defect 52. Also found on the way:
+   `ab_prompt.py` never passed `evidence=True`, so the 50 A/B records cannot be
+   replayed (fixed in `fba2fca`).
 2. **Decisions that are the owner's, with the evidence already measured:**
    - Defect 50: rename the leaking image fixtures and drop the `never` term.
      Measured to be the leading cause (neutral image 4/5 against 0/5,
      p = 0.048), but two of the three leaking cases are in the pre-existing
-     half, so it moves the 89.7% too.
+     half, so it moves the 90.8% (regraded) too.
    - Defect 46: swap `137 is SIGKILL:` for `An exit code above 128 is a
      signal:`. The digit was not carrying the lesson (8 of 9 answering liveness
      runs deny OOM across both arms), the Job case favours the variant 5/5
