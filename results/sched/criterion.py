@@ -53,6 +53,23 @@ VALUE = ["nvidia-a100", "accelerator"]
 GPU_CAUSE = ["nvidia.com/gpu", "gpu request", "gpu resource", "gpu hardware", "no gpu",
              "lacks gpu", "lack of gpu", "gpu capacity", "gpu-enabled", "gpu support"]
 PVC = ["persistentvolumeclaim", "pvc", "volume claim", "unbound"]
+
+# Revision 2, committed after both arms above and BEFORE a third, PVC-only arm
+# runs on the claim-naming follow-up. Read from the after arm by hand: every run
+# named "unbound PVC" (primary 5/5) and none named the claim or its StorageClass
+# -- neither did the before arm, since no pod-level tool carried them -- but the
+# after arm stopped at describe_pod and guessed the claim's name, twice as the
+# kube-root-ca.crt ConfigMap. primary cannot see that, so these are added and are
+# the outcome for the third arm:
+#   names_claim       the claim's real name, archive-data
+#   wrong_claim_name  a claim name that is not it, or "likely named" guessing
+#   names_class_value the missing StorageClass by name, fast-ssd-nonexistent
+#   says_pvc_missing  the claim itself called missing -- it exists; its class does not
+#   scan_references   whether the one tool carrying the StorageClass was called
+WRONG_CLAIM = re.compile(r"likely named|kube-root-ca|archive-pvc|volumeclaimtemplates")
+PVC_MISSING = re.compile(
+    r"(?:pvc|persistentvolumeclaim|claim)[^.]{0,40}"
+    r"(?:does not exist|doesn't exist|not been created|not created|is missing)")
 CLASS = ["fast-ssd-nonexistent", "storageclass", "storage class"]
 
 
@@ -70,4 +87,9 @@ def judge(record):
     elif record["case"] == "unschedulable_unbound_pvc":
         out["primary"] = any(t in text for t in PVC)
         out["names_class"] = any(t in text for t in CLASS)
+        out["names_claim"] = "archive-data" in text
+        out["wrong_claim_name"] = bool(WRONG_CLAIM.search(text))
+        out["names_class_value"] = "fast-ssd-nonexistent" in text
+        out["says_pvc_missing"] = bool(PVC_MISSING.search(text))
+        out["scan_references"] = "scan_references" in tools
     return out
