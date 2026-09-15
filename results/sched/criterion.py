@@ -1,0 +1,56 @@
+"""
+Outcome criterion for the describe_pod scheduling change. Written 2026-09-15
+BEFORE either arm ran: the before arm on 938f06a (describe_pod reports nothing
+about scheduling), the after arm on the change.
+
+The case graders are recorded and not used as the outcome, for two reasons:
+- unschedulable_node_affinity's second expect_all group accepts "node", which
+  almost any answer contains, and its first accepts "pending", which is in the
+  question -- so it passes nearly any answer that reached a grounding verdict.
+- both cases demand get_pod_events. After the change describe_pod carries the
+  scheduler's own message, so a correct answer built from describe_pod alone
+  fails that expectation -- the defect 51 shape. Measuring correctness with it
+  would score the fix as a regression.
+
+The workload name `gpu-scoring` is masked before matching, because it hands
+the model "GPU" whatever the tools say (defect 50's lesson, on a pod name).
+
+unschedulable_node_affinity   (cause: nodeSelector accelerator=nvidia-a100 matches no node)
+    primary     names_selector -- names a node selector or node affinity mismatch.
+                Bare "node" and "label" do not count.
+    secondary   names_value    -- "nvidia-a100" or "accelerator": the required label
+                itself, which no tool reported before the change
+                gpu_cause      -- attributes it to a missing GPU resource or hardware;
+                read by hand before counting, since "no node has the nvidia-a100
+                accelerator label" is correct and also mentions a GPU
+
+unschedulable_unbound_pvc     (cause: PVC archive-data names StorageClass fast-ssd-nonexistent)
+    primary     names_pvc      -- names the claim as unbound or pending. Bare
+                "volume" does not count: every volumeMount contains it.
+    secondary   names_class    -- the StorageClass, by name or as the missing object
+"""
+
+SELECTOR = ["nodeselector", "node selector", "node-selector", "node affinity",
+            "node-affinity", "nodeaffinity", "affinity", "selector", "nvidia-a100",
+            "accelerator"]
+VALUE = ["nvidia-a100", "accelerator"]
+GPU_CAUSE = ["nvidia.com/gpu", "gpu request", "gpu resource", "gpu hardware", "no gpu",
+             "lacks gpu", "lack of gpu", "gpu capacity", "gpu-enabled", "gpu support"]
+PVC = ["persistentvolumeclaim", "pvc", "volume claim", "unbound"]
+CLASS = ["fast-ssd-nonexistent", "storageclass", "storage class"]
+
+
+def judge(record):
+    text = (record.get("answer") or "").lower().replace("gpu-scoring", "<workload>")
+    tools = record.get("tools") or []
+    out = {"case_grader": record.get("passed"),
+           "pod_read": "describe_pod" in tools or "get_pod_events" in tools,
+           "events_read": "get_pod_events" in tools}
+    if record["case"] == "unschedulable_node_affinity":
+        out["primary"] = any(t in text for t in SELECTOR)
+        out["names_value"] = any(t in text for t in VALUE)
+        out["gpu_cause"] = any(t in text for t in GPU_CAUSE)
+    elif record["case"] == "unschedulable_unbound_pvc":
+        out["primary"] = any(t in text for t in PVC)
+        out["names_class"] = any(t in text for t in CLASS)
+    return out
