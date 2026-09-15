@@ -313,3 +313,56 @@ class TestTheDocumentedSuiteCountMatchesTheTree:
         distinct = {total for totals in sums.values() for total in totals}
         assert len(distinct) <= 1, (
             f"the documents disagree about the size of the suite: {sums}")
+
+
+# --- the rest of the handoff's state block ----------------------------------
+#
+# Added 2026-09-15. The suite count above was the one state-block claim a test
+# read, and an audit on 2026-09-13 found eight stale claims beside it, all
+# caught by hand -- including a defect count and a release that had already
+# shipped. These are the three the state block states that the repo can answer
+# without a cluster, a model or the network.
+
+STATE_BLOCK = re.compile(r"\*\*State:.{0,700}", re.S)
+
+
+def _state_block():
+    text = open(os.path.join(ROOT, "NEXT-SESSION.md"), encoding="utf-8").read()
+    region = STATE_BLOCK.search(text)
+    assert region, "NEXT-SESSION.md no longer carries its **State: block"
+    return region.group(0)
+
+
+class TestTheHandoffStateBlockMatchesTheRepo:
+    def test_the_defect_count_is_the_highest_defect_in_the_log(self):
+        # The highest number, not a count of headings: the log carries 17d,
+        # so counting would overstate it by one.
+        claimed = re.search(r"(\d+) defects recorded", _state_block())
+        assert claimed, "the state block no longer says how many defects are recorded"
+        log = open(os.path.join(ROOT, "docs", "VALIDATION.md"), encoding="utf-8").read()
+        highest = max(int(n) for n in re.findall(r"^### (\d+)[a-z]?\.", log, re.M))
+        assert int(claimed.group(1)) == highest, (
+            f"NEXT-SESSION.md says {claimed.group(1)} defects; VALIDATION.md's "
+            f"highest is {highest}")
+
+    def test_the_case_counts_are_the_corpus(self):
+        from evals.cases import CASES, UNCOVERED_CASES
+
+        claimed = re.search(r"(\d+) eval cases of which (\d+) are", _state_block())
+        assert claimed, "the state block no longer states the case counts"
+        assert (int(claimed.group(1)), int(claimed.group(2))) == (
+            len(CASES), len(UNCOVERED_CASES)), (
+            f"NEXT-SESSION.md says {claimed.group(1)} cases, {claimed.group(2)} "
+            f"never-seen; evals/cases.py has {len(CASES)} and {len(UNCOVERED_CASES)}")
+
+    def test_the_latest_tag_is_the_version_the_source_carries(self):
+        # version.py is bumped with Chart.yaml when a release is tagged, and a
+        # test already pins those two together, so it stands in for the tag
+        # without needing git history -- which CI's shallow clone lacks.
+        import version
+
+        claimed = re.search(r"tags through \*\*v(\d+\.\d+\.\d+)\*\*", _state_block())
+        assert claimed, "the state block no longer names the latest tag"
+        assert claimed.group(1) == version.__version__, (
+            f"NEXT-SESSION.md says tags through v{claimed.group(1)}; "
+            f"version.py is {version.__version__}")
