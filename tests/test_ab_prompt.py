@@ -57,13 +57,21 @@ def _deliver(monkeypatch, sends=None):
         calls.append(messages)
         return {"message": "ok"}, think
 
-    def fake_ask(question, model=None):
+    def fake_ask(question, model=None, evidence=False):
         system = agent.SYSTEM_PROMPT if sends is None else sends
         agent._chat(model, [{"role": "system", "content": system},
                             {"role": "user", "content": question}], None)
-        return {"answer": "held by a finalizer", "tool_calls": [],
-                "confidence": "grounded", "unverified": [], "evidence": [],
-                "draft": "held by a finalizer"}
+        result = {"answer": "held by a finalizer", "tool_calls": [],
+                  "confidence": "grounded", "unverified": []}
+        # The real contract: agent.ask drops "evidence" and "draft" unless
+        # asked for them. The first version of this stub returned both
+        # unconditionally, so the test asserting a record carries the draft
+        # passed while the harness never requested it and every real record
+        # came back without one.
+        if evidence:
+            result.update({"evidence": [{"id": "tool-1", "result": "{}"}],
+                           "draft": "held by a finalizer"})
+        return result
 
     monkeypatch.setattr(agent, "_chat", fake_chat)
     monkeypatch.setattr(agent, "ask", fake_ask)
@@ -164,7 +172,17 @@ class TestRun:
         assert record["passed"] is True
         assert record["notes"] == []
         assert record["draft"] == "held by a finalizer"
+        assert record["evidence"], "a record without evidence cannot be replayed"
         assert record["rounds_sent"] == 1
+
+    def test_the_stub_follows_the_real_ask_contract(self):
+        # The stub above only means something if agent.ask really does make
+        # the checker's inputs opt-in; if that default ever flips, this says so
+        # rather than letting the stub drift from what it imitates.
+        import inspect
+
+        parameter = inspect.signature(agent.ask).parameters.get("evidence")
+        assert parameter is not None and parameter.default is False
 
     def test_a_variable_that_never_reached_the_model_is_void_not_scored(self, monkeypatch):
         # The mechanism under test, broken on purpose: the loop sends the
@@ -187,7 +205,7 @@ class TestRun:
         # and agent.ask raised. That run was scored FAIL on the variant arm.
         _deliver(monkeypatch)
 
-        def dropped(question, model=None):
+        def dropped(question, model=None, evidence=False):
             agent._chat(model, [{"role": "system", "content": agent.SYSTEM_PROMPT}], None)
             raise RuntimeError("Server disconnected without sending a response.")
 

@@ -174,7 +174,11 @@ def run(case, arm, setup, model):
     started = time.time()
     with Capture(tool=tool) as capture:
         try:
-            result = agent.ask(question, model=model)
+            # evidence=True is what puts `draft` and `evidence` in the result;
+            # ask() drops both by default. Without it every record this file
+            # wrote before 2026-09-15 carries neither, so none of the defect 50
+            # or 46 A/B runs can be replayed against a future checker.
+            result = agent.ask(question, model=model, evidence=True)
         except ConnectionError as exc:
             # Infrastructure, not the model. run_eval.py aborts here for the
             # same reason: scoring it reports a plausible-looking low number

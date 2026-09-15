@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1779 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1780 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -3136,6 +3136,19 @@ failed, so the arrival check passed it. `provider_failed()`, which
 is kept as `results/ab/defect46-liveness-kill.aborted-ollama-500.json` and the
 A/B was re-run whole rather than resumed, so its arms stay balanced on which
 one leads.
+
+**And a third: none of the 50 A/B records can be replayed.** `e2f9071`'s
+message says records "now carry evidence, draft, notes"; they carry the keys
+and not the values. `agent.ask()` returns `draft` and `evidence` only when
+called with `evidence=True`, which `run_eval.py` passes and the harness did
+not. The test asserting a record carries its draft passed because its stub
+returned both unconditionally — the stub, not the harness, supplied the
+payload. Found 2026-09-15 when defect 52's replay counted zero records under
+`results/ab/`. Fixed, the stub now follows the real opt-in, and removing the
+flag fails the test. **The defect 50 and 46 conclusions are unaffected**: they
+rest on the recorded answers, and defect 52's four clauses are preserved in
+each record's `contradictions`. What is lost is replaying those 50 runs against
+a future checker.
 
 
 ### 51. The finalizer case names the right cause 3/3 and scores 1/3
