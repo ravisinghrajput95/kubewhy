@@ -1136,6 +1136,13 @@ def describe_pod(name: str, namespace: str = "default"):
     see an edit until it restarts, which is the case for env and envFrom and
     for any volume mounted with subPath. The pod stays Ready throughout and
     nothing else reports it.
+
+    For a pod no node has accepted, reports under "scheduling" the scheduler's
+    own reason and message, and the nodeSelector, required node affinity and
+    tolerations the pod sets. Use this for a Pending pod with no node: the
+    message says what failed and the selector says what it asked for. A pod
+    with no "scheduling" block has either been placed or not yet been
+    considered, never "has no selector".
     Args: name -- the pod name; namespace -- defaults to "default".
     """
     try:
@@ -1204,6 +1211,98 @@ def describe_pod(name: str, namespace: str = "default"):
     if leaving:
         projected["terminating"] = leaving
 
+    stuck = _scheduling(pod)
+    if stuck:
+        projected["scheduling"] = stuck
+
+    return projected
+
+
+# The two tolerations the DefaultTolerationSeconds admission plugin adds to
+# every pod. Reporting them would put the same two lines on every unscheduled
+# pod and say nothing about why this one is stuck.
+_ADMISSION_TOLERATIONS = {
+    "node.kubernetes.io/not-ready",
+    "node.kubernetes.io/unreachable",
+}
+
+
+def _node_affinity_required(affinity):
+    """Required node-affinity terms, as one readable string per expression."""
+    node_affinity = getattr(affinity, "node_affinity", None)
+    required = getattr(
+        node_affinity, "required_during_scheduling_ignored_during_execution", None)
+    terms = []
+    for term in getattr(required, "node_selector_terms", None) or []:
+        expressions = []
+        for prefix, items in (("", term.match_expressions),
+                              ("field ", term.match_fields)):
+            for expr in items or []:
+                text = f"{prefix}{expr.key} {expr.operator}"
+                if expr.values:
+                    text += f" [{','.join(expr.values)}]"
+                expressions.append(text)
+        if expressions:
+            terms.append(expressions)
+    return terms
+
+
+def _scheduling(pod):
+    """
+    Why no node has accepted this pod, read from the pod itself.
+
+    Measured on kind 2026-09-15 against the two unscheduled fixtures in
+    demo/tricky-pods.yaml. The scheduler writes its verdict onto the pod as a
+    `PodScheduled=False` condition -- `Unschedulable`, "0/1 nodes are
+    available: 1 node(s) didn't match Pod's node affinity/selector" -- and
+    describe_pod read none of it. Nor did it report the `nodeSelector` behind
+    that, and no other tool did either: get_pod_events carries the scheduler's
+    message and never the label it failed to match, so
+    `accelerator: nvidia-a100` was unreachable by any tool.
+
+    What that cost, measured the same day at n=5 before this existed: every run
+    reached describe_pod, one in five went on to the events, and none of the
+    four that answered named the selector. Three blamed a missing GPU, which
+    the pod's name suggests and nothing measured, and one wrote that the pod
+    "does not include nodeSelector, tolerations, or affinity rules" -- reading a
+    field this projection did not carry as a setting the pod did not have.
+
+    The condition rather than the events for the reason: the same pod's events
+    also held a stale "untolerated taint(s)" message from the node's first
+    seconds, and the condition carries only the scheduler's current verdict.
+
+    Only for a pod with no node whose scheduler has said why. A pod created a
+    second ago has no condition yet, and reporting its selector as though it
+    explained something would be a finding the evidence does not support. Pod
+    affinity and anti-affinity are not projected: no fixture here produces one,
+    so a projection of them would be untested.
+    """
+    # No separate node_name check: a bound pod's PodScheduled condition is True,
+    # so this already excludes it, and a guard no real pod can reach is one no
+    # test can fail.
+    condition = next(
+        (c for c in (pod.status.conditions or [])
+         if c.type == "PodScheduled" and c.status == "False"),
+        None,
+    )
+    if condition is None:
+        return None
+
+    projected = {"reason": condition.reason}
+    if condition.message:
+        projected["message"] = condition.message[:400]
+    if pod.spec.node_selector:
+        projected["node_selector"] = dict(pod.spec.node_selector)
+    required = _node_affinity_required(pod.spec.affinity)
+    if required:
+        projected["node_affinity_required"] = required
+    tolerations = [
+        f"{t.key or '*'}{'=' + t.value if t.value else ''}:{t.effect or '*'}"
+        for t in (pod.spec.tolerations or [])
+        if t.key not in _ADMISSION_TOLERATIONS
+    ]
+    if tolerations:
+        projected["tolerations"] = tolerations
     return projected
 
 

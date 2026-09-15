@@ -1001,6 +1001,117 @@ class TestDescribePod:
         assert len(result["containers"]["app"]["waiting_message"]) <= 300
 
 
+# The message and selector gpu-scoring carried on kind, 2026-09-15.
+_SELECTOR_MESSAGE = (
+    "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. "
+    "no new claims to deallocate, preemption: 0/1 nodes are available: 1 "
+    "Preemption is not helpful for scheduling.")
+
+
+def _unscheduled(message=_SELECTOR_MESSAGE, reason="Unschedulable", **spec):
+    """A pod no node has taken, shaped as the API server returns it."""
+    pod = make_pod(name="gpu-scoring-1", phase="Pending", node=None, statuses=[])
+    pod.status.conditions = [client.V1PodCondition(
+        type="PodScheduled", status="False", reason=reason, message=message)]
+    for key, value in spec.items():
+        setattr(pod.spec, key, value)
+    return pod
+
+
+class TestDescribePodSaysWhyNothingScheduledIt:
+    """
+    describe_pod reported nothing about scheduling, and two recorded runs of
+    unschedulable_node_affinity read that silence as a fact: "The pod does not
+    have explicit node selectors". The pod had one. No tool reported it -- the
+    events carry the scheduler's message and never the label it failed to match.
+    """
+
+    def test_the_scheduler_verdict_and_the_selector_that_caused_it(self, api):
+        api.read_namespaced_pod.return_value = _unscheduled(
+            node_selector={"accelerator": "nvidia-a100"})
+
+        scheduling = k8s.describe_pod("gpu-scoring-1", "shop")["scheduling"]
+
+        assert scheduling["reason"] == "Unschedulable"
+        assert "didn't match Pod's node affinity/selector" in scheduling["message"]
+        assert scheduling["node_selector"] == {"accelerator": "nvidia-a100"}
+
+    def test_required_node_affinity_is_projected_readably(self, api):
+        term = client.V1NodeSelectorTerm(match_expressions=[
+            client.V1NodeSelectorRequirement(
+                key="topology.kubernetes.io/zone", operator="In",
+                values=["us-east1-b", "us-east1-c"]),
+            client.V1NodeSelectorRequirement(key="gpu", operator="Exists"),
+        ])
+        affinity = client.V1Affinity(node_affinity=client.V1NodeAffinity(
+            required_during_scheduling_ignored_during_execution=client.V1NodeSelector(
+                node_selector_terms=[term])))
+        api.read_namespaced_pod.return_value = _unscheduled(affinity=affinity)
+
+        scheduling = k8s.describe_pod("gpu-scoring-1", "shop")["scheduling"]
+
+        assert scheduling["node_affinity_required"] == [[
+            "topology.kubernetes.io/zone In [us-east1-b,us-east1-c]",
+            "gpu Exists",
+        ]]
+
+    def test_tolerations_the_pod_set_are_kept_and_admission_defaults_are_not(self, api):
+        # The two NoExecute tolerations admission adds to every pod would be
+        # the same two lines on every unscheduled pod.
+        tolerations = [
+            client.V1Toleration(key="node.kubernetes.io/not-ready", operator="Exists",
+                                effect="NoExecute", toleration_seconds=300),
+            client.V1Toleration(key="node.kubernetes.io/unreachable", operator="Exists",
+                                effect="NoExecute", toleration_seconds=300),
+            client.V1Toleration(key="dedicated", operator="Equal", value="batch",
+                                effect="NoSchedule"),
+        ]
+        api.read_namespaced_pod.return_value = _unscheduled(tolerations=tolerations)
+
+        scheduling = k8s.describe_pod("gpu-scoring-1", "shop")["scheduling"]
+
+        assert scheduling["tolerations"] == ["dedicated=batch:NoSchedule"]
+
+    def test_a_pvc_block_carries_the_message_and_no_empty_fields(self, api):
+        api.read_namespaced_pod.return_value = _unscheduled(
+            message="0/1 nodes are available: pod has unbound immediate "
+                    "PersistentVolumeClaims. not found")
+
+        scheduling = k8s.describe_pod("archive-1", "shop")["scheduling"]
+
+        assert scheduling == {
+            "reason": "Unschedulable",
+            "message": "0/1 nodes are available: pod has unbound immediate "
+                       "PersistentVolumeClaims. not found",
+        }
+
+    def test_a_scheduled_pod_carries_no_block(self, api, healthy_pod):
+        # A pod on a node with a nodeSelector is a pod whose selector worked;
+        # reporting it would put a non-finding on every such pod. Shaped as the
+        # API returns a bound pod -- PodScheduled True -- because a pod with no
+        # conditions at all would pass this for the wrong reason.
+        healthy_pod.spec.node_selector = {"accelerator": "nvidia-a100"}
+        healthy_pod.status.conditions = [client.V1PodCondition(
+            type="PodScheduled", status="True")]
+        api.read_namespaced_pod.return_value = healthy_pod
+
+        assert "scheduling" not in k8s.describe_pod("healthy", "demo")
+
+    def test_a_pod_the_scheduler_has_not_reached_yet_carries_no_block(self, api):
+        # No node and no verdict yet: a pod created a second ago. Its selector
+        # explains nothing until the scheduler says it could not be met.
+        pod = _unscheduled(node_selector={"accelerator": "nvidia-a100"})
+        pod.status.conditions = []
+        api.read_namespaced_pod.return_value = pod
+
+        assert "scheduling" not in k8s.describe_pod("gpu-scoring-1", "shop")
+
+    def test_a_long_scheduler_message_is_bounded(self, api):
+        api.read_namespaced_pod.return_value = _unscheduled(message="x" * 5000)
+
+        assert len(k8s.describe_pod("p", "shop")["scheduling"]["message"]) <= 400
+
+
 class TestEvents:
     def test_returns_only_warnings_newest_first(self, api):
         import datetime as dt
