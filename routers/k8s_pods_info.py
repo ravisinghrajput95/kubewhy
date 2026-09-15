@@ -1142,8 +1142,10 @@ def describe_pod(name: str, namespace: str = "default"):
     tolerations and PersistentVolumeClaims the pod sets. Use this for a Pending
     pod with no node: the message says what failed and the selector says what
     it asked for. A pod with no "scheduling" block has either been placed or
-    not yet been considered, never "has no selector". A claim named here is not
-    evidence of why it is unbound; scan_references reports that.
+    not yet been considered, never "has no selector". Each claim it mounts
+    carries its phase, its StorageClass and whether that exists, the class's
+    provisioner, and the newest event on the claim itself -- which, for a
+    provisioner that never answers, is a Normal event and the only record.
     Args: name -- the pod name; namespace -- defaults to "default".
     """
     try:
@@ -1214,9 +1216,85 @@ def describe_pod(name: str, namespace: str = "default"):
 
     stuck = _scheduling(pod)
     if stuck:
+        if stuck.get("volume_claims"):
+            stuck["volume_claims"] = [
+                _claim_status(namespace, claim) for claim in stuck["volume_claims"]]
         projected["scheduling"] = stuck
 
     return projected
+
+
+def _claim_status(namespace, name):
+    """
+    Why a claim an unscheduled pod mounts is not bound: its own state, its
+    StorageClass, and the newest event recorded against the claim itself.
+
+    Coverage gap (a), measured on kind 2026-09-15. Two claims, two faults, and
+    before this no pod-level tool told them apart:
+
+      archive-data  StorageClass fast-ssd-nonexistent does not exist.
+                    Warning ProvisioningFailed: storageclass ... not found
+      ledger-data   StorageClass ghost-provisioner exists; its provisioner
+                    example.com/no-such-csi-driver is not running anywhere.
+                    *Normal* ExternalProvisioning: Waiting for a volume to be
+                    created either by the external provisioner ...
+
+    The scheduler says "pod has unbound immediate PersistentVolumeClaims" for
+    both. The difference is only on the claim, and for the second one only in
+    a Normal event, which is why this reads events of every type. Measured at
+    n=5 before this existed, no run named either StorageClass, and 0 of 15
+    runs across three arms called scan_references, the one tool that reports
+    a missing class.
+
+    Whether a provisioner is actually running is not something the API can
+    say for a non-CSI provisioner, so this does not claim it: it reports the
+    provisioner the class names and the event saying nothing has answered.
+
+    Never raises: a claim that cannot be read is reported as unreadable and the
+    rest of describe_pod stands.
+    """
+    status = {"name": name}
+    try:
+        claim = _api().read_namespaced_persistent_volume_claim(
+            name, namespace, _request_timeout=TIMEOUT)
+    except Exception as exc:
+        status["unreadable"] = _handle(exc).get("error", str(exc))[:200]
+        return status
+
+    status["phase"] = claim.status.phase if claim.status else None
+    wanted = claim.spec.storage_class_name
+    status["storage_class"] = wanted
+    if wanted:
+        try:
+            storage_class = _storage_api().read_storage_class(
+                wanted, _request_timeout=TIMEOUT)
+            status["storage_class_exists"] = True
+            status["provisioner"] = storage_class.provisioner
+        except ApiException as exc:
+            if exc.status == 404:
+                status["storage_class_exists"] = False
+        except Exception:
+            pass
+
+    try:
+        events = _api().list_namespaced_event(
+            namespace,
+            field_selector=f"involvedObject.kind=PersistentVolumeClaim,involvedObject.name={name}",
+            _request_timeout=TIMEOUT,
+        ).items
+    except Exception:
+        events = []
+    dated = [e for e in events if (e.last_timestamp or e.event_time)]
+    if dated:
+        newest = max(dated, key=lambda e: e.last_timestamp or e.event_time)
+        status["event"] = {
+            "type": newest.type,
+            "reason": newest.reason,
+            "count": newest.count,
+            "age": _age(newest.last_timestamp or newest.event_time),
+            "message": redact((newest.message or "")[:300]),
+        }
+    return status
 
 
 # The two tolerations the DefaultTolerationSeconds admission plugin adds to

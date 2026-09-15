@@ -1072,9 +1072,10 @@ class TestDescribePodSaysWhyNothingScheduledIt:
 
         assert scheduling["tolerations"] == ["dedicated=batch:NoSchedule"]
 
-    def test_a_pvc_block_names_the_claims_and_carries_no_empty_fields(self, api):
-        # The claim names are the point: carrying the message without them had
-        # every measured run guess a name, twice a ConfigMap's.
+    _PVC_MESSAGE = ("0/1 nodes are available: pod has unbound immediate "
+                    "PersistentVolumeClaims. not found")
+
+    def _archive(self, api):
         volumes = [
             client.V1Volume(name="data",
                             persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
@@ -1083,18 +1084,71 @@ class TestDescribePodSaysWhyNothingScheduledIt:
                             config_map=client.V1ConfigMapVolumeSource(name="kube-root-ca.crt")),
         ]
         api.read_namespaced_pod.return_value = _unscheduled(
-            message="0/1 nodes are available: pod has unbound immediate "
-                    "PersistentVolumeClaims. not found",
-            volumes=volumes)
+            message=self._PVC_MESSAGE, volumes=volumes)
+        api.read_namespaced_persistent_volume_claim.return_value = \
+            client.V1PersistentVolumeClaim(
+                spec=client.V1PersistentVolumeClaimSpec(
+                    storage_class_name="fast-ssd-nonexistent"),
+                status=client.V1PersistentVolumeClaimStatus(phase="Pending"))
 
-        scheduling = k8s.describe_pod("archive-1", "shop")["scheduling"]
+    def test_a_claim_whose_storage_class_does_not_exist(self, api):
+        # The claim names are what stops the model guessing them -- carrying the
+        # message alone had every measured run guess, twice a ConfigMap's name.
+        self._archive(api)
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=[
+            _event("Warning", "ProvisioningFailed",
+                   'storageclass.storage.k8s.io "fast-ssd-nonexistent" not found',
+                   dt.datetime(2026, 9, 15, 12, 0, tzinfo=dt.UTC))])
+        storage = MagicMock()
+        storage.read_storage_class.side_effect = ApiException(status=404)
 
-        assert scheduling == {
-            "reason": "Unschedulable",
-            "message": "0/1 nodes are available: pod has unbound immediate "
-                       "PersistentVolumeClaims. not found",
-            "volume_claims": ["archive-data"],
-        }
+        with patch.object(k8s, "_storage_api", return_value=storage):
+            scheduling = k8s.describe_pod("archive-1", "shop")["scheduling"]
+
+        assert scheduling["message"] == self._PVC_MESSAGE
+        (claim,) = scheduling["volume_claims"]
+        assert claim["name"] == "archive-data"
+        assert claim["phase"] == "Pending"
+        assert claim["storage_class"] == "fast-ssd-nonexistent"
+        assert claim["storage_class_exists"] is False
+        assert claim["event"]["reason"] == "ProvisioningFailed"
+        # Only the claim's own events were asked for.
+        selector = api.list_namespaced_event.call_args.kwargs["field_selector"]
+        assert "involvedObject.kind=PersistentVolumeClaim" in selector
+        assert "involvedObject.name=archive-data" in selector
+
+    def test_a_class_whose_provisioner_never_answers_shows_the_normal_event(self, api):
+        # The ghost provisioner: the class exists and the only record of the
+        # fault is a Normal event, so a warnings-only reading would lose it.
+        self._archive(api)
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=[
+            _event("Normal", "ExternalProvisioning",
+                   "Waiting for a volume to be created either by the external "
+                   "provisioner 'example.com/no-such-csi-driver'",
+                   dt.datetime(2026, 9, 15, 12, 0, tzinfo=dt.UTC))])
+        storage = MagicMock()
+        storage.read_storage_class.return_value = client.V1StorageClass(
+            provisioner="example.com/no-such-csi-driver")
+
+        with patch.object(k8s, "_storage_api", return_value=storage):
+            (claim,) = k8s.describe_pod("archive-1", "shop")["scheduling"]["volume_claims"]
+
+        assert claim["storage_class_exists"] is True
+        assert claim["provisioner"] == "example.com/no-such-csi-driver"
+        assert claim["event"]["type"] == "Normal"
+        assert "external provisioner" in claim["event"]["message"]
+
+    def test_an_unreadable_claim_does_not_take_describe_pod_down(self, api):
+        self._archive(api)
+        api.read_namespaced_persistent_volume_claim.side_effect = ApiException(
+            status=403, reason="Forbidden")
+
+        result = k8s.describe_pod("archive-1", "shop")
+
+        (claim,) = result["scheduling"]["volume_claims"]
+        assert claim["name"] == "archive-data"
+        assert "403" in claim["unreadable"]
+        assert result["containers"], "the rest of the projection must stand"
 
     def test_a_scheduled_pod_carries_no_block(self, api, healthy_pod):
         # A pod on a node with a nodeSelector is a pod whose selector worked;
