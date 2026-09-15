@@ -1,0 +1,491 @@
+[
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:21:37.011428+00:00",
+  "load_before": 2.65,
+  "load_after": 3.43,
+  "seconds": 88.4,
+  "rounds_sent": 3,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "local-only"
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `local-only` deployment failed to start because the specified image `an-image-that-was-never-loaded:v3` could not be pulled. The pod is in the `ErrImageNeverPull` state, indicating the image is either invalid, missing from the registry, or unreachable. \n\n**Fix:**  \nUpdate the deployment's image to a valid, accessible tag (e.g., `your-registry/billing-api:3.2.1`) and ensure the registry is reachable. If using a private registry, verify credentials are properly configured.",
+  "chars": 479,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The billing-api deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:23:05.373421+00:00",
+  "load_before": 3.43,
+  "load_after": 3.81,
+  "seconds": 102.3,
+  "rounds_sent": 4,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "billing-api",
+    "only_unhealthy": true
+   },
+   {
+    "name": "billing-api-5bd64fb8bd-4wl5n",
+    "namespace": "uncovered2",
+    "limit": 5
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [
+   "named 'network' alongside the answer"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `billing-api` deployment fails because the container image `billing-api:3.2.1` cannot be pulled due to a **`Never`** pull policy. This means the pod is explicitly instructed not to attempt pulling the image from any registry, and the image is missing from the local node.\n\n### Root Cause\n- **Image not present**: The image `billing-api:3.2.1` is not available in the cluster's local cache or any configured registry.\n- **Pull policy**: The `Never` pull policy prevents the pod from fetching the image from external registries.\n\n### Solution\n1. **Verify the image exists**: Ensure `billing-api:3.2.1` is correctly pushed to a registry (e.g., Docker Hub, private registry).\n2. **Check registry access**: Confirm the cluster can reach the registry (network policies, firewall rules, or DNS issues).\n3. **Use a valid pull policy**: Change the pull policy to `Always` or `IfNotPresent` if the image is in a private registry (and add credentials via a secret).\n4. **Correct the image name**: If the tag `3.2.1` is incorrect, update it to a valid version.\n\nExample fix for a private registry:\n```yaml\nimagePullPolicy: Always\nimage: billing-api:3.2.1\n```\nAdd a Kubernetes secret for registry authentication if required. Once the image is accessible, the pod will start.",
+  "chars": 1265,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The billing-api deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:24:47.668608+00:00",
+  "load_before": 3.81,
+  "load_after": 3.18,
+  "seconds": 53.6,
+  "rounds_sent": 3,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "billing-api"
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [
+   "named 'pull secret' alongside the answer",
+   "named 'network' alongside the answer"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `billing-api` deployment failed to start because the pod `billing-api-5bd64fb8bd-4wl5n` encountered an **image pull error** (`ErrImageNeverPull`). This means the container image `billing-api:3.2.1` could not be pulled from the registry. \n\n### Likely Causes:\n1. **Incorrect or invalid image name/tag** (e.g., typo, deprecated tag).\n2. **Registry authentication issue** (missing pull secret or incorrect credentials).\n3. **Image deleted or unreachable** (registry down, network restrictions).\n\n### Next Steps:\n- Verify the image name and tag in the deployment spec.\n- Check registry availability and authentication configuration.\n- Ensure the image exists in the registry (e.g., `docker pull billing-api:3.2.1` manually). \n\nFixing the image pull issue will allow the pod to start.",
+  "chars": 782,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:25:41.278125+00:00",
+  "load_before": 3.18,
+  "load_after": 2.29,
+  "seconds": 47.1,
+  "rounds_sent": 2,
+  "passed": false,
+  "confidence": "partial",
+  "unverified": [
+   "2"
+  ],
+  "tools": [
+   "list_deployments"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [
+   "never called describe_pod",
+   "unverified claims: ['2']"
+  ],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `local-only` deployment in `uncovered2` has 0 ready replicas because its pod uses an invalid image: `an-image-that-was-never-loaded:v3`. This image does not exist in any registry, so the pod fails to start. \n\n**Fix:**  \nUpdate the image name in the deployment spec to a valid registry path (e.g., `registry.example.com/my-image:v3`) and ensure the image is pushed to the registry. Then redeploy.\n\n---\n**Evidence audit.**\n1 of 3 stated values could not be traced to any tool result for the workload they were stated about: `2`. Treat these as inference, not measurement.",
+  "chars": 573,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:26:28.411344+00:00",
+  "load_before": 2.29,
+  "load_after": 1.97,
+  "seconds": 89.6,
+  "rounds_sent": 4,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "describe_pod",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "name": "local-only-0",
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "local-only"
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "named 'does not exist in the registry' alongside the answer"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The deployment's pods are failing to start because the specified image `an-image-that-was-never-loaded:v3` cannot be pulled. The `ErrImageNeverPull` error confirms the image does not exist in the registry. \n\n**Fix:**  \nUpdate the deployment's image field to a valid image name (e.g., a properly tagged image in your registry) and redeploy. Verify the registry URL and credentials if the image is private.",
+  "chars": 404,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The billing-api deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:27:58.009145+00:00",
+  "load_before": 1.97,
+  "load_after": 1.52,
+  "seconds": 84.1,
+  "rounds_sent": 3,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true,
+    "namespace": "uncovered2",
+    "workload": "billing-api"
+   },
+   {
+    "namespace": "uncovered2",
+    "name": "billing-api-5bd64fb8bd-4wl5n"
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "named 'pull secret' alongside the answer"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `billing-api` pod fails to start because the container image `billing-api:3.2.1` is not present and the pull policy is set to `Never`, preventing any attempt to fetch it from a registry. \n\n### Root Cause:\n- **Image Pull Failure**: The specified image tag `3.2.1` does not exist in any registry (public or private) that the pod can access. \n- **Pull Policy**: The `Never` policy means the container will not attempt to pull the image from a registry, even if it's private or external.\n\n### Solution:\n1. **Verify Image Name/Tag**: Confirm the image name and tag (`billing-api:3.2.1`) is correct and matches the registry's available tags.\n2. **Check Registry Access**: If the image is in a private registry, ensure the pod has the correct pull secrets configured.\n3. **Update Pull Policy**: If the image is intended to be pulled from a registry, change the pull policy to `Always` or `IfNotPresent`.\n4. **Push Image**: If the image is meant to be built locally, ensure it is pushed to the registry with the correct tag (`3.2.1`).\n\nWithout the image being available or the pull policy adjusted, the pod will remain in the `ErrImageNeverPull` state.",
+  "chars": 1148,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The billing-api deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:29:22.151733+00:00",
+  "load_before": 1.52,
+  "load_after": 2.12,
+  "seconds": 61.6,
+  "rounds_sent": 3,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true,
+    "namespace": "uncovered2",
+    "workload": "billing-api"
+   },
+   {
+    "name": "billing-api-5bd64fb8bd-4wl5n",
+    "namespace": "uncovered2",
+    "limit": 5
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `billing-api` pod fails to start because the container image `billing-api:3.2.1` cannot be pulled, and the pull policy is set to `Never`. This means the pod will not attempt to fetch the image from a registry. To fix this:\n\n1. **Update the pull policy** in the deployment's container spec to `Always` or `IfNotPresent` so the kubelet can attempt to pull the image.\n2. **Verify the image name** is correct and accessible (e.g., check if the registry requires authentication or if the tag `3.2.1` is valid).\n3. **Preload the image** on the node (`kubewhy-r2-control-plane`) manually using `docker pull` (if using Docker) or the appropriate tool for the container runtime.\n\nExample fix for the deployment YAML:\n```yaml\ncontainers:\n- name: billing-api\n  image: billing-api:3.2.1\n  imagePullPolicy: Always\n```",
+  "chars": 808,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:30:23.750292+00:00",
+  "load_before": 2.12,
+  "load_after": 2.11,
+  "seconds": 32.2,
+  "rounds_sent": 2,
+  "passed": false,
+  "confidence": "partial",
+  "unverified": [
+   "2"
+  ],
+  "tools": [
+   "list_deployments"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [
+   "never called describe_pod",
+   "unverified claims: ['2']"
+  ],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `local-only` deployment in `uncovered2` has 0 ready replicas because its container image `an-image-that-was-never-loaded:v3` cannot be pulled. This is likely due to:\n\n1. **Invalid image name** - The image `an-image-that-was-never-loaded:v3` does not exist in any container registry (it appears to be a placeholder or typo).\n[unverified: 2]. **Missing image** - If this was meant to be a private registry image, it might not be pushed or accessible.\n\n**Fix**: Update the deployment's image spec to use a valid image name (e.g., a properly tagged image from Docker Hub or your private registry). Verify the image exists and is pullable by the cluster.\n\n---\n**Evidence audit.**\n1 of 4 stated values could not be traced to any tool result for the workload they were stated about: `2`. Treat these as inference, not measurement.",
+  "chars": 827,
+  "hedges": [
+   "likely",
+   "appears"
+  ]
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:30:55.908990+00:00",
+  "load_before": 2.11,
+  "load_after": 1.55,
+  "seconds": 84.7,
+  "rounds_sent": 3,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "local-only"
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [
+   "named 'pull secret' alongside the answer",
+   "named 'registry is unreachable' alongside the answer"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `local-only` deployment fails because its pod cannot pull the specified image (`an-image-that-was-never-loaded:v3`). The pod is in the `ErrImageNeverPull` state, meaning the image name is invalid or the registry is unreachable. \n\n**Fix**:  \nUpdate the deployment's image field to a valid, accessible image name (e.g., a correct registry path like `registry.example.com/my-image:v3`). If using a private registry, ensure pull secrets are configured in the deployment's spec.",
+  "chars": 477,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "question",
+   "variant": "The billing-api deployment in the uncovered2 namespace will not start. Why?"
+  },
+  "question": "The billing-api deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:32:20.627862+00:00",
+  "load_before": 1.55,
+  "load_after": 4.97,
+  "seconds": 74.0,
+  "rounds_sent": 3,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "billing-api"
+   },
+   {
+    "name": "billing-api-5bd64fb8bd-4wl5n",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The pod `billing-api-5bd64fb8bd-4wl5n` fails to start because the container image `billing-api:3.2.1` cannot be pulled, and the pull policy is set to `Never`. This means the pod is explicitly instructed not to attempt pulling the image from any registry.\n\n### Likely Causes:\n1. **Image Name/Tag is Incorrect**: The image `billing-api:3.2.1` does not exist in any registry, or the tag is wrong.\n2. **Private Registry Access**: If the image is in a private registry, the pod lacks credentials to authenticate.\n3. **Pull Policy Misconfiguration**: The `Never` pull policy prevents the pod from fetching the image, even if it exists.\n\n### Solution:\n- **Verify the Image Exists**: Check if `billing-api:3.2.1` is available in the specified registry (e.g., Docker Hub, private registry).\n- **Correct the Pull Policy**: Change the pull policy to `IfNotPresent` or `Always` in the deployment spec to allow the pod to pull the image if it exists.\n- **Add Registry Credentials**: If the image is in a private registry, ensure the pod has secrets for authentication (e.g., via Kubernetes ServiceAccount or secret mount).\n\nExample fix for pull policy:\n```yaml\ncontainers:\n  - image: billing-api:3.2.1\n    imagePullPolicy: IfNotPresent\n```\n\nAfter\u4fee\u6b63, redeploy the deployment to resolve the issue.",
+  "chars": 1282,
+  "hedges": [
+   "likely"
+  ]
+ }
+]

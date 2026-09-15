@@ -52,7 +52,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from cases import CASES  # noqa: E402
 from ollama_state import resident  # noqa: E402
-from run_eval import fixtures_present, grade, write_records  # noqa: E402
+from run_eval import (  # noqa: E402
+    fixtures_present,
+    grade,
+    provider_failed,
+    write_records,
+)
 
 import agent  # noqa: E402
 import routers.k8s_pods_info as k8s  # noqa: E402
@@ -199,7 +204,14 @@ def run(case, arm, setup, model):
         "rounds_sent": len(capture.sent),
     }
 
-    why_void = arrival(capture, arm, setup["old"], setup["new"])
+    # Infrastructure first. On 2026-09-15 Ollama answered one round with a 500
+    # and restarted; the run's answer became "ERROR: Server disconnected
+    # without sending a response." with no tool called, and this file scored
+    # it FAIL on the variant arm. Its prompt *had* been delivered on the round
+    # that failed, so the arrival check alone passed it. run_eval.py already
+    # voids exactly this shape; the harness now uses the same rule.
+    why_void = provider_failed(result) or arrival(
+        capture, arm, setup["old"], setup["new"])
     if why_void:
         record.update({"void": True, "void_reason": why_void, "passed": None,
                        "answer": result.get("answer", "")})

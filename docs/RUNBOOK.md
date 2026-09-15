@@ -218,19 +218,19 @@ cluster — every diagnosis is read fresh.
 Four things go wrong in different ways, and only one of them means the answer
 is wrong. Telling them apart is most of what this section is for.
 
-**The numbers below come from 2828 recorded runs in `results/`, and they are
+**The numbers below come from 2831 recorded runs in `results/`, and they are
 not a performance claim.** That corpus is a mixture of experiments — different
 models, prompt configurations, some deliberately degraded to measure the
 effect. It says what these failure modes look like when they occur, not how
 often kubewhy is right. For that, read [AI_EVALUATION.md](AI_EVALUATION.md),
 which is careful about what its numbers do and do not support.
 
-| Verdict | Share of 2689 runs | What it means |
+| Verdict | Share of 2831 runs | What it means |
 |---|---|---|
-| `grounded` | 2036 (72.0%) | Every claim traced to a tool result |
+| `grounded` | 2039 (72.0%) | Every claim traced to a tool result |
 | `partial` | 378 (13.4%) | Some claims traced, some not |
-| `insufficient_evidence` | 321 (11.4%) | Nothing here could be checked — often the **correct** answer |
-| `contradicted` | 58 (2.1%) | The evidence says otherwise |
+| `insufficient_evidence` | 321 (11.3%) | Nothing here could be checked — often the **correct** answer |
+| `contradicted` | 58 (2.0%) | The evidence says otherwise |
 | `ungrounded` | 11 (0.4%) | Nothing traced |
 
 ### The model is unreachable

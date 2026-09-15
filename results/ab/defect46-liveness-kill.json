@@ -1,0 +1,717 @@
+[
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": false,
+  "started_at": "2026-09-15T05:38:47.377905+00:00",
+  "load_before": 6.52,
+  "load_after": 1.62,
+  "seconds": 205.0,
+  "rounds_sent": 6,
+  "passed": false,
+  "confidence": "contradicted",
+  "unverified": [
+   "oomkilled",
+   "512",
+   "256",
+   "memory leak"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "slow-starter"
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo"
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "container": "web",
+    "tail": 100
+   }
+  ],
+  "failures": [
+   "grounding verdict 'contradicted', expected one of ['grounded', 'partial', 'insufficient_evidence']"
+  ],
+  "notes": [
+   "named 'oomkilled' alongside the answer",
+   "stated ['oomkilled', '512', '256', 'memory leak'] with no measurement behind it",
+   "contradicted: oom kill vs last_termination.reason = error"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [
+   {
+    "rule": "termination_reason_vs_memory_cause",
+    "claim": "oom kill",
+    "measured": "last_termination.reason = error",
+    "because": "the kubelet writes reason OOMKilled when the kernel's OOM killer terminates a container, so a reason of Error means the kill came from somewhere else. Exit code 137 is SIGKILL and says only that the container was killed, never by whom",
+    "clause": "This means the **OOM killer was not the cause** (the kubelet explicitly sets `OOMKilled` when the OOM killer terminates a container).",
+    "evidence": [
+     {
+      "id": "tool-1",
+      "tool": "list_pods",
+      "field": "last_termination.reason"
+     }
+    ]
+   }
+  ],
+  "nudges": 1,
+  "policies": 0,
+  "answer": "The **slow-starter deployment** in the `demo` namespace is restarting 26 times due to **SIGKILL (exit code 137)**, but the exact cause of the termination is unclear. Here's the updated diagnosis based on the evidence:\n\n---\n\n### **Key Findings**\n1. **Exit Code 137 (SIGKILL)**:\n   - The container was forcibly terminated by the kernel, but the **reason field is \"Error\"**, which is a generic kubelet-reported reason. This means the **OOM killer was not the cause** (the kubelet explicitly sets `[unverified: OOMKilled]` when the OOM killer terminates a container).\n   - **Exit code 137 alone does not identify the killer**\u2014it only confirms the container was killed by a signal (SIGKILL).\n\n2. **No Memory Limits Defined**:\n   - The container has **no memory limits** (`limits` is empty in the `describe_pod` output). While this could contribute to resource pressure, the absence of `[unverified: OOMKilled]` in the termination reason suggests the kill was not triggered by the OOM killer.\n\n3. **Liveness Probe Configuration**:\n   - The liveness probe checks TCP on port 8080 with an **initial delay of 5 seconds** and a **timeout of 1 second**. If the app takes longer than 1 second to start, the probe fails, triggering a restart. However, the pod is marked as `Ready`, so this is likely a secondary factor.\n\n4. **No Logs Available**:\n   - `get_pod_logs` returned no logs, which could mean:\n     - The container exited abruptly (e.g., SIGKILL), leaving no logs.\n     - The logs were cleared or not configured properly.\n\n---\n\n### **Why This Happens**\n- The container was killed by **SIGKILL (exit code 137)**, but the **exact cause is unknown**. The `reason` field (\"Error\") does not specify the killer, and the absence of `[unverified: OOMKilled]` rules out the OOM killer. Other possibilities include:\n  - A crash or fault in the application code.\n  - External processes or system-level issues (e.g., kernel bugs, resource contention).\n  - A misconfigured liveness probe (though the pod is marked as `Ready`).\n\n---\n\n### **Recommended Fix**\n1. **Define Resource Limits**:\n   - Add memory limits to the container's resource configuration to prevent resource exhaustion. Example:\n     ```yaml\n     resources:\n       limits:\n         memory: \"[unverified: 512Mi]\"\n       requests:\n         memory: \"[unverified: 256Mi]\"\n     ```\n\n2. **Review Application Behavior**:\n   - Investigate the application for potential crashes or [unverified: memory leaks], especially if the container is consuming unexpected resources.\n\n3. **Adjust Liveness Probe Settings**:\n   - Increase the **timeout** or **initial delay** if the app takes longer to start. For example:\n     ```yaml\n     livenessProbe:\n       tcpSocket:\n         port: 8080\n       initialDelaySeconds: 10\n       periodSeconds: 5\n       timeoutSeconds: 3\n     ```\n\n4. **Check for System-Level Issues**:\n   - Ensure the node (e.g., `kubewhy-r2-control-plane`) is not under memory or disk pressure, which could indirectly cause SIGKILLs.\n\n---\n\n### **Conclusion**\nThe pod is restarting due to **SIGKILL (exit code 137)**, but the **exact cause is unresolved**. The termination reason (\"Error\") does not specify the killer, and the absence of `[unverified: OOMKilled]` rules out the OOM killer. Further investigation into the application's behavior, resource usage, and system health is needed to determine the root cause.\n\n---\n**Evidence audit.**\n4 of 16 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`, `512`, `256`, `memory leak`. Treat these as inference, not measurement.",
+  "chars": 3575,
+  "hedges": [
+   "likely",
+   "suggests",
+   "unclear"
+  ]
+ },
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-15T05:42:12.426893+00:00",
+  "load_before": 1.62,
+  "load_after": 1.37,
+  "seconds": 151.4,
+  "rounds_sent": 5,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "512"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true,
+    "namespace": "demo",
+    "workload": "slow-starter"
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo"
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "tail": 50
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['512'] with no measurement behind it"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The **slow-starter** deployment in the `demo` namespace is restarting due to a **liveness probe failure** and **container termination**. Here's the breakdown:\n\n---\n\n### **Root Cause**\n1. **Liveness Probe Failure**  \n   - The liveness probe checks TCP on port `8080`, but the container isn't listening on this port.  \n   - The probe fails with `Connection refused`, triggering a restart.  \n   - The probe's **timeout** (`1s`) is too short for the application to respond, and the **initial delay** (`5s`) may not match the app's startup time.  \n\n2. **Container Termination**  \n   - The container exits with **code 137** (`SIGKILL`), indicating it was killed by the system (likely the OOM killer or another process).  \n   - No logs are available to confirm the exact reason, but the **exit code** and **CrashLoopBackOff** state strongly suggest a resource exhaustion issue or application crash.\n\n---\n\n### **Next Steps**\n1. **Fix Liveness Probe Configuration**  \n   - Increase the **probe timeout** and **initial delay** to match the app's startup time.  \n   - Example:  \n     ```yaml\n     livenessProbe:\n       tcpSocket: port: 8080\n       initialDelaySeconds: 10\n       periodSeconds: 5\n       timeoutSeconds: 5\n       failureThreshold: 5\n     ```\n\n2. **Check Resource Limits**  \n   - Add memory limits to the container to prevent OOM kills.  \n   - Example:  \n     ```yaml\n     resources:\n       limits:\n         memory: \"[unverified: 512Mi]\"\n     ```\n\n3. **Verify Application Binding**  \n   - Ensure the application is configured to listen on **port 8080**.  \n   - Check for misconfigurations (e.g., incorrect port, firewall rules, or app-specific issues).\n\n4. **Debug Further**  \n   - If the issue persists, inspect the container's **configMaps/secrets** (via `describe_pod`) to ensure correct environment variables or secrets are mounted.  \n   - Test the container image locally to confirm it runs without errors.  \n\n---\n\n### **Summary**\nThe deployment is restarting due to a **failed liveness probe** and **container termination**. Adjust the probe settings and resource limits to resolve the issue.\n\n---\n**Evidence audit.**\n1 of 11 stated values could not be traced to any tool result for the workload they were stated about: `512`. Treat these as inference, not measurement.",
+  "chars": 2278,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-15T05:44:43.876293+00:00",
+  "load_before": 1.37,
+  "load_after": 1.11,
+  "seconds": 154.2,
+  "rounds_sent": 7,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "8",
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_nodes",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "slow-starter",
+    "only_unhealthy": true,
+    "namespace": "demo"
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo"
+   },
+   {},
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "tail": 50
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "named 'oomkilled' alongside the answer",
+   "stated ['8', 'oomkilled'] with no measurement behind it"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 1,
+  "answer": "The **slow-starter deployment** in the `demo` namespace is restarting due to **unexpected termination** of its container, but the exact cause remains unresolved. Here's the evidence-based explanation:\n\n---\n\n### \u2705 **Confirmed Findings**\n1. **Exit Code 137**: The container was killed by `SIGKILL` (exit code 137), indicating an external process terminated it. However, the **cause of the termination is unspecified**.\n2. **No Memory Limits**: The container's `resources.limits.memory` is unset, allowing it to consume all available memory on the node (`kubewhy-r2-control-plane` has [unverified: 8Gi] allocatable memory). This could indirectly contribute to instability but is not confirmed as the root cause.\n3. **No Logs Available**: `get_pod_logs` returned \"no logs available,\" so the application's internal error (if any) cannot be determined.\n4. **Last Termination Reason**: `last_termination.reason = \"Error\"` (not \"[unverified: OOMKilled]\"), meaning the kubelet did **not** attribute the kill to the kernel's OOM killer. The exit code alone does not identify the killer.\n\n---\n\n### \ud83d\udd0d Unresolved Cause\n- **Exit code 137** confirms the container was killed, but **does not specify the killer** (e.g., application crash, external signal, or resource exhaustion).\n- The absence of logs and the generic `\"Error\"` reason mean the **exact reason for the termination is unknown**. It could be:\n  - A bug in the application (e.g., infinite loop, segmentation fault).\n  - Resource constraints (e.g., memory, CPU, or file descriptors) not tied to OOM.\n  - An external process or system signal (e.g., `kill -9`).\n\n---\n\n### \ud83d\udd27 Recommended Actions\n1. **Set Memory Limits**: Explicitly define `resources.limits.memory` in the deployment to prevent unbounded memory usage and avoid potential resource contention.\n2. **Check Logs**: If logs become available, inspect them for application-specific errors.\n3. **Monitor Probes**: Verify that liveness/readiness probes are configured correctly (e.g., `initial_delay_seconds` matches application startup time) to avoid premature restarts.\n\nWithout further data, the restarts are tied to **external termination** of the container, but the **specific cause remains undetermined**.\n\n---\n**Evidence audit.**\n2 of 5 stated values could not be traced to any tool result for the workload they were stated about: `8`, `oomkilled`. Treat these as inference, not measurement.",
+  "chars": 2398,
+  "hedges": []
+ },
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-15T05:47:18.069851+00:00",
+  "load_before": 1.11,
+  "load_after": 1.62,
+  "seconds": 242.3,
+  "rounds_sent": 7,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "512",
+   "500"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "workload": "slow-starter",
+    "only_unhealthy": true
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo"
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "tail": 50
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['512', '500'] with no measurement behind it"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 1,
+  "policies": 0,
+  "answer": "The **slow-starter deployment** in the `demo` namespace is restarting due to **liveness probe failures** and **unexpected container termination**. Here's the revised diagnosis based on the evidence:\n\n---\n\n### **Confirmed Findings**\n1. **CrashLoopBackOff**:\n   - The pod `slow-starter-7c4f8c9965-rnp79` is in a crash loop with **29 restarts**.\n   - The container `web` exited with **code 137 (SIGKILL)**, indicating it was forcibly terminated. However, the `last_termination.reason` is **\"Error\"**, which means the kubelet initiated the kill (not the kernel's OOM killer). The exact cause of the termination is **unspecified** in the data.\n\n2. **Liveness Probe Failures**:\n   - The liveness probe checks TCP on port `8080`, but the container's application is not listening on this port. This causes the probe to fail repeatedly, triggering restarts.\n   - Example event:  \n     `Liveness probe failed: dial tcp 10.244.0.10:8080: connect: connection refused`.\n\n3. **No Application Logs**:\n   - No logs were retrieved from the container, making it difficult to diagnose application-specific errors. This could mean the container exited too quickly or logs are misconfigured.\n\n---\n\n### **Unresolved Cause of SIGKILL**\n- The exit code **137 (SIGKILL)** confirms the container was terminated abruptly, but the `last_termination.reason` of **\"Error\"** indicates the kubelet (Kubernetes node agent) killed the container. This could stem from:\n  - **Resource limits**: The container may have exceeded memory or CPU limits (check `get_top_memory_processes`/`get_top_cpu_processes` on the host).\n  - **Manual intervention**: A human or process (e.g., `kubectl delete pod`) could have forced the termination.\n  - **Node pressure**: The node might have been under memory or disk pressure, causing the kubelet to evict the pod (check `list_nodes` for pressure conditions).\n\n---\n\n### **Next Steps to Investigate Further**\n1. **Check Host Resource Usage**:\n   - Run `get_top_memory_processes` and `get_top_cpu_processes` on the host to identify if the container is consuming excessive resources (could explain a SIGKILL from the kubelet).\n\n2. **Verify Resource Limits**:\n   - Ensure the container has defined memory and CPU limits in its deployment spec. Example:\n     ```yaml\n     resources:\n       limits:\n         memory: \"[unverified: 512Mi]\"\n         cpu: \"2m (observed)\"\n     ```\n\n3. **Check Node Pressure**:\n   - Use `list_nodes` to check if the node hosting the pod is under memory or disk pressure, which could trigger kubelet eviction.\n\n4. **Review Liveness Probe Configuration**:\n   - Ensure the application is listening on port `8080` or adjust the probe's `port` and `initial_delay_seconds` if the app uses a different port or takes longer to start.\n\n---\n\n### **Summary**\nThe deployment is restarting due to **liveness probe failures** (app not listening on port 8080) and **unexpected container termination** (SIGKILL with reason \"Error\"). The exact cause of the SIGKILL is unclear without further host resource analysis or logs. Focus on resource limits, node pressure, and probe configuration to resolve the issue.\n\n---\n**Evidence audit.**\n2 of 16 stated values could not be traced to any tool result for the workload they were stated about: `512`, `500`. Treat these as inference, not measurement.",
+  "chars": 3297,
+  "hedges": [
+   "unclear"
+  ]
+ },
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-15T05:51:20.336107+00:00",
+  "load_before": 1.62,
+  "load_after": 1.38,
+  "seconds": 231.9,
+  "rounds_sent": 7,
+  "passed": false,
+  "confidence": "contradicted",
+  "unverified": [
+   "oomkilled",
+   "10",
+   "512",
+   "500"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_nodes",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true,
+    "namespace": "demo",
+    "workload": "slow-starter"
+   },
+   {
+    "namespace": "demo",
+    "name": "slow-starter-7c4f8c9965-rnp79"
+   },
+   {},
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "container": "web",
+    "tail": 50
+   }
+  ],
+  "failures": [
+   "grounding verdict 'contradicted', expected one of ['grounded', 'partial', 'insufficient_evidence']"
+  ],
+  "notes": [
+   "named 'oomkilled' alongside the answer",
+   "stated ['oomkilled', '10', '512', '500'] with no measurement behind it",
+   "contradicted: oomkilled vs last_termination.reason = error"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [
+   {
+    "rule": "termination_reason_vs_memory_cause",
+    "claim": "oomkilled",
+    "measured": "last_termination.reason = error",
+    "because": "the kubelet writes reason OOMKilled when the kernel's OOM killer terminates a container, so a reason of Error means the kill came from somewhere else. Exit code 137 is SIGKILL and says only that the container was killed, never by whom",
+    "clause": "\"OOMKilled\"` only when the kernel's OOM killer terminates a container.",
+    "evidence": [
+     {
+      "id": "tool-1",
+      "tool": "list_pods",
+      "field": "last_termination.reason"
+     }
+    ]
+   }
+  ],
+  "nudges": 1,
+  "policies": 0,
+  "answer": "The **slow-starter** deployment in the `demo` namespace is restarting due to **SIGKILL (exit code 137)**, but the exact cause is **not definitively [unverified: OOMKilled]**. Here's the updated diagnosis based on the evidence:\n\n---\n\n### \ud83d\udea8 Root Cause\n1. **Container Termination**:  \n   - The pod's last termination had **exit code 137 (SIGKILL)**, but the `last_termination.reason` is **\"Error\"**, which is a generic reason set by the kubelet.  \n   - **Exit code 137 alone does not indicate [unverified: OOMKilled]**; the kubelet explicitly sets `reason: \"[unverified: OOMKilled]\"` only when the kernel's OOM killer terminates a container. Since the reason is **\"Error\"**, the kill originated from elsewhere (e.g., a liveness probe failure, manual termination, or another process).\n\n2. **No Logs Available**:  \n   - `get_pod_logs` returned **no logs**, which could mean the container crashed without writing logs, or the logs were cleared. This makes it harder to pinpoint the exact cause.\n\n3. **Node Resource Health**:  \n   - The node (`kubewhy-r2-control-plane`) is **not under memory pressure** (`pressure: null`), so the OOM killer is unlikely to be the culprit. The container may be using resources beyond its limits, but the node itself is not constrained.\n\n4. **Liveness Probe Misconfiguration**:  \n   - The liveness probe checks TCP on port 8080 with an **initial delay of 5 seconds**. If the application takes longer to start, the probe may fail before the container is ready, triggering a restart.\n\n---\n\n### \ud83d\udccc Key Evidence\n- **Exit Code 137**: SIGKILL, but no specific killer ([unverified: OOMKilled]) is logged.  \n- **No Pod Logs**: No application-specific errors are available to confirm the crash.  \n- **Node Pressure**: The node is not under memory pressure, ruling out node-level OOM.  \n- **Liveness Probe**: Likely contributing to restarts if the application is not ready by 5 seconds.\n\n---\n\n### \ud83d\udd27 Resolution Steps\n1. **Investigate Liveness Probe**:  \n   - Check if the application takes longer than 5 seconds to start. If so, increase the `initialDelaySeconds` in the liveness probe.  \n   - Example:  \n     ```yaml\n     livenessProbe:\n       tcpSocket:\n         port: 8080\n       initialDelaySeconds: [unverified: 10]\n       periodSeconds: 5\n     ```\n\n2. **Add Resource Limits**:  \n   - Define memory and CPU limits for the container to prevent unexpected resource exhaustion.  \n   - Example:  \n     ```yaml\n     resources:\n       limits:\n         memory: \"[unverified: 512Mi]\"\n         cpu: \"[unverified: 500m]\"\n     ```\n\n3. **Check for External Termination**:  \n   - Verify if the container was manually terminated or killed by another process. Use `kubectl describe pod` or `kubectl get events` for clues.\n\n---\n\n### \u2705 Summary\nThe **slow-starter** deployment is restarting due to **SIGKILL (exit code 137)**, but the exact cause is **not [unverified: OOMKilled]** (since `last_termination.reason` is \"Error\"). The node is not under memory pressure, and the liveness probe may be triggering restarts if the application is not ready by 5 seconds. Add resource limits and adjust the liveness probe to resolve the issue.\n\n---\n**Evidence audit.**\n4 of 20 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`, `10`, `512`, `500`. Treat these as inference, not measurement.",
+  "chars": 3337,
+  "hedges": [
+   "likely",
+   "may be"
+  ]
+ },
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-15T05:55:12.284848+00:00",
+  "load_before": 1.38,
+  "load_after": 0.96,
+  "seconds": 255.2,
+  "rounds_sent": 7,
+  "passed": false,
+  "confidence": "contradicted",
+  "unverified": [
+   "512",
+   "500",
+   "256",
+   "250",
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "slow-starter"
+   },
+   {
+    "namespace": "demo",
+    "name": "slow-starter-7c4f8c9965-rnp79"
+   },
+   {
+    "namespace": "demo",
+    "tail": 50,
+    "container": "web",
+    "name": "slow-starter-7c4f8c9965-rnp79"
+   },
+   {
+    "limit": 5,
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo"
+   }
+  ],
+  "failures": [
+   "grounding verdict 'contradicted', expected one of ['grounded', 'partial', 'insufficient_evidence']"
+  ],
+  "notes": [
+   "named 'oomkilled' alongside the answer",
+   "stated ['512', '500', '256', '250', 'oomkilled'] with no measurement behind it",
+   "contradicted: oom kill vs last_termination.reason = error"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [
+   {
+    "rule": "termination_reason_vs_memory_cause",
+    "claim": "oom kill",
+    "measured": "last_termination.reason = error",
+    "because": "the kubelet writes reason OOMKilled when the kernel's OOM killer terminates a container, so a reason of Error means the kill came from somewhere else. Exit code 137 is SIGKILL and says only that the container was killed, never by whom",
+    "clause": "The OOM killer is not the cause, as the termination reason is not `\"OOMKilled\"`.",
+    "evidence": [
+     {
+      "id": "tool-1",
+      "tool": "list_pods",
+      "field": "last_termination.reason"
+     }
+    ]
+   }
+  ],
+  "nudges": 1,
+  "policies": 0,
+  "answer": "The **slow-starter** deployment in the **demo** namespace is restarting due to a **CrashLoopBackOff** cycle caused by **container termination** (exit code 137: `SIGKILL`) and **failed liveness probes**. Here's the accurate breakdown:\n\n---\n\n### **Root Cause**\n1. **Container Termination (Exit Code 137)**:\n   - The container was **killed by an external process or system action** (not the OOM killer). The `last_termination.reason` field shows `\"Error\"`, which indicates the kubelet recorded an unspecified termination cause (e.g., a manual kill, a systemd process, or a resource limit enforced by the host OS). The exit code 137 confirms the container was terminated via `SIGKILL`, but the **specific killer is not identified** by Kubernetes.\n\n2. **Liveness Probe Failures**:\n   - The liveness probe checks TCP on **port 8080** with an **initial delay of 5 seconds**. However, the container crashes before the probe can connect, resulting in **\"connection refused\"** errors. This triggers repeated restarts and the `CrashLoopBackOff` status.\n\n3. **No Logs Available**:\n   - The `busybox` image is minimal and does not generate detailed logs. The absence of logs confirms the container exited abruptly without writing meaningful output.\n\n---\n\n### **Key Evidence**\n- **Exit Code 137**: Confirms the container was killed by `SIGKILL`, but does not specify the killer.\n- **Liveness Probe Failures**: Show the container crashes before the probe can validate it's running.\n- **Events**: \n  - `BackOff` restarts (13+ times) and `Unhealthy` liveness failures confirm the loop.\n  - The probe's `initialDelaySeconds: 5` is too short for the container to start, exacerbating the issue.\n\n---\n\n### **Recommended Fixes**\n1. **Investigate Termination Cause**:\n   - Check system logs (e.g., `dmesg`, `journalctl`) on the node (`kubewhy-r2-control-plane`) to identify why the container was killed (e.g., resource limits, manual kill, or host process interference).\n\n2. **Adjust Liveness Probe**:\n   ```yaml\n   livenessProbe:\n     tcpSocket:\n       port: 8080\n     initialDelaySeconds: 10  # Match container startup time\n     periodSeconds: 5\n   ```\n   Ensures the probe waits long enough for the container to start.\n\n3. **Add Resource Limits**:\n   ```yaml\n   resources:\n     limits:\n       memory: \"[unverified: 512Mi]\"\n       cpu: \"[unverified: 500m]\"\n     requests:\n       memory: \"[unverified: 256Mi]\"\n       cpu: \"[unverified: 250m]\"\n   ```\n   Prevents resource exhaustion and ensures the container has predictable limits.\n\n4. **Monitor with `get_pod_events`**:\n   ```bash\n   get_pod_events --name slow-starter-7c4f8c9965-rnp79 --namespace demo\n   ```\n   For additional context if the issue persists.\n\n---\n\n### **Summary**\nThe deployment is restarting because the container is being killed by an unspecified process (exit code 137, reason `\"Error\"`) and the liveness probe fails before the container starts. The OOM killer is not the cause, as the termination reason is not `\"[unverified: OOMKilled]\"`. Adding resource limits and adjusting probe settings will resolve the issue.\n\n---\n**Evidence audit.**\n5 of 20 stated values could not be traced to any tool result for the workload they were stated about: `512`, `500`, `256`, `250`, `oomkilled`. Treat these as inference, not measurement.",
+  "chars": 3276,
+  "hedges": []
+ },
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-15T05:59:27.452939+00:00",
+  "load_before": 0.96,
+  "load_after": 2.36,
+  "seconds": 204.1,
+  "rounds_sent": 5,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "slow-starter"
+   },
+   {
+    "namespace": "demo",
+    "name": "slow-starter-7c4f8c9965-rnp79"
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "tail": 50
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The **slow-starter deployment** is restarting due to a **liveness probe failure** on port `8080`. Here's the breakdown:\n\n1. **Liveness Probe Failure**:  \n   - The probe checks TCP on port `8080` (as configured in the container's `liveness` probe).  \n   - The probe fails repeatedly with `connection refused`, indicating the container isn't listening on that port.  \n   - This triggers a **CrashLoopBackOff** state, causing the pod to restart after a 5-minute delay (as per the probe's `failure_threshold` of 3 and `period` of 5 seconds).\n\n2. **Exit Code 137**:  \n   - Exit code `137` means the container was **killed by the kernel** (SIGKILL, signal 9).  \n   - However, the `last_termination.reason` is `Error`, which suggests the kubelet terminated the container for a non-oom reason (e.g., probe failure, config error, or application crash).\n\n3. **Root Cause**:  \n   - The container likely **crashed during startup** or failed to bind to port `8080`, causing the liveness probe to fail.  \n   - Since logs are unavailable, check the application's startup logic to ensure it binds to `8080` and handles any configuration errors (e.g., missing files, incorrect environment variables).\n\n4. **Fix**:  \n   - Verify the application is configured to listen on `8080`.  \n   - Add explicit `readiness` and `liveness` probe configurations to match the application's startup time.  \n   - Ensure the container image is correct and healthy (test locally first).  \n\nNo logs are available, so further debugging would require inspecting the container's filesystem or testing the image in isolation.",
+  "chars": 1583,
+  "hedges": [
+   "likely",
+   "suggests"
+  ]
+ },
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-15T06:02:51.605223+00:00",
+  "load_before": 2.36,
+  "load_after": 1.8,
+  "seconds": 236.3,
+  "rounds_sent": 6,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "evicted"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "workload": "slow-starter",
+    "only_unhealthy": true
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo"
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "tail": 50
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "named 'oomkilled' alongside the answer",
+   "stated ['evicted'] with no measurement behind it"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 1,
+  "policies": 0,
+  "answer": "The `slow-starter` deployment in the `demo` namespace is restarting due to **CrashLoopBackOff**, driven by two interrelated factors:  \n\n### 1. **Unbounded Resource Consumption**  \n   - The container (`busybox:1.36`) has **no memory or CPU limits** (`limits: {}`, `requests: {}`), allowing it to consume unrestricted resources.  \n   - While `last_termination.reason = Error` (not `OOMKilled`), this does not rule out **node-level resource pressure** (e.g., memory or disk pressure) causing the container to be evicted or killed by the kubelet.  \n\n### 2. **Liveness Probe Misalignment**  \n   - The liveness probe checks for TCP connectivity on port `8080` with an **initial delay of 5 seconds**. If the container takes longer than 5 seconds to start (e.g., due to slow initialization or blocking processes), the probe fails, triggering a restart.  \n   - With **33 restarts**, this suggests the probe is failing repeatedly, likely due to the container not being ready within the probe\u2019s initial delay window.  \n\n### 3. **Missing Logs and Events**  \n   - **No logs** are available for the container, making it impossible to diagnose application-specific errors.  \n   - **Events** (e.g., `get_pod_events`) would clarify if the termination was due to node pressure, image pull errors, or other cluster-level issues.  \n\n### 4. **Unresolved Root Cause**  \n   - The **exact reason for the `Error` termination** remains unclear. Possible culprits include:  \n     - A **slow-starting application** (e.g., `busybox` script or service) causing the liveness probe to fail.  \n     - **Node-level resource exhaustion** (e.g., memory pressure) evicting the pod.  \n     - A **misconfigured probe** (e.g., incorrect port, protocol, or timeout).  \n\n### Next Steps (If Tools Were Available)  \n   - **Check node pressure**: `list_nodes` to confirm if the node (`kubewhy-r2-control-plane`) is under memory or disk pressure.  \n   - **Inspect pod events**: `get_pod_events` to identify if the pod was [unverified: evicted], if an image pull failed, or if the kubelet terminated it for another reason.  \n   - **Adjust probe settings**: Increase the liveness probe\u2019s `initial_delay_seconds` to match the container\u2019s startup time.  \n   - **Set resource limits**: Prevent unbounded resource usage by defining `memory` and `cpu` limits in the container\u2019s spec.  \n\nWithout further data, the cause remains unresolved. The key issue is the lack of resource constraints and probe misalignment, which together create a feedback loop of restarts.\n\n---\n**Evidence audit.**\n1 of 7 stated values could not be traced to any tool result for the workload they were stated about: `evicted`. Treat these as inference, not measurement.",
+  "chars": 2690,
+  "hedges": [
+   "likely",
+   "suggests",
+   "unclear"
+  ]
+ },
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-15T06:06:47.907694+00:00",
+  "load_before": 1.8,
+  "load_after": 3.51,
+  "seconds": 600.1,
+  "rounds_sent": 6,
+  "passed": false,
+  "confidence": "ungrounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "workload": "slow-starter",
+    "only_unhealthy": true
+   },
+   {
+    "namespace": "demo",
+    "name": "slow-starter-7c4f8c9965-rnp79"
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo",
+    "container": "web",
+    "tail": 50
+   }
+  ],
+  "failures": [
+   "none of ['137', 'liveness', 'probe', 'killed', 'sigkill', 'terminated'] in answer",
+   "grounding verdict 'ungrounded', expected one of ['grounded', 'partial', 'insufficient_evidence']"
+  ],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 1,
+  "policies": 0,
+  "answer": "Gave up after 600s: the investigation budget was exhausted waiting for the model.",
+  "chars": 81,
+  "hedges": []
+ },
+ {
+  "case": "scoping_quiet_workload_beside_loud_one",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "prompt",
+   "old": "137 is SIGKILL: it says",
+   "new": "An exit code above 128 is a signal: it says"
+  },
+  "question": "Why is the slow-starter deployment in the demo namespace restarting?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-15T06:16:47.993009+00:00",
+  "load_before": 3.51,
+  "load_after": 2.78,
+  "seconds": 373.0,
+  "rounds_sent": 6,
+  "passed": false,
+  "confidence": "contradicted",
+  "unverified": [
+   "oomkilled",
+   "memory leak"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_nodes"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "workload": "slow-starter",
+    "only_unhealthy": true
+   },
+   {
+    "name": "slow-starter-7c4f8c9965-rnp79",
+    "namespace": "demo"
+   },
+   {}
+  ],
+  "failures": [
+   "grounding verdict 'contradicted', expected one of ['grounded', 'partial', 'insufficient_evidence']"
+  ],
+  "notes": [
+   "named 'oomkilled' alongside the answer",
+   "stated ['oomkilled', 'memory leak'] with no measurement behind it",
+   "contradicted: oomkilled vs last_termination.reason = error"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [
+   {
+    "rule": "termination_reason_vs_memory_cause",
+    "claim": "oomkilled",
+    "measured": "last_termination.reason = error",
+    "because": "the kubelet writes reason OOMKilled when the kernel's OOM killer terminates a container, so a reason of Error means the kill came from somewhere else. Exit code 137 is SIGKILL and says only that the container was killed, never by whom",
+    "clause": "The kubelet sets `OOMKilled` explicitly for OOM kills.",
+    "evidence": [
+     {
+      "id": "tool-1",
+      "tool": "list_pods",
+      "field": "last_termination.reason"
+     }
+    ]
+   }
+  ],
+  "nudges": 1,
+  "policies": 0,
+  "answer": "The **slow-starter deployment** is restarting due to **container termination** (exit code **137**, SIGKILL), but the exact cause is **unclear**. Here's the evidence-based breakdown:\n\n---\n\n### \ud83d\udd34 **Key Findings**:\n1. **Container Termination**:  \n   - Exit code **137** confirms the container was **killed by the kernel** (SIGKILL), but the `last_termination.reason` field shows `\"Error\"`.  \n   - **Note**: The kubelet sets `[unverified: OOMKilled]` explicitly for OOM kills. A `\"Error\"` reason means the kill originated from **another source** (e.g., a custom script, systemd, or another process), not the OOM killer.  \n\n2. **No Memory Limits**:  \n   - The container has **no memory limits** defined (`limits: {}`). While this could lead to unbounded memory usage, the node (`kubewhy-r2-control-plane`) shows **no memory pressure** (`pressure: null`). This suggests the node is not under memory stress, but the container might still be using memory in a way that triggers external termination (e.g., a watchdog or resource quota).  \n\n3. **Liveness Probe Settings**:  \n   - The liveness probe has a `timeout` of **1 second** and `failure_threshold` of **3**. If the application takes longer than 1 second to start (e.g., during initialization), the probe will fail, triggering restarts. This could compound issues if the app is memory-intensive during startup.  \n\n4. **Node Health**:  \n   - The node is **ready** and has **no memory pressure**, ruling out node-level resource exhaustion as the cause.  \n\n---\n\n### \ud83d\udea8 **Unresolved Cause**:\n- The **exact reason** for the termination (SIGKILL with `\"Error\"` reason) **cannot be determined** from the current data. It could be:  \n  - A **custom kill signal** from the application or a sidecar.  \n  - A **resource quota** or **systemd**-driven termination.  \n  - A **bug in the container** or **external process**.  \n\n---\n\n### \ud83d\udee0\ufe0f **Next Steps**:\n1. **Check Pod Logs**:  \n   Use `get_pod_logs` to identify if the container crashed due to an application error, [unverified: memory leak], or external signal.  \n   ```bash\n   get_pod_logs --name slow-starter-7c4f8c9965-rnp79 --namespace demo\n   ```\n\n2. **Set Resource Limits**:  \n   Define explicit memory limits in the container's spec to prevent unbounded usage.  \n   ```yaml\n   resources:\n     limits:\n       memory: \"2Gi\"\n   ```\n\n3. **Adjust Liveness Probe**:  \n   Increase `initial_delay_seconds` and `failure_threshold` to match the app's startup time.  \n   ```yaml\n   livenessProbe:\n     initialDelaySeconds: 10\n     failureThreshold: 5\n   ```\n\n4. **Audit Node Configs**:  \n   Check if the node has **custom kill rules** (e.g., `OOMKilled` settings) or **systemd** watchdogs that might terminate the container.  \n\n---\n\n### \u2705 Summary:\nThe deployment is restarting due to an **unknown external termination** (SIGKILL, reason `\"Error\"`), not directly caused by OOM. The node is healthy, but the container lacks memory limits, which could contribute to instability. Further investigation into logs and node-specific rules is required to pinpoint the root cause.\n\n---\n**Evidence audit.**\n2 of 13 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`, `memory leak`. Treat these as inference, not measurement.",
+  "chars": 3250,
+  "hedges": [
+   "suggests",
+   "unclear"
+  ]
+ }
+]

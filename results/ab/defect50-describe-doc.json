@@ -1,0 +1,489 @@
+[
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T17:55:07.610635+00:00",
+  "load_before": 3.07,
+  "load_after": 3.02,
+  "seconds": 83.1,
+  "rounds_sent": 3,
+  "passed": false,
+  "confidence": "partial",
+  "unverified": [
+   "namespace uncovered2"
+  ],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "local-only"
+   }
+  ],
+  "failures": [
+   "never called describe_pod",
+   "unverified claims: ['namespace uncovered2']"
+  ],
+  "notes": [
+   "named 'network' alongside the answer"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The deployment \"local-only\" in namespace `uncovered2` is failing because its pod `local-only-5bd97d469-mp98t` cannot pull the image `an-image-that-was-never-loaded:v3`. The error `ErrImageNeverPull` indicates the image does not exist in any registry or is unreachable. \n\n### Action Required:\n1. **Verify the image name**: Confirm `an-image-that-was-never-loaded:v3` is correct and exists in a registry (e.g., Docker Hub, private registry).\n2. **Check registry access**: Ensure the node `kubewhy-r2-control-plane` has network access to the registry where the image is hosted.\n3. **Push the image**: If the image is supposed to be local, push it to a registry accessible by the cluster or configure the node to use a local registry.\n\nWithout fixing the image pull issue, the pod will remain in a pending state.\n\n---\n**Evidence audit.**\n1 of 8 stated values could not be traced to any tool result for the workload they were stated about: `namespace uncovered2`. Treat these as inference, not measurement.",
+  "chars": 1001,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T17:56:30.746736+00:00",
+  "load_before": 3.02,
+  "load_after": 3.32,
+  "seconds": 81.7,
+  "rounds_sent": 3,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "workload": "local-only"
+   },
+   {
+    "namespace": "uncovered2",
+    "name": "local-only-5bd97d469-mp98t"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The pod `local-only-5bd97d469-mp98t` fails because the container image `an-image-that-was-never-loaded:v3` is not present locally, and the pull policy is set to `Never`. This means the kubelet will not attempt to fetch the image from a registry.\n\n### Root Cause:\n- The image tag `v3` does not exist in the local registry.\n- The pull policy `Never` prevents the container from pulling the image from any remote registry.\n\n### Fix:\n1. **Verify the image name**: Ensure `an-image-that-was-never-loaded:v3` is correct and exists in your local registry or a reachable remote registry.\n2. **Adjust the pull policy**:\n   - If the image is meant to be pulled from a remote registry, change the pull policy to `IfNotPresent` or `Always`.\n   - If the image is supposed to be local, push the image to the local registry first (e.g., using `docker push` or `crictl`).\n\nExample fix for pull policy:\n```yaml\nimagePullPolicy: IfNotPresent  # or Always if a remote registry is available\n```\n\nAfter correcting the image or pull policy, redeploy the workload.",
+  "chars": 1041,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T17:57:52.473500+00:00",
+  "load_before": 3.32,
+  "load_after": 1.75,
+  "seconds": 113.4,
+  "rounds_sent": 4,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespaces": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "local-only"
+   },
+   {
+    "name": "local-only-5bd97d469-mp98t",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The scan identified **uncovered2/local-only** as the sole unhealthy workload. Here's the breakdown:\n\n- **uncovered2/local-only**:  \n  Fails with `ErrImageNeverPull` because the container image `an-image-that-was-never-loaded:v3` is missing on the node, and the pull policy is set to `Never`, preventing the kubelet from fetching it.  \n  **Fix**: Verify the image name, push it to the registry (or ensure it\u2019s preloaded locally), or adjust the pull policy to `Always`/`IfNotPresent`.  \n\nNo other workloads were reported in the namespace. The issue is isolated to this deployment.",
+  "chars": 578,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T17:59:45.832182+00:00",
+  "load_before": 1.75,
+  "load_after": 2.58,
+  "seconds": 48.0,
+  "rounds_sent": 3,
+  "passed": false,
+  "confidence": "partial",
+  "unverified": [
+   "5000"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true,
+    "namespace": "uncovered2",
+    "workload": "local-only"
+   },
+   {
+    "name": "local-only-5bd97d469-mp98t",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [
+   "unverified claims: ['5000']"
+  ],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The deployment fails because the container image `an-image-that-was-never-loaded:v3` is not present locally, and the pull policy is set to `Never`. Kubernetes does not attempt to pull images from external registries when the pull policy is `Never`, so the pod cannot start.\n\n**Fix:**  \nUpdate the deployment's image tag to a valid local image or adjust the pull policy to `IfNotPresent` (or `Always`) to allow pulling from a registry. For example:  \n- Use a local image tag like `localhost:[unverified: 5000]/my-image:latest`.  \n- Or correct the typo in the image name if it was meant to reference an existing registry.  \n\nThis error indicates the image is either missing or misconfigured in the deployment spec.\n\n---\n**Evidence audit.**\n1 of 1 stated values could not be traced to any tool result for the workload they were stated about: `5000`. Treat these as inference, not measurement.",
+  "chars": 889,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:00:33.843291+00:00",
+  "load_before": 2.58,
+  "load_after": 2.23,
+  "seconds": 63.5,
+  "rounds_sent": 3,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "local-only"
+   },
+   {
+    "name": "local-only-5bd97d469-mp98t",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The deployment fails because the container image `an-image-that-was-never-loaded:v3` is missing and the pull policy is set to `Never`, meaning the pod isn't attempting to pull it from a registry. \n\n**Solution**:  \n1. **Verify the image name**: Confirm `an-image-that-was-never-loaded:v3` is correct and exists locally or in a registry.  \n2. **Push the image**: If it's meant to be pulled from a registry, push it there and update the deployment to use the full registry path (e.g., `registry.example.com/an-image-that-was-never-loaded:v3`).  \n3. **Adjust pull policy**: If the image is local, set the pull policy to `IfNotPresent` or `Always` to ensure it's pulled if missing.  \n\nWithout the image or a valid pull policy, the pod cannot start.",
+  "chars": 743,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:01:37.318167+00:00",
+  "load_before": 2.23,
+  "load_after": 1.91,
+  "seconds": 54.8,
+  "rounds_sent": 3,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "local-only"
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [
+   "named 'pull secret' alongside the answer"
+  ],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `local-only` deployment fails because its pod `local-only-5bd97d469-mp98t` cannot pull the image `an-image-that-was-never-loaded:v3`. The `ErrImageNeverPull` status confirms the image is invalid, missing, or unreachable. \n\n**Fix:**  \nUpdate the image name in the deployment spec to a valid, accessible image (e.g., a properly tagged image in a registry). If the image is private, ensure pull secrets are configured. Reapply the deployment after correcting the image reference.",
+  "chars": 480,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:02:32.162312+00:00",
+  "load_before": 1.91,
+  "load_after": 1.64,
+  "seconds": 73.6,
+  "rounds_sent": 3,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "local-only"
+   },
+   {
+    "name": "local-only-5bd97d469-mp98t",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The pod `local-only-5bd97d469-mp98t` fails because the container image `an-image-that-was-never-loaded:v3` cannot be pulled. The pull policy is set to `Never`, meaning the pod does not attempt to fetch the image from the registry. \n\n**Fix:**  \n1. **Verify the image name**: Ensure `an-image-that-was-never-loaded:v3` exists in the specified registry.  \n2. **Adjust the pull policy**: Change the pull policy to `IfNotPresent` or `Always` in the deployment spec to allow the pod to pull the image.  \n3. **Check authentication**: If the image is private, ensure the pod has valid credentials (e.g., via a secret) to access the registry.  \n\nThe error persists because the pod cannot proceed without the image.",
+  "chars": 705,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:03:45.773908+00:00",
+  "load_before": 1.64,
+  "load_after": 1.75,
+  "seconds": 46.7,
+  "rounds_sent": 2,
+  "passed": false,
+  "confidence": "partial",
+  "unverified": [
+   "2",
+   "namespace uncovered2"
+  ],
+  "tools": [
+   "list_deployments"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [
+   "never called describe_pod",
+   "unverified claims: ['2', 'namespace uncovered2']"
+  ],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The deployment `local-only` in namespace `uncovered2` has 0 ready replicas because its container image `an-image-that-was-never-loaded:v3` is invalid or unreachable. The image name suggests it was never properly pushed to a registry or the registry credentials are missing. \n\n**Fix:**  \n1. Verify the image name is correct and exists in the registry.  \n[unverified: 2]. Ensure the registry credentials are configured in the deployment's secret or imagePullSecrets.  \n3. Push the image to the registry if it's missing.  \n\nOnce the image is accessible, the pod should start.\n\n---\n**Evidence audit.**\n2 of 4 stated values could not be traced to any tool result for the workload they were stated about: `2`, `namespace uncovered2`. Treat these as inference, not measurement.",
+  "chars": 770,
+  "hedges": [
+   "suggests"
+  ]
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:04:32.427605+00:00",
+  "load_before": 1.75,
+  "load_after": 1.85,
+  "seconds": 32.6,
+  "rounds_sent": 2,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The `local-only` deployment is failing because its specified image `an-image-that-was-never-loaded:v3` does not exist. Kubernetes cannot pull an image that isn't available in any registry. Verify the image name in your deployment configuration and ensure it is correct, accessible, and properly tagged. If it's a private registry, check authentication credentials.",
+  "chars": 364,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "replace",
+   "target": "tool:describe_pod",
+   "old": "Returns why a specific pod is in its current state.",
+   "new": "Returns why a specific pod is in its current state. A container that has not started has no termination to read: its waiting_reason and waiting_message are the kubelet's own account of why, and an image name read from a deployment's spec is not. Several faults with different fixes all look like a wrong image from the spec alone."
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-r2",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-14T18:05:05.055299+00:00",
+  "load_before": 1.85,
+  "load_after": 1.84,
+  "seconds": 76.3,
+  "rounds_sent": 3,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "local-only"
+   },
+   {
+    "name": "local-only-5bd97d469-mp98t",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [],
+  "draft": null,
+  "contradictions": [],
+  "nudges": 0,
+  "policies": 0,
+  "answer": "The pod `local-only-5bd97d469-mp98t` fails to start because the container image `an-image-that-was-never-loaded:v3` cannot be pulled, and the pull policy is set to `Never`. This means the kubelet will not attempt to fetch the image from any registry, and since it\u2019s not already present on the node, the pod remains in an error state.\n\n### Root Cause:\n- **Image not found**: The specified image `an-image-that-was-never-loaded:v3` does not exist in any registry or on the node.\n- **Pull policy**: The `Never` pull policy prevents the kubelet from attempting to download the image, even if it were available elsewhere.\n\n### Fix:\n1. **Verify the image name and tag**: Ensure `an-image-that-was-never-loaded:v3` is correct. Check for typos or mismatches with the actual image name in the registry.\n2. **Adjust the pull policy**:\n   - If the image is hosted in a private registry, set the pull policy to `Always` or `IfNotPresent` to allow the kubelet to attempt pulling it.\n   - If the image is supposed to be preloaded on the node, ensure it is manually copied to the node\u2019s filesystem (e.g., via `docker load` or `crun`).\n\nExample fix for pull policy:\n```yaml\nimagePullPolicy: IfNotPresent  # or Always if the image is in a registry\n```\n\nWithout resolving this, the pod will remain in `ErrImageNeverPull` state.",
+  "chars": 1309,
+  "hedges": []
+ }
+]

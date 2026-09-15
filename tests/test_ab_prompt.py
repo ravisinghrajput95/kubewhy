@@ -181,6 +181,27 @@ class TestRun:
         assert record["passed"] is None
         assert "missing" in record["void_reason"]
 
+    def test_a_provider_that_dropped_the_connection_is_void_not_a_failure(self, monkeypatch):
+        # The recorded 2026-09-15 shape: the prompt reached the model on the
+        # round that failed, so arrival passes, then the server disconnected
+        # and agent.ask raised. That run was scored FAIL on the variant arm.
+        _deliver(monkeypatch)
+
+        def dropped(question, model=None):
+            agent._chat(model, [{"role": "system", "content": agent.SYSTEM_PROMPT}], None)
+            raise RuntimeError("Server disconnected without sending a response.")
+
+        monkeypatch.setattr(agent, "ask", dropped)
+        setup = ab.build_setup(_args(replace="137 is SIGKILL:", new="SIGNAL SENTENCE:"))
+        setup["questions"] = {"control": CASE["question"], "variant": CASE["question"]}
+
+        record = ab.run(CASE, "variant", setup, "qwen3")
+
+        assert record["rounds_sent"] == 1, "the payload must have arrived for this to test anything"
+        assert record["void"] is True
+        assert record["passed"] is None
+        assert "disconnected" in record["void_reason"].lower()
+
     def test_the_control_arm_is_delivered_unchanged(self, monkeypatch):
         calls = _deliver(monkeypatch)
         setup = ab.build_setup(_args(replace="137 is SIGKILL:", new="SIGNAL SENTENCE:"))

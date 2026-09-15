@@ -7,11 +7,11 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-13 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1778 passed, 0 skipped**
+**State: `main` at the 2026-09-15 head — `git log --oneline -1` is the
+authority, not this line — tree clean and pushed, **1779 passed, 0 skipped**
 (49s), CI green, tags through **v0.2.1** (2026-09-09). **mypy and ruff are both
 at zero and both gate**; `continue-on-error` came off the ruff step on
-2026-09-13. 49 defects recorded, 36 eval cases of which 7 are
+2026-09-13. 52 defects recorded, 36 eval cases of which 7 are
 never-seen-fault-type cases.
 
 **That figure is measured, with Postgres up**, on the tree this session ends
@@ -37,7 +37,7 @@ qwen3 was unloaded from Ollama, and Docker Desktop went down on its own
 afterwards — see the Environment note about this machine. Zero clusters, zero
 containers.**
 
-**mypy is at zero across 87 files and ruff is at zero, and CI gates on both**
+**mypy is at zero across 91 files and ruff is at zero, and CI gates on both**
 (`types` job in tests.yml, `continue-on-error` removed 2026-09-13).
 
 **Mutation coverage.** Three modules are measured properly, on one base each,
@@ -553,7 +553,65 @@ greps the state block's figures against a measured source the way
 `test_documented_measurements.py` already does for RUNBOOK.md. The second is
 more in this project's character.
 
-## Pick up, in order
+## Pick up, in order — written 2026-09-15, replaces the list below it
+
+Done 2026-09-14/15, so do not redo: round 2's `stuck_terminating_finalizer` at
+n=3 (defect 51); the defect 50 A/B, three arms at n=5 (defect 50's new
+section); the defect 46 A/B on both cases at n=5 (defect 46's new section);
+`evals/ab_prompt.py` rebuilt and tested; `analyse_scan_summary.py`'s import.
+Everything for those A/Bs is under `results/ab/`, which the corpus glob does not
+read — criteria, drivers, records and logs.
+
+1. **Defect 52: the contradiction checker flags denials and restated rules.**
+   Four of four `contradicted` verdicts in the defect 46 liveness A/B were
+   false. Classify the 51 distinct clauses `termination_reason_vs_memory_cause`
+   has ever flagged by hand first (a regex puts 12 in the two shapes), then
+   fix, then replay with `evals/replay_grounding.py` — nothing may move the
+   other way. Until then, a case with `expected_grounding` undercounts correct
+   denying answers.
+2. **Decisions that are the owner's, with the evidence already measured:**
+   - Defect 50: rename the leaking image fixtures and drop the `never` term.
+     Measured to be the leading cause (neutral image 4/5 against 0/5,
+     p = 0.048), but two of the three leaking cases are in the pre-existing
+     half, so it moves the 89.7% too.
+   - Defect 46: swap `137 is SIGKILL:` for `An exit code above 128 is a
+     signal:`. The digit was not carrying the lesson (8 of 9 answering liveness
+     runs deny OOM across both arms), the Job case favours the variant 5/5
+     against 4/5, and nothing is significant at n=5 — so it was not applied.
+   - Defect 51: drop `expect_tools` from `stuck_terminating_finalizer`, or
+     replace it with `get_pod_events`. They grade the recorded runs 3/3 and
+     0/3; which one is right depends on whether the preStop failure is part of
+     the answer.
+   - 0.2.2 carrying defects 48 and 49, and HA on a released image, both as
+     before.
+3. **Defect 50's cross-tab says where to spend effort next, and it is not
+   prompts.** 14/16 runs that read the pod named the fault, 0/17 that did not,
+   p = 1.5e-7. The same question for `unschedulable_node_affinity` has a
+   *tool* answer: `describe_pod` reports no `nodeSelector`, affinity or
+   `PodScheduled` condition for a Pending pod, so only `get_pod_events` carries
+   the cause, and two recorded runs answered "no GPU" from the workload's name.
+   Verify the condition's message on a live cluster, then add it to
+   `describe_pod` for an unscheduled pod. Its phrase list is near-vacuous too:
+   `pending` is in the question and `node` is in any answer.
+4. **Extend the echo guard to fixture identifiers**, narrowly. A term matched
+   inside the subject's own image string passes any answer that quotes it;
+   `image_pull_failure`, `leading_question_image_pull_is_not_oom` and
+   `image_never_pulled_by_policy` all do. A guard over *every* fixture name
+   flags eight cases and most are legitimate (`cluster_wide_scan` must name
+   workloads), so scope it to image strings.
+5. Unchanged from the 2026-09-14 handoff: the two coverage gaps (PVC events,
+   pod priority), latency, the `routers/k8s_pods_info.py` mutation survey, and
+   the documentation archive.
+
+**Traps learned this session.** The laptop rebooted mid-session: Docker and
+kind came back, but a CrashLoopBackOff pod keeps its pre-reboot
+`lastState.terminated` until its back-off expires, so wait for a
+`finishedAt` after boot before measuring against it. Ollama 0.31.2 restarted
+itself after a 500 during a run; `ab_prompt.py` now voids that shape. A commit
+under `results/ab/` is linted by ruff's gate, which is how `e1f6350` failed CI
+unnoticed until the next session — check CI after *every* push.
+
+## Pick up, in order — 2026-09-13, superseded by the list above
 
 1. **Done 2026-09-12 — defect 47, and what it leaves open.** The set ran:
    34 cases at `--repeat 3`, 102 runs, 2h46m, on a kind cluster with all five

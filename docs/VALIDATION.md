@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1778 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1779 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -2665,6 +2665,51 @@ that removing the Job paragraph's digit was enough for three consecutive runs,
 not that the prompt had stopped supplying the number. n=3 against a model that
 volunteers `128+9` from its own knowledge cannot separate those.
 
+**Measured 2026-09-14/15: both variants, paired at n=5 on the case the digit
+cost and on the case the sentence was written for.** qwen3, thinking on, kind,
+`evals/ab_prompt.py`. Control is the prompt as shipped; the variant replaces
+`137 is SIGKILL: it says` with `An exit code above 128 is a signal: it says`
+and nothing else. Every run's variable was confirmed delivered, 0 voids of 20.
+The outcome criterion, `results/ab/defect46-criterion.py`, was committed
+(`e1f6350`) before any run — and it had to exist, because
+`scoping_quiet_workload_beside_loud_one` accepts `137` and `sigkill`, the
+control sentence's own words, so under its own grader the control arm can pass
+by echoing its prompt and the variant cannot.
+
+`scoping_quiet_workload_beside_loud_one` is the case `820353d` wrote the sentence
+for: a liveness probe against a port nothing listens on, killing the container
+with exit 137 and reason `Error`, which qwen3 had called OOMKilled 5/5.
+
+| case | outcome | control | variant |
+|---|---|---|---|
+| `job_killed_by_its_own_deadline` | case grader | 4/5 | 5/5 |
+| | states `137` for a Job with no pods | **1/5** | **0/5** |
+| `scoping_quiet_workload_beside_loud_one` | names the probe (pre-registered primary) | 4/5 | 5/5 |
+| | asserts an OOM kill, every mention read by hand | 0/4 answered | 1/5 |
+
+The control's one Job failure is the recorded shape exactly — `[unverified:
+137] (SIGKILL)` on a Job whose pods were deleted. The variant's one OOM
+assertion is hedged: "killed by the system (likely the OOM killer or another
+process)". One control liveness run spent the 600s budget and produced no
+answer, which is why that cell reads 0/4.
+
+**What this settles, which is less than a fix.** Neither difference is
+significant (Fisher p = 1.0 on every row at n=5). What it does establish is the
+thing the trade was feared to cost: **removing the numeral did not remove the
+lesson.** Eight of the nine liveness runs that produced an answer, across both
+arms, deny an OOM kill on the strength of `last_termination.reason = Error`, and the variant's answers still
+say "exit code 137 (SIGKILL)" — read from `describe_pod`, where it is measured.
+So the prediction that the digit carries the teaching is not supported at this
+n, and the direction on the Job case favours the variant. **The prompt is left
+as shipped**, because a direction at p = 1.0 is not "measures better", which is
+what this defect set as the bar; changing it is recorded as a decision for the
+owner, with this table as the evidence.
+
+**The case grader's own score for the liveness arm is 2/5 against 3/5, and
+four of those five failures are not the model's.** Four runs came back
+`contradicted` on `termination_reason_vs_memory_cause`, and every flagged clause
+is a denial or the prompt's own rule restated — defect 52.
+
 
 ### 47. The generalization gap, measured at n=3 instead of asserted at n=1
 
@@ -2967,9 +3012,24 @@ FAIL grounded  ['list_deployments', 'list_pods'] never called describe_pod
 ```
 
 **None of the three failed on the phrase list or on the `forbid` near-miss.**
-The answers were acceptable in substance; the model reached `list_deployments`,
-read `an-image-that-was-never-loaded:v3` out of its `images` field, and
-concluded from the name alone. It never asked the kubelet what happened.
+The model reached `list_deployments`, read `an-image-that-was-never-loaded:v3`
+out of its `images` field, and concluded from the name alone. It never asked
+the kubelet what happened.
+
+**Corrected 2026-09-14, by reading the three answers rather than their failure
+reasons: they were not "acceptable in substance", and the phrase list passing
+them is a grader defect.** None of the three names the pull policy. Two call
+the image "invalid or unreachable" and "a malformed image spec" — the
+`InvalidImageName` member of the family, which is the wrong one. The third
+reads `ErrImageNeverPull` off `list_pods` and then advises checking
+`imagePullSecrets` and registry access — the near-miss this case exists to
+forbid, spelled as the field name so `forbid: "pull secret"` does not match it.
+And the first two met `expect_any` **only through the fixture**: its term
+`never` is a substring of `an-image-that-was-never-loaded`, so any answer that
+quotes the image passes it. Masking the image string, neither matches a single
+term. This is the class `TestExpectationsThatTheQuestionAlreadySatisfies`
+guards, arriving by a channel it does not check — an identifier the fixture
+puts in every tool result, rather than a word in the question.
 
 **This is the second case showing it.** `malformed_image_reference` in defect
 47's set did the same thing — one of its three runs answered from
@@ -2994,6 +3054,180 @@ exactly this), or a case whose `expect_tools` is stricter than the answer needs,
 is open — and it should be settled by measurement rather than by editing the
 prompt and re-running once. The n=3 set on `stuck_terminating_finalizer` was
 interrupted before it ran and is the other half of this measurement.
+
+**Measured 2026-09-14: three paired A/Bs at n=5, and the leading cause is the
+fixture.** qwen3, thinking on, kind, `evals/ab_prompt.py` with arms adjacent
+and alternating which leads. Setting up found a fourth candidate the list above
+did not have: three of the corpus's four image fixtures put the diagnosis in
+the image string itself (`this-tag-does-not-exist`, `never-loaded`, the
+malformed reference), a hint a real cluster's `billing-api:3.2.1` does not
+give. And one of the three listed candidates was wrong on inspection —
+`list_deployments`' description never mentions images; they are in its
+*output*. Ollama sends a tool's whole docstring, and `describe_pod`'s, which is
+the one that should say it, is about terminations, OOM, probes and config and
+never mentions a container that has not started. So the arms were:
+
+| arm | what differs from its control |
+|---|---|
+| description | one sentence added to `describe_pod`'s docstring |
+| prompt | the same sentence added to the diagnosis paragraph of `SYSTEM_PROMPT` |
+| neutral image | the same fault, asked about a Deployment whose image is `billing-api:3.2.1` |
+
+The sentence names no term from the case's `expect_any` or `forbid` —
+checked programmatically before launch — so no arm could pass by teaching the
+answer's words. Every run's variable was confirmed delivered to the model
+(0 voids of 30). **The outcome was not the case's grader**, which is the
+defect above; it was `results/ab/defect50-criterion.py`, written and committed
+(`e1f6350`) before any arm was read: *strict* means the answer names the pull
+policy, with every image string from the run's own evidence masked first.
+
+| arm | control | variant | Fisher p, within pair |
+|---|---|---|---|
+| description | 2/5 | 4/5 | 0.52 |
+| prompt | 1/5 | 3/5 | 0.52 |
+| neutral image | **0/5** | **4/5** | **0.048** |
+
+**What settles, and what does not.**
+
+- **Reading the pod is what makes the answer right, and that part is not
+  close.** Over all 33 runs of this case (the 30 above plus the 3 recorded
+  2026-09-13), the answer named the pull policy in **14 of the 16** runs that
+  reached `describe_pod` or `get_pod_events`, and in **0 of the 17** that did
+  not — p = 1.5e-7. That is observational rather than randomised, and it is
+  enough to close the third candidate: **`expect_tools: ["describe_pod"]` is not
+  over-strict for this case.** No run that skipped the pod got the fault right.
+- **Each intervention raises the read rate, and none can be told from the
+  others.** Pooled, the variants name the policy in 11/15 against 3/18 across
+  every control, p = 0.0016. Within a pair only the neutral-image arm clears
+  0.05, and the description and neutral-image arms are 4/5 each (p = 1.0). n=5
+  does not rank them.
+- **The neutral-image arm is the informative one, because it changes nothing
+  about the agent.** The prompt and tools are identical to the control; only the
+  image name stopped carrying the answer, and the model went and read the pod.
+  So on this fixture the failure is *sufficient* to explain by the leak, and
+  the prompt and description sentences are compensating for a hint real
+  clusters do not give. What a 0/3 on this case measured was substantially the
+  fixture, not the agent.
+
+**Not yet acted on, deliberately.** The measured fix is to rename the fixture
+image and replace the `never` term, not to edit the prompt. But
+`image_pull_failure` (`nginx:this-tag-does-not-exist`) and
+`leading_question_image_pull_is_not_oom` share the leak and sit in the
+*pre-existing* half, so renaming consistently moves the 89.7% as well as the
+never-seen figure, and re-measures cases whose records go back to 2026-08-04. That is a
+decision about which published numbers to break, and it is recorded here
+rather than taken.
+
+**The harness this needed had been broken for weeks.** `evals/ab_prompt.py`
+unpacked two values from a `grade()` that had returned three since `2781d7e`,
+so its first graded run raised before a record was written, and it could only
+test a paragraph sliced off the end of the prompt. Rebuilt in `e2f9071` to
+rewrite one sentence of the prompt or of one tool's docstring, or to ask a
+different question, and to void any run whose variable did not reach the model
+on every round. Five sabotages of that check, five failing tests.
+
+**And the rebuild missed one thing `run_eval.py` already knew.** On 2026-09-15
+at 00:20:56 Ollama answered a round with a 500 and restarted itself; the run in
+flight became `ERROR: Server disconnected without sending a response.` with no
+tool called, and the harness scored it `FAIL` on the variant arm of the defect
+46 liveness-kill A/B. Its prompt *had* reached the model on the round that
+failed, so the arrival check passed it. `provider_failed()`, which
+`run_eval.py` uses to void exactly this shape, now runs first. The aborted set
+is kept as `results/ab/defect46-liveness-kill.aborted-ollama-500.json` and the
+A/B was re-run whole rather than resumed, so its arms stay balanced on which
+one leads.
+
+
+### 51. The finalizer case names the right cause 3/3 and scores 1/3
+
+**Measured 2026-09-14**, qwen3, thinking on, n=3 on
+`stuck_terminating_finalizer`, the second round-2 case, on a fresh kind cluster.
+The pod was deleted by hand after applying the fixture — applied alone it just
+runs — and verified past its grace period (`deletionGracePeriodSeconds: 0`,
+phase `Failed`, `FailedPreStopHook` in its events) with every tool called by
+hand before any model time. Machine load 2.5 to 12 across the set, so no
+latency is quoted from it.
+
+```
+FAIL grounded  ['list_pods', 'get_pod_logs']                  never called describe_pod
+PASS grounded  ['list_pods', 'describe_pod', 'get_pod_logs']
+FAIL grounded  ['list_pods', 'get_pod_logs']                  never called describe_pod
+```
+
+**All three answers name `example.com/never-removed` as the cause, all three
+are `grounded`, and the two failures carry no other reason.** Defect 49's fix
+put the `terminating` block, finalizers included, into `list_pods` as well as
+`describe_pod` — so `list_pods` now carries the whole answer, and what
+`describe_pod` adds for this pod is `last_termination: Error/137`, which the
+answer does not need. **`expect_tools` was written against the tools as they
+were before the fix that made the fault reachable, and it now requires a call
+that contributes nothing.** The contrast with defect 50 is the point: there,
+reading the pod separated 14 right answers from 0; here it separates nothing.
+
+What no run reached is the other half of the ground truth: `FailedPreStopHook`
+is only in `get_pod_events`, and 0 of 3 called it. The case does not require it,
+so this is recorded rather than scored.
+
+**Left as graded, for the reason defect 44's phrase list was.** Changing
+`expect_tools` after reading the results is a grader change, and this project
+replays those before believing them. The candidates are to drop the
+requirement, or to replace it with `get_pod_events` if the preStop failure is
+meant to be part of a passing answer; they grade the same three runs 3/3 and
+0/3 respectively, which says the choice is about what the case is *for*.
+
+**The never-seen half, recomputed with both round-2 cases**
+(`evals/split_by_novelty.py` over the 2026-09-12, 09-13 and 09-14 sets):
+
+| set | score | 95% CI |
+|---|---|---|
+| the 29 the prompts had seen (2026-09-12) | 78/87, 89.7% | [81.5–94.5] |
+| the 7 they had not, pooled across three dates | 9/21, **42.9%** | [24.5–63.5] |
+
+Fisher p = 1.3e-5. **This pools across tool versions**: defects 48 and 49
+changed tool output between the 2026-09-12 set and the two round-2 sets, while
+`SYSTEM_PROMPT` is unchanged across all three (verified by diff). So it is not
+one tree measured once, and defect 47's 8/15 remains the clean single-tree
+figure. Of the 12 never-seen failures, 8 carry a tool-expectation reason, and
+this defect and defect 50 show that one reason can mean opposite things: a
+wrong answer that never looked, or a right answer that looked somewhere else.
+
+
+### 52. The contradiction checker still flags a denial whose negator comes after the phrase
+
+**Found 2026-09-15**, reading the four `contradicted` verdicts in defect 46's
+liveness-kill A/B by hand. All four fired `termination_reason_vs_memory_cause`
+against a measured `last_termination.reason = Error`, and none of the four
+clauses claims an OOM kill:
+
+| run | clause | shape |
+|---|---|---|
+| control | "This means the **OOM killer was not the cause** (the kubelet explicitly sets `OOMKilled` when the OOM killer terminates a container)." | denial, then the rule |
+| control | "`\"OOMKilled\"` only when the kernel's OOM killer terminates a container." | the rule, cut mid-sentence by the splitter |
+| variant | "The OOM killer is not the cause, as the termination reason is not `\"OOMKilled\"`." | denial, negator after the phrase |
+| variant | "The kubelet sets `OOMKilled` explicitly for OOM kills." | the rule, restated |
+
+Defect 45 widened the window a negator is looked for in, and that window looks
+*backwards* from the phrase. Two shapes fall outside it: **"X is not the
+cause"**, where the negator follows the phrase, and **a general statement of
+the rule** — the sentence `SYSTEM_PROMPT` itself teaches, "OOMKilled when it
+was the kernel's OOM killer" — which asserts nothing about this container.
+This is defect 45's finding again with new spellings: the checker penalising
+the sentence the prompt asks for.
+
+**Sized, not yet classified.** Over every recorded run, this rule has fired on
+46 runs and 51 distinct clauses; a regex for the two shapes matches **12** of
+them (3 post-negated, 9 rule statements). That is a crude upper-and-lower bound
+at once — a regex both misses paraphrases and can match a clause that also
+asserts — and the defect-45 method is what turns it into a number: classify the
+51 by hand, fix, then replay with `evals/replay_grounding.py` and require that
+nothing moves the other way.
+
+**Not fixed in this pass, on purpose.** `contradicted` is a published verdict
+(RUNBOOK's table), and every change to it in this project has been replayed
+before it was believed; defect 45's first attempt put three new records into
+`contradicted`. What it costs until then: any case that sets
+`expected_grounding` can fail a correct, denying answer, and a defect-46-style
+A/B that reads the case grader will undercount both arms.
 
 
 ## Where a run's 74 seconds go

@@ -11,6 +11,7 @@ wrong    -- names a different member of the image-fault family, or the pull-secr
 pod_read -- the run reached describe_pod or get_pod_events (the only tools carrying the message)
 """
 import re
+
 STRICT = ["pull policy", "pullpolicy", "imagepullpolicy", "policy of never",
           "policy is never", "policy is set to never", "policy: never", "set to never"]
 LENIENT_EXTRA = ["errimageneverpull"]
