@@ -11,7 +11,7 @@ via Socket Mode (slack_socket.py).
 authority, not this line — tree clean and pushed, **1807 passed, 0 skipped**
 (49s), CI green, tags through **v0.2.1** (2026-09-09). **mypy and ruff are both
 at zero and both gate**; `continue-on-error` came off the ruff step on
-2026-09-13. 52 defects recorded, 36 eval cases of which 7 are
+2026-09-13. 53 defects recorded, 36 eval cases of which 7 are
 never-seen-fault-type cases.
 
 **That figure is measured, with Postgres up**, on the tree this session ends
@@ -589,15 +589,24 @@ read — criteria, drivers, records and logs.
      the answer.
    - 0.2.2 carrying defects 48 and 49, and HA on a released image, both as
      before.
-3. **Defect 50's cross-tab says where to spend effort next, and it is not
-   prompts.** 14/16 runs that read the pod named the fault, 0/17 that did not,
-   p = 1.5e-7. The same question for `unschedulable_node_affinity` has a
-   *tool* answer: `describe_pod` reports no `nodeSelector`, affinity or
-   `PodScheduled` condition for a Pending pod, so only `get_pod_events` carries
-   the cause, and two recorded runs answered "no GPU" from the workload's name.
-   Verify the condition's message on a live cluster, then add it to
-   `describe_pod` for an unscheduled pod. Its phrase list is near-vacuous too:
-   `pending` is in the question and `node` is in any answer.
+3. **Done 2026-09-15 — defect 53.** `describe_pod` now carries a "scheduling"
+   block for a pod the scheduler has ruled on: its message, `nodeSelector`,
+   required node affinity, tolerations and claim names. By hand,
+   `unschedulable_node_affinity` went 0/5 → 8/10 naming the selector and its
+   value (p = 0.0070, sequential arms). The first version made
+   `unschedulable_unbound_pvc` guess claim names 5/5; naming the claims took
+   that to 0/5. What it left open:
+   - **`get_pod_events` returns superseded messages.** Both post-change runs
+     that read the events blamed a stale "untolerated taint(s)" from the node's
+     first seconds; none of the 8 that did not. Filter FailedScheduling events
+     older than the pod's current `PodScheduled` condition, or say which is
+     current.
+   - **`scan_references` is never called for an unbound claim** — 0/15 runs,
+     despite a docstring pointer. The StorageClass is reachable by hand only.
+   - Both scheduling cases' `expect_tools: get_pod_events` is now the defect 51
+     shape: the case grader reads 1/5 and 1/5 on answers that are 4/5 right.
+     Owner's decision, with defect 51's.
+   - `results/sched/criterion.py`'s denial regex misses markdown between words.
 4. **Extend the echo guard to fixture identifiers**, narrowly. A term matched
    inside the subject's own image string passes any answer that quotes it;
    `image_pull_failure`, `leading_question_image_pull_is_not_oom` and

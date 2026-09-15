@@ -218,20 +218,20 @@ cluster — every diagnosis is read fresh.
 Four things go wrong in different ways, and only one of them means the answer
 is wrong. Telling them apart is most of what this section is for.
 
-**The numbers below come from 2831 recorded runs in `results/`, and they are
+**The numbers below come from 2861 recorded runs in `results/`, and they are
 not a performance claim.** That corpus is a mixture of experiments — different
 models, prompt configurations, some deliberately degraded to measure the
 effect. It says what these failure modes look like when they occur, not how
 often kubewhy is right. For that, read [AI_EVALUATION.md](AI_EVALUATION.md),
 which is careful about what its numbers do and do not support.
 
-| Verdict | Share of 2831 runs | What it means |
+| Verdict | Share of 2861 runs | What it means |
 |---|---|---|
-| `grounded` | 2039 (72.0%) | Every claim traced to a tool result |
-| `partial` | 378 (13.4%) | Some claims traced, some not |
-| `insufficient_evidence` | 321 (11.3%) | Nothing here could be checked — often the **correct** answer |
+| `grounded` | 2057 (71.9%) | Every claim traced to a tool result |
+| `partial` | 384 (13.4%) | Some claims traced, some not |
+| `insufficient_evidence` | 325 (11.4%) | Nothing here could be checked — often the **correct** answer |
 | `contradicted` | 58 (2.0%) | The evidence says otherwise |
-| `ungrounded` | 11 (0.4%) | Nothing traced |
+| `ungrounded` | 13 (0.5%) | Nothing traced |
 
 ### The model is unreachable
 
@@ -265,8 +265,8 @@ it loudly. This is degraded, not down.
 **Symptom.** The answer carries `termination: deadline_exceeded` and reads as
 incomplete, because it is. The run was stopped while collecting evidence.
 
-**Measured, over 2784 recorded runs with a duration:** median **46.7s**, p95
-**187.9s**, p99 **314.5s**. The default `TRIAGE_INVESTIGATION_BUDGET` is 600s,
+**Measured, over 2817 recorded runs with a duration:** median **47.5s**, p95
+**189.6s**, p99 **313.1s**. The default `TRIAGE_INVESTIGATION_BUDGET` is 600s,
 which is roughly 1.9× the p99.
 
 Five runs exceeded 600s of wall clock. All five are in files from unattended

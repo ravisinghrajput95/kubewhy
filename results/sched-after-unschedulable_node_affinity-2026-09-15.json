@@ -1,0 +1,638 @@
+[
+ {
+  "case": "unschedulable_node_affinity",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": false,
+  "seconds": 96.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-15T12:52:34",
+  "load_before": 3.46,
+  "load_after": 1.92,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_nodes"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true,
+    "namespace": "shop",
+    "workload": "gpu-scoring"
+   },
+   {
+    "name": "gpu-scoring-7d9cd4cc87-zwbct",
+    "namespace": "shop"
+   },
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"gpu-scoring-7d9cd4cc87-zwbct\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"gpu-scoring-7d9cd4cc87-zwbct\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\", \"node_selector\": {\"accelerator\": \"nvidia-a100\"}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-sched-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The `gpu-scoring` pod is stuck in **Pending** because its `nodeSelector` requires a node labeled `accelerator: nvidia-a100`, but no such node exists in the cluster. The only available node (`kubewhy-sched-control-plane`) lacks this label and has no GPU resources. \n\n### Solution:\n1. **Label the node** with `accelerator: nvidia-a100` if it has an NVIDIA A100 GPU.\n2. **Remove or adjust the `nodeSelector`** in the pod's spec if GPU-specific scheduling is not required. \n\nWithout these changes, the pod will remain unschedulable.",
+  "answer": "The `gpu-scoring` pod is stuck in **Pending** because its `nodeSelector` requires a node labeled `accelerator: nvidia-a100`, but no such node exists in the cluster. The only available node (`kubewhy-sched-control-plane`) lacks this label and has no GPU resources. \n\n### Solution:\n1. **Label the node** with `accelerator: nvidia-a100` if it has an NVIDIA A100 GPU.\n2. **Remove or adjust the `nodeSelector`** in the pod's spec if GPU-specific scheduling is not required. \n\nWithout these changes, the pod will remain unschedulable.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called get_pod_events"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 96767.6,
+   "tool_ms": 20.5,
+   "rounds": 4,
+   "round_ms": [
+    27835.8,
+    19420.7,
+    25022.6,
+    24488.6
+   ],
+   "slowest_round_ms": 27835.8,
+   "model_share": 1.0,
+   "wall_ms": 96789.5,
+   "unaccounted_ms": 1.4,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    },
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "e1ebc32f7101",
+  "target": {
+   "kind": "workload",
+   "name": "gpu-scoring",
+   "namespace": "shop"
+  }
+ },
+ {
+  "case": "unschedulable_node_affinity",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": true,
+  "seconds": 151.2,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-15T12:54:10",
+  "load_before": 1.92,
+  "load_after": 2.6,
+  "low_power_mode": true,
+  "unverified": [
+   "diskpressure",
+   "memorypressure"
+  ],
+  "tools": [
+   "describe_pod",
+   "list_pods",
+   "get_pod_events",
+   "list_nodes"
+  ],
+  "arguments": [
+   {
+    "name": "gpu-scoring",
+    "namespace": "shop"
+   },
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "gpu-scoring"
+   },
+   {
+    "name": "gpu-scoring-7d9cd4cc87-zwbct",
+    "namespace": "shop",
+    "limit": 5
+   },
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "describe_pod",
+    "result": "{\"error\": \"kubernetes API error 404: pods \\\"gpu-scoring\\\" not found\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"gpu-scoring-7d9cd4cc87-zwbct\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"gpu-scoring-7d9cd4cc87-zwbct\", \"events\": [{\"reason\": \"FailedScheduling\", \"count\": 7, \"age\": \"3m\", \"message\": \"0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\"}, {\"reason\": \"FailedScheduling\", \"count\": 1, \"age\": \"33m\", \"message\": \"0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-sched-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The `gpu-scoring` pod is stuck in **Pending** due to scheduling constraints, and here's the full diagnosis:\n\n---\n\n### \u2705 **Node Status**  \nThe only node in the cluster, `kubewhy-sched-control-plane`, is **ready** with no resource pressure (`MemoryPressure`, `DiskPressure`, etc.). It has allocatable CPU and memory, and is **not unschedulable**.  \n\n---\n\n### \ud83d\udea8 **Scheduling Failures**  \nThe pod\u2019s scheduling failed **twice** with these root causes:  \n\n1. **Node Selector/Affinity Mismatch**  \n   - The pod\u2019s `nodeSelector` or `affinity` rules do **not match** the node\u2019s labels.  \n   - Example: If the pod requires a node labeled `gpu=true`, but the node lacks this label, it cannot schedule.  \n\n2. **Untolerated Taints**  \n   - The pod\u2019s tolerations **do not cover** taints on the node.  \n   - For example, if the node has a taint like `node-role.kubernetes.io/gpu:NoSchedule`, the pod must include a toleration for it to run.  \n\n---\n\n### \ud83d\udd0d **Next Steps**  \n1. Check the pod\u2019s `spec.nodeSelector` and `spec.tolerations` via `describe_pod`.  \n2. Verify the node\u2019s labels and taints:  \n   - Labels: `kubectl get nodes --show-labels`  \n   - Taints: `kubectl describe node kubewhy-sched-control-plane | grep Taint`  \n3. Ensure the pod\u2019s requirements (e.g., GPU labels) align with the node\u2019s capabilities.  \n\n---\n\n### \ud83d\udccc Summary  \nThe pod is pending because its scheduling rules (node affinity/tolerations) do **not match** the single available node. The node itself is healthy, so the issue lies in the pod\u2019s configuration. Fix the mismatch to resolve the Pending state.",
+  "answer": "The `gpu-scoring` pod is stuck in **Pending** due to scheduling constraints, and here's the full diagnosis:\n\n---\n\n### \u2705 **Node Status**  \nThe only node in the cluster, `kubewhy-sched-control-plane`, is **ready** with no resource pressure (`[unverified: MemoryPressure]`, `[unverified: DiskPressure]`, etc.). It has allocatable CPU and memory, and is **not unschedulable**.  \n\n---\n\n### \ud83d\udea8 **Scheduling Failures**  \nThe pod\u2019s scheduling failed **twice** with these root causes:  \n\n1. **Node Selector/Affinity Mismatch**  \n   - The pod\u2019s `nodeSelector` or `affinity` rules do **not match** the node\u2019s labels.  \n   - Example: If the pod requires a node labeled `gpu=true`, but the node lacks this label, it cannot schedule.  \n\n2. **Untolerated Taints**  \n   - The pod\u2019s tolerations **do not cover** taints on the node.  \n   - For example, if the node has a taint like `node-role.kubernetes.io/gpu:NoSchedule`, the pod must include a toleration for it to run.  \n\n---\n\n### \ud83d\udd0d **Next Steps**  \n1. Check the pod\u2019s `spec.nodeSelector` and `spec.tolerations` via `describe_pod`.  \n2. Verify the node\u2019s labels and taints:  \n   - Labels: `kubectl get nodes --show-labels`  \n   - Taints: `kubectl describe node kubewhy-sched-control-plane | grep Taint`  \n3. Ensure the pod\u2019s requirements (e.g., GPU labels) align with the node\u2019s capabilities.  \n\n---\n\n### \ud83d\udccc Summary  \nThe pod is pending because its scheduling rules (node affinity/tolerations) do **not match** the single available node. The node itself is healthy, so the issue lies in the pod\u2019s configuration. Fix the mismatch to resolve the Pending state.\n\n---\n**Evidence audit.**\n2 of 2 stated values could not be traced to any tool result for the workload they were stated about: `diskpressure`, `memorypressure`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['diskpressure', 'memorypressure'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 151123.4,
+   "tool_ms": 24.0,
+   "rounds": 6,
+   "round_ms": [
+    16371.6,
+    14640.6,
+    25565.1,
+    34426.6,
+    24972.1,
+    35147.5
+   ],
+   "slowest_round_ms": 35147.5,
+   "model_share": 1.0,
+   "wall_ms": 151153.3,
+   "unaccounted_ms": 5.9,
+   "slept_ms": 0.3
+  },
+  "rca": {
+   "observations": [],
+   "inferences": [
+    {
+     "claim": "diskpressure",
+     "kind": "status"
+    },
+    {
+     "claim": "memorypressure",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "DiskPressure",
+    "MemoryPressure"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "17f0733e499b",
+  "target": {
+   "kind": "workload",
+   "name": "gpu-scoring",
+   "namespace": "shop"
+  }
+ },
+ {
+  "case": "unschedulable_node_affinity",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": false,
+  "seconds": 107.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-15T12:56:42",
+  "load_before": 2.6,
+  "load_after": 3.18,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "gpu-scoring"
+   },
+   {
+    "name": "gpu-scoring-7d9cd4cc87-zwbct",
+    "namespace": "shop"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"gpu-scoring-7d9cd4cc87-zwbct\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"gpu-scoring-7d9cd4cc87-zwbct\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\", \"node_selector\": {\"accelerator\": \"nvidia-a100\"}}}"
+   }
+  ],
+  "draft": "The **gpu-scoring pod** is stuck in **Pending** because it requires a node with an **NVIDIA A100 GPU** (as specified by `node_selector: accelerator=nvidia-a100`), but no such node exists in the cluster. \n\n### Key Details:\n- **Node Selector Mismatch**: The pod\u2019s `nodeSelector` specifies `accelerator: nvidia-a100`, but no nodes in the cluster have this label. \n- **Scheduler Message**: The scheduler reports `0/1 nodes are available` and explicitly states the pod\u2019s node affinity/selector doesn\u2019t match any node.\n\n### Next Steps:\n1. **Check Node Labels**: Verify if any nodes have the `accelerator=nvidia-a100` label. Use `kubectl get nodes --show-labels` to inspect node labels.\n2. **Update Node Labels**: If no nodes match, add the required label to a node with an A100 GPU (e.g., `kubectl label nodes <node-name> accelerator=nvidia-a100`).\n3. **Adjust Pod Spec**: If A100 GPUs are unavailable, update the pod\u2019s `nodeSelector` to match existing GPU types (e.g., `nvidia-v100`) or remove the `nodeSelector` to allow scheduling on any node.\n\nWithout a matching node, the pod cannot proceed.",
+  "answer": "The **gpu-scoring pod** is stuck in **Pending** because it requires a node with an **NVIDIA A100 GPU** (as specified by `node_selector: accelerator=nvidia-a100`), but no such node exists in the cluster. \n\n### Key Details:\n- **Node Selector Mismatch**: The pod\u2019s `nodeSelector` specifies `accelerator: nvidia-a100`, but no nodes in the cluster have this label. \n- **Scheduler Message**: The scheduler reports `0/1 nodes are available` and explicitly states the pod\u2019s node affinity/selector doesn\u2019t match any node.\n\n### Next Steps:\n1. **Check Node Labels**: Verify if any nodes have the `accelerator=nvidia-a100` label. Use `kubectl get nodes --show-labels` to inspect node labels.\n2. **Update Node Labels**: If no nodes match, add the required label to a node with an A100 GPU (e.g., `kubectl label nodes <node-name> accelerator=nvidia-a100`).\n3. **Adjust Pod Spec**: If A100 GPUs are unavailable, update the pod\u2019s `nodeSelector` to match existing GPU types (e.g., `nvidia-v100`) or remove the `nodeSelector` to allow scheduling on any node.\n\nWithout a matching node, the pod cannot proceed.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called get_pod_events"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 107815.1,
+   "tool_ms": 15.1,
+   "rounds": 3,
+   "round_ms": [
+    26601.9,
+    31127.8,
+    50085.4
+   ],
+   "slowest_round_ms": 50085.4,
+   "model_share": 1.0,
+   "wall_ms": 107834.3,
+   "unaccounted_ms": 4.0,
+   "slept_ms": 2.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    },
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    },
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "gpu-scoring-7d9cd4cc87-zwbct.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "6bed8554fe3c",
+  "target": {
+   "kind": "workload",
+   "name": "gpu-scoring",
+   "namespace": "shop"
+  }
+ },
+ {
+  "case": "unschedulable_node_affinity",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": false,
+  "seconds": 140.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-15T12:58:30",
+  "load_before": 3.18,
+  "load_after": 2.87,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_nodes"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "gpu-scoring"
+   },
+   {
+    "name": "gpu-scoring-7d9cd4cc87-zwbct",
+    "namespace": "shop"
+   },
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"gpu-scoring-7d9cd4cc87-zwbct\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"gpu-scoring-7d9cd4cc87-zwbct\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\", \"node_selector\": {\"accelerator\": \"nvidia-a100\"}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-sched-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The `gpu-scoring` pod is stuck in **Pending** because **no node** in the cluster matches its `nodeSelector` requirement for an `\"accelerator\": \"nvidia-a100\"`. The only available node (`kubewhy-sched-control-plane`) lacks this label, so the scheduler cannot assign it.\n\n### Solution:\n1. **Check node labels**: Ensure there are nodes with the `\"accelerator\": \"nvidia-a100\"` label.\n2. **Adjust nodeSelector**: Update the pod's `nodeSelector` to match available nodes (e.g., remove the GPU-specific requirement if not critical).\n3. **Add GPU nodes**: If GPU resources are needed, add nodes with the required hardware and appropriate labels.",
+  "answer": "The `gpu-scoring` pod is stuck in **Pending** because **no node** in the cluster matches its `nodeSelector` requirement for an `\"accelerator\": \"nvidia-a100\"`. The only available node (`kubewhy-sched-control-plane`) lacks this label, so the scheduler cannot assign it.\n\n### Solution:\n1. **Check node labels**: Ensure there are nodes with the `\"accelerator\": \"nvidia-a100\"` label.\n2. **Adjust nodeSelector**: Update the pod's `nodeSelector` to match available nodes (e.g., remove the GPU-specific requirement if not critical).\n3. **Add GPU nodes**: If GPU resources are needed, add nodes with the required hardware and appropriate labels.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called get_pod_events"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 140254.3,
+   "tool_ms": 26.9,
+   "rounds": 4,
+   "round_ms": [
+    43756.4,
+    35107.4,
+    34845.6,
+    26545.0
+   ],
+   "slowest_round_ms": 43756.4,
+   "model_share": 1.0,
+   "wall_ms": 140282.7,
+   "unaccounted_ms": 1.5,
+   "slept_ms": 0.5
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    },
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "6b32b8d56586",
+  "target": {
+   "kind": "workload",
+   "name": "gpu-scoring",
+   "namespace": "shop"
+  }
+ },
+ {
+  "case": "unschedulable_node_affinity",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": false,
+  "seconds": 176.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-15T13:00:50",
+  "load_before": 2.87,
+  "load_after": 1.56,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_nodes"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true,
+    "namespace": "shop",
+    "workload": "gpu-scoring"
+   },
+   {
+    "name": "gpu-scoring-7d9cd4cc87-zwbct",
+    "namespace": "shop"
+   },
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"gpu-scoring-7d9cd4cc87-zwbct\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"gpu-scoring-7d9cd4cc87-zwbct\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\", \"node_selector\": {\"accelerator\": \"nvidia-a100\"}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-sched-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The `gpu-scoring` pod in the `shop` namespace is stuck in **Pending** due to a **node selector mismatch**. Here's the full diagnosis:\n\n### Root Cause\n- **Node Selector Requirement**: The pod specifies `node_selector: accelerator=nvidia-a100` in its spec. This means it can only run on nodes labeled with `accelerator: nvidia-a100`.\n- **No Matching Nodes**: The cluster has **no nodes** with this label. The `list_nodes` output shows only one node (`kubewhy-sched-control-plane`), which does **not** have the required label. The scheduler cannot place the pod on any node.\n\n### Key Evidence\n1. **Pod Status**: `Pending` with reason `Unschedulable` (from `describe_pod`).\n2. **Node Selector Mismatch**: Explicitly stated in the `scheduling` block of the pod's description.\n3. **Node Inventory**: `list_nodes` confirms only one node exists, and it lacks the required label.\n\n### Next Steps\n1. **Add a Node with the Required Label**: Deploy a node (e.g., a GPU-equipped machine) and label it `accelerator=nvidia-a100`.\n2. **Update the Pod's Node Selector**: If no NVIDIA A100 GPUs are available, change the node selector to match existing hardware (e.g., `accelerator=cuda` for NVIDIA GPUs).\n3. **Verify Node Availability**: Re-run `list_nodes` after adding a compatible node to confirm the pod can schedule.\n\nWithout a node meeting the `accelerator: nvidia-a100` requirement, the pod will remain in `Pending` indefinitely.",
+  "answer": "The `gpu-scoring` pod in the `shop` namespace is stuck in **Pending** due to a **node selector mismatch**. Here's the full diagnosis:\n\n### Root Cause\n- **Node Selector Requirement**: The pod specifies `node_selector: accelerator=nvidia-a100` in its spec. This means it can only run on nodes labeled with `accelerator: nvidia-a100`.\n- **No Matching Nodes**: The cluster has **no nodes** with this label. The `list_nodes` output shows only one node (`kubewhy-sched-control-plane`), which does **not** have the required label. The scheduler cannot place the pod on any node.\n\n### Key Evidence\n1. **Pod Status**: `Pending` with reason `Unschedulable` (from `describe_pod`).\n2. **Node Selector Mismatch**: Explicitly stated in the `scheduling` block of the pod's description.\n3. **Node Inventory**: `list_nodes` confirms only one node exists, and it lacks the required label.\n\n### Next Steps\n1. **Add a Node with the Required Label**: Deploy a node (e.g., a GPU-equipped machine) and label it `accelerator=nvidia-a100`.\n2. **Update the Pod's Node Selector**: If no NVIDIA A100 GPUs are available, change the node selector to match existing hardware (e.g., `accelerator=cuda` for NVIDIA GPUs).\n3. **Verify Node Availability**: Re-run `list_nodes` after adding a compatible node to confirm the pod can schedule.\n\nWithout a node meeting the `accelerator: nvidia-a100` requirement, the pod will remain in `Pending` indefinitely.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called get_pod_events"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 176639.6,
+   "tool_ms": 18.2,
+   "rounds": 5,
+   "round_ms": [
+    46369.5,
+    23749.6,
+    44106.1,
+    23199.7,
+    39214.7
+   ],
+   "slowest_round_ms": 46369.5,
+   "model_share": 1.0,
+   "wall_ms": 176661.2,
+   "unaccounted_ms": 3.4,
+   "slept_ms": 0.4
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    },
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    },
+    {
+     "claim": "100",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.node_selector.accelerator",
+       "value": "100"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "26c4a00538f8",
+  "target": {
+   "kind": "workload",
+   "name": "gpu-scoring",
+   "namespace": "shop"
+  }
+ }
+]

@@ -3342,6 +3342,116 @@ reasons, so that case's 1/3 stands; the claim that the model fabricated an OOM
 kill there does not.
 
 
+### 53. describe_pod said nothing about scheduling, and the model read the silence as a fact
+
+**Problem, measured on kind 2026-09-15** against `demo/tricky-pods.yaml`. The
+scheduler writes its verdict onto an unschedulable pod as a `PodScheduled=False`
+condition, and `describe_pod` read none of it:
+
+| what the API holds for `gpu-scoring` | who reported it |
+|---|---|
+| `PodScheduled=False`, `Unschedulable`, "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector" | `get_pod_events`, as an event |
+| `nodeSelector: {accelerator: nvidia-a100}` — the label no node carries | **no tool at all** |
+
+The events carry the scheduler's message and never the label it failed to
+match, so the one fact the cause turns on was unreachable. And the same pod's
+events also held a stale "1 node(s) had untolerated taint(s)" from the node's
+first seconds; the condition carries only the current verdict.
+
+**Three arms, n=5 each, both scheduling cases, one cluster, run in sequence.**
+qwen3, thinking on, `evals/run_eval.py`, records in
+`results/sched-{before,after,claims}-*-2026-09-15.json`. `before` is the tree
+without the change (`aa13573`); `after` adds the scheduler's verdict, selector,
+affinity and tolerations (`2a82f73`); `claims` adds the PersistentVolumeClaim
+names and a docstring pointer to `scan_references` (`c917a7c`). **Sequential,
+not paired** — `ab_prompt.py` swaps text, not code — so an ordering effect
+cannot be ruled out; the arms ran within two hours on an idle machine.
+
+**The outcome was not the case grader**, for reasons committed before the first
+arm (`f55c404`): `unschedulable_node_affinity` accepts `pending`, which is in its
+question, and `node`, which is in almost any answer; and both cases demand
+`get_pod_events`, which a correct answer built from the new output does not
+need. The criterion was revised twice, each time before the arm it applied to:
+once (`aa13573`) when it scored two recorded "no GPU" answers correct because
+they mention selectors only to deny one exists, and once (`26cff0b`) to see the
+PVC regression described below. **It still has a hole found after the before
+arm:** its denial pattern does not allow markdown between the words, so "does
+not include **nodeSelector**" scored as naming the selector. Every figure below
+is therefore a reading by hand, with the frozen criterion's own number beside
+it.
+
+**`unschedulable_node_affinity`**, by hand:
+
+| | before | after | claims |
+|---|---|---|---|
+| names the selector *and* `accelerator: nvidia-a100` | **0/5** | **4/5** | **4/5** |
+| blames a missing GPU | 3/5 | 0/5 | 0/5 |
+| says the pod has no selector | 1/5 | 0/5 | 0/5 |
+| names a selector mismatch and blames the stale taint | 0/5 | 1/5 | 1/5 |
+| empty answer | 1/5 | 0/5 | 0/5 |
+| *frozen criterion, primary* | *1/5* | *5/5* | *5/5* |
+| *case grader* | *1/5* | *1/5* | *1/5* |
+
+Before against both arms carrying the change, 0/5 against 8/10, **Fisher
+p = 0.0070**. The case grader scores all three arms 1/5 and passes a wrong answer
+in two of them — "Missing GPU Resource Requests" in `before` — which is the
+vacuity the criterion was written around.
+
+**The before arm is defect 50's mechanism with the pod's name as the leak.**
+Every run reached `describe_pod`, one in five went on to the events, and three
+answered from the name `gpu-scoring`. One wrote "the pod's configuration (via
+`describe_pod`) does not include nodeSelector, tolerations, or affinity rules" —
+a field this projection never carried, read as a setting the pod lacked.
+
+**Both runs after the change that read the events blamed the stale taint.**
+One in `after`, one in `claims`: each reached `get_pod_events`, found the old
+"untolerated taint(s)" beside the current message, and reported both as causes.
+0 of the 8 runs that did not read the events did. That is a defect in
+`get_pod_events`, which returns a message the scheduler superseded, and it is
+recorded rather than fixed here.
+
+**`unschedulable_unbound_pvc` — the first version of the change made it worse,
+and the case grader was the only thing that showed it at first:**
+
+| | before | after | claims |
+|---|---|---|---|
+| names the claim `archive-data` | 0/5 | 0/5 | **3/5** |
+| guesses a claim name that is not it | 2/5 | **5/5** | **0/5** |
+| calls the claim itself missing (it exists; its StorageClass does not) | 2/5 | 4/5 | 1/5 |
+| read `get_pod_events` | 5/5 | 0/5 | 1/5 |
+| names StorageClass `fast-ssd-nonexistent` | 0/5 | 0/5 | 0/5 |
+| called `scan_references`, the one tool carrying it | 0/5 | 0/5 | 0/5 |
+| *case grader* | *5/5* | *0/5* | *1/5* |
+
+With the scheduler's message in `describe_pod`, every run stopped there, and
+every run guessed which claim — "likely named archive-pvc", "the
+`volumeClaimTemplates` of its deployment", and twice the `kube-root-ca.crt`
+ConfigMap, scored `grounded` because that name *is* in `describe_pod`'s config
+list. The `before` arm's answers were no better informed — the event carries the
+same message, no claim name, and no pod-level tool ever carried the StorageClass
+— but they guessed less. Naming the claims took wrong names 5/5 → 0/5 (p =
+0.0079). **The pointer to `scan_references` did nothing: 0 of 15 runs across all
+arms called it**, so the StorageClass half of this fault is reachable by hand and
+not in practice. That is coverage gap (a) from the handoff, confirmed live.
+
+**The case grader's 5/5 → 1/5 is the defect 51 shape, not a result.** Every
+failure in `after` and in `claims` carries `never called get_pod_events`,
+the empty answer included. Whether both cases should drop that expectation is the same
+owner's decision defect 51 recorded.
+
+**The change.** `_scheduling(pod)` returns nothing for a pod the scheduler has
+not ruled on — no `PodScheduled=False` condition — so a pod created a second ago
+reports no selector as though it explained anything. Otherwise: the reason,
+the message bounded to 400 characters, `node_selector`, required node-affinity
+terms as readable expressions, tolerations the pod set (not the two admission
+adds to every pod), and `volume_claims`. Pod affinity and anti-affinity are not
+projected; no fixture produces one. Live: of 33 pods across `demo` and `shop`,
+exactly the two unscheduled fixtures carry a block. Seven tests; every part was
+disabled and a test watched fail, and a `node_name` guard that no test could
+fail was removed — a bound pod's `PodScheduled` is `True`, so the condition check
+already excluded it.
+
+
 ## Where a run's 74 seconds go
 
 Every latency figure this project has published is a report. None of them said

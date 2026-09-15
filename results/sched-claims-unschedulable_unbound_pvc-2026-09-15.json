@@ -1,0 +1,505 @@
+[
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": false,
+  "seconds": 70.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-15T13:26:54",
+  "load_before": 3.03,
+  "load_after": 2.35,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "archive"
+   },
+   {
+    "name": "archive-77ff685b48-ntv2r",
+    "namespace": "shop"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-ntv2r\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-ntv2r\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [\"archive-data\"]}}"
+   }
+  ],
+  "draft": "The **archive pod** in the `shop` namespace is not scheduling because it depends on a **PersistentVolumeClaim (PVC)** named `archive-data` that has not been bound to a PersistentVolume (PV). Here's the breakdown:\n\n- **Root cause**: The pod's scheduling is blocked by the message:  \n  `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.\"`  \n  This means the PVC `archive-data` is not yet provisioned or matched to a PV.\n\n- **Next steps**:  \n  1. Check if the PVC `archive-data` exists in the `shop` namespace:  \n     ```bash\n     kubectl get pvc -n shop\n     ```  \n     If it's missing, the PVC may not have been created, or the storage class might be misconfigured.  \n\n  2. Verify if a PV exists that matches the PVC's requirements (e.g., storage class, access mode).  \n  3. If the PVC is misconfigured, update it with valid PV details or ensure the storage class is available.  \n\nThis is a storage-related issue, not a pod or node problem. Once the PVC is bound, the pod should schedule automatically.",
+  "answer": "The **archive pod** in the `shop` namespace is not scheduling because it depends on a **PersistentVolumeClaim (PVC)** named `archive-data` that has not been bound to a PersistentVolume (PV). Here's the breakdown:\n\n- **Root cause**: The pod's scheduling is blocked by the message:  \n  `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.\"`  \n  This means the PVC `archive-data` is not yet provisioned or matched to a PV.\n\n- **Next steps**:  \n  1. Check if the PVC `archive-data` exists in the `shop` namespace:  \n     ```bash\n     kubectl get pvc -n shop\n     ```  \n     If it's missing, the PVC may not have been created, or the storage class might be misconfigured.  \n\n  2. Verify if a PV exists that matches the PVC's requirements (e.g., storage class, access mode).  \n  3. If the PVC is misconfigured, update it with valid PV details or ensure the storage class is available.  \n\nThis is a storage-related issue, not a pod or node problem. Once the PVC is bound, the pod should schedule automatically.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called get_pod_events"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 70830.2,
+   "tool_ms": 14.5,
+   "rounds": 3,
+   "round_ms": [
+    22666.5,
+    13710.1,
+    34453.6
+   ],
+   "slowest_round_ms": 34453.6,
+   "model_share": 1.0,
+   "wall_ms": 70847.1,
+   "unaccounted_ms": 2.4,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "archive-77ff685b48-ntv2r.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "29c5c3246df8",
+  "target": {
+   "kind": "workload",
+   "name": "archive",
+   "namespace": "shop"
+  }
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": false,
+  "seconds": 68.2,
+  "confidence": "ungrounded",
+  "model_resident": true,
+  "started_at": "2026-09-15T13:28:05",
+  "load_before": 2.35,
+  "load_after": 1.97,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "workload": "archive"
+   },
+   {
+    "name": "archive-77ff685b48-ntv2r",
+    "namespace": "shop"
+   },
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "archive"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-ntv2r\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-ntv2r\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [\"archive-data\"]}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-ntv2r\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   }
+  ],
+  "draft": "",
+  "answer": "",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "missing ['schedul', 'pending']",
+   "missing ['volume', 'pvc', 'persistentvolumeclaim', 'claim']",
+   "never called get_pod_events",
+   "grounding verdict 'ungrounded', expected one of ['grounded', 'partial']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 68178.1,
+   "tool_ms": 21.9,
+   "rounds": 4,
+   "round_ms": [
+    28324.9,
+    12331.6,
+    12022.7,
+    15498.9
+   ],
+   "slowest_round_ms": 28324.9,
+   "model_share": 1.0,
+   "wall_ms": 68200.6,
+   "unaccounted_ms": 0.6,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "b024db827058",
+  "target": {
+   "kind": "workload",
+   "name": "archive",
+   "namespace": "shop"
+  }
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": false,
+  "seconds": 63.6,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-15T13:29:13",
+  "load_before": 1.97,
+  "load_after": 2.04,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "archive",
+    "namespace": "shop"
+   },
+   {
+    "namespace": "shop",
+    "name": "archive-77ff685b48-ntv2r"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-ntv2r\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-ntv2r\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [\"archive-data\"]}}"
+   }
+  ],
+  "draft": "The **archive pod** is not scheduled because it requires a PersistentVolumeClaim (PVC) named `archive-data` that cannot be bound. The PVC is missing or unprovisioned, preventing the pod from being assigned a node.\n\n### Key Details:\n- **Error**: `Unschedulable` due to `0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims`.\n- **Missing PVC**: `archive-data` is referenced but not found in the `shop` namespace.\n- **Volume Claims**: The pod\u2019s volume claims include `archive-data`, which must be manually created or ensured to exist.\n\n### Next Steps:\n1. **Check if the PVC exists**:\n   ```bash\n   kubectl get pvc -n shop\n   ```\n   Look for `archive-data`. If missing, create it with a matching storage class.\n\n2. **Verify storage class**:\n   Ensure the PVC uses a valid storage class (e.g., `standard` or `local-path`) that matches the cluster\u2019s configuration.\n\n3. **Requeue the pod**:\n   Once the PVC is created, the pod will automatically be scheduled. If not, manually delete and recreate the pod to trigger rescheduling.",
+  "answer": "The **archive pod** is not scheduled because it requires a PersistentVolumeClaim (PVC) named `archive-data` that cannot be bound. The PVC is missing or unprovisioned, preventing the pod from being assigned a node.\n\n### Key Details:\n- **Error**: `Unschedulable` due to `0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims`.\n- **Missing PVC**: `archive-data` is referenced but not found in the `shop` namespace.\n- **Volume Claims**: The pod\u2019s volume claims include `archive-data`, which must be manually created or ensured to exist.\n\n### Next Steps:\n1. **Check if the PVC exists**:\n   ```bash\n   kubectl get pvc -n shop\n   ```\n   Look for `archive-data`. If missing, create it with a matching storage class.\n\n2. **Verify storage class**:\n   Ensure the PVC uses a valid storage class (e.g., `standard` or `local-path`) that matches the cluster\u2019s configuration.\n\n3. **Requeue the pod**:\n   Once the PVC is created, the pod will automatically be scheduled. If not, manually delete and recreate the pod to trigger rescheduling.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called get_pod_events"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 63534.7,
+   "tool_ms": 17.1,
+   "rounds": 3,
+   "round_ms": [
+    18524.8,
+    13059.9,
+    31950.1
+   ],
+   "slowest_round_ms": 31950.1,
+   "model_share": 1.0,
+   "wall_ms": 63555.2,
+   "unaccounted_ms": 3.4,
+   "slept_ms": 1.9
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "archive-77ff685b48-ntv2r.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "a880a8e94f34",
+  "target": {
+   "kind": "workload",
+   "name": "archive",
+   "namespace": "shop"
+  }
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": false,
+  "seconds": 54.0,
+  "confidence": "insufficient_evidence",
+  "model_resident": true,
+  "started_at": "2026-09-15T13:30:17",
+  "load_before": 2.04,
+  "load_after": 1.96,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "archive"
+   },
+   {
+    "name": "archive-77ff685b48-ntv2r",
+    "namespace": "shop"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-ntv2r\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-ntv2r\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [\"archive-data\"]}}"
+   }
+  ],
+  "draft": "The **archive pod** in the `shop` namespace is not scheduling because it has an **unbound PersistentVolumeClaim (PVC)** named `archive-data`. The scheduler cannot assign the pod to a node until the PVC is bound to a PersistentVolume (PV).\n\n### Key Details:\n- **Error**: `Pod has unbound immediate PersistentVolumeClaims`.\n- **PVC Name**: `archive-data` (likely missing or misconfigured).\n- **Node Affinity/Taints**: No explicit node constraints were found, so the scheduler is trying to place it on any node.\n\n### Next Steps:\n1. **Check if the PVC exists**:\n   ```bash\n   kubectl get pvc -n shop\n   ```\n   Look for `archive-data`. If missing, create it with a matching PV or StorageClass.\n\n2. **Verify PV availability**:\n   Ensure a PV exists that matches the PVC's `storageClassName`, `accessModes`, and `capacity`.\n\n3. **Inspect PVC details** (if it exists):\n   ```bash\n   kubectl describe pvc archive-data -n shop\n   ```\n   Check for errors like `NoPersistentVolumeClaimFound` or misconfigurations.\n\nWithout a bound PV, the pod will remain in `Pending` state.",
+  "answer": "The **archive pod** in the `shop` namespace is not scheduling because it has an **unbound PersistentVolumeClaim (PVC)** named `archive-data`. The scheduler cannot assign the pod to a node until the PVC is bound to a PersistentVolume (PV).\n\n### Key Details:\n- **Error**: `Pod has unbound immediate PersistentVolumeClaims`.\n- **PVC Name**: `archive-data` (likely missing or misconfigured).\n- **Node Affinity/Taints**: No explicit node constraints were found, so the scheduler is trying to place it on any node.\n\n### Next Steps:\n1. **Check if the PVC exists**:\n   ```bash\n   kubectl get pvc -n shop\n   ```\n   Look for `archive-data`. If missing, create it with a matching PV or StorageClass.\n\n2. **Verify PV availability**:\n   Ensure a PV exists that matches the PVC's `storageClassName`, `accessModes`, and `capacity`.\n\n3. **Inspect PVC details** (if it exists):\n   ```bash\n   kubectl describe pvc archive-data -n shop\n   ```\n   Check for errors like `NoPersistentVolumeClaimFound` or misconfigurations.\n\nWithout a bound PV, the pod will remain in `Pending` state.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called get_pod_events",
+   "grounding verdict 'insufficient_evidence', expected one of ['grounded', 'partial']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 53995.1,
+   "tool_ms": 20.4,
+   "rounds": 3,
+   "round_ms": [
+    15074.8,
+    8828.9,
+    30091.4
+   ],
+   "slowest_round_ms": 30091.4,
+   "model_share": 1.0,
+   "wall_ms": 54017.5,
+   "unaccounted_ms": 2.0,
+   "slept_ms": 0.4
+  },
+  "rca": {
+   "observations": [],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "026f3e98fdf7",
+  "target": {
+   "kind": "workload",
+   "name": "archive",
+   "namespace": "shop"
+  }
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3",
+  "context": "kind-kubewhy-sched",
+  "think": true,
+  "passed": true,
+  "seconds": 58.1,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-15T13:31:11",
+  "load_before": 1.96,
+  "load_after": 1.02,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "archive"
+   },
+   {
+    "name": "archive-77ff685b48-ntv2r",
+    "namespace": "shop",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-ntv2r\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"archive-77ff685b48-ntv2r\", \"events\": [{\"reason\": \"FailedScheduling\", \"count\": 15, \"age\": \"4m\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\"}]}"
+   }
+  ],
+  "draft": "The archive pod is not being scheduled because it has **unbound PersistentVolumeClaims (PVCs)**. The event log shows:  \n`0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found`.  \n\n### Next Steps:  \n1. **Check the PVCs referenced by the pod**: Verify if the PVCs are defined in the `shop` namespace and if their `PersistentVolume` (PV) claims are bound.  \n   - Use `kubectl get pvc -n shop` to list PVCs.  \n   - Look for PVCs with status `Pending` (unbound).  \n\n2. **Inspect the PVs**: Ensure the PVs exist and are correctly configured to match the PVCs.  \n   - Use `kubectl get pv` to check PVs.  \n\n3. **Storage Class or Provisioner Issues**: If PVs are missing, the storage class or provisioner might be misconfigured.  \n\n**Fix**: Bind the PVCs to available PVs or create missing PVs to resolve the scheduling block.",
+  "answer": "The archive pod is not being scheduled because it has **unbound PersistentVolumeClaims (PVCs)**. The event log shows:  \n`0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found`.  \n\n### Next Steps:  \n1. **Check the PVCs referenced by the pod**: Verify if the PVCs are defined in the `shop` namespace and if their `PersistentVolume` (PV) claims are bound.  \n   - Use `kubectl get pvc -n shop` to list PVCs.  \n   - Look for PVCs with status `Pending` (unbound).  \n\n2. **Inspect the PVs**: Ensure the PVs exist and are correctly configured to match the PVCs.  \n   - Use `kubectl get pv` to check PVs.  \n\n3. **Storage Class or Provisioner Issues**: If PVs are missing, the storage class or provisioner might be misconfigured.  \n\n**Fix**: Bind the PVCs to available PVs or create missing PVs to resolve the scheduling block.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 58059.0,
+   "tool_ms": 20.5,
+   "rounds": 3,
+   "round_ms": [
+    14816.4,
+    12509.4,
+    30733.1
+   ],
+   "slowest_round_ms": 30733.1,
+   "model_share": 1.0,
+   "wall_ms": 58081.4,
+   "unaccounted_ms": 2.0,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "archive-77ff685b48-ntv2r.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "get_pod_events",
+       "field": "events[0].count",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "f3ad9ff6c036",
+  "target": {
+   "kind": "workload",
+   "name": "archive",
+   "namespace": "shop"
+  }
+ }
+]
