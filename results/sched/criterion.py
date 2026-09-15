@@ -30,6 +30,22 @@ unschedulable_unbound_pvc     (cause: PVC archive-data names StorageClass fast-s
     secondary   names_class    -- the StorageClass, by name or as the missing object
 """
 
+import re
+
+# Revision 1, committed before either arm ran, after checking the criterion
+# against the three recorded 2026-09-12 runs: two of them scored primary True
+# while their cause was "the node lacks a GPU", because they mention selectors
+# only to DENY one exists -- "The pod does not have explicit node selectors or
+# taints preventing scheduling". That sentence is false, and it is the gap this
+# change is about: describe_pod never reported nodeSelector, so its absence from
+# the projection was read as its absence from the pod. primary now requires a
+# selector term AND no denial that the pod has a selector.
+DENIES_SELECTOR = re.compile(
+    r"(?:does not|doesn't|do not|don't|not)\s+(?:have|include|specify|define|set)"
+    r"\s+(?:any\s+|explicit\s+|a\s+)?(?:node[ -]?selectors?|node affinity|affinity)"
+    r"|\bno\s+(?:explicit\s+)?(?:node[ -]?selectors?|node affinity)"
+    r"|\bno\s+taints?\s+or\s+node[ -]?selectors?")
+
 SELECTOR = ["nodeselector", "node selector", "node-selector", "node affinity",
             "node-affinity", "nodeaffinity", "affinity", "selector", "nvidia-a100",
             "accelerator"]
@@ -47,7 +63,8 @@ def judge(record):
            "pod_read": "describe_pod" in tools or "get_pod_events" in tools,
            "events_read": "get_pod_events" in tools}
     if record["case"] == "unschedulable_node_affinity":
-        out["primary"] = any(t in text for t in SELECTOR)
+        out["denies_selector"] = bool(DENIES_SELECTOR.search(text))
+        out["primary"] = any(t in text for t in SELECTOR) and not out["denies_selector"]
         out["names_value"] = any(t in text for t in VALUE)
         out["gpu_cause"] = any(t in text for t in GPU_CAUSE)
     elif record["case"] == "unschedulable_unbound_pvc":
