@@ -15,6 +15,7 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 import threading
 
 from kubernetes import client, config
@@ -1145,7 +1146,10 @@ def describe_pod(name: str, namespace: str = "default"):
     not yet been considered, never "has no selector". Each claim it mounts
     carries its phase, its StorageClass and whether that exists, the class's
     provisioner, and the newest event on the claim itself -- which, for a
-    provisioner that never answers, is a Normal event and the only record.
+    provisioner that never answers, is a Normal event and the only record. A
+    pod with a priority class carries its priority, and earlier pods of the
+    same workload the scheduler preempted are named with what preempted them:
+    "Insufficient cpu" beside a higher-priority preemptor is a priority fault.
     Args: name -- the pod name; namespace -- defaults to "default".
     """
     try:
@@ -1219,9 +1223,77 @@ def describe_pod(name: str, namespace: str = "default"):
         if stuck.get("volume_claims"):
             stuck["volume_claims"] = [
                 _claim_status(namespace, claim) for claim in stuck["volume_claims"]]
+        preempted = _earlier_preemptions(pod, namespace)
+        if preempted:
+            stuck["earlier_pods_preempted"] = preempted
         projected["scheduling"] = stuck
 
     return projected
+
+
+_PREEMPTED_BY = re.compile(r"Preempted by pod (?P<uid>[0-9a-f-]{36})")
+
+
+def _earlier_preemptions(pod, namespace):
+    """
+    Earlier pods of this pod's workload that the scheduler preempted, and by
+    what.
+
+    Coverage gap (b), measured on kind 2026-09-15 with the low-batch/high-urgent
+    fixture in demo/uncovered-faults-2.yaml. The pod an operator asks about is
+    the replacement, Pending with "Insufficient cpu" -- which points away from
+    the cause. The cause is on its predecessor, which no longer exists: a
+    *Normal* event "Preempted by pod <uid> on node ...", naming the preemptor
+    only by UID. No tool read it.
+
+    Same workload means the same name up to the pod's own suffix -- the
+    ReplicaSet's pods share everything before the last dash. The preemptor's UID
+    is resolved to a name and priority when it is in this namespace; otherwise
+    the UID is reported as it is, rather than a guess.
+
+    Never raises: an unreadable event list means nothing is reported here.
+    """
+    owners = pod.metadata.owner_references or []
+    if not any(o.kind == "ReplicaSet" for o in owners):
+        return []
+    prefix = pod.metadata.name.rsplit("-", 1)[0] + "-"
+    try:
+        events = _api().list_namespaced_event(
+            namespace, field_selector="reason=Preempted",
+            _request_timeout=TIMEOUT).items
+    except Exception:
+        return []
+    events = [e for e in events
+              if (e.involved_object.name or "").startswith(prefix)
+              and e.involved_object.name != pod.metadata.name]
+    if not events:
+        return []
+
+    by_uid = {}
+    try:
+        for other in _api().list_namespaced_pod(
+                namespace, _request_timeout=TIMEOUT).items:
+            by_uid[other.metadata.uid] = other
+    except Exception:
+        pass
+
+    found = []
+    for event in sorted(events, key=lambda e: e.last_timestamp or e.event_time,
+                        reverse=True)[:5]:
+        entry = {"pod": event.involved_object.name,
+                 "age": _age(event.last_timestamp or event.event_time)}
+        match = _PREEMPTED_BY.search(event.message or "")
+        if match:
+            preemptor = by_uid.get(match["uid"])
+            if preemptor is not None:
+                entry["by"] = preemptor.metadata.name
+                entry["by_priority"] = preemptor.spec.priority
+                if preemptor.spec.priority_class_name:
+                    entry["by_priority_class"] = preemptor.spec.priority_class_name
+            else:
+                entry["by_uid"] = match["uid"]
+        found.append(entry)
+    return found
 
 
 def _claim_status(namespace, name):
@@ -1370,6 +1442,13 @@ def _scheduling(pod):
     projected = {"reason": condition.reason}
     if condition.message:
         projected["message"] = condition.message[:400]
+    # Priority decides both whether this pod may preempt and whether it may be
+    # preempted; "Insufficient cpu" on a low-priority pod beside a high-priority
+    # one is a priority fact, not a capacity one. Only when set: a pod with no
+    # class has priority 0 and saying so on every pod is noise.
+    if pod.spec.priority_class_name:
+        projected["priority_class"] = pod.spec.priority_class_name
+        projected["priority"] = pod.spec.priority
     if pod.spec.node_selector:
         projected["node_selector"] = dict(pod.spec.node_selector)
     required = _node_affinity_required(pod.spec.affinity)

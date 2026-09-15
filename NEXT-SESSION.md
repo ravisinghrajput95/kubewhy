@@ -8,7 +8,7 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-15 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1822 passed, 0 skipped**
+authority, not this line — tree clean and pushed, **1827 passed, 0 skipped**
 (49s), CI green, tags through **v0.2.1** (2026-09-09). **mypy and ruff are both
 at zero and both gate**; `continue-on-error` came off the ruff step on
 2026-09-13. 53 defects recorded, 36 eval cases of which 7 are

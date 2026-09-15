@@ -1150,6 +1150,94 @@ class TestDescribePodSaysWhyNothingScheduledIt:
         assert "403" in claim["unreadable"]
         assert result["containers"], "the rest of the projection must stand"
 
+    _INSUFFICIENT = ("0/1 nodes are available: 1 Insufficient cpu. no new claims to "
+                     "deallocate, preemption: 0/1 nodes are available: 1 Insufficient cpu.")
+    _URGENT_UID = "8a68abeb-a766-4236-8070-d88ddd4234cd"
+
+    def _filler(self, api, events, pods=None):
+        pod = _unscheduled(message=self._INSUFFICIENT,
+                           priority_class_name="low-batch", priority=1)
+        pod.metadata = client.V1ObjectMeta(
+            name="filler-566dddfd7b-f4cvp", namespace="uncovered2",
+            owner_references=[client.V1OwnerReference(
+                api_version="apps/v1", kind="ReplicaSet", name="filler-566dddfd7b",
+                uid="rs", controller=True)])
+        api.read_namespaced_pod.return_value = pod
+        api.list_namespaced_event.return_value = client.CoreV1EventList(items=events)
+        urgent = make_pod(name="urgent-6d8cdc5494-8c26s", namespace="uncovered2")
+        urgent.metadata.uid = self._URGENT_UID
+        urgent.spec.priority = 1000000
+        urgent.spec.priority_class_name = "high-urgent"
+        api.list_namespaced_pod.return_value = client.V1PodList(
+            items=pods if pods is not None else [urgent])
+
+    def _preempted(self, victim, uid=None):
+        event = _event("Normal", "Preempted",
+                       f"Preempted by pod {uid or self._URGENT_UID} on node kind-control-plane",
+                       dt.datetime(2026, 9, 15, 12, 0, tzinfo=dt.UTC))
+        event.involved_object = client.V1ObjectReference(name=victim)
+        return event
+
+    def test_a_preempted_predecessor_is_named_with_its_preemptor(self, api):
+        """
+        Gap (b). The replacement pod says only "Insufficient cpu"; the cause is
+        a Normal event on a pod that no longer exists, naming the preemptor by
+        UID. Measured on kind with the low-batch/high-urgent fixture.
+        """
+        self._filler(api, [self._preempted("filler-566dddfd7b-4562h")])
+
+        scheduling = k8s.describe_pod("filler-566dddfd7b-f4cvp", "uncovered2")["scheduling"]
+
+        assert scheduling["priority_class"] == "low-batch"
+        assert scheduling["priority"] == 1
+        (earlier,) = scheduling["earlier_pods_preempted"]
+        assert earlier["pod"] == "filler-566dddfd7b-4562h"
+        assert earlier["by"] == "urgent-6d8cdc5494-8c26s"
+        assert earlier["by_priority"] == 1000000
+        assert earlier["by_priority_class"] == "high-urgent"
+        assert api.list_namespaced_event.call_args.kwargs["field_selector"] == "reason=Preempted"
+
+    def test_a_preemptor_that_cannot_be_resolved_is_reported_by_uid(self, api):
+        # Outside this namespace, or already gone: the UID, not a guess.
+        self._filler(api, [self._preempted("filler-566dddfd7b-4562h")], pods=[])
+
+        (earlier,) = k8s.describe_pod(
+            "filler-566dddfd7b-f4cvp", "uncovered2")["scheduling"]["earlier_pods_preempted"]
+
+        assert earlier["by_uid"] == self._URGENT_UID
+        assert "by" not in earlier
+
+    def test_only_this_workloads_pods_and_never_the_pod_itself(self, api):
+        self._filler(api, [
+            self._preempted("filler-566dddfd7b-f4cvp"),      # the pod being described
+            self._preempted("fillerx-77aa88bb99-zzzzz"),     # a different workload
+            self._preempted("other-566dddfd7b-4562h"),
+        ])
+
+        scheduling = k8s.describe_pod("filler-566dddfd7b-f4cvp", "uncovered2")["scheduling"]
+
+        assert "earlier_pods_preempted" not in scheduling
+
+    def test_a_bare_pod_has_no_predecessors_to_look_up(self, api):
+        # Nothing recreates a bare pod, so there is no earlier pod of its
+        # workload -- and no reason to list the namespace's events.
+        self._filler(api, [self._preempted("filler-566dddfd7b-4562h")])
+        api.read_namespaced_pod.return_value.metadata.owner_references = None
+
+        scheduling = k8s.describe_pod("filler-566dddfd7b-f4cvp", "uncovered2")["scheduling"]
+
+        assert "earlier_pods_preempted" not in scheduling
+        api.list_namespaced_event.assert_not_called()
+
+    def test_an_unreadable_event_list_reports_nothing_and_raises_nothing(self, api):
+        self._filler(api, [])
+        api.list_namespaced_event.side_effect = ApiException(status=403)
+
+        scheduling = k8s.describe_pod("filler-566dddfd7b-f4cvp", "uncovered2")["scheduling"]
+
+        assert "earlier_pods_preempted" not in scheduling
+        assert scheduling["priority_class"] == "low-batch"
+
     def test_a_scheduled_pod_carries_no_block(self, api, healthy_pod):
         # A pod on a node with a nodeSelector is a pod whose selector worked;
         # reporting it would put a non-finding on every such pod. Shaped as the
