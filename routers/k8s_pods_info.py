@@ -1138,11 +1138,12 @@ def describe_pod(name: str, namespace: str = "default"):
     nothing else reports it.
 
     For a pod no node has accepted, reports under "scheduling" the scheduler's
-    own reason and message, and the nodeSelector, required node affinity and
-    tolerations the pod sets. Use this for a Pending pod with no node: the
-    message says what failed and the selector says what it asked for. A pod
-    with no "scheduling" block has either been placed or not yet been
-    considered, never "has no selector".
+    own reason and message, and the nodeSelector, required node affinity,
+    tolerations and PersistentVolumeClaims the pod sets. Use this for a Pending
+    pod with no node: the message says what failed and the selector says what
+    it asked for. A pod with no "scheduling" block has either been placed or
+    not yet been considered, never "has no selector". A claim named here is not
+    evidence of why it is unbound; scan_references reports that.
     Args: name -- the pod name; namespace -- defaults to "default".
     """
     try:
@@ -1303,6 +1304,20 @@ def _scheduling(pod):
     ]
     if tolerations:
         projected["tolerations"] = tolerations
+    # The claims it mounts, by name. Without them the scheduler's "pod has
+    # unbound immediate PersistentVolumeClaims" is an invitation to guess:
+    # measured at n=5 on unschedulable_unbound_pvc, the first version of this
+    # block carried the message and not the names, every run stopped at
+    # describe_pod, and every run guessed -- "likely named archive-pvc", and
+    # twice the kube-root-ca.crt ConfigMap, scored grounded because that name is
+    # in this same projection's config list.
+    claims = [
+        v.persistent_volume_claim.claim_name
+        for v in (pod.spec.volumes or [])
+        if v.persistent_volume_claim and v.persistent_volume_claim.claim_name
+    ]
+    if claims:
+        projected["volume_claims"] = claims
     return projected
 
 

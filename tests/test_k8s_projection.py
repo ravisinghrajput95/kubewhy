@@ -1072,10 +1072,20 @@ class TestDescribePodSaysWhyNothingScheduledIt:
 
         assert scheduling["tolerations"] == ["dedicated=batch:NoSchedule"]
 
-    def test_a_pvc_block_carries_the_message_and_no_empty_fields(self, api):
+    def test_a_pvc_block_names_the_claims_and_carries_no_empty_fields(self, api):
+        # The claim names are the point: carrying the message without them had
+        # every measured run guess a name, twice a ConfigMap's.
+        volumes = [
+            client.V1Volume(name="data",
+                            persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                                claim_name="archive-data")),
+            client.V1Volume(name="cfg",
+                            config_map=client.V1ConfigMapVolumeSource(name="kube-root-ca.crt")),
+        ]
         api.read_namespaced_pod.return_value = _unscheduled(
             message="0/1 nodes are available: pod has unbound immediate "
-                    "PersistentVolumeClaims. not found")
+                    "PersistentVolumeClaims. not found",
+            volumes=volumes)
 
         scheduling = k8s.describe_pod("archive-1", "shop")["scheduling"]
 
@@ -1083,6 +1093,7 @@ class TestDescribePodSaysWhyNothingScheduledIt:
             "reason": "Unschedulable",
             "message": "0/1 nodes are available: pod has unbound immediate "
                        "PersistentVolumeClaims. not found",
+            "volume_claims": ["archive-data"],
         }
 
     def test_a_scheduled_pod_carries_no_block(self, api, healthy_pod):
