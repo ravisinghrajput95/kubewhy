@@ -8,7 +8,7 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-15 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1830 passed, 0 skipped**
+authority, not this line — tree clean and pushed, **1834 passed, 0 skipped**
 (49s), CI green, tags through **v0.2.1** (2026-09-09). **mypy and ruff are both
 at zero and both gate**; `continue-on-error` came off the ruff step on
 2026-09-13. 53 defects recorded, 36 eval cases of which 7 are
@@ -583,10 +583,10 @@ read — criteria, drivers, records and logs.
      signal:`. The digit was not carrying the lesson (8 of 9 answering liveness
      runs deny OOM across both arms), the Job case favours the variant 5/5
      against 4/5, and nothing is significant at n=5 — so it was not applied.
-   - Defect 51: drop `expect_tools` from `stuck_terminating_finalizer`, or
-     replace it with `get_pod_events`. They grade the recorded runs 3/3 and
-     0/3; which one is right depends on whether the preStop failure is part of
-     the answer.
+   - **Done 2026-09-15** — defects 51/53: `expect_tools` dropped from the
+     finalizer and both scheduling cases; the affinity case gained
+     `false_statements` and a real expectation. Replayed over every recorded
+     run; no historical pass lost. Never-seen pooled half regrades to 11/21.
    - 0.2.2 carrying defects 48 and 49, and HA on a released image, both as
      before.
 3. **Done 2026-09-15 — defect 53.** `describe_pod` now carries a "scheduling"

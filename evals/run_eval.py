@@ -18,6 +18,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 import time
 
@@ -168,6 +169,19 @@ def grade(case, result):
             notes.append(f"named {term!r} alongside the answer")
         else:
             failures.append(f"wrongly claimed {term!r}")
+
+    # Sentences that are false of this case's fixture, whatever else the
+    # answer says. `forbid` is deliberately conditional -- a wrong term beside
+    # a met expectation is an aside -- which leaves no way to fail an answer
+    # that names the right thing and also states something the cluster
+    # contradicts. Measured 2026-09-15 on unschedulable_node_affinity: "the
+    # pod's configuration does not include **nodeSelector**, tolerations, or
+    # affinity rules" met the selector expectation it was denying. Markdown is
+    # stripped first, because the model emphasises exactly the word it denies.
+    plain = re.sub(r"[*`_]", "", answer)
+    for statement in case.get("false_statements", []):
+        if statement.lower() in plain:
+            failures.append(f"stated what the fixture contradicts: {statement!r}")
 
     for tool in case.get("expect_tools", []):
         if tool not in called:

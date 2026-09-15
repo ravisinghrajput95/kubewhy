@@ -864,3 +864,54 @@ class TestAVoidRunIsNotAFailedOne:
         result = {"answer": "ERROR: KeyError 'containers'", "tool_calls": []}
 
         assert self.run_eval.provider_failed(result) is None
+
+
+class TestAFalseStatementFailsWhateverElseTheAnswerSays:
+    """
+    `forbid` is conditional on the expectations being met, so an answer that
+    meets them *by denying them* could not fail. Measured on
+    unschedulable_node_affinity 2026-09-15: "The pod's configuration (via
+    `describe_pod`) does not include **nodeSelector**, tolerations, or affinity
+    rules" contains the word the selector expectation looks for.
+    """
+
+    CASE = {
+        "name": "x", "question": "Why is the gpu-scoring pod stuck in Pending?",
+        "expect_all": [["affinity", "selector"]],
+        "false_statements": ["does not include nodeselector"],
+        "forbid": ["image pull"],
+    }
+
+    def result(self, answer):
+        return {"answer": answer, "tool_calls": [], "confidence": "grounded",
+                "unverified": []}
+
+    def test_the_recorded_denial_fails_despite_meeting_the_expectation(self):
+        answer = ("The pod's configuration (via `describe_pod`) does not include "
+                  "**nodeSelector**, tolerations, or affinity rules.")
+        passed, reasons, _ = grade_answer(self.CASE, self.result(answer))
+        assert not passed
+        assert any("fixture contradicts" in r for r in reasons)
+
+    def test_markdown_is_stripped_before_matching(self):
+        # The counter for the stripping: without it the emphasised word above
+        # would slip past the plain-text statement.
+        passed, _, _ = grade_answer(
+            self.CASE, self.result("It does not include `nodeSelector` rules."))
+        assert not passed
+
+    def test_a_correct_answer_is_untouched(self):
+        answer = ("Its nodeSelector requires accelerator: nvidia-a100, and no "
+                  "node carries that label.")
+        passed, reasons, _ = grade_answer(self.CASE, self.result(answer))
+        assert passed, reasons
+
+    def test_the_real_case_carries_the_statements_and_a_real_denial_fails_it(self):
+        from evals.cases import CASES
+
+        case = next(c for c in CASES if c["name"] == "unschedulable_node_affinity")
+        recorded = ("The **gpu-scoring pod** is stuck in **Pending** ... The pod's "
+                    "configuration (via `describe_pod`) does not include "
+                    "**nodeSelector**, **tolerations**, or **affinity rules**.")
+        passed, reasons, _ = grade_answer(case, self.result(recorded))
+        assert not passed, reasons

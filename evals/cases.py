@@ -23,6 +23,11 @@ run.
                   recover from
     needs          fixture file this case depends on, when it is not
                   demo/broken-pods.yaml
+    false_statements
+                  sentences that are untrue of this case's fixture; any one,
+                  markdown stripped, fails the run unconditionally. For the
+                  answer that meets an expectation by denying it -- which
+                  `forbid`, being conditional, cannot fail
 """
 
 # --- faults the corpus had never produced, added 2026-09-09 -------------
@@ -101,7 +106,10 @@ UNCOVERED_CASES_2 = [
         # nothing will remove the finalizer.
         "forbid": ["the container crashed", "the application failed",
                    "crashloop", "out of memory", "check the application logs"],
-        "expect_tools": ["describe_pod"],
+        # expect_tools dropped 2026-09-15 (defect 51): defect 49 put the
+        # finalizers into list_pods, so describe_pod adds nothing the answer
+        # needs, and all three recorded runs named the finalizer -- two of them
+        # scored FAIL on "never called describe_pod" alone.
         "require_grounded": True,
     },
 ]
@@ -614,11 +622,27 @@ CASES = [
         "required_evidence": ["FailedScheduling event", "nodeSelector"],
         "expected_grounding": ["grounded", "partial"],
         "question": "Why is the gpu-scoring pod in the shop namespace stuck in Pending?",
+        # Changed 2026-09-15 (defect 53), replayed over all 48 recorded runs
+        # and checked against 15 read by hand. The old groups passed nearly
+        # anything: "pending" is in the question and "node" in any answer, and
+        # a run blaming "Missing GPU Resource Requests" scored PASS. Now the
+        # answer must name the selector or affinity. expect_tools is gone:
+        # describe_pod carries the scheduler's verdict and the selector since
+        # defect 53, and get_pod_events is where a superseded taint warning
+        # misled both runs that read it. No historical pass is lost.
         "expect_all": [
-            ["schedul", "pending"],
-            ["node", "affinity", "selector", "nodeselector"],
+            ["affinity", "selector"],
         ],
-        "expect_tools": ["get_pod_events"],
+        # The pod has a nodeSelector. An answer saying otherwise read a field
+        # describe_pod did not carry as a setting the pod lacked -- and met the
+        # expectation above with the word it was denying.
+        "false_statements": [
+            "does not include nodeselector", "does not include node selector",
+            "does not have explicit node selectors", "does not have a node selector",
+            "does not have a nodeselector", "does not specify a node selector",
+            "does not specify a nodeselector", "spec does not include node selectors",
+            "no node selector or taints", "no taints or node selectors", "no nodeselector",
+        ],
         "forbid": ["crashloop", "oomkilled", "image pull"],
         "needs": "demo/tricky-pods.yaml",
     },
@@ -629,11 +653,13 @@ CASES = [
         "required_evidence": ["FailedScheduling event"],
         "expected_grounding": ["grounded", "partial"],
         "question": "Why is the archive pod in the shop namespace not being scheduled?",
+        # Changed 2026-09-15 (defect 53). "schedul" is in the question and
+        # "volume" in every volumeMount, so the old groups passed on an echo.
+        # expect_tools dropped for the same reason as the affinity case: the
+        # claim, its StorageClass and its events are in describe_pod now.
         "expect_all": [
-            ["schedul", "pending"],
-            ["volume", "pvc", "persistentvolumeclaim", "claim"],
+            ["pvc", "persistentvolumeclaim", "volume claim", "unbound"],
         ],
-        "expect_tools": ["get_pod_events"],
         "forbid": ["oomkilled", "image pull"],
         "needs": "demo/tricky-pods.yaml",
     },

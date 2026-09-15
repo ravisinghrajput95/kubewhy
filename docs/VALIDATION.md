@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1830 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1834 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -3194,6 +3194,14 @@ requirement, or to replace it with `get_pod_events` if the preStop failure is
 meant to be part of a passing answer; they grade the same three runs 3/3 and
 0/3 respectively, which says the choice is about what the case is *for*.
 
+**Decided and applied 2026-09-15: the requirement is dropped.** Putting the
+finalizers into `list_pods` is the fix defect 49 shipped, and a case that
+fails an answer for not re-reading it is grading the old tool. Regraded, the
+three recorded runs read **3/3** — matching the reading by hand — and the
+pooled never-seen half moves from 9/21 to **11/21, 52.4% [32.4–71.7]** against
+the regraded 79/87, p = 1.6e-4. `split_by_novelty.py` still prints the
+as-graded 9/21, because it reads the recorded `passed` field.
+
 **The never-seen half, recomputed with both round-2 cases**
 (`evals/split_by_novelty.py` over the 2026-09-12, 09-13 and 09-14 sets):
 
@@ -3481,6 +3489,32 @@ same message, no claim name, and no pod-level tool ever carried the StorageClass
 0.0079). **The pointer to `scan_references` did nothing: 0 of 15 runs across all
 arms called it**, so the StorageClass half of this fault is reachable by hand and
 not in practice. That is coverage gap (a) from the handoff, confirmed live.
+
+**Decided and applied 2026-09-15: both cases now grade what the tools can
+answer.** `expect_tools` is dropped from both. The affinity case needed more
+than that, because without a tool requirement its old groups — `pending`, in
+the question, and `node`, in any answer — pass the "no GPU" answers outright.
+Two candidates were replayed over all 48 recorded runs and both were wrong:
+requiring the label `nvidia-a100` matched every hand reading on the new arms and
+failed **13 correct historical answers** that named the selector mismatch from
+the scheduler's message before any tool could show the label; requiring
+"selector" and "match" failed a correct answer and passed the denial. What
+separates right from wrong is the false statement, so the grader gained
+`false_statements`: sentences untrue of the case's fixture that fail a run
+unconditionally, markdown stripped, because `forbid` is conditional and could
+not fail an answer that met the expectation by denying it. The case now
+requires "selector" or "affinity" and lists the denials. Replayed:
+
+| case | before | after | passes lost | passes gained |
+|---|---|---|---|---|
+| `unschedulable_node_affinity` | 17/48 | 24/48 | 1 — "Missing GPU Resource Requests" | 8, all read by hand as naming the selector |
+| `unschedulable_unbound_pvc` | 26/48 | 32/48 | 0 | 6, all naming the unbound claim |
+
+No historical pass is lost on either case. The grader still passes the two
+answers that named the selector *and* blamed the superseded taint — they name
+the true cause, and the event fix above removes the source of the second one.
+Four grader tests, and removing the markdown stripping or the failure itself
+fails them.
 
 **The case grader's 5/5 → 1/5 is the defect 51 shape, not a result.** Every
 failure in `after` and in `claims` carries `never called get_pod_events`,
