@@ -3534,6 +3534,86 @@ fail was removed — a bound pod's `PodScheduled` is `True`, so the condition ch
 already excluded it.
 
 
+### 54. The closing measurement: three gaps closed, and three bars that were mine
+
+**Measured 2026-09-15/16**, qwen3, thinking on, n=5 per case on one kind
+cluster carrying every fixture, in `results/close-{a,b,c}-*`. This is the
+measurement for everything the 2026-09-15 close-out changed: the scheduling
+projection (defect 53 and its follow-ups), the renamed fixtures (defect 50's
+decision), the case bars (defects 51/53's decision) and the prompt swap
+(defect 46's decision).
+
+| case | before today, regraded | today |
+|---|---|---|
+| `unschedulable_node_affinity` | 24/48 | **5/5** |
+| `unschedulable_unbound_pvc` | 34/48 | **5/5** |
+| `image_pull_failure` (renamed fixture) | 91/162 | **5/5** |
+| `leading_question_image_pull_is_not_oom` | 33/33 | **5/5** |
+| `malformed_image_reference` (renamed) | 3/4 | 4/5 |
+| `image_never_pulled_by_policy` (renamed) | 0/3 | 2/5 |
+| `job_killed_by_its_own_deadline` | 2/4 | **5/5** |
+| `claim_waiting_on_a_missing_provisioner` (new) | — | **5/5** |
+| `pending_behind_a_higher_priority_pod` (new) | — | **5/5** |
+| `stuck_terminating_finalizer` | 3/3 | 3/10 |
+
+**The "before" column pools dates, trees and cluster states** — it is what the
+current grader makes of every recorded run of that case, not a controlled arm.
+Only the never-pull row is a clean comparison, because its fixture and case
+changed together and both sets are n=5 on this cluster.
+
+**Three cases were failing correct answers, and every bar was written here.**
+Read by hand before anything was changed:
+
+- `malformed_image_reference` 0/5, **all five correct**, all failing on
+  `never called describe_pod`. This fault *is* the string — three colons — and
+  `list_pods` already carries the kubelet's `InvalidImageName`. Defect 50's
+  cross-tab justified that requirement for the never-pull case, where reading
+  the pod separated 14 right answers from 0; here it separates nothing.
+- `claim_waiting_on_a_missing_provisioner` 0/5 and `unschedulable_unbound_pvc`
+  2/5, **the failures all correct**, scored `insufficient_evidence` against an
+  `expected_grounding` of grounded-or-partial. Grounding extracts figures and
+  status words; a correct answer to these cases is made of names —
+  `archive-data`, `fast-ssd-nonexistent`, `example.com/no-such-csi-driver` —
+  so it carries nothing checkable. "Nothing here could be checked" is the true
+  verdict and the bar was wrong. **This is the fourth grader defect this
+  close-out found by reading answers rather than counting them.**
+
+Replayed over every recorded run, the three bar changes move 16 runs, all
+FAIL → PASS, and lose no historical pass. One is in defect 47's set — a
+correct answer that had failed the since-widened phrase list — so that set
+reads **88/102**, never-seen **9/15**.
+
+**What the two new cases establish.** Both coverage gaps the handoff carried
+as unanswerable are answered, 5/5 each, and both are reachable only through
+`describe_pod`: `scan_cluster` and `get_pod_events` say "Insufficient cpu" and
+"unbound PersistentVolumeClaims", which point away from the cause. The
+preemption case's evidence expires: a `Preempted` event lives as long as the
+cluster's event TTL, an hour by default, so that case must run inside the hour
+after the preemption it is about.
+
+**Decision 46, applied and then measured on the cases it touches.**
+`job_killed_by_its_own_deadline` is **5/5** where the digit had cost it a run
+in three. On `stuck_terminating_finalizer`, whose pod really does exit 137 and
+where the answer is the finalizer, the failure mode moved the right way
+without moving the score much: `contradicted` verdicts 2 → 0, `oomkilled`
+stated without measurement 2 → 1, OOM mentioned at all 4/5 → 3/5, score 1/5 →
+2/5. **At n=5 none of that is significant**, and the case's remaining failures
+are a fabricated "2" beside an otherwise correct answer.
+
+**And on `scoping_quiet_workload_beside_loud_one`, the case the sentence was
+written for, the lesson survives its removal.** 3/5, and by hand: **all five
+name the liveness probe**, all five still state exit code 137 — which they now
+read from `describe_pod`, where it is measured, rather than from the prompt —
+and the two failures are `contradicted` verdicts, one of them asserting an OOM
+kill the evidence refutes. So the digit in the prompt was not what taught the
+lesson, which is what defect 46 could not settle at n=5 on argument.
+
+**The finalizer row is the one that got worse, and it is not a regression in
+the product.** Its 3/3 "before" is three runs regraded under today's grader;
+its 3/10 today is ten runs on two prompts. What the ten show is that this
+case's answers name the finalizer nearly every time and fail on values the
+model volunteers around it.
+
 ## Where a run's 74 seconds go
 
 Every latency figure this project has published is a report. None of them said

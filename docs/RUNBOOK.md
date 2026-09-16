@@ -218,19 +218,19 @@ cluster — every diagnosis is read fresh.
 Four things go wrong in different ways, and only one of them means the answer
 is wrong. Telling them apart is most of what this section is for.
 
-**The numbers below come from 2906 recorded runs in `results/`, and they are
+**The numbers below come from 2921 recorded runs in `results/`, and they are
 not a performance claim.** That corpus is a mixture of experiments — different
 models, prompt configurations, some deliberately degraded to measure the
 effect. It says what these failure modes look like when they occur, not how
 often kubewhy is right. For that, read [AI_EVALUATION.md](AI_EVALUATION.md),
 which is careful about what its numbers do and do not support.
 
-| Verdict | Share of 2906 runs | What it means |
+| Verdict | Share of 2921 runs | What it means |
 |---|---|---|
-| `grounded` | 2071 (71.3%) | Every claim traced to a tool result |
-| `partial` | 403 (13.9%) | Some claims traced, some not |
+| `grounded` | 2078 (71.1%) | Every claim traced to a tool result |
+| `partial` | 409 (14.0%) | Some claims traced, some not |
 | `insufficient_evidence` | 335 (11.5%) | Nothing here could be checked — often the **correct** answer |
-| `contradicted` | 60 (2.1%) | The evidence says otherwise |
+| `contradicted` | 62 (2.1%) | The evidence says otherwise |
 | `ungrounded` | 13 (0.4%) | Nothing traced |
 
 ### The model is unreachable
@@ -265,8 +265,8 @@ it loudly. This is degraded, not down.
 **Symptom.** The answer carries `termination: deadline_exceeded` and reads as
 incomplete, because it is. The run was stopped while collecting evidence.
 
-**Measured, over 2862 recorded runs with a duration:** median **48.8s**, p95
-**190.6s**, p99 **313.1s**. The default `TRIAGE_INVESTIGATION_BUDGET` is 600s,
+**Measured, over 2877 recorded runs with a duration:** median **49.0s**, p95
+**193.5s**, p99 **317.3s**. The default `TRIAGE_INVESTIGATION_BUDGET` is 600s,
 which is roughly 1.9× the p99.
 
 Five runs exceeded 600s of wall clock. All five are in files from unattended
@@ -303,7 +303,7 @@ a separate list rather than folded into `unknowns`, because "the tools did not
 say" and "the tools said otherwise" are different and only the second means the
 answer is wrong.
 
-**One caveat worth knowing before you escalate.** 37 of those 60 — **62%** —
+**One caveat worth knowing before you escalate.** 39 of those 62 — **63%** —
 come from a single scenario, `scoping_quiet_workload_beside_loud_one`, which is
 a **known open defect**: asked about a quiet workload beside a loud broken one,
 the run reads exit code 137 as proof of OOM and dismisses

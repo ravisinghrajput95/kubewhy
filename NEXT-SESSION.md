@@ -11,7 +11,7 @@ via Socket Mode (slack_socket.py).
 authority, not this line — tree clean and pushed, **1841 passed, 0 skipped**
 (49s), CI green, tags through **v0.2.1** (2026-09-09). **mypy and ruff are both
 at zero and both gate**; `continue-on-error` came off the ruff step on
-2026-09-13. 53 defects recorded, 38 eval cases of which 9 are
+2026-09-13. 54 defects recorded, 38 eval cases of which 9 are
 never-seen-fault-type cases.
 
 **That figure is measured, with Postgres up**, on the tree this session ends
