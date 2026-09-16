@@ -718,9 +718,9 @@ class TestTargetPrefetch:
 
     A round costs 26-31s of model time and a tool call 24ms, so the reads a
     run almost always starts with are cheaper done before the model is asked
-    than spent a round on. Off by default: it changes what the model sees on
-    its first round, and defect 53 measured that a partial answer handed over
-    early can end the search.
+    than spent a round on. On by default since defect 55 measured it: two
+    rounds fewer at the median over 35 paired runs, and the search defect 53
+    feared a partial answer would end went on as often or more.
     """
 
     QUESTION = "Why is the crasher deployment in the demo namespace crashing?"
@@ -753,8 +753,16 @@ class TestTargetPrefetch:
             result = agent.ask(question)
         return result, chat.call_args_list[0].kwargs["messages"][1]["content"], calls
 
-    def test_off_by_default_reads_nothing(self, monkeypatch):
+    def test_on_by_default(self, monkeypatch):
         result, sent, calls = self._ask(monkeypatch, None)
+
+        assert [name for name, _ in calls] == ["scan_cluster", "describe_pod"]
+        assert "already called for you" in sent
+        assert all(c["prefetched"] for c in result["tool_calls"])
+
+    @pytest.mark.parametrize("value", ["off", "0", "false", "no", "OFF"])
+    def test_switched_off_reads_nothing(self, monkeypatch, value):
+        result, sent, calls = self._ask(monkeypatch, value)
 
         assert calls == []
         assert sent == self.QUESTION

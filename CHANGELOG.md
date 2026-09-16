@@ -8,7 +8,8 @@ signatures and response shapes may still change.
 
 ### Added
 
-- **`TRIAGE_PREFETCH_TARGET=on`**, off by default. For a question naming a
+- **The named workload is read before the model's first round**, on by
+  default; `TRIAGE_PREFETCH_TARGET=off` restores the old behaviour. For a question naming a
   workload, the run reads its `scan_cluster` row and `describe_pod` of the
   example pod before the model's first round, and counts both as measured
   evidence. Measured as a paired A/B over 35 pairs on seven cases, qwen3 with

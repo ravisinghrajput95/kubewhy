@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1853 passing, **0 skipped**, in 49s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1858 passing, **0 skipped**, in 54s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -3703,8 +3703,13 @@ thinking on. Absolute times are high against the corpus (control median 105.3s
 against 75.0s): another project's kind cluster shared the Docker VM
 throughout. The pairing cancels that for the difference, not for the level.
 The per-round cost was not an outcome committed in advance, so the 27.3s to
-35.5s rise is observed rather than tested. The switch is still off by default;
-whether to turn it on is recorded as a decision, not taken.
+35.5s rise is observed rather than tested.
+
+**Turned on by default 2026-09-16, by the owner's decision on this
+measurement.** `TRIAGE_PREFETCH_TARGET=off` restores the old behaviour. Because
+unset now means on, a future `ab_prompt.py --variant-env` A/B of this switch
+has to vary `TRIAGE_PREFETCH_TARGET=off`: the harness unsets the variable for
+the control arm, and unset is no longer the old behaviour.
 
 
 ## Where a run's 74 seconds go

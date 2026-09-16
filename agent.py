@@ -445,10 +445,16 @@ def prefetch_enabled():
     """
     Whether to read the named workload before the model's first round.
 
+    On unless TRIAGE_PREFETCH_TARGET is 0/off/false/no. On by default since
+    2026-09-16, on a paired A/B of 35 pairs (VALIDATION.md defect 55): median
+    rounds 4 to 2 and wall clock 105.3s to 84.8s, with no accuracy loss
+    measured. It costs time on a question the model would have answered in its
+    first rounds anyway, and that is the reason to switch it off.
+
     Read at call time, not import, so an A/B can switch it per run
-    (`evals/ab_prompt.py --variant-env TRIAGE_PREFETCH_TARGET=on`).
+    (`evals/ab_prompt.py --variant-env TRIAGE_PREFETCH_TARGET=off`).
     """
-    return os.getenv("TRIAGE_PREFETCH_TARGET", "").lower() in ("1", "on", "true", "yes")
+    return os.getenv("TRIAGE_PREFETCH_TARGET", "on").lower() not in ("0", "off", "false", "no")
 
 
 def prefetch_target(target):
