@@ -1,0 +1,444 @@
+[
+ {
+  "case": "scoping_holds_among_many_broken",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": true,
+  "seconds": 91.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:28:52",
+  "load_before": 0.73,
+  "load_after": 1.86,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "log-shipper",
+    "namespaces": "demo"
+   },
+   {
+    "name": "log-shipper-mv2cv",
+    "namespace": "demo"
+   },
+   {
+    "name": "log-shipper-mv2cv",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "container": "shipper",
+    "name": "log-shipper-mv2cv",
+    "namespace": "demo",
+    "tail": 20
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/log-shipper\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-shipper-mv2cv\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"log-shipper-mv2cv\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-full-control-plane\", \"containers\": {\"shipper\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 7, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=shipper pod=log-shipper-mv2cv_demo(81195b49-03a0-4d52-8a2b-de050a8a4590)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 2}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"log-shipper-mv2cv\", \"events\": [{\"reason\": \"BackOff\", \"count\": 18, \"age\": \"1m\", \"message\": \"Back-off restarting failed container shipper in pod log-shipper-mv2cv_demo(81195b49-03a0-4d52-8a2b-de050a8a4590)\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"log-shipper-mv2cv\", \"source\": \"current\", \"logs\": \"no sink configured\", \"container\": \"shipper\"}"
+   }
+  ],
+  "draft": "The log-shipper pod is failing due to an unconfigured log sink in the `shipper` container. Here's the breakdown:\n\n1. **CrashLoopBackOff**: The container exits with **exit code 2** (generic error) and restarts repeatedly.  \n2. **No Log Output**: `get_pod_logs` returns \"no sink configured,\" indicating the container isn't writing logs to stdout/stderr, so Kubernetes cannot capture them.  \n3. **Busybox Limitation**: The `busybox:1.36` image uses `ash` shell, which requires explicit log configuration. If the container's entry point or script expects a log sink (e.g., syslog, file, or remote server) but none is defined, it fails immediately.  \n\n### Fix  \nConfigure a log sink in the container's command or volume. For example:  \n- Add `-x` to `ash` to enable debug mode and check for syntax errors.  \n- Mount a ConfigMap/Secret for logging configuration.  \n- Ensure the container's `command` and `args` are correctly specified in the daemonset spec.  \n\nWithout a sink, the container exits with code 2, triggering the crash loop.",
+  "answer": "The log-shipper pod is failing due to an unconfigured log sink in the `shipper` container. Here's the breakdown:\n\n1. **CrashLoopBackOff**: The container exits with **exit code 2** (generic error) and restarts repeatedly.  \n2. **No Log Output**: `get_pod_logs` returns \"no sink configured,\" indicating the container isn't writing logs to stdout/stderr, so Kubernetes cannot capture them.  \n3. **Busybox Limitation**: The `busybox:1.36` image uses `ash` shell, which requires explicit log configuration. If the container's entry point or script expects a log sink (e.g., syslog, file, or remote server) but none is defined, it fails immediately.  \n\n### Fix  \nConfigure a log sink in the container's command or volume. For example:  \n- Add `-x` to `ash` to enable debug mode and check for syntax errors.  \n- Mount a ConfigMap/Secret for logging configuration.  \n- Ensure the container's `command` and `args` are correctly specified in the daemonset spec.  \n\nWithout a sink, the container exits with code 2, triggering the crash loop.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 90951.6,
+   "tool_ms": 41.6,
+   "rounds": 3,
+   "round_ms": [
+    22319.3,
+    21239.6,
+    47392.6
+   ],
+   "slowest_round_ms": 47392.6,
+   "model_share": 1.0,
+   "wall_ms": 90997.0,
+   "unaccounted_ms": 3.9,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/log-shipper.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/log-shipper.example",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/log-shipper.example",
+       "value": "2"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "0b1dbbae3151",
+  "target": {
+   "kind": "workload",
+   "name": "log-shipper",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "scoping_holds_among_many_broken",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": true,
+  "seconds": 114.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:30:23",
+  "load_before": 1.86,
+  "load_after": 1.81,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "log-shipper",
+    "namespaces": "demo"
+   },
+   {
+    "name": "log-shipper-mv2cv",
+    "namespace": "demo"
+   },
+   {
+    "name": "log-shipper-mv2cv",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "name": "log-shipper-mv2cv",
+    "namespace": "demo",
+    "tail": 50
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/log-shipper\": {\"status\": \"Error\", \"pods\": 1, \"example\": \"log-shipper-mv2cv\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"log-shipper-mv2cv\", \"namespace\": \"demo\", \"status\": \"Error\", \"node\": \"kubewhy-full-control-plane\", \"containers\": {\"shipper\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 8, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 2}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"log-shipper-mv2cv\", \"events\": [{\"reason\": \"BackOff\", \"count\": 20, \"age\": \"27s\", \"message\": \"Back-off restarting failed container shipper in pod log-shipper-mv2cv_demo(81195b49-03a0-4d52-8a2b-de050a8a4590)\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"log-shipper-mv2cv\", \"source\": \"current\", \"logs\": \"no sink configured\"}"
+   }
+  ],
+  "draft": "The log-shipper daemonset is failing because the container **exits immediately with code 2**, indicating a missing or invalid command. Here's why:\n\n1. **No Logs, No Process**:  \n   The container uses the `busybox:1.36` image, which is minimal. If no command is specified in the pod's `command` field, the container starts but exits immediately with code 2 (as seen in `last_termination.reason` and `get_pod_logs`).\n\n2. **Daemonset Misconfiguration**:  \n   A daemonset requires a valid process to run. If the pod spec lacks a `command` or uses an invalid one (e.g., a script not present in `busybox`), the container fails to start, triggering repeated restarts and the `BackOff` event.\n\n3. **No Log Sink**:  \n   The `no sink configured` message in logs confirms the container isn't writing any output, reinforcing that the process never ran.\n\n---\n\n**Fix**:  \nUpdate the pod spec to include a valid `command` (e.g., `sh` or a specific log-shipper tool) and ensure the `busybox` image includes the necessary binaries. For example:\n```yaml\nspec:\n  containers:\n  - name: shipper\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"while true; do echo \\\"log message\\\"; sleep 1; done\"]\n```\nThis ensures the container runs a valid process and avoids exit code 2.",
+  "answer": "The log-shipper daemonset is failing because the container **exits immediately with code 2**, indicating a missing or invalid command. Here's why:\n\n1. **No Logs, No Process**:  \n   The container uses the `busybox:1.36` image, which is minimal. If no command is specified in the pod's `command` field, the container starts but exits immediately with code 2 (as seen in `last_termination.reason` and `get_pod_logs`).\n\n2. **Daemonset Misconfiguration**:  \n   A daemonset requires a valid process to run. If the pod spec lacks a `command` or uses an invalid one (e.g., a script not present in `busybox`), the container fails to start, triggering repeated restarts and the `BackOff` event.\n\n3. **No Log Sink**:  \n   The `no sink configured` message in logs confirms the container isn't writing any output, reinforcing that the process never ran.\n\n---\n\n**Fix**:  \nUpdate the pod spec to include a valid `command` (e.g., `sh` or a specific log-shipper tool) and ensure the `busybox` image includes the necessary binaries. For example:\n```yaml\nspec:\n  containers:\n  - name: shipper\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"while true; do echo \\\"log message\\\"; sleep 1; done\"]\n```\nThis ensures the container runs a valid process and avoids exit code 2.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 114678.3,
+   "tool_ms": 52.1,
+   "rounds": 3,
+   "round_ms": [
+    30118.1,
+    30149.1,
+    54411.1
+   ],
+   "slowest_round_ms": 54411.1,
+   "model_share": 1.0,
+   "wall_ms": 114732.4,
+   "unaccounted_ms": 2.0,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/log-shipper.example",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/log-shipper.example",
+       "value": "2"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "4d6fdcba4adb",
+  "target": {
+   "kind": "workload",
+   "name": "log-shipper",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "scoping_holds_among_many_broken",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": true,
+  "seconds": 101.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:32:17",
+  "load_before": 1.81,
+  "load_after": 3.95,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "log-shipper",
+    "namespaces": "demo"
+   },
+   {
+    "name": "log-shipper-mv2cv",
+    "namespace": "demo"
+   },
+   {
+    "name": "log-shipper-mv2cv",
+    "namespace": "demo",
+    "limit": 5
+   },
+   {
+    "namespace": "demo",
+    "tail": 20,
+    "name": "log-shipper-mv2cv"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/log-shipper\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-shipper-mv2cv\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"log-shipper-mv2cv\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-full-control-plane\", \"containers\": {\"shipper\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 8, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=shipper pod=log-shipper-mv2cv_demo(81195b49-03a0-4d52-8a2b-de050a8a4590)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 2}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"log-shipper-mv2cv\", \"events\": [{\"reason\": \"BackOff\", \"count\": 21, \"age\": \"57s\", \"message\": \"Back-off restarting failed container shipper in pod log-shipper-mv2cv_demo(81195b49-03a0-4d52-8a2b-de050a8a4590)\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"log-shipper-mv2cv\", \"source\": \"current\", \"logs\": \"no sink configured\"}"
+   }
+  ],
+  "draft": "The log-shipper pod is failing because the container exited with status code `2`, and the logs show **no log sink was configured**. This indicates the application inside the container (likely a log aggregation tool) failed to start because it couldn\u2019t write logs to its expected destination. \n\n### Root Cause:\n- The container image (`busybox:1.36`) is minimal and lacks built-in logging capabilities. The log-shipper application likely requires a configured log sink (e.g., a file, stdout, or a remote service) to operate.\n- The `ConfigMap` mounted (`kube-root-ca.crt`) provides TLS certificates but does not include the log-shipper\u2019s configuration. The application likely needs a separate `ConfigMap` or `Secret` to define its logging destination.\n\n### Fix:\n1. **Verify the daemonset\u2019s container spec**: Ensure the log-shipper application has a configured log sink (e.g., via environment variables or volume mounts).\n2. **Add a `ConfigMap`/`Secret`**: Provide the log-shipper\u2019s configuration (e.g., endpoint, credentials) to enable logging.\n3. **Check for missing dependencies**: Ensure the container image includes all required tools (e.g., `nc`, `curl`) for log shipping, or use a purpose-built image.\n\nThe pod will remain in `CrashLoopBackOff` until the log sink is properly configured.",
+  "answer": "The log-shipper pod is failing because the container exited with status code `2`, and the logs show **no log sink was configured**. This indicates the application inside the container (likely a log aggregation tool) failed to start because it couldn\u2019t write logs to its expected destination. \n\n### Root Cause:\n- The container image (`busybox:1.36`) is minimal and lacks built-in logging capabilities. The log-shipper application likely requires a configured log sink (e.g., a file, stdout, or a remote service) to operate.\n- The `ConfigMap` mounted (`kube-root-ca.crt`) provides TLS certificates but does not include the log-shipper\u2019s configuration. The application likely needs a separate `ConfigMap` or `Secret` to define its logging destination.\n\n### Fix:\n1. **Verify the daemonset\u2019s container spec**: Ensure the log-shipper application has a configured log sink (e.g., via environment variables or volume mounts).\n2. **Add a `ConfigMap`/`Secret`**: Provide the log-shipper\u2019s configuration (e.g., endpoint, credentials) to enable logging.\n3. **Check for missing dependencies**: Ensure the container image includes all required tools (e.g., `nc`, `curl`) for log shipping, or use a purpose-built image.\n\nThe pod will remain in `CrashLoopBackOff` until the log sink is properly configured.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 100926.9,
+   "tool_ms": 44.8,
+   "rounds": 3,
+   "round_ms": [
+    34285.4,
+    23822.3,
+    42819.3
+   ],
+   "slowest_round_ms": 42819.3,
+   "model_share": 1.0,
+   "wall_ms": 100974.4,
+   "unaccounted_ms": 2.7,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/log-shipper.example",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "0a389f2c71ad",
+  "target": {
+   "kind": "workload",
+   "name": "log-shipper",
+   "namespace": "demo"
+  }
+ }
+]

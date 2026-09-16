@@ -1,0 +1,596 @@
+[
+ {
+  "case": "insufficient_cause_not_in_cluster",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": false,
+  "seconds": 163.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:48:25",
+  "load_before": 0.72,
+  "load_after": 1.38,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "list_deployments",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "crasher",
+    "namespaces": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-cwhjn",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-cwhjn",
+    "namespace": "demo",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/crasher\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"crasher-5964d99948-cwhjn\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-cwhjn\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-full-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 12, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-cwhjn_demo(a7cb2f50-40bf-4b55-80e6-62079b9f8f81)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-cwhjn\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"}"
+   }
+  ],
+  "draft": "The `scan_cluster` result included the following workloads in the `demo` namespace:  \n- **bad-image**: 0/1 ready, image `nginx:1.99.7`  \n- **crasher**: 0/1 ready, image `busybox:1.36` (CrashLoopBackOff)  \n- **memory-hog**: 0/1 ready, image `polinux/stress`  \n- **needs-db**: 0/1 ready, image `busybox:1.36`  \n- **never-ready**: 0/1 ready, image `busybox:1.36`  \n- **slow-starter**: 1/1 ready, image `busybox:1.36`  \n\nThe `get_pod_logs` for `crasher-5964d99948-cwhjn` showed the container crashed due to a database connection refusal (`FATAL: could not connect to db:5432: connection refused`).  \n\n**Answer**:  \nThe tools provided cannot retrieve deployment history, deployer identities, or approval timestamps for Kubernetes workloads. The `crasher` deployment\u2019s crash log indicates a database connectivity issue, but no metadata about the engineer who deployed it or the approval time is available through these tools. To answer this question, access to the deployment\u2019s metadata (e.g., `metadata.creator` or `metadata.annotations`) would be required, which is not supported by the current toolset.",
+  "answer": "The `scan_cluster` result included the following workloads in the `demo` namespace:  \n- **bad-image**: 0/1 ready, image `nginx:1.99.7`  \n- **crasher**: 0/1 ready, image `busybox:1.36` (CrashLoopBackOff)  \n- **memory-hog**: 0/1 ready, image `polinux/stress`  \n- **needs-db**: 0/1 ready, image `busybox:1.36`  \n- **never-ready**: 0/1 ready, image `busybox:1.36`  \n- **slow-starter**: 1/1 ready, image `busybox:1.36`  \n\nThe `get_pod_logs` for `crasher-5964d99948-cwhjn` showed the container crashed due to a database connection refusal (`FATAL: could not connect to db:5432: connection refused`).  \n\n**Answer**:  \nThe tools provided cannot retrieve deployment history, deployer identities, or approval timestamps for Kubernetes workloads. The `crasher` deployment\u2019s crash log indicates a database connectivity issue, but no metadata about the engineer who deployed it or the approval time is available through these tools. To answer this question, access to the deployment\u2019s metadata (e.g., `metadata.creator` or `metadata.annotations`) would be required, which is not supported by the current toolset.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 1,
+  "reconciles": 0,
+  "failures": [
+   "grounding verdict 'grounded', expected one of ['insufficient_evidence']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 163750.5,
+   "tool_ms": 45.6,
+   "rounds": 6,
+   "round_ms": [
+    40836.8,
+    25580.5,
+    20019.2,
+    23373.6,
+    19131.7,
+    34808.8
+   ],
+   "slowest_round_ms": 40836.8,
+   "model_share": 1.0,
+   "wall_ms": 163801.5,
+   "unaccounted_ms": 5.3,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.waiting_message",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "list_deployments",
+       "field": "bad-image.images[0]",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.waiting_message",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.waiting_message",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.waiting_message",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.waiting_message",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.waiting_message",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.crasher.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "5964",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.example",
+       "value": "5964"
+      }
+     ]
+    },
+    {
+     "claim": "99948",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.example",
+       "value": "99948"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "5481fb5c0985",
+  "target": {
+   "kind": "workload",
+   "name": "crasher",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "insufficient_cause_not_in_cluster",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": false,
+  "seconds": 57.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:51:09",
+  "load_before": 1.38,
+  "load_after": 1.07,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "crasher",
+    "namespaces": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-cwhjn",
+    "namespace": "demo"
+   },
+   {
+    "tail": 100,
+    "name": "crasher-5964d99948-cwhjn",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/crasher\": {\"status\": \"Error\", \"pods\": 1, \"example\": \"crasher-5964d99948-cwhjn\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-cwhjn\", \"namespace\": \"demo\", \"status\": \"Error\", \"node\": \"kubewhy-full-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 13, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-cwhjn\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"}"
+   }
+  ],
+  "draft": "The crasher pod failed because it could not connect to a database (error: `FATAL: could not connect to db:5432: connection refused`). However, **the tools provided do not track deployment history, approval timestamps, or user accountability** for Kubernetes workloads. This information would require access to Kubernetes audit logs, CI/CD pipeline records, or deployment metadata outside the scope of the available tools.",
+  "answer": "The crasher pod failed because it could not connect to a database (error: `FATAL: could not connect to db:5432: connection refused`). However, **the tools provided do not track deployment history, approval timestamps, or user accountability** for Kubernetes workloads. This information would require access to Kubernetes audit logs, CI/CD pipeline records, or deployment metadata outside the scope of the available tools.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "grounding verdict 'grounded', expected one of ['insufficient_evidence']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 57719.2,
+   "tool_ms": 41.0,
+   "rounds": 3,
+   "round_ms": [
+    17877.4,
+    19993.6,
+    19848.2
+   ],
+   "slowest_round_ms": 19993.6,
+   "model_share": 0.999,
+   "wall_ms": 57761.6,
+   "unaccounted_ms": 1.4,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "341811c1cc1b",
+  "target": {
+   "kind": "workload",
+   "name": "crasher",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "insufficient_cause_not_in_cluster",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": false,
+  "seconds": 131.5,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:52:07",
+  "load_before": 1.07,
+  "load_after": 0.62,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "list_deployments",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "crasher",
+    "namespaces": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-cwhjn",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo"
+   },
+   {
+    "tail": 50,
+    "name": "crasher-5964d99948-cwhjn",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/crasher\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"crasher-5964d99948-cwhjn\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-cwhjn\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-full-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 13, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-cwhjn_demo(a7cb2f50-40bf-4b55-80e6-62079b9f8f81)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-cwhjn\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"}"
+   }
+  ],
+  "draft": "The `scan_cluster` result included the `demo/crasher` workload, which is in `CrashLoopBackOff` due to a container crash (exit code 1, reason: `Error`). The `get_pod_logs` confirmed the container failed with a `connection refused` error to a database. However, **none of the tools provided can identify the engineer who deployed the workload or the approval timestamp**. \n\nDeployment authorship and approval timestamps are not tracked by the available functions (e.g., `list_deployments` only shows replica counts and images, not metadata about deployers). To answer this, you would need to consult **Kubernetes audit logs** (for API actions) or **CI/CD pipeline records** (for approval workflows), which are outside the scope of the tools here. \n\nOther workloads in the `demo` namespace (e.g., `bad-image`, `memory-hog`, etc.) also show unhealthy states, but none provide deployment authorship details.",
+  "answer": "The `scan_cluster` result included the `demo/crasher` workload, which is in `CrashLoopBackOff` due to a container crash (exit code 1, reason: `Error`). The `get_pod_logs` confirmed the container failed with a `connection refused` error to a database. However, **none of the tools provided can identify the engineer who deployed the workload or the approval timestamp**. \n\nDeployment authorship and approval timestamps are not tracked by the available functions (e.g., `list_deployments` only shows replica counts and images, not metadata about deployers). To answer this, you would need to consult **Kubernetes audit logs** (for API actions) or **CI/CD pipeline records** (for approval workflows), which are outside the scope of the tools here. \n\nOther workloads in the `demo` namespace (e.g., `bad-image`, `memory-hog`, etc.) also show unhealthy states, but none provide deployment authorship details.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 1,
+  "reconciles": 0,
+  "failures": [
+   "grounding verdict 'grounded', expected one of ['insufficient_evidence']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 131424.4,
+   "tool_ms": 45.8,
+   "rounds": 6,
+   "round_ms": [
+    28646.3,
+    19993.4,
+    18495.2,
+    24120.9,
+    16210.2,
+    23958.5
+   ],
+   "slowest_round_ms": 28646.3,
+   "model_share": 1.0,
+   "wall_ms": 131473.1,
+   "unaccounted_ms": 2.9,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/crasher.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "b3e265222fc9",
+  "target": {
+   "kind": "workload",
+   "name": "crasher",
+   "namespace": "demo"
+  }
+ }
+]

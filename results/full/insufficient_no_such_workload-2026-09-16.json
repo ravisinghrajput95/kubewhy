@@ -1,0 +1,268 @@
+[
+ {
+  "case": "insufficient_no_such_workload",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": false,
+  "seconds": 140.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:44:07",
+  "load_before": 0.88,
+  "load_after": 0.64,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "list_deployments"
+  ],
+  "arguments": [
+   {
+    "namespaces": "demo",
+    "workload": "payments-gateway"
+   },
+   {
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"result\": \"no workload named payments-gateway exists in this cluster\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The deployment `payments-gateway` could not be found in the `demo` namespace. The `list_deployments` response shows no deployment by that name exists. However, several deployments in the `demo` namespace are failing or unhealthy:\n\n- **`bad-image`**: Image `nginx:1.99.7` is invalid or unreachable.\n- **`crasher`**: Likely crashing (e.g., due to a faulty application or misconfiguration).\n- **`memory-hog`**: Exceeding memory limits (image `polinux/stress` is a memory-intensive tool).\n- **`needs-db`**: Depends on a database that is unavailable or misconfigured.\n- **`never-ready`**: Pods are stuck in a state where they never transition to `Ready` (e.g., probe failures or scheduling issues).\n- **`slow-starter`**: Pods take too long to start, possibly due to resource constraints or application delays.\n\n### Possible Causes for Missing Deployment\n1. **Typo or Name Mismatch**: The deployment might have a different name (e.g., `payments-gateway` vs. `payment-gateway`).\n2. **Deleted or Orphaned**: The deployment might have been deleted or is in a non-standard configuration.\n3. **Non-Deployment Workload**: The workload could be a Job, StatefulSet, or another type. For example, a Job named `payments-gateway` might have failed due to `DeadlineExceeded` or `BackoffLimitExceeded`.\n\n### Next Steps (If Tools Were Available)\n- Run `list_jobs` in the `demo` namespace to check for failing Jobs with the same name.\n- Use `scan_references` in the `demo` namespace to verify if any resources (e.g., Services, ConfigMaps) referenced by the deployment are misconfigured.\n- Confirm the deployment name and namespace via `kubectl get deployments --all-namespaces` for accuracy.\n\nWithout further tool calls, the root cause remains unresolved. The deployment likely does not exist, or its failure is tied to a different workload type.",
+  "answer": "The deployment `payments-gateway` could not be found in the `demo` namespace. The `list_deployments` response shows no deployment by that name exists. However, several deployments in the `demo` namespace are failing or unhealthy:\n\n- **`bad-image`**: Image `nginx:1.99.7` is invalid or unreachable.\n- **`crasher`**: Likely crashing (e.g., due to a faulty application or misconfiguration).\n- **`memory-hog`**: Exceeding memory limits (image `polinux/stress` is a memory-intensive tool).\n- **`needs-db`**: Depends on a database that is unavailable or misconfigured.\n- **`never-ready`**: Pods are stuck in a state where they never transition to `Ready` (e.g., probe failures or scheduling issues).\n- **`slow-starter`**: Pods take too long to start, possibly due to resource constraints or application delays.\n\n### Possible Causes for Missing Deployment\n1. **Typo or Name Mismatch**: The deployment might have a different name (e.g., `payments-gateway` vs. `payment-gateway`).\n2. **Deleted or Orphaned**: The deployment might have been deleted or is in a non-standard configuration.\n3. **Non-Deployment Workload**: The workload could be a Job, StatefulSet, or another type. For example, a Job named `payments-gateway` might have failed due to `DeadlineExceeded` or `BackoffLimitExceeded`.\n\n### Next Steps (If Tools Were Available)\n- Run `list_jobs` in the `demo` namespace to check for failing Jobs with the same name.\n- Use `scan_references` in the `demo` namespace to verify if any resources (e.g., Services, ConfigMaps) referenced by the deployment are misconfigured.\n- Confirm the deployment name and namespace via `kubectl get deployments --all-namespaces` for accuracy.\n\nWithout further tool calls, the root cause remains unresolved. The deployment likely does not exist, or its failure is tied to a different workload type.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "wrongly claimed 'memory limit'"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 139907.1,
+   "tool_ms": 61.4,
+   "rounds": 4,
+   "round_ms": [
+    49828.2,
+    20449.7,
+    25875.0,
+    43754.2
+   ],
+   "slowest_round_ms": 49828.2,
+   "model_share": 1.0,
+   "wall_ms": 139972.1,
+   "unaccounted_ms": 3.6,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "bad-image.images[0]",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "bad-image.images[0]",
+       "value": "7"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "0f82ef78b5d1",
+  "target": {
+   "kind": "workload",
+   "name": "payments-gateway",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "insufficient_no_such_workload",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": true,
+  "seconds": 73.4,
+  "confidence": "insufficient_evidence",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:46:27",
+  "load_before": 0.64,
+  "load_after": 0.77,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "list_deployments"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "workload": "payments-gateway",
+    "only_unhealthy": true
+   },
+   {
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"result\": \"no pods of workload payments-gateway in namespace demo\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The deployment `payments-gateway` could not be found in the `demo` namespace. The listed deployments include entries like `bad-image`, `crasher`, `memory-hog`, etc., but none match the name `payments-gateway`. \n\nPossible explanations:\n1. **Typo or incorrect name**: Verify the deployment name for typos.\n2. **Deployment deleted**: The deployment might have been deleted or not yet created.\n3. **Namespace mismatch**: Ensure the namespace is correctly specified as `demo`.\n\nTo proceed, check if the deployment exists using `kubectl get deployments -n demo` or confirm the correct name. If it\u2019s a typo, try matching the closest name (e.g., `needs-db` or `never-ready` if relevant).",
+  "answer": "The deployment `payments-gateway` could not be found in the `demo` namespace. The listed deployments include entries like `bad-image`, `crasher`, `memory-hog`, etc., but none match the name `payments-gateway`. \n\nPossible explanations:\n1. **Typo or incorrect name**: Verify the deployment name for typos.\n2. **Deployment deleted**: The deployment might have been deleted or not yet created.\n3. **Namespace mismatch**: Ensure the namespace is correctly specified as `demo`.\n\nTo proceed, check if the deployment exists using `kubectl get deployments -n demo` or confirm the correct name. If it\u2019s a typo, try matching the closest name (e.g., `needs-db` or `never-ready` if relevant).",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 73332.1,
+   "tool_ms": 54.3,
+   "rounds": 3,
+   "round_ms": [
+    36498.0,
+    13968.1,
+    22866.0
+   ],
+   "slowest_round_ms": 36498.0,
+   "model_share": 0.999,
+   "wall_ms": 73388.2,
+   "unaccounted_ms": 1.8,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "f1aa1e8312d1",
+  "target": {
+   "kind": "workload",
+   "name": "payments-gateway",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "insufficient_no_such_workload",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": true,
+  "seconds": 44.9,
+  "confidence": "insufficient_evidence",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:47:40",
+  "load_before": 0.77,
+  "load_after": 0.72,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "payments-gateway"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"result\": \"no pods of workload payments-gateway in namespace demo\"}"
+   }
+  ],
+  "draft": "The `payments-gateway` deployment or pod could not be found in the `demo` namespace. This might indicate:\n\n1. **Typo or incorrect name**: Double-check the exact name of the deployment/pod.\n2. **Resource type mismatch**: It might be a different workload type (e.g., StatefulSet, DaemonSet, or a plain pod).\n3. **Namespace issue**: Confirm the namespace is correct (`demo`).\n\nTo proceed, could you clarify the exact name of the workload or confirm if it\u2019s a different resource type?",
+  "answer": "The `payments-gateway` deployment or pod could not be found in the `demo` namespace. This might indicate:\n\n1. **Typo or incorrect name**: Double-check the exact name of the deployment/pod.\n2. **Resource type mismatch**: It might be a different workload type (e.g., StatefulSet, DaemonSet, or a plain pod).\n3. **Namespace issue**: Confirm the namespace is correct (`demo`).\n\nTo proceed, could you clarify the exact name of the workload or confirm if it\u2019s a different resource type?",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 44883.7,
+   "tool_ms": 55.2,
+   "rounds": 3,
+   "round_ms": [
+    15745.6,
+    13809.4,
+    15328.7
+   ],
+   "slowest_round_ms": 15745.6,
+   "model_share": 0.999,
+   "wall_ms": 44940.3,
+   "unaccounted_ms": 1.4,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "7fd02a34cbb7",
+  "target": {
+   "kind": "workload",
+   "name": "payments-gateway",
+   "namespace": "demo"
+  }
+ }
+]

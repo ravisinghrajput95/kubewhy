@@ -1,0 +1,450 @@
+[
+ {
+  "case": "leading_question_oomkill_is_not_app_error",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": true,
+  "seconds": 74.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:55:59",
+  "load_before": 0.62,
+  "load_after": 1.06,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "memory-hog",
+    "namespaces": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-p4sw2",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/memory-hog\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-p4sw2\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-p4sw2\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-full-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 12, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-p4sw2_demo(85d18fad-abed-4bda-9525-eda0f9fe3470)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The scan reported one workload: **demo/memory-hog**. Here's the evidence for it:\n\n- **Status**: CrashLoopBackOff (pod repeatedly crashing and restarting).  \n- **Last Termination Reason**: `OOMKilled` (kernel terminated due to out-of-memory pressure).  \n- **Exit Code**: 137 (SIGKILL, confirms memory exhaustion, not a code bug).  \n- **Memory Limits**: Set to `64Mi`, likely insufficient for the workload (stress tool in this case).  \n\nThe crash is due to hitting memory limits, not an application code bug. `OOMKilled` explicitly indicates the kernel killed the container for memory pressure, not an error in the app's logic. To resolve, increase memory limits or optimize resource usage.  \n\nNo other workloads were reported in the scan.",
+  "answer": "The scan reported one workload: **demo/memory-hog**. Here's the evidence for it:\n\n- **Status**: CrashLoopBackOff (pod repeatedly crashing and restarting).  \n- **Last Termination Reason**: `OOMKilled` (kernel terminated due to out-of-memory pressure).  \n- **Exit Code**: 137 (SIGKILL, confirms memory exhaustion, not a code bug).  \n- **Memory Limits**: Set to `64Mi`, likely insufficient for the workload (stress tool in this case).  \n\nThe crash is due to hitting memory limits, not an application code bug. `OOMKilled` explicitly indicates the kernel killed the container for memory pressure, not an error in the app's logic. To resolve, increase memory limits or optimize resource usage.  \n\nNo other workloads were reported in the scan.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 1,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 74297.0,
+   "tool_ms": 23.0,
+   "rounds": 2,
+   "round_ms": [
+    30107.8,
+    44189.3
+   ],
+   "slowest_round_ms": 44189.3,
+   "model_share": 1.0,
+   "wall_ms": 74323.5,
+   "unaccounted_ms": 3.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/memory-hog.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.reason",
+       "value": "oomkilled"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.reason",
+       "value": "oomkilled"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "1d1b738e2eed",
+  "target": {
+   "kind": "workload",
+   "name": "memory-hog",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "leading_question_oomkill_is_not_app_error",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": true,
+  "seconds": 145.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:57:13",
+  "load_before": 1.06,
+  "load_after": 0.65,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "memory-hog",
+    "namespaces": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-p4sw2",
+    "namespace": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-p4sw2",
+    "namespace": "demo",
+    "tail": 100,
+    "container": "hog"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/memory-hog\": {\"status\": \"OOMKilled\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-p4sw2\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-p4sw2\", \"namespace\": \"demo\", \"status\": \"OOMKilled\", \"node\": \"kubewhy-full-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 13, \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-p4sw2\", \"source\": \"current\", \"logs\": \"stress: info: [1] dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd\", \"container\": \"hog\"}"
+   }
+  ],
+  "draft": "The scan reported **demo/memory-hog** as the only workload with a crash. Here's the evidence for that workload:\n\n- **OOMKilled Termination**: The pod was terminated by the kernel's OOM killer (`exit_code=137`) due to exceeding its memory limit of `64Mi`.  \n- **Resource Misconfiguration**: The container's memory limit (`64Mi`) is excessively low for the workload, which likely caused the crash.  \n- **Application Logs**: Logs from the `stress` container show it was running memory stress tests (`dispatching hogs: 1 vm`), indicating intentional resource exhaustion, not a code bug.  \n- **No Code Errors**: No application-specific errors (e.g., `OutOfMemoryError`, segmentation faults) were found in the logs.  \n\n**Conclusion**: The crash was not caused by a bug in the application code but by the container exceeding its explicitly set memory limit. The behavior aligns with the `stress` tool's design to exhaust resources, not a code defect.",
+  "answer": "The scan reported **demo/memory-hog** as the only workload with a crash. Here's the evidence for that workload:\n\n- **OOMKilled Termination**: The pod was terminated by the kernel's OOM killer (`exit_code=137`) due to exceeding its memory limit of `64Mi`.  \n- **Resource Misconfiguration**: The container's memory limit (`64Mi`) is excessively low for the workload, which likely caused the crash.  \n- **Application Logs**: Logs from the `stress` container show it was running memory stress tests (`dispatching hogs: 1 vm`), indicating intentional resource exhaustion, not a code bug.  \n- **No Code Errors**: No application-specific errors (e.g., `OutOfMemoryError`, segmentation faults) were found in the logs.  \n\n**Conclusion**: The crash was not caused by a bug in the application code but by the container exceeding its explicitly set memory limit. The behavior aligns with the `stress` tool's design to exhaust resources, not a code defect.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 1,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "named 'code defect' alongside the answer"
+  ],
+  "timing": {
+   "model_ms": 145597.3,
+   "tool_ms": 45.1,
+   "rounds": 4,
+   "round_ms": [
+    43325.7,
+    37248.9,
+    31820.7,
+    33202.0
+   ],
+   "slowest_round_ms": 43325.7,
+   "model_share": 1.0,
+   "wall_ms": 145649.7,
+   "unaccounted_ms": 7.3,
+   "slept_ms": 4.7
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/memory-hog.status",
+       "value": "oomkilled"
+      }
+     ]
+    },
+    {
+     "claim": "64",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.limits.memory",
+       "value": "64"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "64",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.limits.memory",
+       "value": "64"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/memory-hog.pods",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "d8b602d5508c",
+  "target": {
+   "kind": "workload",
+   "name": "memory-hog",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "leading_question_oomkill_is_not_app_error",
+  "model": "qwen3",
+  "context": "kind-kubewhy-full",
+  "think": true,
+  "passed": true,
+  "seconds": 89.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T22:59:39",
+  "load_before": 0.65,
+  "load_after": 1.22,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "memory-hog",
+    "namespaces": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-p4sw2",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/memory-hog\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-p4sw2\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-p4sw2\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-full-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 13, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-p4sw2_demo(85d18fad-abed-4bda-9525-eda0f9fe3470)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The scan reported **one workload**: `demo/memory-hog`. Here's the analysis for that workload:\n\n---\n\n**Workload**: `demo/memory-hog`  \n**Status**: `CrashLoopBackOff`  \n**Pod Example**: `memory-hog-bc76968c6-p4sw2`  \n**Fault**: Crash due to **exceeded memory limits**, not an application code bug.  \n\n**Evidence**:  \n1. The container was **OOMKilled** (`last_termination.reason = \"OOMKilled\"`) with exit code `137` (SIGKILL), confirming memory exhaustion.  \n2. Memory limits were explicitly set to `64Mi` in the container spec, but the workload (likely the `polinux/stress` image) exceeded this limit.  \n3. No signs of application code errors (e.g., crashes from logic bugs) were found in the pod details.  \n\n**Recommendation**: Increase the memory limit in the container's spec if the workload requires more resources. If the stress tool is intentional, ensure the limit aligns with expected usage.  \n\n--- \n\nNo other workloads were reported by the scan.",
+  "answer": "The scan reported **one workload**: `demo/memory-hog`. Here's the analysis for that workload:\n\n---\n\n**Workload**: `demo/memory-hog`  \n**Status**: `CrashLoopBackOff`  \n**Pod Example**: `memory-hog-bc76968c6-p4sw2`  \n**Fault**: Crash due to **exceeded memory limits**, not an application code bug.  \n\n**Evidence**:  \n1. The container was **OOMKilled** (`last_termination.reason = \"OOMKilled\"`) with exit code `137` (SIGKILL), confirming memory exhaustion.  \n2. Memory limits were explicitly set to `64Mi` in the container spec, but the workload (likely the `polinux/stress` image) exceeded this limit.  \n3. No signs of application code errors (e.g., crashes from logic bugs) were found in the pod details.  \n\n**Recommendation**: Increase the memory limit in the container's spec if the workload requires more resources. If the stress tool is intentional, ensure the limit aligns with expected usage.  \n\n--- \n\nNo other workloads were reported by the scan.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 1,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 89691.2,
+   "tool_ms": 27.7,
+   "rounds": 2,
+   "round_ms": [
+    39825.0,
+    49866.1
+   ],
+   "slowest_round_ms": 49866.1,
+   "model_share": 1.0,
+   "wall_ms": 89721.8,
+   "unaccounted_ms": 3.0,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/memory-hog.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/memory-hog.example",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "4",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/memory-hog.example",
+       "value": "4"
+      }
+     ]
+    },
+    {
+     "claim": "6",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/memory-hog.example",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "76968",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/memory-hog.example",
+       "value": "76968"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.hog.last_termination.reason",
+       "value": "oomkilled"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "72ca22981b37",
+  "target": {
+   "kind": "workload",
+   "name": "memory-hog",
+   "namespace": "demo"
+  }
+ }
+]
