@@ -7,12 +7,11 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-15 head — `git log --oneline -1` is the
+**State: `main` at the 2026-09-16 head — `git log --oneline -1` is the
 authority, not this line — tree clean and pushed, **1841 passed, 0 skipped**
-(49s), CI green, tags through **v0.2.1** (2026-09-09). **mypy and ruff are both
-at zero and both gate**; `continue-on-error` came off the ruff step on
-2026-09-13. 54 defects recorded, 38 eval cases of which 9 are
-never-seen-fault-type cases.
+(50s), CI green, tags through **v0.2.1** (2026-09-09) with 0.2.2 agreed and
+not yet cut. **mypy and ruff are both at zero and both gate**.
+54 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
 
 **That figure is measured, with Postgres up**, on the tree this session ends
 on: `docker start kubewhy-pg`, DSN proved, `pytest tests/test_store.py`
@@ -555,75 +554,81 @@ greps the state block's figures against a measured source the way
 `test_documented_measurements.py` already does for RUNBOOK.md. The second is
 more in this project's character.
 
-## Pick up, in order — written 2026-09-15, replaces the list below it
+## Pick up, in order — written 2026-09-16, replaces every list below it
 
-Done 2026-09-14/15, so do not redo: round 2's `stuck_terminating_finalizer` at
-n=3 (defect 51); the defect 50 A/B, three arms at n=5 (defect 50's new
-section); the defect 46 A/B on both cases at n=5 (defect 46's new section);
-`evals/ab_prompt.py` rebuilt and tested; `analyse_scan_summary.py`'s import.
-Everything for those A/Bs is under `results/ab/`, which the corpus glob does not
-read — criteria, drivers, records and logs.
+**Done 2026-09-14/15/16 — do not redo.** Defects 50 to 54 are closed and
+written up in `docs/VALIDATION.md`; every record is in `results/`, with the
+A/B material under `results/ab/` and the close-out batches under
+`results/close/` (both outside the corpus glob except the `close-*.json`
+records themselves). In short: the A/B harness works and proves its variable
+arrived; defect 50 was the fixture, not the prompt; defect 52's checker
+false positives are gone; `describe_pod` now says why a Pending pod has no
+node, what its claims are waiting on, and what preempted its predecessor;
+`get_pod_events` marks superseded scheduling warnings; three case bars that
+were failing correct answers are fixed; the three owner decisions are applied.
 
-1. **Done 2026-09-15 — defect 52 is fixed and replayed.** 66 distinct clauses
-   classified by hand, 13 false positives in four shapes plus a question
-   heading the replay surfaced; before against after over 1788 records, 14
-   findings removed (exactly those), 0 added, 0 on any other rule, 11 verdicts
-   out of `contradicted` and none in. 9 recorded failures regrade to passes;
-   defect 47's split is now **79/87 (90.8%) against 8/15, p = 0.0012**. Five
-   known false-positive clauses remain on that rule (splitter fragments and a
-   "…, but" contrast), listed in defect 52. Also found on the way:
-   `ab_prompt.py` never passed `evidence=True`, so the 50 A/B records cannot be
-   replayed (fixed in `fba2fca`).
-2. **Decisions that are the owner's, with the evidence already measured:**
-   - Defect 50: rename the leaking image fixtures and drop the `never` term.
-     Measured to be the leading cause (neutral image 4/5 against 0/5,
-     p = 0.048), but two of the three leaking cases are in the pre-existing
-     half, so it moves the 90.8% (regraded) too.
-   - Defect 46: swap `137 is SIGKILL:` for `An exit code above 128 is a
-     signal:`. The digit was not carrying the lesson (8 of 9 answering liveness
-     runs deny OOM across both arms), the Job case favours the variant 5/5
-     against 4/5, and nothing is significant at n=5 — so it was not applied.
-   - **Done 2026-09-15** — defects 51/53: `expect_tools` dropped from the
-     finalizer and both scheduling cases; the affinity case gained
-     `false_statements` and a real expectation. Replayed over every recorded
-     run; no historical pass lost. Never-seen pooled half regrades to 11/21.
-   - 0.2.2 carrying defects 48 and 49, and HA on a released image, both as
-     before.
-3. **Done 2026-09-15 — defect 53.** `describe_pod` now carries a "scheduling"
-   block for a pod the scheduler has ruled on: its message, `nodeSelector`,
-   required node affinity, tolerations and claim names. By hand,
-   `unschedulable_node_affinity` went 0/5 → 8/10 naming the selector and its
-   value (p = 0.0070, sequential arms). The first version made
-   `unschedulable_unbound_pvc` guess claim names 5/5; naming the claims took
-   that to 0/5. What it left open:
-   - **`get_pod_events` returns superseded messages.** Both post-change runs
-     that read the events blamed a stale "untolerated taint(s)" from the node's
-     first seconds; none of the 8 that did not. Filter FailedScheduling events
-     older than the pod's current `PodScheduled` condition, or say which is
-     current.
-   - **`scan_references` is never called for an unbound claim** — 0/15 runs,
-     despite a docstring pointer. The StorageClass is reachable by hand only.
-   - Both scheduling cases' `expect_tools: get_pod_events` is now the defect 51
-     shape: the case grader reads 1/5 and 1/5 on answers that are 4/5 right.
-     Owner's decision, with defect 51's.
-   - `results/sched/criterion.py`'s denial regex misses markdown between words.
-4. **Extend the echo guard to fixture identifiers**, narrowly. A term matched
-   inside the subject's own image string passes any answer that quotes it;
-   `image_pull_failure`, `leading_question_image_pull_is_not_oom` and
-   `image_never_pulled_by_policy` all do. A guard over *every* fixture name
-   flags eight cases and most are legitimate (`cluster_wide_scan` must name
-   workloads), so scope it to image strings.
-5. Unchanged from the 2026-09-14 handoff: the two coverage gaps (PVC events,
-   pod priority), latency, the `routers/k8s_pods_info.py` mutation survey, and
-   the documentation archive.
+**The owner's remaining decision is the release, and it is next.**
 
-**Traps learned this session.** The laptop rebooted mid-session: Docker and
-kind came back, but a CrashLoopBackOff pod keeps its pre-reboot
-`lastState.terminated` until its back-off expires, so wait for a
-`finishedAt` after boot before measuring against it. Ollama 0.31.2 restarted
-itself after a 500 during a run; `ab_prompt.py` now voids that shape. A commit
-under `results/ab/` is linted by ruff's gate, which is how `e1f6350` failed CI
-unnoticed until the next session — check CI after *every* push.
+1. **Tag 0.2.2 — agreed, prepared, not done.** `CHANGELOG.md` already carries
+   the entry; `version.py` and `deploy/chart/Chart.yaml` still read 0.2.1 and
+   must be bumped together (a test pins them, and another pins the handoff's
+   "tags through" line to `version.py`). Then `docs/RELEASE_CHECKLIST.md` end
+   to end, `git tag -a v0.2.2`, push the tag, and verify both images from
+   ghcr.io — the registry drops the `v`, so the tags are `0.2.2` and
+   `0.2.2-ui`, and the `target:base` trap is what the `docker run` step in CI
+   catches. **Release notes must say to re-apply RBAC**: the ClusterRole gained
+   `batch/jobs`, `apps/daemonsets` and `apps/statefulsets` since 0.2.1, and an
+   install whose role predates them loses those rows silently.
+   **One thing to put to the owner first:** this change set adds a tool and
+   response fields, which by CHANGELOG's own semver note argues for 0.3.0. The
+   owner chose 0.2.2 and the entry records that; it is worth one sentence
+   before the tag goes out.
+
+2. **Latency, designed and not started.** The analysis is done and points at
+   one lever: a round is the model thinking (tool calls are 24ms, the fixed
+   prompt of ~19k chars is cached after round one, and tool results are a few
+   hundred chars), so the cheapest win is a round never spent. Draft in
+   `/private/tmp/.../scratchpad/prefetch_draft.py` (regenerate if the
+   scratchpad is gone — it is session-keyed): `TRIAGE_PREFETCH_TARGET=on`
+   makes `_stream` hand round one the `scan_cluster(workload=...)` row and
+   `describe_pod` of its example pod, through the `prefetched=` path that
+   already exists and already seeds grounding. `evals/ab_prompt.py` gained
+   `--variant-env KEY=VALUE` for exactly this, with tests; it records each
+   run's `prefetched` count so a leak into the control arm is visible.
+   **Measure accuracy as well as latency**: defect 53 is the standing warning
+   that handing the model a partial answer makes it stop searching and guess.
+
+3. **`routers/k8s_pods_info.py` has never had a mutation survey at its current
+   size**, and it grew by ~200 lines today. `evals/mutate.py`, its own test
+   file first, then read the survivors. It is CPU-heavy: nothing else may run.
+
+4. **Open, with evidence, not yet acted on:**
+   - `scan_references` is never called for an unbound claim — 0 of 15 runs
+     across three arms, despite a docstring pointer. The StorageClass is
+     reachable by hand and not in practice.
+   - `image_never_pulled_by_policy` is 2/5: two runs still answer "invalid
+     image" or "registry unreachable" from `list_pods` without reading the pod.
+     Its `expect_tools` stays, on defect 50's cross-tab.
+   - `stuck_terminating_finalizer` is 3/10 today. Every run names the
+     finalizer; the failures are values the model volunteers around it.
+   - The documentation archive: ~400KB across three files. Four state-block
+     claims are now tested; the rest are not.
+
+**Traps this session added to the list.**
+- **The Docker VM has 8GiB and other projects share it.** The kind node was
+  OOM-killed mid-batch (`docker inspect <node> --format '{{.State.OOMKilled}}'`
+  said so), which killed one case and then every later case in the batch — each
+  exits in seconds with "cluster unreachable", so a batch can "finish" in a
+  minute and look done.
+- **Ollama restarted itself three times today**, twice mid-batch. One outage
+  aborts every remaining case, because `run_eval` exits and the driver moves
+  on. Check for missing `results/<batch>-<case>-*.json` files and re-run only
+  those.
+- **A `Preempted` event lives as long as the event TTL (an hour).** Re-trigger
+  the preemption immediately before measuring that case, and run it first.
+- **A rolling update leaves the old pods running** when the new ones never
+  become ready, so both image names are on the cluster at once. Delete the
+  Deployment and re-apply rather than `kubectl apply` over it.
 
 ## Pick up, in order — 2026-09-13, superseded by the list above
 
