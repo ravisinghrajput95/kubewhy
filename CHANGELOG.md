@@ -6,14 +6,16 @@ signatures and response shapes may still change.
 
 ## [Unreleased]
 
-## [0.2.2] - 2026-09-16
+## [0.3.0] - 2026-09-16
 
 Everything a diagnosis could not previously see about a pod that never
 started, and two checker defects that were scoring correct answers wrong.
 
-**Numbered as a patch by the owner's decision.** By this file's own semver
-note it adds a tool and response fields, which would argue for 0.3.0; the
-response shapes it adds are additive and no field was removed or renamed.
+**A minor release, and upgrading needs one manual step: re-apply RBAC.** It
+adds a tool and response fields, and no field was removed or renamed. It was
+prepared as 0.2.2 and renumbered before tagging, because a patch number tells
+an operator the notes can be skipped, and the ClusterRole change below is
+lost silently if they are.
 
 **0.2.1 shipped without an entry here.** It carried the Postgres-backed
 shared state for the watch controller's lease, verified from the registry on
@@ -638,6 +640,7 @@ local model, with claim verification and a scored eval suite.
 - Claim verification is lexical and cannot check reasoning.
 - Cumulative context across a long chain is unbounded.
 
-[Unreleased]: https://github.com/ravisinghrajput95/kubewhy/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/ravisinghrajput95/kubewhy/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ravisinghrajput95/kubewhy/compare/v0.2.1...v0.3.0
 [0.1.2]: https://github.com/ravisinghrajput95/kubewhy/compare/v0.1.1...v0.1.2
 [0.1.0]: https://github.com/ravisinghrajput95/kubewhy/releases/tag/v0.1.0

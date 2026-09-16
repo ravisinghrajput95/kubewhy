@@ -5,7 +5,9 @@ mean, and — at least as importantly — what they do not.
 
 ## The corpus
 
-`evals/cases.py`, 29 scenarios. Each declares:
+`evals/cases.py`, 38 scenarios. The first 29 are the published baseline below;
+the other 9 are fault types the system prompt was never written against, and
+`evals/split_by_novelty.py` scores the two halves separately. Each declares:
 
 | field | meaning |
 |---|---|
@@ -16,15 +18,18 @@ mean, and — at least as importantly — what they do not.
 | `question` | what is asked |
 | `expect_all` / `expect_any` | the diagnosis, as substance not wording |
 | `forbid` | claims that must not appear |
+| `false_statements` | sentences untrue of the fixture, which fail a run even when the expectation is met |
 | `expect_tools` / `forbid_tools` | which tools the answer must be built from |
 | `expected_grounding` | the verdicts this scenario may legitimately produce |
 | `require_grounded` | the answer must carry no unverified claim |
 | `needs` | the fixture file the scenario depends on |
 | `payload` | text that must provably have reached the model |
 
-Categories: oomkill (1), crashloop (3), imagepull (1), config (3),
-scheduling (2), service (2), readiness (1), entity-scoping (4), grounding (3),
-healthy (3), adversarial (2), insufficient-evidence (2), scan (1), scope (1).
+Categories: oomkill (1), crashloop (3), imagepull (1), imagename (2), config (3),
+scheduling (3), storage (1), service (2), readiness (1), lifecycle (2),
+startfailure (1), deadline (1), backofflimit (1), entity-scoping (4),
+grounding (3), healthy (3), adversarial (2), insufficient-evidence (2),
+scan (1), scope (1).
 
 **Ground truth is read from the cluster, not from the manifests' intent.** The
 scheduling scenarios assert on `FailedScheduling: … didn't match Pod's node
@@ -94,8 +99,8 @@ Any change to grounding, contradiction detection or the grader is replayed over
 the recorded corpus **before** it is trusted. This is not ceremony: the first
 draft of the contradiction rules produced six false positives and zero true ones
 against recorded runs, and two more false positives appeared in the first 432
-live runs after that. The corpus under `results/` holds 1652 recorded runs, 793
-of them with both `answer` and `evidence` retained, which is what makes replay
+live runs after that. The corpus under `results/` holds 2921 recorded runs, 1876
+of them with `draft` and `evidence` retained, which is what makes replay
 possible at all.
 
 Replay the recorded **`draft`**, never the **`answer`** — the answer has already

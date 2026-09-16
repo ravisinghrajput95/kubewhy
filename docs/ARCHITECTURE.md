@@ -1,6 +1,6 @@
 # Architecture
 
-Five entry points share one set of tools. The tools are plain Python functions
+Six entry points share one set of tools. The tools are plain Python functions
 returning JSON-able dicts, which is what lets them serve as REST handlers,
 model tools, MCP tools and UI panels with no adapter in between.
 
@@ -16,6 +16,7 @@ flowchart TB
         MCP["mcp_server.py<br/>MCP stdio/HTTP"]
         CTL["controller.py<br/>watch, unprompted"]
         UI["ui.py<br/>Streamlit"]
+        SLK["slack_socket.py<br/>Slack, Socket Mode"]
     end
 
     subgraph loop [Agent loop]
@@ -43,6 +44,7 @@ flowchart TB
     API -.direct, no model.-> tools
     CTL --> ASK
     UI --> ASK
+    SLK --> ASK
     UI -.direct, no model.-> tools
     MCP ==>|"tools exposed<br/>to any MCP client"| tools
 
@@ -62,6 +64,24 @@ flowchart TB
 
 The MCP path deliberately bypasses the loop: an MCP client brings its own
 model, so it wants the tools, not another agent.
+
+## Modules the diagram leaves out
+
+Each one's docstring is its full account; this is where to start reading.
+
+| module | what it is for | used by |
+|---|---|---|
+| `store.py` | State that outlives the process: controller dedup and the lease, and `/ask` jobs. SQLite for one replica, Postgres for more | `app.py`, `controller.py`, `ui.py` |
+| `audit.py` | One record per investigation: who asked, what was read, where inference ran. It names the evidence and never stores it | `agent.py`, `app.py`, `controller.py`, `ui.py`, `slack_socket.py` |
+| `identity.py` | Who is asking. Authentication only: the ClusterRole is the authorization boundary (SECURITY.md) | `app.py`, `ui.py` |
+| `limits.py` | Two limits: investigations per caller, and tokens of evidence sent to an external provider | `app.py`, `inference.py` |
+| `sinks.py` | Where a finished diagnosis goes. A sink formats and delivers, and the controller decides what to send | `controller.py`, `slack_socket.py` |
+| `podcache.py` | A watch-backed pod cache, so repeated cluster scans stop re-listing every pod. Off unless `TRIAGE_POD_CACHE=1` | `routers/k8s_pods_info.py` |
+| `telemetry.py` | Counters and histograms in Prometheus text format | `agent.py`, `app.py`, `inference.py` |
+| `observability.py` | One JSON object per log line; `LOG_FORMAT=text` locally | `app.py`, `controller.py`, `mcp_server.py`, `slack_socket.py` |
+| `version.py` | The version, pinned by a test to `deploy/chart/Chart.yaml` | `mcp_server.py` |
+| `routers/k8s_pods_info.py` | The Kubernetes tools: projections of API objects, errors returned as data | `agent.py`, `app.py`, `controller.py`, `mcp_server.py`, `ui.py` |
+| `routers/{platform,process,system}_info.py`, `routers/top_{cpu,memory}.py` | The host tools, read with psutil | `agent.py`, `app.py`, `mcp_server.py` |
 
 ## A diagnosis, step by step
 
