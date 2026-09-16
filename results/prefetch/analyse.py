@@ -74,7 +74,8 @@ def main(paths):
     print(f"{'case':<30} {'arm':<7} {'right':>5} {'looked':>6} {'grader':>6} "
           f"{'rounds med':>10} {'wall med s':>10} {'model med s':>11} {'tool med ms':>11}")
     for path in paths:
-        records = json.load(open(path))
+        with open(path) as fh:
+            records = json.load(fh)
         case_pairs = pairs(records)
         leaks = [(c, v) for c, v in case_pairs if c.get("prefetched") or not v.get("prefetched")]
         voids = [(c, v) for c, v in case_pairs if c.get("void") or v.get("void")]
