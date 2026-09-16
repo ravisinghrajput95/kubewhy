@@ -1,0 +1,1064 @@
+[
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:15:20.377655+00:00",
+  "load_before": 1.56,
+  "load_after": 1.28,
+  "seconds": 173.4,
+  "rounds_sent": 5,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "never-ready"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-64rcf\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-prefetch-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 618, \"age\": \"2m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The `never-ready` deployment's pod is failing its readiness probe because the `/healthz` endpoint is unreachable. Here's why:\n\n- **Readiness Probe Failure**: The probe checks `http://10.244.0.13:8080/healthz` but gets `connection refused`, meaning the container isn't listening on port 8080.\n- **BusyBox Limitation**: The `busybox:1.36` image is a minimal container with no built-in HTTP server. The `/healthz` endpoint likely isn't implemented or running.\n- **No Application Logic**: BusyBox doesn't include application code to handle HTTP requests. The container starts but doesn't serve traffic or respond to probes.\n\n**Fix**: Replace the `busybox` image with one that includes a web server (e.g., `nginx` or a custom image with `/healthz` logic) and ensure the probe's port and endpoint match the application's configuration.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 173316.3,
+   "tool_ms": 41.9,
+   "rounds": 5,
+   "round_ms": [
+    25670.2,
+    28922.6,
+    29790.3,
+    38430.9,
+    50502.3
+   ],
+   "slowest_round_ms": 50502.3,
+   "model_share": 1.0,
+   "wall_ms": 173361.2,
+   "unaccounted_ms": 3.1,
+   "slept_ms": 0.4
+  },
+  "policies": 0,
+  "answer": "The `never-ready` deployment's pod is failing its readiness probe because the `/healthz` endpoint is unreachable. Here's why:\n\n- **Readiness Probe Failure**: The probe checks `http://10.244.0.13:8080/healthz` but gets `connection refused`, meaning the container isn't listening on port 8080.\n- **BusyBox Limitation**: The `busybox:1.36` image is a minimal container with no built-in HTTP server. The `/healthz` endpoint likely isn't implemented or running.\n- **No Application Logic**: BusyBox doesn't include application code to handle HTTP requests. The container starts but doesn't serve traffic or respond to probes.\n\n**Fix**: Replace the `busybox` image with one that includes a web server (e.g., `nginx` or a custom image with `/healthz` logic) and ensure the probe's port and endpoint match the application's configuration.",
+  "chars": 829,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:18:13.741804+00:00",
+  "load_before": 1.28,
+  "load_after": 1.38,
+  "seconds": 314.5,
+  "rounds_sent": 5,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "on"
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "127"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "workload": "never-ready",
+    "namespaces": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "container": "web",
+    "tail": 50
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['127'] with no measurement behind it"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/never-ready\": {\"status\": \"Running\", \"pods\": 1, \"example\": \"never-ready-848784c697-64rcf\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"source\": \"current\", \"logs\": \"listening on :8080\", \"container\": \"web\"}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 680, \"age\": \"10s\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The scan_cluster function reported **one workload** in the `demo` namespace: `demo/never-ready`. Here's why it remains **Never Ready**:\n\n---\n\n### **demo/never-ready**  \n- **Pod Status**: `Running` but **Not Ready**.  \n- **Root Cause**: The readiness probe for container `web` fails repeatedly.  \n  - **Probe Configuration**: Checks `/healthz:8080` with a **1-second timeout**.  \n  - **Failure Reason**: `Readiness probe failed: connection refused` (events confirm this).  \n  - **App Behavior**: Logs show the app is listening on `:8080`, but the `/healthz` endpoint is unreachable.  \n    - Likely causes:  \n      1. The app binds to `127.0.0.1` (localhost) instead of `0.0.0.0`, blocking external access.  \n      2. The `/healthz` endpoint is misconfigured or not exposed.  \n      3. The app takes longer than 1 second to respond to the probe.  \n\n---\n\n### **No Other Workloads Reported**  \nThe `scan_cluster` tool only identified `demo/never-ready` as the unhealthy workload. No other deployments, pods, or jobs were flagged in the `demo` namespace.  \n\n---\n\n### **Next Steps**  \n1. **Verify `/healthz` Accessibility**: Ensure the endpoint is exposed and reachable from the kubelet (e.g., via `curl http://<pod-ip>:8080/healthz`).  \n2. **Adjust Probe Settings**:  \n   - Increase `timeout_seconds` or `initial_delay_seconds` if the app takes time to start.  \n   - Ensure the probe uses the correct path and port.  \n3. **Check Network Binding**: Confirm the app binds to `0.0.0.0` (or the node's IP) to accept external traffic.  \n\nThis workload is the **only issue** in the `demo` namespace.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 314433.4,
+   "tool_ms": 46.0,
+   "rounds": 5,
+   "round_ms": [
+    43443.1,
+    60967.8,
+    27641.0,
+    93003.1,
+    89378.5
+   ],
+   "slowest_round_ms": 93003.1,
+   "model_share": 1.0,
+   "wall_ms": 314487.5,
+   "unaccounted_ms": 8.1,
+   "slept_ms": 1.8
+  },
+  "policies": 1,
+  "answer": "The scan_cluster function reported **one workload** in the `demo` namespace: `demo/never-ready`. Here's why it remains **Never Ready**:\n\n---\n\n### **demo/never-ready**  \n- **Pod Status**: `Running` but **Not Ready**.  \n- **Root Cause**: The readiness probe for container `web` fails repeatedly.  \n  - **Probe Configuration**: Checks `/healthz:8080` with a **1-second timeout**.  \n  - **Failure Reason**: `Readiness probe failed: connection refused` (events confirm this).  \n  - **App Behavior**: Logs show the app is listening on `:8080`, but the `/healthz` endpoint is unreachable.  \n    - Likely causes:  \n      1. The app binds to `127.0.0.1` (localhost) instead of `0.0.0.0`, blocking external access.  \n      2. The `/healthz` endpoint is misconfigured or not exposed.  \n      3. The app takes longer than 1 second to respond to the probe.  \n\n---\n\n### **No Other Workloads Reported**  \nThe `scan_cluster` tool only identified `demo/never-ready` as the unhealthy workload. No other deployments, pods, or jobs were flagged in the `demo` namespace.  \n\n---\n\n### **Next Steps**  \n1. **Verify `/healthz` Accessibility**: Ensure the endpoint is exposed and reachable from the kubelet (e.g., via `curl http://<pod-ip>:8080/healthz`).  \n2. **Adjust Probe Settings**:  \n   - Increase `timeout_seconds` or `initial_delay_seconds` if the app takes time to start.  \n   - Ensure the probe uses the correct path and port.  \n3. **Check Network Binding**: Confirm the app binds to `0.0.0.0` (or the node's IP) to accept external traffic.  \n\nThis workload is the **only issue** in the `demo` namespace.\n\n---\n**Evidence audit.**\n1 of 8 stated values could not be traced to any tool result for the workload they were stated about: `127`. Treat these as inference, not measurement.",
+  "chars": 1764,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:23:28.232122+00:00",
+  "load_before": 1.38,
+  "load_after": 1.6,
+  "seconds": 236.7,
+  "rounds_sent": 4,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "on"
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "workload": "never-ready",
+    "namespaces": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "tail": 100,
+    "name": "never-ready-848784c697-64rcf"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/never-ready\": {\"status\": \"Running\", \"pods\": 1, \"example\": \"never-ready-848784c697-64rcf\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"source\": \"current\", \"logs\": \"listening on :8080\"}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 742, \"age\": \"38s\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The **never-ready** deployment in the `demo` namespace is stuck in **NotReady** due to a **readiness probe failure** caused by a **missing health endpoint** in the container. Here's the breakdown:\n\n---\n\n### \ud83d\udd0d **Root Cause**\n1. **Readiness Probe Misconfiguration**:\n   - The probe checks `/healthz:8080` with a **1-second timeout**.\n   - The container logs show it is **listening on port 8080**, but the probe fails with `connection refused` (see `get_pod_events` output).\n\n2. **BusyBox Image Limitation**:\n   - The `busybox:1.36` image **does not include a `/healthz` endpoint** by default.\n   - While the container is running and listening on port 8080, it **does not respond to HTTP requests** on `/healthz`, causing the probe to time out.\n\n3. **Probe Timeout Mismatch**:\n   - The probe's **1-second timeout** is too short for the container to respond, even though it is active.\n\n---\n\n### \ud83d\udee0\ufe0f **Solution**\n1. **Fix the Readiness Probe**:\n   - Update the probe to use a valid endpoint (e.g., `/` or a custom path) that the container does respond to.\n   - Increase the **timeout** to match the container's startup time (e.g., `timeoutSeconds: 3`).\n\n   Example fix:\n   ```yaml\n   readinessProbe:\n     httpGet:\n       path: /\n       port: 8080\n     initialDelaySeconds: 2\n     periodSeconds: 5\n     timeoutSeconds: 3\n     failureThreshold: 3\n   ```\n\n2. **Implement a Health Check**:\n   - If `/healthz` is required, modify the container to serve this endpoint (e.g., via a small script or by using a different base image like `nginx` or `httpd`).\n\n3. **Verify Network Accessibility**:\n   - Ensure there are no firewall rules blocking access to port 8080 on the node.\n\n---\n\n### \ud83d\udccc Summary\nThe deployment is not ready because the **readiness probe fails to reach the container's health endpoint**. The container is running but does not respond to the probe's request, leading to repeated failures. Fixing the probe configuration or adding a valid health endpoint will resolve this.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 236632.7,
+   "tool_ms": 54.0,
+   "rounds": 4,
+   "round_ms": [
+    54059.9,
+    61932.4,
+    30331.9,
+    90308.5
+   ],
+   "slowest_round_ms": 90308.5,
+   "model_share": 1.0,
+   "wall_ms": 236690.6,
+   "unaccounted_ms": 3.9,
+   "slept_ms": 0.6
+  },
+  "policies": 1,
+  "answer": "The **never-ready** deployment in the `demo` namespace is stuck in **NotReady** due to a **readiness probe failure** caused by a **missing health endpoint** in the container. Here's the breakdown:\n\n---\n\n### \ud83d\udd0d **Root Cause**\n1. **Readiness Probe Misconfiguration**:\n   - The probe checks `/healthz:8080` with a **1-second timeout**.\n   - The container logs show it is **listening on port 8080**, but the probe fails with `connection refused` (see `get_pod_events` output).\n\n2. **BusyBox Image Limitation**:\n   - The `busybox:1.36` image **does not include a `/healthz` endpoint** by default.\n   - While the container is running and listening on port 8080, it **does not respond to HTTP requests** on `/healthz`, causing the probe to time out.\n\n3. **Probe Timeout Mismatch**:\n   - The probe's **1-second timeout** is too short for the container to respond, even though it is active.\n\n---\n\n### \ud83d\udee0\ufe0f **Solution**\n1. **Fix the Readiness Probe**:\n   - Update the probe to use a valid endpoint (e.g., `/` or a custom path) that the container does respond to.\n   - Increase the **timeout** to match the container's startup time (e.g., `timeoutSeconds: 3`).\n\n   Example fix:\n   ```yaml\n   readinessProbe:\n     httpGet:\n       path: /\n       port: 8080\n     initialDelaySeconds: 2\n     periodSeconds: 5\n     timeoutSeconds: 3\n     failureThreshold: 3\n   ```\n\n2. **Implement a Health Check**:\n   - If `/healthz` is required, modify the container to serve this endpoint (e.g., via a small script or by using a different base image like `nginx` or `httpd`).\n\n3. **Verify Network Accessibility**:\n   - Ensure there are no firewall rules blocking access to port 8080 on the node.\n\n---\n\n### \ud83d\udccc Summary\nThe deployment is not ready because the **readiness probe fails to reach the container's health endpoint**. The container is running but does not respond to the probe's request, leading to repeated failures. Fixing the probe configuration or adding a valid health endpoint will resolve this.",
+  "chars": 1974,
+  "hedges": []
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:27:24.926342+00:00",
+  "load_before": 1.6,
+  "load_after": 1.61,
+  "seconds": 424.5,
+  "rounds_sent": 8,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "never-ready"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "tail": 50
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-64rcf\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-prefetch-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"source\": \"current\", \"logs\": \"listening on :8080\"}"
+   },
+   {
+    "id": "tool-5",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 804, \"age\": \"2m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The `never-ready` deployment's pod is **Running but not Ready** due to a **readiness probe failure**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n- **Readiness Probe Failure**: The probe checks `/healthz:8080` with a **1-second timeout**, but the endpoint is unreachable. The kubelet logs show:\n  ```\n  Readiness probe failed: Get \"http://10.244.0.13:8080/healthz\": dial tcp 10.244.0.13:8080: connect: connection refused\n  ```\n  This indicates the probe cannot reach the endpoint, likely because:\n  1. The app does **not** serve a `/healthz` endpoint.\n  2. The app is running but **not listening on the expected path** (e.g., `/healthz` vs. `/up` or another route).\n  3. The **timeout is too short** for the app to respond (e.g., if it takes longer than 1s to start or handle the request).\n\n---\n\n### **Key Findings**\n1. **Pod Status**: `Running` but `ready: 0/1`.\n2. **Container Logs**: The container is listening on port 8080 (e.g., `listening on :8080`), but the probe fails to reach `/healthz`.\n3. **Probe Configuration**:\n   - **Path**: `/healthz` (not implemented in `busybox:1.36`).\n   - **Timeout**: 1s (too short for the probe to wait for the app to respond).\n4. **Events**: 804 failed readiness probe attempts in 2 minutes, all due to connection refusal.\n\n---\n\n### **Solution**\n1. **Fix the Readiness Probe**:\n   - **Update the endpoint** to match the app's actual health check path (e.g., `/up` or another route).\n   - **Increase the timeout** to allow the app time to respond (e.g., `timeoutSeconds: 3`).\n   - Example:\n     ```yaml\n     readinessProbe:\n       httpGet:\n         path: /up\n         port: 8080\n       initialDelaySeconds: 5\n       timeoutSeconds: 3\n       periodSeconds: 5\n     ```\n2. **Verify the App's Health Endpoint**:\n   - Ensure the app inside `busybox:1.36` serves the specified endpoint (e.g., `/up`).\n   - If no health endpoint exists, replace the probe with a **liveness probe** or remove it if the pod is already marked as ready.\n\n---\n\n### **Next Steps**\n- If the app does not require health checks, remove the readiness probe to avoid false failures.\n- If the app does need health checks, ensure the endpoint and probe settings align with the app's behavior.",
+  "contradictions": [],
+  "nudges": 1,
+  "timing": {
+   "model_ms": 424390.0,
+   "tool_ms": 59.9,
+   "rounds": 8,
+   "round_ms": [
+    20683.3,
+    18723.7,
+    39690.4,
+    77742.5,
+    40779.1,
+    94056.8,
+    37438.5,
+    95275.7
+   ],
+   "slowest_round_ms": 95275.7,
+   "model_share": 1.0,
+   "wall_ms": 424455.4,
+   "unaccounted_ms": 5.5,
+   "slept_ms": 1.0
+  },
+  "policies": 1,
+  "answer": "The `never-ready` deployment's pod is **Running but not Ready** due to a **readiness probe failure**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n- **Readiness Probe Failure**: The probe checks `/healthz:8080` with a **1-second timeout**, but the endpoint is unreachable. The kubelet logs show:\n  ```\n  Readiness probe failed: Get \"http://10.244.0.13:8080/healthz\": dial tcp 10.244.0.13:8080: connect: connection refused\n  ```\n  This indicates the probe cannot reach the endpoint, likely because:\n  1. The app does **not** serve a `/healthz` endpoint.\n  2. The app is running but **not listening on the expected path** (e.g., `/healthz` vs. `/up` or another route).\n  3. The **timeout is too short** for the app to respond (e.g., if it takes longer than 1s to start or handle the request).\n\n---\n\n### **Key Findings**\n1. **Pod Status**: `Running` but `ready: 0/1`.\n2. **Container Logs**: The container is listening on port 8080 (e.g., `listening on :8080`), but the probe fails to reach `/healthz`.\n3. **Probe Configuration**:\n   - **Path**: `/healthz` (not implemented in `busybox:1.36`).\n   - **Timeout**: 1s (too short for the probe to wait for the app to respond).\n4. **Events**: 804 failed readiness probe attempts in 2 minutes, all due to connection refusal.\n\n---\n\n### **Solution**\n1. **Fix the Readiness Probe**:\n   - **Update the endpoint** to match the app's actual health check path (e.g., `/up` or another route).\n   - **Increase the timeout** to allow the app time to respond (e.g., `timeoutSeconds: 3`).\n   - Example:\n     ```yaml\n     readinessProbe:\n       httpGet:\n         path: /up\n         port: 8080\n       initialDelaySeconds: 5\n       timeoutSeconds: 3\n       periodSeconds: 5\n     ```\n2. **Verify the App's Health Endpoint**:\n   - Ensure the app inside `busybox:1.36` serves the specified endpoint (e.g., `/up`).\n   - If no health endpoint exists, replace the probe with a **liveness probe** or remove it if the pod is already marked as ready.\n\n---\n\n### **Next Steps**\n- If the app does not require health checks, remove the readiness probe to avoid false failures.\n- If the app does need health checks, ensure the endpoint and probe settings align with the app's behavior.",
+  "chars": 2203,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:34:29.384244+00:00",
+  "load_before": 1.61,
+  "load_after": 1.63,
+  "seconds": 341.6,
+  "rounds_sent": 7,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "notready",
+   "200"
+  ],
+  "tools": [
+   "list_deployments",
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "workload": "never-ready"
+   },
+   {
+    "namespace": "demo"
+   },
+   {
+    "workload": "never-ready",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['notready', '200'] with no measurement behind it"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"error\": \"TypeError: list_deployments() got an unexpected keyword argument 'workload'\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-64rcf\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-prefetch-control-plane\"}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-5",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 865, \"age\": \"3m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The `never-ready` deployment remains in a `NotReady` state because its **readiness probe is failing repeatedly** due to the container lacking the necessary application to respond to the `/healthz` endpoint. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **Missing Application**:  \n   The container uses `busybox:1.36`, a minimal image that does **not include a web server or process** to listen on port `8080` (the port specified in the readiness probe).  \n   - The probe attempts to reach `http://10.244.0.13:8080/healthz` (the pod's IP and port), but no service is running to handle this request.  \n   - The error `connect: connection refused` confirms the container is idle and not serving traffic.\n\n2. **Probe Misconfiguration**:  \n   - The readiness probe is set to `initialDelaySeconds: 2` and `timeoutSeconds: 1`, which is too aggressive for a minimal image.  \n   - The container fails to start a process, so the probe times out immediately, triggering repeated failures.\n\n---\n\n### **Events Confirmation**\nThe `get_pod_events` response shows **865 consecutive failures** of the readiness probe:  \n```plaintext\nReadiness probe failed: Get \"http://10.244.0.13:8080/healthz\": dial tcp 10.244.0.13:8080: connect: connection refused\n```\nThis directly ties the `NotReady` state to the **absence of a running application** in the container.\n\n---\n\n### **Fix**\n1. **Replace the Image**:  \n   Use an image that includes a web server (e.g., `nginx:latest`) or a custom image with your application.  \n   Example:  \n   ```yaml\n   containers:\n     - name: web\n       image: nginx:latest\n       ports:\n         - containerPort: 8080\n       readinessProbe:\n         httpGet:\n           path: /healthz\n           port: 8080\n         initialDelaySeconds: 5\n         periodSeconds: 10\n         failureThreshold: 5\n   ```\n\n2. **Ensure `/healthz` Endpoint**:  \n   If using a custom application, ensure it listens on port `8080` and responds to `/healthz` with a `200 OK` status.\n\n3. **Adjust Probe Settings**:  \n   Increase `initialDelaySeconds` and `timeoutSeconds` to match the application's startup time, especially for minimal images.\n\n---\n\n### **Why This Matters**\nThe pod is stuck in `Running` but `NotReady` because the kubelet cannot verify the container is serving traffic. Without a valid endpoint, the deployment remains unready, and traffic is not routed to it. The solution requires either a working application or a corrected probe configuration.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 341562.7,
+   "tool_ms": 40.4,
+   "rounds": 7,
+   "round_ms": [
+    25684.5,
+    33213.0,
+    23878.0,
+    39704.2,
+    78193.8,
+    42930.4,
+    97958.8
+   ],
+   "slowest_round_ms": 97958.8,
+   "model_share": 1.0,
+   "wall_ms": 341615.0,
+   "unaccounted_ms": 12.0,
+   "slept_ms": 2.2
+  },
+  "policies": 1,
+  "answer": "The `never-ready` deployment remains in a `[unverified: NotReady]` state because its **readiness probe is failing repeatedly** due to the container lacking the necessary application to respond to the `/healthz` endpoint. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **Missing Application**:  \n   The container uses `busybox:1.36`, a minimal image that does **not include a web server or process** to listen on port `8080` (the port specified in the readiness probe).  \n   - The probe attempts to reach `http://10.244.0.13:8080/healthz` (the pod's IP and port), but no service is running to handle this request.  \n   - The error `connect: connection refused` confirms the container is idle and not serving traffic.\n\n2. **Probe Misconfiguration**:  \n   - The readiness probe is set to `initialDelaySeconds: 2` and `timeoutSeconds: 1`, which is too aggressive for a minimal image.  \n   - The container fails to start a process, so the probe times out immediately, triggering repeated failures.\n\n---\n\n### **Events Confirmation**\nThe `get_pod_events` response shows **865 consecutive failures** of the readiness probe:  \n```plaintext\nReadiness probe failed: Get \"http://10.244.0.13:8080/healthz\": dial tcp 10.244.0.13:8080: connect: connection refused\n```\nThis directly ties the `[unverified: NotReady]` state to the **absence of a running application** in the container.\n\n---\n\n### **Fix**\n1. **Replace the Image**:  \n   Use an image that includes a web server (e.g., `nginx:latest`) or a custom image with your application.  \n   Example:  \n   ```yaml\n   containers:\n     - name: web\n       image: nginx:latest\n       ports:\n         - containerPort: 8080\n       readinessProbe:\n         httpGet:\n           path: /healthz\n           port: 8080\n         initialDelaySeconds: 5\n         periodSeconds: 10\n         failureThreshold: 5\n   ```\n\n2. **Ensure `/healthz` Endpoint**:  \n   If using a custom application, ensure it listens on port `8080` and responds to `/healthz` with a `[unverified: 200] OK` status.\n\n3. **Adjust Probe Settings**:  \n   Increase `initialDelaySeconds` and `timeoutSeconds` to match the application's startup time, especially for minimal images.\n\n---\n\n### **Why This Matters**\nThe pod is stuck in `Running` but `[unverified: NotReady]` because the kubelet cannot verify the container is serving traffic. Without a valid endpoint, the deployment remains unready, and traffic is not routed to it. The solution requires either a working application or a corrected probe configuration.\n\n---\n**Evidence audit.**\n2 of 19 stated values could not be traced to any tool result for the workload they were stated about: `notready`, `200`. Treat these as inference, not measurement.",
+  "chars": 2699,
+  "hedges": []
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:40:11.003226+00:00",
+  "load_before": 1.63,
+  "load_after": 1.48,
+  "seconds": 285.8,
+  "rounds_sent": 4,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "on"
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "workload": "never-ready",
+    "namespaces": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "tail": 10
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/never-ready\": {\"status\": \"Running\", \"pods\": 1, \"example\": \"never-ready-848784c697-64rcf\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"source\": \"current\", \"logs\": \"listening on :8080\"}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 927, \"age\": \"2m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The **never-ready** deployment in the `demo` namespace is stuck in **not Ready** because the **readiness probe is failing repeatedly** due to a **connection refused** error on the `/healthz` endpoint. Here's the breakdown:\n\n---\n\n### \ud83d\udd0d **Root Cause**\n1. **Readiness Probe Failure**:\n   - The probe checks `httpGet /healthz:8080` with a **1-second timeout**.\n   - The kubelet logs show **927 failures** in 2 minutes, all with the message:\n     ```\n     Readiness probe failed: Get \"http://10.244.0.13:8080/healthz\": dial tcp 10.244.0.13:8080: connect: connection refused\n     ```\n   - This indicates the probe **cannot reach the endpoint** despite the container being \"Running\".\n\n2. **Container Is Listening, But Not Responding**:\n   - The logs show the container is **listening on port 8080** (`listening on :8080`), but the probe still gets a **connection refused**.\n   - This implies the container is **not binding to the pod's IP** (e.g., `10.244.0.13`) or the **healthz endpoint is misconfigured** (e.g., not handling `/healthz` requests).\n\n---\n\n### \ud83d\udee0\ufe0f **Why It\u2019s Happening**\n- **Misconfigured Health Endpoint**: The application might not be serving `/healthz` at all, or it's bound to `localhost` instead of all interfaces (`0.0.0.0`).\n- **Network Policy Block**: A network policy or firewall might be blocking traffic to the pod's IP and port.\n- **Security Context**: The container might have a restrictive `securityContext` preventing external connections.\n- **Startup Delay**: The initial delay (2s) might be too short for the app to initialize the healthz endpoint.\n\n---\n\n### \u2705 **Fix Steps**\n1. **Verify Health Endpoint**:\n   - Ensure the application is **listening on all interfaces** (`0.0.0.0`) and serving `/healthz`.\n   - Test manually via `curl http://<pod-ip>:8080/healthz` to confirm it works.\n\n2. **Adjust Readiness Probe**:\n   - Increase the **timeoutSeconds** and **initialDelaySeconds** to match the app's startup time:\n     ```yaml\n     readinessProbe:\n       httpGet:\n         path: /healthz\n         port: 8080\n       initialDelaySeconds: 5\n       periodSeconds: 5\n       timeoutSeconds: 3\n     ```\n\n3. **Check Network Policies**:\n   - Ensure no network policies or firewalls block traffic to the pod's IP and port.\n\n4. **Inspect Security Context**:\n   - Verify the container's `securityContext` allows incoming connections.\n\n---\n\n### \ud83d\udccc Summary\nThe deployment is stuck because the readiness probe cannot reach the `/healthz` endpoint, even though the container is running. This is likely due to a misconfigured health endpoint or network restrictions. Fixing the probe settings and ensuring the endpoint is accessible will resolve the issue.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 285750.0,
+   "tool_ms": 58.3,
+   "rounds": 4,
+   "round_ms": [
+    53057.2,
+    47613.3,
+    60964.2,
+    124115.3
+   ],
+   "slowest_round_ms": 124115.3,
+   "model_share": 1.0,
+   "wall_ms": 285814.1,
+   "unaccounted_ms": 5.8,
+   "slept_ms": 0.8
+  },
+  "policies": 1,
+  "answer": "The **never-ready** deployment in the `demo` namespace is stuck in **not Ready** because the **readiness probe is failing repeatedly** due to a **connection refused** error on the `/healthz` endpoint. Here's the breakdown:\n\n---\n\n### \ud83d\udd0d **Root Cause**\n1. **Readiness Probe Failure**:\n   - The probe checks `httpGet /healthz:8080` with a **1-second timeout**.\n   - The kubelet logs show **927 failures** in 2 minutes, all with the message:\n     ```\n     Readiness probe failed: Get \"http://10.244.0.13:8080/healthz\": dial tcp 10.244.0.13:8080: connect: connection refused\n     ```\n   - This indicates the probe **cannot reach the endpoint** despite the container being \"Running\".\n\n2. **Container Is Listening, But Not Responding**:\n   - The logs show the container is **listening on port 8080** (`listening on :8080`), but the probe still gets a **connection refused**.\n   - This implies the container is **not binding to the pod's IP** (e.g., `10.244.0.13`) or the **healthz endpoint is misconfigured** (e.g., not handling `/healthz` requests).\n\n---\n\n### \ud83d\udee0\ufe0f **Why It\u2019s Happening**\n- **Misconfigured Health Endpoint**: The application might not be serving `/healthz` at all, or it's bound to `localhost` instead of all interfaces (`0.0.0.0`).\n- **Network Policy Block**: A network policy or firewall might be blocking traffic to the pod's IP and port.\n- **Security Context**: The container might have a restrictive `securityContext` preventing external connections.\n- **Startup Delay**: The initial delay (2s) might be too short for the app to initialize the healthz endpoint.\n\n---\n\n### \u2705 **Fix Steps**\n1. **Verify Health Endpoint**:\n   - Ensure the application is **listening on all interfaces** (`0.0.0.0`) and serving `/healthz`.\n   - Test manually via `curl http://<pod-ip>:8080/healthz` to confirm it works.\n\n2. **Adjust Readiness Probe**:\n   - Increase the **timeoutSeconds** and **initialDelaySeconds** to match the app's startup time:\n     ```yaml\n     readinessProbe:\n       httpGet:\n         path: /healthz\n         port: 8080\n       initialDelaySeconds: 5\n       periodSeconds: 5\n       timeoutSeconds: 3\n     ```\n\n3. **Check Network Policies**:\n   - Ensure no network policies or firewalls block traffic to the pod's IP and port.\n\n4. **Inspect Security Context**:\n   - Verify the container's `securityContext` allows incoming connections.\n\n---\n\n### \ud83d\udccc Summary\nThe deployment is stuck because the readiness probe cannot reach the `/healthz` endpoint, even though the container is running. This is likely due to a misconfigured health endpoint or network restrictions. Fixing the probe settings and ensuring the endpoint is accessible will resolve the issue.",
+  "chars": 2664,
+  "hedges": [
+   "likely",
+   "might be"
+  ]
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:44:56.821091+00:00",
+  "load_before": 1.48,
+  "load_after": 1.62,
+  "seconds": 237.6,
+  "rounds_sent": 4,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "on"
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "workload": "never-ready",
+    "namespaces": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "container": "web",
+    "tail": 50
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/never-ready\": {\"status\": \"Running\", \"pods\": 1, \"example\": \"never-ready-848784c697-64rcf\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"source\": \"current\", \"logs\": \"listening on :8080\", \"container\": \"web\"}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 989, \"age\": \"2m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The pod `never-ready-848784c697-64rcf` is **Running but not Ready** because the **readiness probe is failing with a \"connection refused\" error**. Here's why:\n\n### Root Cause:\n- The readiness probe checks `/healthz:8080` (HTTP GET to port 8080), but the endpoint is unreachable. The kubelet's event log shows:  \n  `\"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"`.\n\n### Key Findings:\n1. **Container is running**: Logs confirm the container is listening on port 8080 (`\"listening on :8080\"`).\n2. **Probe target is invalid**: The probe tries to reach `/healthz:8080`, but the application likely does not serve this endpoint.  \n   - The path might be incorrect (e.g., `/health` instead of `/healthz`).  \n   - The port might be misconfigured (e.g., the app listens on a different port, like 80).  \n   - The endpoint might require authentication or specific headers not provided by the probe.\n3. **No crash or restarts**: The pod has 0 restarts, so the issue is not a crash loop but a **misconfigured readiness probe**.\n\n### Fix:\n1. **Verify the health endpoint**:  \n   - Check if the application actually serves `/healthz` on port 8080.  \n   - If the endpoint is different (e.g., `/health` or a different port), update the probe configuration.\n2. **Check network policies**:  \n   - Ensure there are no firewall rules or network policies blocking traffic to the healthz endpoint.\n3. **Adjust probe settings**:  \n   - If the app takes longer to start, increase `initialDelaySeconds` or `timeoutSeconds` (though the current error is \"connection refused,\" not a timeout).\n\n### Example Fix (if endpoint is `/health`):\n```yaml\nreadinessProbe:\n  httpGet:\n    path: /health\n    port: 8080\n  initialDelaySeconds: 5\n  timeoutSeconds: 5\n```\n\nThis will resolve the probe failure and mark the pod as Ready.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 237574.9,
+   "tool_ms": 53.3,
+   "rounds": 4,
+   "round_ms": [
+    41944.3,
+    60070.7,
+    37815.4,
+    97744.6
+   ],
+   "slowest_round_ms": 97744.6,
+   "model_share": 1.0,
+   "wall_ms": 237632.9,
+   "unaccounted_ms": 4.6,
+   "slept_ms": 0.6
+  },
+  "policies": 1,
+  "answer": "The pod `never-ready-848784c697-64rcf` is **Running but not Ready** because the **readiness probe is failing with a \"connection refused\" error**. Here's why:\n\n### Root Cause:\n- The readiness probe checks `/healthz:8080` (HTTP GET to port 8080), but the endpoint is unreachable. The kubelet's event log shows:  \n  `\"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"`.\n\n### Key Findings:\n1. **Container is running**: Logs confirm the container is listening on port 8080 (`\"listening on :8080\"`).\n2. **Probe target is invalid**: The probe tries to reach `/healthz:8080`, but the application likely does not serve this endpoint.  \n   - The path might be incorrect (e.g., `/health` instead of `/healthz`).  \n   - The port might be misconfigured (e.g., the app listens on a different port, like 80).  \n   - The endpoint might require authentication or specific headers not provided by the probe.\n3. **No crash or restarts**: The pod has 0 restarts, so the issue is not a crash loop but a **misconfigured readiness probe**.\n\n### Fix:\n1. **Verify the health endpoint**:  \n   - Check if the application actually serves `/healthz` on port 8080.  \n   - If the endpoint is different (e.g., `/health` or a different port), update the probe configuration.\n2. **Check network policies**:  \n   - Ensure there are no firewall rules or network policies blocking traffic to the healthz endpoint.\n3. **Adjust probe settings**:  \n   - If the app takes longer to start, increase `initialDelaySeconds` or `timeoutSeconds` (though the current error is \"connection refused,\" not a timeout).\n\n### Example Fix (if endpoint is `/health`):\n```yaml\nreadinessProbe:\n  httpGet:\n    path: /health\n    port: 8080\n  initialDelaySeconds: 5\n  timeoutSeconds: 5\n```\n\nThis will resolve the probe failure and mark the pod as Ready.",
+  "chars": 1862,
+  "hedges": [
+   "likely",
+   "might be"
+  ]
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:48:54.456975+00:00",
+  "load_before": 1.62,
+  "load_after": 0.82,
+  "seconds": 299.6,
+  "rounds_sent": 6,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "never-ready"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "limit": 5,
+    "name": "never-ready-848784c697-64rcf"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-64rcf\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-prefetch-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 1051, \"age\": \"2m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The **never-ready deployment** in the `demo` namespace remains in a \"Not Ready\" state due to a **failed readiness probe** on the pod `never-ready-848784c697-64rcf`. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **Readiness Probe Failure**:\n   - The probe checks `/healthz:8080` via HTTP GET.\n   - The **`busybox:1.36`** container does **not** include a web server or `/healthz` endpoint by default.\n   - The probe **times out after 1 second** (as configured), leading to repeated \"Readiness probe failed\" events.\n\n2. **Container Behavior**:\n   - The container exits immediately after starting because no command is specified in the deployment.\n   - Kubernetes marks the pod as **\"Running\"** but does **not restart** the container unless explicitly configured (e.g., with `restartPolicy: Always`).\n\n3. **Event Confirmation**:\n   - The `get_pod_events` call confirms the probe failure:  \n     `\"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"`  \n     This directly points to the missing endpoint.\n\n---\n\n### **Why It\u2019s Not Ready**\n- The pod is in **\"Running\"** state but **not Ready** because the readiness probe fails repeatedly (1051 times in 2 minutes).\n- Kubernetes **does not mark the pod as Ready** until the probe succeeds, which it never does with the current setup.\n\n---\n\n### **Solution**\n1. **Fix the Readiness Probe**:\n   - Replace the HTTP probe with a **TCP probe** on port 8080 (since BusyBox doesn\u2019t support HTTP endpoints).\n   - Example:  \n     ```yaml\n     readinessProbe:\n       tcpSocket:\n         port: 8080\n       initialDelaySeconds: 2\n       periodSeconds: 5\n     ```\n\n2. **Specify a Command**:\n   - Ensure the container runs a process that keeps it alive (e.g., a simple HTTP server or a loop).  \n     Example:  \n     ```yaml\n     container:\n       image: busybox:1.36\n       command: [\"sh\", \"-c\", \"while true; do echo \\\"Hello\\\"; sleep 1; done\"]\n     ```\n\n3. **Use a Suitable Image**:\n   - Replace `busybox:1.36` with an image that includes the required `/healthz` endpoint (e.g., a minimal HTTP server image).\n\n---\n\n### **Summary**\nThe deployment is stuck because the readiness probe fails due to the absence of the `/healthz` endpoint in the `busybox:1.36` container. Fixing the probe configuration or using a compatible image will resolve the issue.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 299519.3,
+   "tool_ms": 43.6,
+   "rounds": 6,
+   "round_ms": [
+    47741.8,
+    34656.2,
+    38396.6,
+    66608.1,
+    26824.4,
+    85292.2
+   ],
+   "slowest_round_ms": 85292.2,
+   "model_share": 1.0,
+   "wall_ms": 299573.7,
+   "unaccounted_ms": 10.8,
+   "slept_ms": 2.4
+  },
+  "policies": 1,
+  "answer": "The **never-ready deployment** in the `demo` namespace remains in a \"Not Ready\" state due to a **failed readiness probe** on the pod `never-ready-848784c697-64rcf`. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **Readiness Probe Failure**:\n   - The probe checks `/healthz:8080` via HTTP GET.\n   - The **`busybox:1.36`** container does **not** include a web server or `/healthz` endpoint by default.\n   - The probe **times out after 1 second** (as configured), leading to repeated \"Readiness probe failed\" events.\n\n2. **Container Behavior**:\n   - The container exits immediately after starting because no command is specified in the deployment.\n   - Kubernetes marks the pod as **\"Running\"** but does **not restart** the container unless explicitly configured (e.g., with `restartPolicy: Always`).\n\n3. **Event Confirmation**:\n   - The `get_pod_events` call confirms the probe failure:  \n     `\"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"`  \n     This directly points to the missing endpoint.\n\n---\n\n### **Why It\u2019s Not Ready**\n- The pod is in **\"Running\"** state but **not Ready** because the readiness probe fails repeatedly (1051 times in 2 minutes).\n- Kubernetes **does not mark the pod as Ready** until the probe succeeds, which it never does with the current setup.\n\n---\n\n### **Solution**\n1. **Fix the Readiness Probe**:\n   - Replace the HTTP probe with a **TCP probe** on port 8080 (since BusyBox doesn\u2019t support HTTP endpoints).\n   - Example:  \n     ```yaml\n     readinessProbe:\n       tcpSocket:\n         port: 8080\n       initialDelaySeconds: 2\n       periodSeconds: 5\n     ```\n\n2. **Specify a Command**:\n   - Ensure the container runs a process that keeps it alive (e.g., a simple HTTP server or a loop).  \n     Example:  \n     ```yaml\n     container:\n       image: busybox:1.36\n       command: [\"sh\", \"-c\", \"while true; do echo \\\"Hello\\\"; sleep 1; done\"]\n     ```\n\n3. **Use a Suitable Image**:\n   - Replace `busybox:1.36` with an image that includes the required `/healthz` endpoint (e.g., a minimal HTTP server image).\n\n---\n\n### **Summary**\nThe deployment is stuck because the readiness probe fails due to the absence of the `/healthz` endpoint in the `busybox:1.36` container. Fixing the probe configuration or using a compatible image will resolve the issue.",
+  "chars": 2355,
+  "hedges": []
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:53:54.034348+00:00",
+  "load_before": 0.82,
+  "load_after": 1.48,
+  "seconds": 326.2,
+  "rounds_sent": 8,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "113",
+   "200"
+  ],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "never-ready"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "tail": 50,
+    "name": "never-ready-848784c697-64rcf"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['113', '200'] with no measurement behind it"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"never-ready-848784c697-64rcf\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-prefetch-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"source\": \"current\", \"logs\": \"listening on :8080\"}"
+   },
+   {
+    "id": "tool-5",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 1113, \"age\": \"2m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The `never-ready` pod is stuck in `Running` but not `Ready` due to a **persistent readiness probe failure**, despite the container functioning correctly. Here's the full diagnosis:\n\n---\n\n### **Key Findings**  \n1. **Container is Running and Listening**  \n   - Logs show `\"listening on :8080\"`, confirming the container starts and binds to port 8080.  \n   - No crashes or exit codes indicate the container is hanging or failing to start.  \n\n2. **Readiness Probe Fails Repeatedly**  \n   - The probe checks `/healthz:8080` with a **1-second timeout**.  \n   - The container lacks a `/healthz` endpoint (BusyBox does not include this by default).  \n   - Events show **1,113 failed probe attempts** in 2 minutes, all with the same error:  \n     `\"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"`  \n\n3. **No Restart or Crash**  \n   - The pod has **0 restarts**, meaning the container hasn\u2019t exited.  \n   - The kubelet does not record a crash reason because the container is not crashing\u2014it\u2019s simply not responding to the probe.  \n\n---\n\n### **Root Cause**  \n- **Missing Health Endpoint**: The `busybox:1.36` image does not natively support a `/healthz` endpoint.  \n- **Too Short Timeout**: The probe\u2019s 1-second timeout is insufficient for the container to respond, even though it\u2019s listening on port 8080.  \n\n---\n\n### **Fix**  \n1. **Add a Health Endpoint**:  \n   - Configure the container to expose `/healthz` (e.g., via a sidecar, script, or custom setup).  \n   - Example: Use a small HTTP server in the container to respond to `/healthz` with a 200 OK.  \n\n2. **Adjust Probe Settings**:  \n   - Increase the **timeout** (e.g., to 5 seconds) to match the container\u2019s startup time.  \n   - Increase **initial delay** (e.g., to 5 seconds) to account for startup latency.  \n\n3. **Use a Suitable Image**:  \n   - Replace `busybox:1.36` with an image that supports readiness probes (e.g., `nginx` or a custom image with health checks).  \n\n---\n\n### **Next Steps**  \n- Update the deployment\u2019s readiness probe configuration with adjusted timeout and initial delay.  \n- Verify the `/healthz` endpoint is functional by testing it directly (e.g., `curl http://<pod-ip>:8080/healthz`).  \n- If using a sidecar for health checks, ensure it\u2019s correctly configured and mounted.  \n\nThis issue is not a crash but a **probe misconfiguration**. The container is functional, but the kubelet cannot mark it as Ready without a valid health check.",
+  "contradictions": [],
+  "nudges": 1,
+  "timing": {
+   "model_ms": 326170.4,
+   "tool_ms": 49.0,
+   "rounds": 8,
+   "round_ms": [
+    32382.4,
+    18633.3,
+    39701.7,
+    63318.4,
+    21917.1,
+    49977.4,
+    21358.8,
+    78881.4
+   ],
+   "slowest_round_ms": 78881.4,
+   "model_share": 1.0,
+   "wall_ms": 326230.1,
+   "unaccounted_ms": 10.7,
+   "slept_ms": 0.9
+  },
+  "policies": 1,
+  "answer": "The `never-ready` pod is stuck in `Running` but not `Ready` due to a **persistent readiness probe failure**, despite the container functioning correctly. Here's the full diagnosis:\n\n---\n\n### **Key Findings**  \n1. **Container is Running and Listening**  \n   - Logs show `\"listening on :8080\"`, confirming the container starts and binds to port 8080.  \n   - No crashes or exit codes indicate the container is hanging or failing to start.  \n\n2. **Readiness Probe Fails Repeatedly**  \n   - The probe checks `/healthz:8080` with a **1-second timeout**.  \n   - The container lacks a `/healthz` endpoint (BusyBox does not include this by default).  \n   - Events show **1,[unverified: 113] failed probe attempts** in 2 minutes, all with the same error:  \n     `\"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"`  \n\n3. **No Restart or Crash**  \n   - The pod has **0 restarts**, meaning the container hasn\u2019t exited.  \n   - The kubelet does not record a crash reason because the container is not crashing\u2014it\u2019s simply not responding to the probe.  \n\n---\n\n### **Root Cause**  \n- **Missing Health Endpoint**: The `busybox:1.36` image does not natively support a `/healthz` endpoint.  \n- **Too Short Timeout**: The probe\u2019s 1-second timeout is insufficient for the container to respond, even though it\u2019s listening on port 8080.  \n\n---\n\n### **Fix**  \n1. **Add a Health Endpoint**:  \n   - Configure the container to expose `/healthz` (e.g., via a sidecar, script, or custom setup).  \n   - Example: Use a small HTTP server in the container to respond to `/healthz` with a [unverified: 200] OK.  \n\n2. **Adjust Probe Settings**:  \n   - Increase the **timeout** (e.g., to 5 seconds) to match the container\u2019s startup time.  \n   - Increase **initial delay** (e.g., to 5 seconds) to account for startup latency.  \n\n3. **Use a Suitable Image**:  \n   - Replace `busybox:1.36` with an image that supports readiness probes (e.g., `nginx` or a custom image with health checks).  \n\n---\n\n### **Next Steps**  \n- Update the deployment\u2019s readiness probe configuration with adjusted timeout and initial delay.  \n- Verify the `/healthz` endpoint is functional by testing it directly (e.g., `curl http://<pod-ip>:8080/healthz`).  \n- If using a sidecar for health checks, ensure it\u2019s correctly configured and mounted.  \n\nThis issue is not a crash but a **probe misconfiguration**. The container is functional, but the kubelet cannot mark it as Ready without a valid health check.\n\n---\n**Evidence audit.**\n2 of 17 stated values could not be traced to any tool result for the workload they were stated about: `113`, `200`. Treat these as inference, not measurement.",
+  "chars": 2696,
+  "hedges": []
+ },
+ {
+  "case": "never_ready_readiness_probe",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "on"
+  },
+  "question": "Why is the never-ready deployment in the demo namespace never becoming ready?",
+  "context": "kind-kubewhy-prefetch",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-16T12:59:20.267963+00:00",
+  "load_before": 1.48,
+  "load_after": 0.47,
+  "seconds": 266.5,
+  "rounds_sent": 5,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "on"
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "127"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "workload": "never-ready",
+    "namespaces": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo"
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "container": "web",
+    "tail": 50
+   },
+   {
+    "name": "never-ready-848784c697-64rcf",
+    "namespace": "demo",
+    "limit": 5
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['127'] with no measurement behind it"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/never-ready\": {\"status\": \"Running\", \"pods\": 1, \"example\": \"never-ready-848784c697-64rcf\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-prefetch-control-plane\", \"containers\": {\"web\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"probes\": {\"readiness\": {\"check\": \"httpGet /healthz:8080\", \"initial_delay\": 2, \"period\": 5, \"timeout\": 1, \"failure_threshold\": 3}}, \"ready\": false, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"source\": \"current\", \"logs\": \"listening on :8080\", \"container\": \"web\"}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"never-ready-848784c697-64rcf\", \"events\": [{\"reason\": \"Unhealthy\", \"count\": 1175, \"age\": \"1m\", \"message\": \"Readiness probe failed: Get \\\"http://10.244.0.13:8080/healthz\\\": dial tcp 10.244.0.13:8080: connect: connection refused\"}]}"
+   }
+  ],
+  "draft": "The scan reported **demo/never-ready** as a workload with a `not-ready` fault. Here's why it remains stuck:\n\n---\n\n### **Workload: demo/never-ready**\n- **Pod Status**: `Running` but `NotReady` due to repeated readiness probe failures.\n- **Root Cause**:  \n  The readiness probe (`httpGet /healthz:8080`) fails with `connection refused`. The container is running and listening on `:8080` (all interfaces), but the kubelet's probe is hitting the node's IP (`10.244.0.13`), which may not route to the container. This could be due to:\n  - The app binding only to `127.0.0.1` (localhost).\n  - Firewall rules blocking traffic from the kubelet to the container's port.\n  - The `/healthz` endpoint not being accessible via HTTP.\n\n- **Probe Configuration**:  \n  - **Timeout**: 1 second (too short for the app to respond).\n  - **Initial Delay**: 2 seconds (first check after 2s).\n  - **Failure Threshold**: 3 (pod marked `NotReady` after 3 failures).\n\n- **Fix**:  \n  1. Ensure the app listens on `0.0.0.0:8080` (all interfaces).  \n  2. Adjust probe settings to match app behavior:  \n     ```yaml\n     readinessProbe:\n       httpGet:\n         path: /healthz\n         port: 8080\n       initialDelaySeconds: 5\n       failureThreshold: 5\n       timeoutSeconds: 3\n     ```  \n  3. Check firewall rules to allow traffic to the container's port.  \n  4. Verify `/healthz` is accessible via HTTP.\n\n---\n\nNo other workloads were reported in the scan. The issue is isolated to `demo/never-ready`.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 266430.5,
+   "tool_ms": 41.1,
+   "rounds": 5,
+   "round_ms": [
+    45693.7,
+    49259.0,
+    20020.7,
+    77213.6,
+    74243.5
+   ],
+   "slowest_round_ms": 77213.6,
+   "model_share": 1.0,
+   "wall_ms": 266476.7,
+   "unaccounted_ms": 5.0,
+   "slept_ms": 0.8
+  },
+  "policies": 1,
+  "answer": "The scan reported **demo/never-ready** as a workload with a `not-ready` fault. Here's why it remains stuck:\n\n---\n\n### **Workload: demo/never-ready**\n- **Pod Status**: `Running` but `NotReady` due to repeated readiness probe failures.\n- **Root Cause**:  \n  The readiness probe (`httpGet /healthz:8080`) fails with `connection refused`. The container is running and listening on `:8080` (all interfaces), but the kubelet's probe is hitting the node's IP (`10.244.0.13`), which may not route to the container. This could be due to:\n  - The app binding only to `127.0.0.1` (localhost).\n  - Firewall rules blocking traffic from the kubelet to the container's port.\n  - The `/healthz` endpoint not being accessible via HTTP.\n\n- **Probe Configuration**:  \n  - **Timeout**: 1 second (too short for the app to respond).\n  - **Initial Delay**: 2 seconds (first check after 2s).\n  - **Failure Threshold**: 3 (pod marked `NotReady` after 3 failures).\n\n- **Fix**:  \n  1. Ensure the app listens on `0.0.0.0:8080` (all interfaces).  \n  2. Adjust probe settings to match app behavior:  \n     ```yaml\n     readinessProbe:\n       httpGet:\n         path: /healthz\n         port: 8080\n       initialDelaySeconds: 5\n       failureThreshold: 5\n       timeoutSeconds: 3\n     ```  \n  3. Check firewall rules to allow traffic to the container's port.  \n  4. Verify `/healthz` is accessible via HTTP.\n\n---\n\nNo other workloads were reported in the scan. The issue is isolated to `demo/never-ready`.\n\n---\n**Evidence audit.**\n1 of 13 stated values could not be traced to any tool result for the workload they were stated about: `127`. Treat these as inference, not measurement.",
+  "chars": 1648,
+  "hedges": []
+ }
+]

@@ -318,6 +318,16 @@ latency goes: 7.1× on the median across sixteen cases, and every one of them
 slower. `TRIAGE_THINK=false` trades some accuracy for it — how much is
 [still not settled](../NEXT-SESSION.md), across three undetermined rounds.
 
+`TRIAGE_PREFETCH_TARGET=on` keeps thinking on and spends fewer rounds instead.
+For a question naming a workload, it reads the workload's scan row and its
+example pod before the model's first round. Measured as a paired A/B over 35
+pairs on seven cases, qwen3 with thinking on, it cut the median from 4 rounds to
+2 and the median wall clock from 105.3s to 84.8s. No accuracy loss was
+measured: 29/35 against 33/35 correct by hand, not significant. Each round costs
+more with it on, so a question the model would have answered in its first two
+rounds anyway gets slower, by 10s to 23s on the one such case measured. Off by
+default. [VALIDATION.md defect 55](VALIDATION.md) has the method and the limits.
+
 ## Adding a provider
 
 Two files, and a number.

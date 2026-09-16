@@ -11,7 +11,7 @@ via Socket Mode (slack_socket.py).
 authority, not this line — tree clean and pushed, **1853 passed, 0 skipped**
 (50s), CI green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
 renumbered by the owner before tagging. **mypy and ruff are both at zero and both gate**.
-54 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
+55 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
 
 **That figure is measured, with Postgres up**, on the tree this session ends
 on: `docker start kubewhy-pg`, DSN proved, `pytest tests/test_store.py`
@@ -586,19 +586,23 @@ were failing correct answers are fixed; the three owner decisions are applied.
    GitHub Release was made for 0.1.2 through 0.2.1. **Not done: HA on this
    image** — no `helm install` with `sharedState.enabled=true` at two replicas.
 
-2. **Latency, designed and not started.** The analysis is done and points at
-   one lever: a round is the model thinking (tool calls are 24ms, the fixed
-   prompt of ~19k chars is cached after round one, and tool results are a few
-   hundred chars), so the cheapest win is a round never spent. Draft in
-   `/private/tmp/.../scratchpad/prefetch_draft.py` (regenerate if the
-   scratchpad is gone — it is session-keyed): `TRIAGE_PREFETCH_TARGET=on`
-   makes `_stream` hand round one the `scan_cluster(workload=...)` row and
-   `describe_pod` of its example pod, through the `prefetched=` path that
-   already exists and already seeds grounding. `evals/ab_prompt.py` gained
-   `--variant-env KEY=VALUE` for exactly this, with tests; it records each
-   run's `prefetched` count so a leak into the control arm is visible.
-   **Measure accuracy as well as latency**: defect 53 is the standing warning
-   that handing the model a partial answer makes it stop searching and guess.
+2. **Latency: built and measured 2026-09-16, and one decision is yours.**
+   `TRIAGE_PREFETCH_TARGET=on` (`6f9700a`, off by default) reads the named
+   workload's scan row and example pod before round one. Paired A/B, 35 pairs
+   on 7 cases, qwen3 thinking on, criterion frozen first (defect 55): **median
+   rounds 4 → 2, wall 105.3s → 84.8s, lower in 28/35 pairs, sign p = 0.0005;
+   right by hand 29/35 → 33/35, no pair right in control only, McNemar
+   p = 0.125.** Defect 53's risk did not show: the model went on to logs and
+   events as often or more (session-cache events 1/5 → 4/5). The costs: each
+   round is dearer (median 27.3s → 35.5s), so `oomkill_root_cause`, which had no
+   round to save, was slower in 5/5 pairs by 10–23s. **Open decision: turn it
+   on by default.** The evidence supports it for the six cases where it saved
+   rounds; the one where it cost time was a case the model already answered in
+   three rounds. Not measured: cases outside these seven, thinking off, any
+   model but qwen3, the controller and UI surfaces (the switch lives in
+   `_stream`, so all six surfaces inherit it). The frozen criterion's healthy
+   word list flags a denial of OOMKilled, defect 52's class a third time; fix it
+   before reusing that file.
 
 3. **`routers/k8s_pods_info.py` has never had a mutation survey at its current
    size**, and it grew by ~200 lines today. `evals/mutate.py`, its own test

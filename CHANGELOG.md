@@ -6,6 +6,17 @@ signatures and response shapes may still change.
 
 ## [Unreleased]
 
+### Added
+
+- **`TRIAGE_PREFETCH_TARGET=on`**, off by default. For a question naming a
+  workload, the run reads its `scan_cluster` row and `describe_pod` of the
+  example pod before the model's first round, and counts both as measured
+  evidence. Measured as a paired A/B over 35 pairs on seven cases, qwen3 with
+  thinking on: median rounds 4 to 2, median wall clock 105.3s to 84.8s, and no
+  accuracy loss measured (29/35 against 33/35 by hand, not significant).
+  A question the model would have answered in its first two rounds anyway gets
+  slower, by 10s to 23s on the one such case measured. VALIDATION.md defect 55.
+
 ## [0.3.0] - 2026-09-16
 
 Everything a diagnosis could not previously see about a pod that never

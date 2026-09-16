@@ -3614,6 +3614,99 @@ its 3/10 today is ten runs on two prompts. What the ten show is that this
 case's answers name the finalizer nearly every time and fail on values the
 model volunteers around it.
 
+### 55. Two rounds never spent: reading the named workload before round one
+
+**Measured 2026-09-16**, qwen3, thinking on, paired A/B with
+`evals/ab_prompt.py --variant-env TRIAGE_PREFETCH_TARGET=on`, **7 cases × 5
+repeats × 2 arms = 70 runs, 35 pairs**, arms adjacent and alternating which
+leads, on one kind cluster (`kind-kubewhy-prefetch`), tree `8896e71`, records in
+`results/prefetch/`. 0 voids, 0 leaks: every control run carried 0 prefetched
+calls and every variant run 2. The criterion (`results/prefetch/criterion.py`)
+was committed before the first arm ran, and so was the driver.
+
+**The mechanism (`6f9700a`).** With the switch on, a question naming a workload
+gets `scan_cluster(workload=)` and `describe_pod` of that row's example pod
+handed to it before round one, through the `prefetched=` path, so grounding
+counts them as measurements. Off by default. Three things the existing path
+would have got wrong, each fixed before measuring and each covered by a test
+that fails with the fix removed: the run's clocks started after the prefetched
+setup, so the variant would have looked faster by its own reads; the
+captured-evidence wording says "do not ask for it again", which is defect 53's
+stop-searching invitation; and an error or not-found would have been handed
+over as evidence.
+
+**Why the case grader could not be the outcome.** `expect_tools` counts
+prefetched calls, so the variant arm can never fail "never called
+describe_pod". The criterion reads the answer instead, and records whether the
+model itself went to the tool holding a cause the prefetch does not carry.
+
+**Latency: two rounds fewer, 30s faster at the median.**
+
+| | control | variant |
+|---|---|---|
+| wall clock, median | 105.3s | **84.8s** |
+| wall clock, p90 | 326.2s | 237.6s |
+| wall clock, max | 429.8s | 314.5s |
+| model rounds, median | 4 | **2** |
+| model time per round, median | 27.3s | 35.5s |
+| round 1, median | 25.7s | 32.6s |
+
+Paired, variant minus control: **wall −29.7s median, −48.1s mean, lower in 28
+of 35 pairs**, exact sign test p = 0.0005, sign-flip permutation p = 0.0002.
+**Rounds −2 median, lower in 31 of 35 and higher in none**, sign p = 9.3e-10.
+
+| case | wall diffs, s | rounds diffs |
+|---|---|---|
+| `poststart_hook_not_the_app` | −276 −162 −122 −73 −25 | −5 −4 −4 −4 −2 |
+| `crashloop_root_cause` | −207 −104 −86 −14 +4 | −4 −4 −3 −2 −1 |
+| `never_ready_readiness_probe` | −188 −62 −60 −56 +141 | −4 −3 −3 −2 0 |
+| `image_never_pulled_by_policy` | −60 −56 −44 −18 −4 | −2 −2 −2 −1 −1 |
+| `unschedulable_unbound_pvc` | −63 −26 −25 −22 −21 | −4 −2 −2 −2 −2 |
+| `healthy_not_reported_broken` | −45 −31 −30 −23 −6 | −3 −3 −2 −2 −1 |
+| `oomkill_root_cause` | **+10 +12 +14 +18 +23** | −1 −1 0 0 0 |
+
+**The saving is entirely rounds, and a round costs more with it on.** Round 1
+takes ~7s longer at the median, and the per-round median rises from 27.3s to
+35.5s. `oomkill_root_cause` shows the cost alone: where the prefetch saved no
+round, the variant was slower in **5 of 5 pairs**, by 10s to 23s. That case had
+little round to save: 3 of its 5 control runs called `list_pods` and
+`describe_pod` and answered, in 3 rounds. All 5 variant runs also took 3
+rounds, and all 5 spent one of them on `get_pod_logs`, a call only 1 control run
+made.
+
+**Accuracy: no loss measured, and the search was not cut short.**
+
+| | control | variant |
+|---|---|---|
+| right, frozen criterion | 29/35 | 32/35 |
+| right, by hand | 29/35 | **33/35** |
+| pairs right in control only, by hand | 0 | — |
+| pairs right in variant only, by hand | — | 4 |
+
+Exact McNemar p = 0.125 by hand (0.375 on the frozen criterion), Fisher
+p = 0.26. **Not significant: this shows no harm at n=35, not an improvement.**
+The one difference between hand and criterion is a hole in the frozen file: the
+healthy case's word list flags `oomkilled` inside "no termination reasons (like
+OOMKilled) were reported", a denial. Defect 52's class, found a third time. The
+file is left as frozen and the hand count is reported beside it.
+
+Defect 53's risk was that a partial answer ends the search. On the three cases
+whose cause the prefetch does not carry, the model went to the right tool as
+often or more with it on: logs for `crasher` 5/5 against 5/5, events for
+`never-ready` 5/5 against 5/5, events for `session-cache` **1/5 against 4/5**.
+15 variant runs answered from the two prefetched reads with no call of their
+own, all 15 correct, and all on the three cases whose cause is in
+`describe_pod`: unbound claim, never-pull, healthy.
+
+**What this does not establish.** Seven cases I chose, one model, one cluster,
+thinking on. Absolute times are high against the corpus (control median 105.3s
+against 75.0s): another project's kind cluster shared the Docker VM
+throughout. The pairing cancels that for the difference, not for the level.
+The per-round cost was not an outcome committed in advance, so the 27.3s to
+35.5s rise is observed rather than tested. The switch is still off by default;
+whether to turn it on is recorded as a decision, not taken.
+
+
 ## Where a run's 74 seconds go
 
 Every latency figure this project has published is a report. None of them said
