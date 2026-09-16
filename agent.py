@@ -441,30 +441,116 @@ def capture_pod_logs(pod, namespace, tail=50):
     }]
 
 
+def prefetch_enabled():
+    """
+    Whether to read the named workload before the model's first round.
+
+    Read at call time, not import, so an A/B can switch it per run
+    (`evals/ab_prompt.py --variant-env TRIAGE_PREFETCH_TARGET=on`).
+    """
+    return os.getenv("TRIAGE_PREFETCH_TARGET", "").lower() in ("1", "on", "true", "yes")
+
+
+def prefetch_target(target):
+    """
+    The two reads nearly every diagnosis of a named workload starts with.
+
+    A round is the model thinking, not the tools: over 851 recorded runs the
+    tool calls took 24ms at the median and each round after the second cost
+    26.5s to 31.3s ("Where a run's 74 seconds go", VALIDATION.md). Most runs
+    about a named workload spend their first rounds on scan_cluster(workload=)
+    and then describe_pod of the example pod it returns. Doing both here saves
+    those rounds without deciding anything for the model.
+
+    Returns the list shape ask(prefetched=...) takes, marked `source: target`,
+    or [] for a target that is not a named workload. A read that fails is
+    dropped rather than passed on: an error handed over as evidence would be
+    a 404 dressed up as a measurement, and without it the run behaves exactly
+    as it would have with the switch off.
+    """
+    if not target or target.get("kind") != "workload" or not target.get("name"):
+        return []
+
+    def read(name, arguments):
+        output = _run_tool(name, arguments)
+        try:
+            parsed = json.loads(output)
+        except ValueError:
+            return None, None
+        if not isinstance(parsed, dict) or "error" in parsed or "result" in parsed:
+            return None, None
+        return {
+            "name": name,
+            "arguments": arguments,
+            "result": output,
+            "captured_at": time.strftime("%H:%M:%S"),
+            "source": "target",
+        }, parsed
+
+    arguments = {"workload": target["name"]}
+    if target.get("namespace"):
+        arguments["namespaces"] = target["namespace"]
+    scan, rows = read("scan_cluster", arguments)
+    if not scan:
+        return []
+
+    # Rows come largest blast radius first, so the first example is the one
+    # the model would have been pointed at. A failed Job or a controller with
+    # no pods has no example, and its scan row is the whole of what exists.
+    for key, row in rows.items():
+        if isinstance(row, dict) and row.get("example"):
+            namespace = key.split("/", 1)[0]
+            pod, _ = read("describe_pod", {"name": row["example"], "namespace": namespace})
+            return [scan, pod] if pod else [scan]
+    return [scan]
+
+
 def _prefetched_block(prefetched):
     """
     Render evidence collected before the loop started, for the user message.
 
-    Written to be read by the model as fact rather than as a hint, and
-    timestamped, because the whole reason it exists is that the subject may no
-    longer be there to re-read. It says so explicitly: a tool returning 404 for
-    this pod is expected, and does not mean the evidence below is wrong.
+    Two kinds, worded differently because they mean different things.
+
+    Captured evidence (the controller, --explain) was collected because the
+    subject may no longer be there to re-read. It says so explicitly: a tool
+    returning 404 for this pod is expected, and does not mean the evidence
+    below is wrong.
+
+    Target evidence (prefetch_target) is an ordinary first read done early to
+    save a round. It must not say "do not ask again" or suggest it is complete:
+    defect 53 measured the model stopping at a partial answer and guessing the
+    rest, and a block that reads as the whole picture invites exactly that.
     """
-    parts = []
-    for item in prefetched:
-        args = ", ".join(f"{k}={v!r}" for k, v in (item.get("arguments") or {}).items())
-        parts.append(
-            f"{item['name']}({args}) returned, at {item.get('captured_at', 'an earlier time')}:\n"
-            f"{item['result']}"
+    def render(items):
+        parts = []
+        for item in items:
+            args = ", ".join(f"{k}={v!r}" for k, v in (item.get("arguments") or {}).items())
+            parts.append(
+                f"{item['name']}({args}) returned, at {item.get('captured_at', 'an earlier time')}:\n"
+                f"{item['result']}"
+            )
+        return "\n\n".join(parts)
+
+    captured = [item for item in prefetched if item.get("source") != "target"]
+    early = [item for item in prefetched if item.get("source") == "target"]
+    block = ""
+    if captured:
+        block += (
+            "\n\nEvidence already collected for you, while the pod was still "
+            "running. The pod may have been deleted since — if a tool now returns "
+            "a 404 for it, that is expected and does not contradict this. For a "
+            "Job or CronJob pod this is the only record that will ever exist, so "
+            "do not ask for it again and do not withhold a diagnosis for want of "
+            "it:\n\n" + render(captured)
         )
-    return (
-        "\n\nEvidence already collected for you, while the pod was still "
-        "running. The pod may have been deleted since — if a tool now returns "
-        "a 404 for it, that is expected and does not contradict this. For a "
-        "Job or CronJob pod this is the only record that will ever exist, so "
-        "do not ask for it again and do not withhold a diagnosis for want of "
-        "it:\n\n" + "\n\n".join(parts)
-    )
+    if early:
+        block += (
+            "\n\nThese tools were already called for you on the workload this "
+            "question names. Treat the results as the first calls of your "
+            "investigation, not as all of it: where they do not show the cause, "
+            "call the tools that would.\n\n" + render(early)
+        )
+    return block
 
 
 def _timing(model_ms, tool_ms, round_ms, wall_ms=None, slept_ms=0.0):
@@ -1135,7 +1221,23 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
             "target_name": target["name"],
             "target_namespace": target["namespace"],
         })
+    # Two clocks, deliberately. perf_counter is monotonic and stops while the
+    # machine is asleep; time.time() does not. Their difference over the same
+    # interval is how long the host was suspended mid-run -- which is the
+    # difference between "the model hung" and "the laptop napped", and those
+    # were indistinguishable in every stall this project has recorded.
+    began_wall = time.time()
+    began_mono = time.perf_counter()
+    # Started before the prefetch below, so a run that reads the workload
+    # early is charged for those reads rather than looking a round faster
+    # than it was.
+
     prefetched = list(prefetched or [])
+    prefetch_ms = 0.0
+    if prefetch_enabled():
+        started = time.perf_counter()
+        prefetched += prefetch_target(target)
+        prefetch_ms = (time.perf_counter() - started) * 1000
     trace = []
     # Seeded with the prefetched results so grounding treats them as
     # measurements. They ARE measurements -- a tool produced them against the
@@ -1172,20 +1274,13 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
     # Per round rather than a total, because "one round hung" and "every round
     # was slow" are different faults and the sum cannot tell them apart.
     model_ms = 0.0
-    tool_ms = 0.0
+    tool_ms = prefetch_ms
     round_ms = []
     nudges = 0
     policies = 0
     coverage = 0
     reconciles = 0
 
-    # Two clocks, deliberately. perf_counter is monotonic and stops while the
-    # machine is asleep; time.time() does not. Their difference over the same
-    # interval is how long the host was suspended mid-run -- which is the
-    # difference between "the model hung" and "the laptop napped", and those
-    # were indistinguishable in every stall this project has recorded.
-    began_wall = time.time()
-    began_mono = time.perf_counter()
 
     def remaining():
         """

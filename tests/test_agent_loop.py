@@ -712,6 +712,157 @@ class TestPrefetchedEvidence:
         assert chat.call_args.kwargs["messages"][1]["content"] == "plain question"
 
 
+class TestTargetPrefetch:
+    """
+    TRIAGE_PREFETCH_TARGET: read the named workload before round one.
+
+    A round costs 26-31s of model time and a tool call 24ms, so the reads a
+    run almost always starts with are cheaper done before the model is asked
+    than spent a round on. Off by default: it changes what the model sees on
+    its first round, and defect 53 measured that a partial answer handed over
+    early can end the search.
+    """
+
+    QUESTION = "Why is the crasher deployment in the demo namespace crashing?"
+    ROW = {"demo/crasher": {"status": "CrashLoopBackOff", "pods": 1,
+                            "example": "crasher-5964d99948-9g8vg"}}
+    POD = {"name": "crasher-5964d99948-9g8vg", "status": "CrashLoopBackOff",
+           "last_termination": {"reason": "Error", "exit_code": 1}}
+
+    def _tools(self, scan=None, describe=None, calls=None):
+        calls = [] if calls is None else calls
+
+        def scan_cluster(**arguments):
+            calls.append(("scan_cluster", arguments))
+            return self.ROW if scan is None else scan
+
+        def describe_pod(**arguments):
+            calls.append(("describe_pod", arguments))
+            return self.POD if describe is None else describe
+
+        return {"scan_cluster": scan_cluster, "describe_pod": describe_pod}
+
+    def _ask(self, monkeypatch, value, question=QUESTION, **tools):
+        if value is None:
+            monkeypatch.delenv("TRIAGE_PREFETCH_TARGET", raising=False)
+        else:
+            monkeypatch.setenv("TRIAGE_PREFETCH_TARGET", value)
+        calls = []
+        with patch.dict(agent.TOOLS, self._tools(calls=calls, **tools)), \
+                mock_chat(return_value=reply(content="It exits with code 1.")) as chat:
+            result = agent.ask(question)
+        return result, chat.call_args_list[0].kwargs["messages"][1]["content"], calls
+
+    def test_off_by_default_reads_nothing(self, monkeypatch):
+        result, sent, calls = self._ask(monkeypatch, None)
+
+        assert calls == []
+        assert sent == self.QUESTION
+        assert result["tool_calls"] == []
+
+    def test_on_reads_the_scan_row_then_its_example_pod(self, monkeypatch):
+        result, sent, calls = self._ask(monkeypatch, "on")
+
+        assert calls == [
+            ("scan_cluster", {"workload": "crasher", "namespaces": "demo"}),
+            ("describe_pod", {"name": "crasher-5964d99948-9g8vg", "namespace": "demo"}),
+        ]
+        assert "crasher-5964d99948-9g8vg" in sent and '"exit_code": 1' in sent
+        assert [(c["name"], c["prefetched"]) for c in result["tool_calls"]] == [
+            ("scan_cluster", True), ("describe_pod", True)]
+
+    def test_the_prefetched_reads_ground_the_answer(self, monkeypatch):
+        """The exit code the answer quotes came from describe_pod, handed over."""
+        result, _, _ = self._ask(monkeypatch, "on")
+
+        assert result["unverified"] == []
+        assert result["confidence"] == "grounded"
+
+    def test_a_row_with_no_example_pod_reads_only_the_scan(self, monkeypatch):
+        """A failed Job whose pods were deleted: the row is all there is."""
+        job = {"demo/crasher": {"status": "Failed", "pods": 0,
+                                "reason": "DeadlineExceeded"}}
+        result, sent, calls = self._ask(monkeypatch, "on", scan=job)
+
+        assert [name for name, _ in calls] == ["scan_cluster"]
+        assert "DeadlineExceeded" in sent
+        assert len(result["tool_calls"]) == 1
+
+    @pytest.mark.parametrize("scan", [
+        {"error": "Forbidden"},
+        {"result": "no workload named crasher exists in this cluster"},
+    ])
+    def test_a_scan_that_found_nothing_is_not_handed_over(self, monkeypatch, scan):
+        """An error or a not-found is not evidence; the run proceeds as if off."""
+        result, sent, calls = self._ask(monkeypatch, "on", scan=scan)
+
+        assert [name for name, _ in calls] == ["scan_cluster"]
+        assert sent == self.QUESTION
+        assert result["tool_calls"] == []
+
+    def test_a_describe_that_failed_keeps_the_scan(self, monkeypatch):
+        result, sent, _ = self._ask(monkeypatch, "on", describe={"error": "NotFound"})
+
+        assert [c["name"] for c in result["tool_calls"]] == ["scan_cluster"]
+        assert "NotFound" not in sent
+
+    @pytest.mark.parametrize("question", [
+        "What is broken in the demo namespace?",
+        "Why is the typo-svc service in the demo namespace unreachable?",
+    ])
+    def test_a_question_naming_no_workload_reads_nothing(self, monkeypatch, question):
+        """A namespace has no scan row to read; a Service has no example pod."""
+        _, sent, calls = self._ask(monkeypatch, "on", question=question)
+
+        assert calls == []
+        assert "already called" not in sent
+
+    def test_the_block_does_not_tell_the_model_to_stop(self, monkeypatch):
+        """
+        Defect 53: handed a partial answer, the model stopped searching and
+        guessed. The captured-evidence wording says "do not ask for it again",
+        which is right for a deleted pod and wrong here.
+        """
+        _, sent, _ = self._ask(monkeypatch, "on")
+
+        assert "already called for you" in sent
+        assert "not as all of it" in sent
+        assert "do not ask for it again" not in sent
+        assert "may have been deleted" not in sent
+
+    def test_captured_evidence_keeps_its_own_wording_beside_it(self, monkeypatch):
+        monkeypatch.setenv("TRIAGE_PREFETCH_TARGET", "on")
+        logs = {"name": "get_pod_logs", "arguments": {"name": "p"},
+                "result": '{"logs": "FATAL"}'}
+        with patch.dict(agent.TOOLS, self._tools()), \
+                mock_chat(return_value=reply(content="x")) as chat:
+            agent.ask(self.QUESTION, prefetched=[logs])
+        sent = chat.call_args_list[0].kwargs["messages"][1]["content"]
+
+        assert "do not ask for it again" in sent
+        assert "already called for you" in sent
+        assert sent.index('"logs": "FATAL"') < sent.index("already called for you")
+
+    def test_the_reads_are_charged_to_the_run(self, monkeypatch):
+        """
+        Otherwise the variant arm of a latency A/B looks faster by exactly the
+        time it spent reading: the clocks used to start after this point.
+        """
+        def slow_scan(**arguments):
+            time.sleep(0.2)
+            return self.ROW
+
+        monkeypatch.setenv("TRIAGE_PREFETCH_TARGET", "on")
+        tools = self._tools()
+        tools["scan_cluster"] = slow_scan
+        with patch.dict(agent.TOOLS, tools), \
+                mock_chat(return_value=reply(content="x")):
+            result = agent.ask(self.QUESTION)
+
+        assert 200 <= result["timing"]["tool_ms"] < 2000
+        assert 200 <= result["timing"]["wall_ms"] < 2000
+
+
 def clock(*readings):
     """
     A fake clock that holds its last reading instead of running out.
