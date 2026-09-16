@@ -569,20 +569,22 @@ were failing correct answers are fixed; the three owner decisions are applied.
 
 **The owner's remaining decision is the release, and it is next.**
 
-1. **Tag 0.2.2 — agreed, prepared, not done.** `CHANGELOG.md` already carries
-   the entry; `version.py` and `deploy/chart/Chart.yaml` still read 0.2.1 and
-   must be bumped together (a test pins them, and another pins the handoff's
-   "tags through" line to `version.py`). Then `docs/RELEASE_CHECKLIST.md` end
-   to end, `git tag -a v0.2.2`, push the tag, and verify both images from
-   ghcr.io — the registry drops the `v`, so the tags are `0.2.2` and
-   `0.2.2-ui`, and the `target:base` trap is what the `docker run` step in CI
-   catches. **Release notes must say to re-apply RBAC**: the ClusterRole gained
-   `batch/jobs`, `apps/daemonsets` and `apps/statefulsets` since 0.2.1, and an
-   install whose role predates them loses those rows silently.
-   **One thing to put to the owner first:** this change set adds a tool and
-   response fields, which by CHANGELOG's own semver note argues for 0.3.0. The
-   owner chose 0.2.2 and the entry records that; it is worth one sentence
-   before the tag goes out.
+1. **Done 2026-09-16: v0.3.0 is released.** Renumbered from the prepared
+   0.2.2 by the owner before tagging, on CHANGELOG's own semver note. The
+   checklist ran end to end and found three gated documents stale, fixed in
+   `af23ff8`: DEMO.md lacked the 11 scored fixtures beyond the walkthrough,
+   ARCHITECTURE.md said five entry points and named none of the shared-state,
+   audit or identity modules, AI_EVALUATION.md said 29 scenarios and 1652 runs.
+   CI green on `af23ff8`; the release workflow succeeded in 9m50s. **Verified
+   from the registry, not the log:** `0.3.0` is
+   `sha256:91bf3cb9278f…` with Cmd `fastapi run app.py`, `0.3.0-ui` is
+   `sha256:e05338965be7…` with Cmd `streamlit run ui.py`, both linux/amd64 and
+   linux/arm64, `latest` carries `0.3.0`'s digest, and
+   `helm show chart oci://ghcr.io/ravisinghrajput95/charts/kubewhy --version
+   0.3.0` reads 0.3.0/0.3.0. A GitHub Release carries the RBAC re-apply step
+   first; before it, the repo page showed **v0.1.1** as Latest, because no
+   GitHub Release was made for 0.1.2 through 0.2.1. **Not done: HA on this
+   image** — no `helm install` with `sharedState.enabled=true` at two replicas.
 
 2. **Latency, designed and not started.** The analysis is done and points at
    one lever: a round is the model thinking (tool calls are 24ms, the fixed
