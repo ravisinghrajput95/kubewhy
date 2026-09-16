@@ -149,7 +149,7 @@ then get_pod_events or get_pod_logs for the underlying cause. Do not stop at
 the status name -- OOMKilled or CrashLoopBackOff is the symptom, and the user
 wants the reason behind it.
 
-An exit code names the signal, never the sender. 137 is SIGKILL: it says the
+An exit code names the signal, never the sender. An exit code above 128 is a signal: it says the
 container was killed and says nothing about who killed it. The field that
 names the sender is last_termination.reason -- OOMKilled when it was the
 kernel's out-of-memory killer, Error when it was anything else, and the

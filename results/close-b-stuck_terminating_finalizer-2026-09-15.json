@@ -1,0 +1,1020 @@
+[
+ {
+  "case": "stuck_terminating_finalizer",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 299.2,
+  "confidence": "contradicted",
+  "model_resident": true,
+  "started_at": "2026-09-16T11:52:22",
+  "load_before": 2.74,
+  "load_after": 4.3,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "get_pod_logs",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "workload": "drain-hook"
+   },
+   {
+    "name": "drain-hook",
+    "namespace": "uncovered2",
+    "tail": 100
+   },
+   {
+    "name": "drain-hook",
+    "namespace": "uncovered2"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"drain-hook\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\", \"terminating\": {\"since\": \"12h\", \"grace_seconds\": 0, \"past_grace\": true, \"finalizers\": [\"example.com/never-removed\"]}}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"drain-hook\", \"source\": \"current\", \"logs\": \"unable to retrieve container logs for containerd://3b8f0765fcee1ca3f8e05e24061c32e78f8779ab1a486183369beeabbfef8c58\"}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"drain-hook\", \"namespace\": \"uncovered2\", \"status\": \"Error\", \"node\": \"kubewhy-close-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"terminating\": {\"since\": \"12h\", \"grace_seconds\": 0, \"past_grace\": true, \"finalizers\": [\"example.com/never-removed\"]}}"
+   }
+  ],
+  "draft": "The `drain-hook` pod in `uncovered2` is stuck in a **terminating state** due to a **custom finalizer** (`example.com/never-removed`) and a **forced container termination** (exit code `137`, SIGKILL). Here's the full diagnosis, corrected for accuracy:\n\n---\n\n### **Root Cause**\n1. **Finalizer Blocking Deletion**  \n   - The pod has a **custom finalizer** (`example.com/never-removed`) that explicitly prevents garbage collection. This finalizer is the **primary reason** the pod remains in `Terminating` state. Kubernetes will not remove the pod until this finalizer is manually deleted or resolved.\n\n2. **Container Killed by SIGKILL**  \n   - The container exited with **exit code 137**, which is `SIGKILL` (a forced termination by the kernel). This indicates the container was abruptly terminated, but the **reason field** (`last_termination.reason = Error`) does not specify the cause. The kubelet sets `OOMKilled` as the reason **only if** the kernel\u2019s out-of-memory killer terminated the container. Since the reason is `Error`, the kill originated from another source (e.g., a manual `kubectl delete`, a pod disruption, or an external process). The logs failed to retrieve, so the exact cause of the termination remains **unconfirmed**.\n\n3. **Termination Grace Period Expired**  \n   - The pod has been in `Terminating` state for **12 hours** with `past_grace: true`, indicating it was forcefully deleted (e.g., via `kubectl delete --grace-period=0`), but the finalizer persists, blocking cleanup.\n\n---\n\n### **Why It Won\u2019t Go Away**\n- The **finalizer** (`example.com/never-removed`) is the **root cause**. Kubernetes will not remove the pod until this finalizer is removed or resolved.  \n- The container\u2019s `SIGKILL` exit code indicates an abrupt termination, but the exact cause (e.g., external kill, resource limits, or a bug) is **unconfirmed** due to missing logs.  \n\n---\n\n### **Next Steps**\n1. **Remove the Finalizer Manually** (not recommended for production):  \n   ```bash\n   kubectl patch pod drain-hook -n uncovered2 -p '{\"metadata\":{\"finalizers\":[]}}'\n   ```\n   This will force deletion but may leave orphaned resources.\n\n2. **Investigate the Finalizer Source**:  \n   - Check if a controller, operator, or custom logic added this finalizer. It may be a bug in the controller\u2019s cleanup logic.  \n   - Inspect the pod\u2019s events (`get_pod_events`) for hints about why the finalizer was added (e.g., a failed drain process).\n\n3. **Verify Container Exit Context**:  \n   - If the container exited due to a crash, check `describe_pod` for resource limits or OOMKilled flags. However, logs are unavailable, so this remains speculative.\n\n---\n\n### **Summary**\nThe pod is stuck due to the **finalizer** blocking deletion and a **SIGKILL** exit code from the container. The finalizer is the critical issue here, and resolving it requires manual intervention or fixing the controller/operator that added it. The container\u2019s termination reason (Error) and exit code (137) confirm a forced kill, but the exact cause remains **unsettled** due to missing logs.",
+  "answer": "The `drain-hook` pod in `uncovered2` is stuck in a **terminating state** due to a **custom finalizer** (`example.com/never-removed`) and a **forced container termination** (exit code `137`, SIGKILL). Here's the full diagnosis, corrected for accuracy:\n\n---\n\n### **Root Cause**\n1. **Finalizer Blocking Deletion**  \n   - The pod has a **custom finalizer** (`example.com/never-removed`) that explicitly prevents garbage collection. This finalizer is the **primary reason** the pod remains in `Terminating` state. Kubernetes will not remove the pod until this finalizer is manually deleted or resolved.\n\n2. **Container Killed by SIGKILL**  \n   - The container exited with **exit code 137**, which is `SIGKILL` (a forced termination by the kernel). This indicates the container was abruptly terminated, but the **reason field** (`last_termination.reason = Error`) does not specify the cause. The kubelet sets `[unverified: OOMKilled]` as the reason **only if** the kernel\u2019s out-of-memory killer terminated the container. Since the reason is `Error`, the kill originated from another source (e.g., a manual `kubectl delete`, a pod disruption, or an external process). The logs failed to retrieve, so the exact cause of the termination remains **unconfirmed**.\n\n3. **Termination Grace Period Expired**  \n   - The pod has been in `Terminating` state for **12 hours** with `past_grace: true`, indicating it was forcefully deleted (e.g., via `kubectl delete --grace-period=0`), but the finalizer persists, blocking cleanup.\n\n---\n\n### **Why It Won\u2019t Go Away**\n- The **finalizer** (`example.com/never-removed`) is the **root cause**. Kubernetes will not remove the pod until this finalizer is removed or resolved.  \n- The container\u2019s `SIGKILL` exit code indicates an abrupt termination, but the exact cause (e.g., external kill, resource limits, or a bug) is **unconfirmed** due to missing logs.  \n\n---\n\n### **Next Steps**\n1. **Remove the Finalizer Manually** (not recommended for production):  \n   ```bash\n   kubectl patch pod drain-hook -n uncovered2 -p '{\"metadata\":{\"finalizers\":[]}}'\n   ```\n   This will force deletion but may leave orphaned resources.\n\n2. **Investigate the Finalizer Source**:  \n   - Check if a controller, operator, or custom logic added this finalizer. It may be a bug in the controller\u2019s cleanup logic.  \n   - Inspect the pod\u2019s events (`get_pod_events`) for hints about why the finalizer was added (e.g., a failed drain process).\n\n3. **Verify Container Exit Context**:  \n   - If the container exited due to a crash, check `describe_pod` for resource limits or [unverified: OOMKilled] flags. However, logs are unavailable, so this remains speculative.\n\n---\n\n### **Summary**\nThe pod is stuck due to the **finalizer** blocking deletion and a **SIGKILL** exit code from the container. The finalizer is the critical issue here, and resolving it requires manual intervention or fixing the controller/operator that added it. The container\u2019s termination reason (Error) and exit code (137) confirm a forced kill, but the exact cause remains **unsettled** due to missing logs.\n\n---\n**Evidence audit.**\n1 of 8 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 1,
+  "failures": [
+   "unverified claims: ['oomkilled']",
+   "grounding verdict 'contradicted', expected one of ['grounded', 'partial']"
+  ],
+  "notes": [
+   "contradicted: out-of-memory vs last_termination.reason = error; oomkilled vs last_termination.reason = error"
+  ],
+  "timing": {
+   "model_ms": 299131.7,
+   "tool_ms": 23.1,
+   "rounds": 7,
+   "round_ms": [
+    30028.2,
+    37734.6,
+    13930.5,
+    37099.9,
+    36889.2,
+    68564.5,
+    74884.7
+   ],
+   "slowest_round_ms": 74884.7,
+   "model_share": 1.0,
+   "wall_ms": 299162.2,
+   "unaccounted_ms": 7.4,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "12",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "12"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    },
+    {
+     "claim": "out-of-memory",
+     "kind": "contradiction"
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "contradiction"
+    }
+   ],
+   "contradictions": [
+    {
+     "claim": "out-of-memory",
+     "measured": "last_termination.reason = error",
+     "rule": "termination_reason_vs_memory_cause",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "last_termination.reason"
+      }
+     ]
+    },
+    {
+     "claim": "oomkilled",
+     "measured": "last_termination.reason = error",
+     "rule": "termination_reason_vs_memory_cause",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "last_termination.reason"
+      }
+     ]
+    }
+   ],
+   "unknowns": [
+    "OOMKilled",
+    "OOMKilled"
+   ],
+   "corrections": []
+  },
+  "contradictions": [
+   {
+    "rule": "termination_reason_vs_memory_cause",
+    "claim": "out-of-memory",
+    "measured": "last_termination.reason = error",
+    "because": "the kubelet writes reason OOMKilled when the kernel's OOM killer terminates a container, so a reason of Error means the kill came from somewhere else. Exit code 137 is SIGKILL and says only that the container was killed, never by whom",
+    "clause": "The kubelet sets `OOMKilled` as the reason **only if** the kernel\u2019s out-of-memory killer terminated the container.",
+    "evidence": [
+     {
+      "id": "tool-1",
+      "tool": "list_pods",
+      "field": "last_termination.reason"
+     }
+    ]
+   },
+   {
+    "rule": "termination_reason_vs_memory_cause",
+    "claim": "oomkilled",
+    "measured": "last_termination.reason = error",
+    "because": "the kubelet writes reason OOMKilled when the kernel's OOM killer terminates a container, so a reason of Error means the kill came from somewhere else. Exit code 137 is SIGKILL and says only that the container was killed, never by whom",
+    "clause": "- If the container exited due to a crash, check `describe_pod` for resource limits or OOMKilled flags.",
+    "evidence": [
+     {
+      "id": "tool-1",
+      "tool": "list_pods",
+      "field": "last_termination.reason"
+     }
+    ]
+   }
+  ],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "b36ef0086203",
+  "target": {
+   "kind": "workload",
+   "name": "drain-hook",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "stuck_terminating_finalizer",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 247.2,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-16T11:57:21",
+  "load_before": 4.3,
+  "load_after": 2.25,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "drain-hook"
+   },
+   {
+    "name": "drain-hook",
+    "namespace": "uncovered2"
+   },
+   {
+    "name": "drain-hook",
+    "namespace": "uncovered2",
+    "tail": 50
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"drain-hook\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\", \"terminating\": {\"since\": \"12h\", \"grace_seconds\": 0, \"past_grace\": true, \"finalizers\": [\"example.com/never-removed\"]}}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"drain-hook\", \"namespace\": \"uncovered2\", \"status\": \"Error\", \"node\": \"kubewhy-close-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"terminating\": {\"since\": \"12h\", \"grace_seconds\": 0, \"past_grace\": true, \"finalizers\": [\"example.com/never-removed\"]}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"drain-hook\", \"source\": \"current\", \"logs\": \"unable to retrieve container logs for containerd://3b8f0765fcee1ca3f8e05e24061c32e78f8779ab1a486183369beeabbfef8c58\"}"
+   }
+  ],
+  "draft": "The **drain-hook pod** in the `uncovered2` namespace is stuck due to a **finalizer** (`example.com/never-removed`) blocking its deletion. Here\u2019s the full, accurate diagnosis based on the evidence:\n\n---\n\n### \ud83d\udeab **Root Cause: Finalizer Preventing Deletion**\n- The pod has a **custom finalizer** (`example.com/never-removed`) that explicitly prevents garbage collection. This finalizer is likely added by a controller, operator, or resource manager (e.g., a Helm chart, custom controller, or cleanup tool) that failed to remove it.\n- The pod\u2019s termination grace period (0 seconds) expired 12 hours ago, but the finalizer persists, so the pod remains in a `Status: Error` state.\n\n---\n\n### \ud83d\udea8 **Container Termination: SIGKILL (Code 137), Cause Unknown**\n- The container exited with **code 137** (SIGKILL), which means it was **forcibly terminated** by the kernel or a process with elevated privileges. However:\n  - The `last_termination.reason` is **\"Error\"**, which indicates the kubelet recorded an unspecified error during termination (not OOMKilled, as that would explicitly set the reason to \"OOMKilled\").\n  - **No logs are available** to confirm the exact cause of the termination (e.g., manual kill, resource limits, or external process intervention).\n\n---\n\n### \ud83d\udcdc **Next Steps to Resolve**\n1. **Remove the Finalizer**:\n   - Manually delete the `example.com/never-removed` finalizer from the pod\u2019s metadata (requires cluster admin access):\n     ```bash\n     kubectl edit pod drain-hook -n uncovered2\n     ```\n     Remove the `finalizers` field or edit it to remove `example.com/never-removed`.\n\n2. **Investigate the Finalizer Source**:\n   - Check the pod\u2019s owner reference (via `kubectl get pod drain-hook -o jsonpath='{.metadata.ownerReferences}'`) to identify the controller or resource that added the finalizer.\n   - Debug the controller/operator to ensure it properly cleans up finalizers.\n\n3. **Check for Manual Intervention**:\n   - If the pod was manually killed (e.g., via `kubectl delete pod`), ensure no lingering processes or finalizers are preventing cleanup.\n\n4. **Verify Container Behavior**:\n   - If the container was killed by an external process, investigate system logs (e.g., `dmesg`, kubelet logs) for clues about the termination.\n\n---\n\n### \ud83d\udccc Summary\nThe pod will not go away because the `example.com/never-removed` finalizer blocks deletion. The container was killed with **SIGKILL (code 137)**, but the exact cause is unclear due to missing logs and the `last_termination.reason` being \"Error\" (not OOMKilled). Removing the finalizer and investigating its source will resolve the issue.",
+  "answer": "The **drain-hook pod** in the `uncovered2` namespace is stuck due to a **finalizer** (`example.com/never-removed`) blocking its deletion. Here\u2019s the full, accurate diagnosis based on the evidence:\n\n---\n\n### \ud83d\udeab **Root Cause: Finalizer Preventing Deletion**\n- The pod has a **custom finalizer** (`example.com/never-removed`) that explicitly prevents garbage collection. This finalizer is likely added by a controller, operator, or resource manager (e.g., a Helm chart, custom controller, or cleanup tool) that failed to remove it.\n- The pod\u2019s termination grace period (0 seconds) expired 12 hours ago, but the finalizer persists, so the pod remains in a `Status: Error` state.\n\n---\n\n### \ud83d\udea8 **Container Termination: SIGKILL (Code 137), Cause Unknown**\n- The container exited with **code 137** (SIGKILL), which means it was **forcibly terminated** by the kernel or a process with elevated privileges. However:\n  - The `last_termination.reason` is **\"Error\"**, which indicates the kubelet recorded an unspecified error during termination (not OOMKilled, as that would explicitly set the reason to \"OOMKilled\").\n  - **No logs are available** to confirm the exact cause of the termination (e.g., manual kill, resource limits, or external process intervention).\n\n---\n\n### \ud83d\udcdc **Next Steps to Resolve**\n1. **Remove the Finalizer**:\n   - Manually delete the `example.com/never-removed` finalizer from the pod\u2019s metadata (requires cluster admin access):\n     ```bash\n     kubectl edit pod drain-hook -n uncovered2\n     ```\n     Remove the `finalizers` field or edit it to remove `example.com/never-removed`.\n\n2. **Investigate the Finalizer Source**:\n   - Check the pod\u2019s owner reference (via `kubectl get pod drain-hook -o jsonpath='{.metadata.ownerReferences}'`) to identify the controller or resource that added the finalizer.\n   - Debug the controller/operator to ensure it properly cleans up finalizers.\n\n3. **Check for Manual Intervention**:\n   - If the pod was manually killed (e.g., via `kubectl delete pod`), ensure no lingering processes or finalizers are preventing cleanup.\n\n4. **Verify Container Behavior**:\n   - If the container was killed by an external process, investigate system logs (e.g., `dmesg`, kubelet logs) for clues about the termination.\n\n---\n\n### \ud83d\udccc Summary\nThe pod will not go away because the `example.com/never-removed` finalizer blocks deletion. The container was killed with **SIGKILL (code 137)**, but the exact cause is unclear due to missing logs and the `last_termination.reason` being \"Error\" (not [unverified: OOMKilled]). Removing the finalizer and investigating its source will resolve the issue.\n\n---\n**Evidence audit.**\n1 of 8 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 1,
+  "failures": [
+   "unverified claims: ['oomkilled']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 247125.4,
+   "tool_ms": 31.5,
+   "rounds": 7,
+   "round_ms": [
+    23327.5,
+    25349.0,
+    18978.7,
+    47129.5,
+    19356.8,
+    55225.3,
+    57758.7
+   ],
+   "slowest_round_ms": 57758.7,
+   "model_share": 1.0,
+   "wall_ms": 247172.0,
+   "unaccounted_ms": 15.1,
+   "slept_ms": 4.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "12",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "12"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "OOMKilled"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "d306a7bdb077",
+  "target": {
+   "kind": "workload",
+   "name": "drain-hook",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "stuck_terminating_finalizer",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 122.6,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-16T12:01:28",
+  "load_before": 2.25,
+  "load_after": 1.94,
+  "low_power_mode": true,
+  "unverified": [
+   "2"
+  ],
+  "tools": [
+   "list_pods",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "workload": "drain-hook"
+   },
+   {
+    "name": "drain-hook",
+    "namespace": "uncovered2",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"drain-hook\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\", \"terminating\": {\"since\": \"12h\", \"grace_seconds\": 0, \"past_grace\": true, \"finalizers\": [\"example.com/never-removed\"]}}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"drain-hook\", \"source\": \"current\", \"logs\": \"unable to retrieve container logs for containerd://3b8f0765fcee1ca3f8e05e24061c32e78f8779ab1a486183369beeabbfef8c58\"}"
+   }
+  ],
+  "draft": "The drain-hook pod in the `uncovered2` namespace is stuck due to the finalizer `example.com/never-removed`, which explicitly prevents its deletion. The logs for the container could not be retrieved, so there is no application-specific error or exit code to analyze. \n\n### Steps to resolve:\n1. **Remove the finalizer**:\n   - Edit the pod's spec to remove `example.com/never-removed` from its finalizers list. This allows the kubelet to clean up the pod.\n   - Example command:  \n     ```bash\n     kubectl patch pod drain-hook -n uncovered2 -p '{\"metadata\":{\"finalizers\":[]}}'\n     ```\n\n2. **Force delete (caution)**:\n   - If the pod remains stuck, force delete it with:  \n     ```bash\n     kubectl delete pod -n uncovered2 drain-hook --grace-period=0 --force\n     ```\n   - **Note**: Force deletion bypasses finalizers and should only be used if the finalizer is malicious or misconfigured.\n\nThe finalizer `example.com/never-removed` likely originated from a misconfigured controller or manual intervention. Removing it will resolve the issue.",
+  "answer": "The drain-hook pod in the `uncovered2` namespace is stuck due to the finalizer `example.com/never-removed`, which explicitly prevents its deletion. The logs for the container could not be retrieved, so there is no application-specific error or exit code to analyze. \n\n### Steps to resolve:\n1. **Remove the finalizer**:\n   - Edit the pod's spec to remove `example.com/never-removed` from its finalizers list. This allows the kubelet to clean up the pod.\n   - Example command:  \n     ```bash\n     kubectl patch pod drain-hook -n uncovered2 -p '{\"metadata\":{\"finalizers\":[]}}'\n     ```\n\n[unverified: 2]. **Force delete (caution)**:\n   - If the pod remains stuck, force delete it with:  \n     ```bash\n     kubectl delete pod -n uncovered2 drain-hook --grace-period=0 --force\n     ```\n   - **Note**: Force deletion bypasses finalizers and should only be used if the finalizer is malicious or misconfigured.\n\nThe finalizer `example.com/never-removed` likely originated from a misconfigured controller or manual intervention. Removing it will resolve the issue.\n\n---\n**Evidence audit.**\n1 of 4 stated values could not be traced to any tool result for the workload they were stated about: `2`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "unverified claims: ['2']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 122602.5,
+   "tool_ms": 22.2,
+   "rounds": 4,
+   "round_ms": [
+    32799.7,
+    26883.6,
+    21978.3,
+    40940.9
+   ],
+   "slowest_round_ms": 40940.9,
+   "model_share": 1.0,
+   "wall_ms": 122627.4,
+   "unaccounted_ms": 2.7,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.ready",
+       "value": "0"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "2",
+     "kind": "number"
+    },
+    {
+     "claim": "2",
+     "kind": "number"
+    },
+    {
+     "claim": "2",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "2"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "b1de69701274",
+  "target": {
+   "kind": "workload",
+   "name": "drain-hook",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "stuck_terminating_finalizer",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 242.6,
+  "confidence": "contradicted",
+  "model_resident": true,
+  "started_at": "2026-09-16T12:03:31",
+  "load_before": 1.94,
+  "load_after": 2.51,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_nodes",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "drain-hook"
+   },
+   {
+    "name": "drain-hook",
+    "namespace": "uncovered2"
+   },
+   {},
+   {
+    "name": "drain-hook",
+    "namespace": "uncovered2",
+    "tail": 50
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"drain-hook\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\", \"terminating\": {\"since\": \"12h\", \"grace_seconds\": 0, \"past_grace\": true, \"finalizers\": [\"example.com/never-removed\"]}}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"drain-hook\", \"namespace\": \"uncovered2\", \"status\": \"Error\", \"node\": \"kubewhy-close-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"terminating\": {\"since\": \"12h\", \"grace_seconds\": 0, \"past_grace\": true, \"finalizers\": [\"example.com/never-removed\"]}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-close-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"drain-hook\", \"source\": \"current\", \"logs\": \"unable to retrieve container logs for containerd://3b8f0765fcee1ca3f8e05e24061c32e78f8779ab1a486183369beeabbfef8c58\"}"
+   }
+  ],
+  "draft": "The **drain-hook pod** in `uncovered2` is stuck for two key reasons, confirmed by your findings:\n\n---\n\n### 1. **Finalizer Preventing Deletion**  \n   - The pod has a **custom finalizer** `example.com/never-removed` attached, which explicitly blocks its deletion.  \n   - **Fix**: Remove the finalizer via:  \n     ```bash\n     kubectl patch pod drain-hook -n uncovered2 -p '{\"metadata\":{\"finalizers\":null}}'\n     ```  \n     \u26a0\ufe0f **Note**: Removing finalizers can orphan resources; ensure this is intentional.\n\n---\n\n### 2. **SIGKILL (137) Exit Code with No Logs**  \n   - The pod was terminated with **exit code 137 (SIGKILL)**, which typically indicates the **OOM killer** (out-of-memory) killed the container.  \n   - **Critical Issue**: **No logs were retrieved** from the container (`containerd://3b8f0765fcee1ca3f8e05e24061c32e78f8779ab1a486183369beeabbfef8c58`). Without logs, we cannot confirm if the OOM killer was responsible or if another process caused the termination.  \n   - **Next Steps**:  \n     - Check the pod\u2019s resource limits in its spec (`resources.limits.memory`) to see if memory constraints were exceeded.  \n     - Investigate node pressure again (`list_nodes`) to rule out hidden memory/disk issues.  \n     - If the pod is no longer needed, manually delete it via `kubectl delete pod drain-hook -n uncovered2` after removing the finalizer.\n\n---\n\n### Summary  \nThe pod is stuck due to the finalizer and an unexplained SIGKILL exit. Without logs, the exact cause of the termination remains unknown. Prioritize removing the finalizer and verifying resource limits to resolve the issue.",
+  "answer": "The **drain-hook pod** in `uncovered2` is stuck for two key reasons, confirmed by your findings:\n\n---\n\n### 1. **Finalizer Preventing Deletion**  \n   - The pod has a **custom finalizer** `example.com/never-removed` attached, which explicitly blocks its deletion.  \n   - **Fix**: Remove the finalizer via:  \n     ```bash\n     kubectl patch pod drain-hook -n uncovered2 -p '{\"metadata\":{\"finalizers\":null}}'\n     ```  \n     \u26a0\ufe0f **Note**: Removing finalizers can orphan resources; ensure this is intentional.\n\n---\n\n### 2. **SIGKILL (137) Exit Code with No Logs**  \n   - The pod was terminated with **exit code 137 (SIGKILL)**, which typically indicates the **OOM killer** (out-of-memory) killed the container.  \n   - **Critical Issue**: **No logs were retrieved** from the container (`containerd://3b8f0765fcee1ca3f8e05e24061c32e78f8779ab1a486183369beeabbfef8c58`). Without logs, we cannot confirm if the OOM killer was responsible or if another process caused the termination.  \n   - **Next Steps**:  \n     - Check the pod\u2019s resource limits in its spec (`resources.limits.memory`) to see if memory constraints were exceeded.  \n     - Investigate node pressure again (`list_nodes`) to rule out hidden memory/disk issues.  \n     - If the pod is no longer needed, manually delete it via `kubectl delete pod drain-hook -n uncovered2` after removing the finalizer.\n\n---\n\n### Summary  \nThe pod is stuck due to the finalizer and an unexplained SIGKILL exit. Without logs, the exact cause of the termination remains unknown. Prioritize removing the finalizer and verifying resource limits to resolve the issue.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "grounding verdict 'contradicted', expected one of ['grounded', 'partial']"
+  ],
+  "notes": [
+   "contradicted: out-of-memory vs last_termination.reason = error"
+  ],
+  "timing": {
+   "model_ms": 242585.3,
+   "tool_ms": 24.6,
+   "rounds": 7,
+   "round_ms": [
+    29450.8,
+    22314.1,
+    42773.6,
+    21883.8,
+    58050.5,
+    19861.1,
+    48251.3
+   ],
+   "slowest_round_ms": 58050.5,
+   "model_share": 1.0,
+   "wall_ms": 242615.2,
+   "unaccounted_ms": 5.3,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.ready",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "3",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "3"
+      }
+     ]
+    },
+    {
+     "claim": "5",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "list_nodes",
+       "field": "kubewhy-close-control-plane.allocatable_cpu",
+       "value": "5"
+      }
+     ]
+    },
+    {
+     "claim": "8",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "list_nodes",
+       "field": "kubewhy-close-control-plane.allocatable_memory",
+       "value": "8"
+      }
+     ]
+    },
+    {
+     "claim": "32",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "32"
+      }
+     ]
+    },
+    {
+     "claim": "58",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "58"
+      }
+     ]
+    },
+    {
+     "claim": "78",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "78"
+      }
+     ]
+    },
+    {
+     "claim": "765",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "765"
+      }
+     ]
+    },
+    {
+     "claim": "8779",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "8779"
+      }
+     ]
+    },
+    {
+     "claim": "24061",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "24061"
+      }
+     ]
+    },
+    {
+     "claim": "486183369",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "486183369"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "2"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "out-of-memory",
+     "kind": "contradiction"
+    }
+   ],
+   "contradictions": [
+    {
+     "claim": "out-of-memory",
+     "measured": "last_termination.reason = error",
+     "rule": "termination_reason_vs_memory_cause",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "last_termination.reason"
+      }
+     ]
+    }
+   ],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [
+   {
+    "rule": "termination_reason_vs_memory_cause",
+    "claim": "out-of-memory",
+    "measured": "last_termination.reason = error",
+    "because": "the kubelet writes reason OOMKilled when the kernel's OOM killer terminates a container, so a reason of Error means the kill came from somewhere else. Exit code 137 is SIGKILL and says only that the container was killed, never by whom",
+    "clause": "- The pod was terminated with **exit code 137 (SIGKILL)**, which typically indicates the **OOM killer** (out-of-memory) killed the container.",
+    "evidence": [
+     {
+      "id": "tool-1",
+      "tool": "list_pods",
+      "field": "last_termination.reason"
+     }
+    ]
+   }
+  ],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "4c2001b4b755",
+  "target": {
+   "kind": "workload",
+   "name": "drain-hook",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "stuck_terminating_finalizer",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": true,
+  "seconds": 234.9,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T12:07:34",
+  "load_before": 2.51,
+  "load_after": 1.91,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "list_jobs",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "drain-hook"
+   },
+   {
+    "name": "drain-hook",
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "name": "drain-hook",
+    "namespace": "uncovered2",
+    "tail": 50
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"drain-hook\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\", \"terminating\": {\"since\": \"12h\", \"grace_seconds\": 0, \"past_grace\": true, \"finalizers\": [\"example.com/never-removed\"]}}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"drain-hook\", \"namespace\": \"uncovered2\", \"status\": \"Error\", \"node\": \"kubewhy-close-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"terminating\": {\"since\": \"12h\", \"grace_seconds\": 0, \"past_grace\": true, \"finalizers\": [\"example.com/never-removed\"]}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_jobs",
+    "result": "{\"result\": \"no jobs in namespace uncovered2\"}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"drain-hook\", \"source\": \"current\", \"logs\": \"unable to retrieve container logs for containerd://3b8f0765fcee1ca3f8e05e24061c32e78f8779ab1a486183369beeabbfef8c58\"}"
+   }
+  ],
+  "draft": "The `drain-hook` pod in the `uncovered2` namespace is stuck due to a **custom finalizer** (`example.com/never-removed`) preventing its deletion. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n1. **Finalizer Block**:  \n   The pod has a custom finalizer `example.com/never-removed` added to its metadata. Finalizers prevent Kubernetes from deleting objects until their conditions are met. This finalizer appears to be a leftover from a controller/operator that failed to clean up, causing the pod to linger even after it should have been terminated.\n\n2. **SIGKILL Exit Code**:  \n   The container exited with code `137` (SIGKILL), indicating it was forcibly terminated. However, the `last_termination.reason` is `\"Error\"`, which is vague. This likely correlates with the finalizer blocking proper cleanup, causing the kubelet to kill the pod without resolving the underlying issue.\n\n3. **No Job Association**:  \n   `list_jobs` in the `uncovered2` namespace returned no results, confirming there is no Job associated with this pod. Jobs with `DeadlineExceeded` or `BackoffLimitExceeded` could leave pods in incomplete states, but this is not the case here.\n\n4. **No Container Logs**:  \n   Attempting to retrieve logs for the `drain-hook` pod failed, returning an error. This suggests either the container did not produce logs, or the logs are not accessible (e.g., due to a misconfigured logging driver or storage issue). Without logs, we cannot determine the exact reason for the container's termination beyond the finalizer's interference.\n\n---\n\n### **Action Required**\n- **Remove the Finalizer**:  \n  Manually remove the finalizer using `kubectl patch` (if safe) or fix the controller/operator that added it. Example:\n  ```bash\n  kubectl patch pod drain-hook -n uncovered2 -p '{\"metadata\":{\"finalizers\":null}}'\n  ```\n- **Investigate Controller/Operator**:  \n  Check if a custom controller or operator added the `example.com/never-removed` finalizer. Ensure it is properly handling cleanup to prevent future issues.\n\nThe pod will not go away until the finalizer is removed or the controller responsible for it is fixed.",
+  "answer": "The `drain-hook` pod in the `uncovered2` namespace is stuck due to a **custom finalizer** (`example.com/never-removed`) preventing its deletion. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n1. **Finalizer Block**:  \n   The pod has a custom finalizer `example.com/never-removed` added to its metadata. Finalizers prevent Kubernetes from deleting objects until their conditions are met. This finalizer appears to be a leftover from a controller/operator that failed to clean up, causing the pod to linger even after it should have been terminated.\n\n2. **SIGKILL Exit Code**:  \n   The container exited with code `137` (SIGKILL), indicating it was forcibly terminated. However, the `last_termination.reason` is `\"Error\"`, which is vague. This likely correlates with the finalizer blocking proper cleanup, causing the kubelet to kill the pod without resolving the underlying issue.\n\n3. **No Job Association**:  \n   `list_jobs` in the `uncovered2` namespace returned no results, confirming there is no Job associated with this pod. Jobs with `DeadlineExceeded` or `BackoffLimitExceeded` could leave pods in incomplete states, but this is not the case here.\n\n4. **No Container Logs**:  \n   Attempting to retrieve logs for the `drain-hook` pod failed, returning an error. This suggests either the container did not produce logs, or the logs are not accessible (e.g., due to a misconfigured logging driver or storage issue). Without logs, we cannot determine the exact reason for the container's termination beyond the finalizer's interference.\n\n---\n\n### **Action Required**\n- **Remove the Finalizer**:  \n  Manually remove the finalizer using `kubectl patch` (if safe) or fix the controller/operator that added it. Example:\n  ```bash\n  kubectl patch pod drain-hook -n uncovered2 -p '{\"metadata\":{\"finalizers\":null}}'\n  ```\n- **Investigate Controller/Operator**:  \n  Check if a custom controller or operator added the `example.com/never-removed` finalizer. Ensure it is properly handling cleanup to prevent future issues.\n\nThe pod will not go away until the finalizer is removed or the controller responsible for it is fixed.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 234852.0,
+   "tool_ms": 32.0,
+   "rounds": 7,
+   "round_ms": [
+    32721.7,
+    33652.0,
+    45665.0,
+    29187.0,
+    36591.4,
+    18246.6,
+    38788.3
+   ],
+   "slowest_round_ms": 45665.0,
+   "model_share": 1.0,
+   "wall_ms": 234886.7,
+   "unaccounted_ms": 2.7,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_pods",
+       "field": "drain-hook.terminating.since",
+       "value": "2"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "f8478d905733",
+  "target": {
+   "kind": "workload",
+   "name": "drain-hook",
+   "namespace": "uncovered2"
+  }
+ }
+]

@@ -1,0 +1,94 @@
+[
+ {
+  "case": "claim_waiting_on_a_missing_provisioner",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 114.4,
+  "confidence": "insufficient_evidence",
+  "model_resident": true,
+  "started_at": "2026-09-16T00:01:36",
+  "load_before": 3.11,
+  "load_after": 2.44,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "workload": "ledger-writer"
+   },
+   {
+    "name": "ledger-writer",
+    "namespace": "uncovered2"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"ledger-writer\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"ledger-writer\", \"namespace\": \"uncovered2\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"ledger-data\", \"phase\": \"Pending\", \"storage_class\": \"ghost-provisioner\", \"storage_class_exists\": true, \"provisioner\": \"example.com/no-such-csi-driver\", \"event\": {\"type\": \"Normal\", \"reason\": \"ExternalProvisioning\", \"count\": 163, \"age\": \"1s\", \"message\": \"Waiting for a volume to be created either by the external provisioner 'example.com/no-such-csi-driver' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.\"}}]}}"
+   }
+  ],
+  "draft": "The **ledger-writer pod** is stuck in **Pending** because it depends on a **PersistentVolumeClaim (PVC)** named `ledger-data` that cannot be fulfilled. Here's why:\n\n1. **PVC is Unbound**:  \n   The PVC `ledger-data` is in **Pending** state and has no volume bound to it. The error message indicates the PVC is waiting for a volume to be created by the external provisioner `example.com/no-such-csi-driver`.\n\n2. **Provisioner Not Found**:  \n   The storage class `ghost-provisioner` exists, but its provisioner `example.com/no-such-csi-driver` is **not registered** or running. This means the CSI driver for this storage class is missing or misconfigured.\n\n3. **No Manual Binding**:  \n   The PVC is not manually bound, and the provisioner is not available to create the volume. Without a valid volume, the pod cannot schedule.\n\n---\n\n### \u2705 Solution\n- **Install/Verify the CSI Driver**:  \n  Ensure the CSI driver for `example.com/no-such-csi-driver` is installed and running. Check the kubelet logs or the driver's documentation for installation steps.\n\n- **Manually Create Volume (if applicable)**:  \n  If the PVC is intended to be manually provisioned, create the volume in the storage backend (e.g., cloud storage, NFS) and bind it to the PVC.\n\n- **Check Storage Class Configuration**:  \n  Verify that the storage class `ghost-provisioner` is correctly configured with a valid provisioner. If the provisioner is incorrect, update it to a valid one.\n\nOnce the PVC is bound and the volume exists, the pod will transition to **Pending** \u2192 **Running**.",
+  "answer": "The **ledger-writer pod** is stuck in **Pending** because it depends on a **PersistentVolumeClaim (PVC)** named `ledger-data` that cannot be fulfilled. Here's why:\n\n1. **PVC is Unbound**:  \n   The PVC `ledger-data` is in **Pending** state and has no volume bound to it. The error message indicates the PVC is waiting for a volume to be created by the external provisioner `example.com/no-such-csi-driver`.\n\n2. **Provisioner Not Found**:  \n   The storage class `ghost-provisioner` exists, but its provisioner `example.com/no-such-csi-driver` is **not registered** or running. This means the CSI driver for this storage class is missing or misconfigured.\n\n3. **No Manual Binding**:  \n   The PVC is not manually bound, and the provisioner is not available to create the volume. Without a valid volume, the pod cannot schedule.\n\n---\n\n### \u2705 Solution\n- **Install/Verify the CSI Driver**:  \n  Ensure the CSI driver for `example.com/no-such-csi-driver` is installed and running. Check the kubelet logs or the driver's documentation for installation steps.\n\n- **Manually Create Volume (if applicable)**:  \n  If the PVC is intended to be manually provisioned, create the volume in the storage backend (e.g., cloud storage, NFS) and bind it to the PVC.\n\n- **Check Storage Class Configuration**:  \n  Verify that the storage class `ghost-provisioner` is correctly configured with a valid provisioner. If the provisioner is incorrect, update it to a valid one.\n\nOnce the PVC is bound and the volume exists, the pod will transition to **Pending** \u2192 **Running**.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "stated what the fixture contradicts: 'storage class is missing'",
+   "grounding verdict 'insufficient_evidence', expected one of ['grounded', 'partial']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 114387.2,
+   "tool_ms": 16.1,
+   "rounds": 3,
+   "round_ms": [
+    51011.7,
+    24183.8,
+    39191.8
+   ],
+   "slowest_round_ms": 51011.7,
+   "model_share": 1.0,
+   "wall_ms": 114405.6,
+   "unaccounted_ms": 2.3,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "a05f39199050",
+  "target": {
+   "kind": "workload",
+   "name": "ledger-writer",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "claim_waiting_on_a_missing_provisioner",
+  "model": "qwen3",
+  "void": true,
+  "void_reason": "Server disconnected without sending a response.",
+  "answer": "ERROR: Server disconnected without sending a response.",
+  "seconds": 49.3,
+  "started_at": "2026-09-16T00:03:30"
+ }
+]

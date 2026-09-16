@@ -168,6 +168,15 @@ def run(case, arm, setup, model):
     if tool:
         agent.TOOLS[tool].__doc__ = setup["docs"][arm]
 
+    env = setup.get("env")
+    saved = None
+    if env:
+        saved = os.environ.get(env[0])
+        if arm == "variant":
+            os.environ[env[0]] = env[1]
+        else:
+            os.environ.pop(env[0], None)
+
     was_resident = resident(model)
     load_before = os.getloadavg()[0]
     began_at = dt.datetime.now(dt.UTC).isoformat()
@@ -214,8 +223,20 @@ def run(case, arm, setup, model):
     # it FAIL on the variant arm. Its prompt *had* been delivered on the round
     # that failed, so the arrival check alone passed it. run_eval.py already
     # voids exactly this shape; the harness now uses the same rule.
-    why_void = provider_failed(result) or arrival(
-        capture, arm, setup["old"], setup["new"])
+    if env:
+        if saved is None:
+            os.environ.pop(env[0], None)
+        else:
+            os.environ[env[0]] = saved
+        record["env"] = {env[0]: env[1] if arm == "variant" else None}
+    # What the loop was handed rather than went and got. Recorded for every
+    # arm: a control run carrying any is a switch that leaked, and a variant
+    # run carrying none is one whose question gave it nothing to fetch.
+    record["prefetched"] = sum(
+        1 for call in result.get("tool_calls", []) if call.get("prefetched"))
+
+    why_void = provider_failed(result) or (None if env else arrival(
+        capture, arm, setup["old"], setup["new"]))
     if why_void:
         record.update({"void": True, "void_reason": why_void, "passed": None,
                        "answer": result.get("answer", "")})
@@ -248,12 +269,27 @@ def run(case, arm, setup, model):
 def build_setup(args):
     """Both arms' prompt, tool docstring and question, differing in one thing."""
     prompt = agent.SYSTEM_PROMPT
-    modes = [bool(args.replace is not None), bool(args.variant_question)]
+    variant_env = getattr(args, "variant_env", None)
+    modes = [bool(args.replace is not None), bool(args.variant_question),
+             bool(variant_env)]
     if sum(modes) > 1:
-        raise SystemExit("one variable per A/B: --replace or --variant-question")
+        raise SystemExit(
+            "one variable per A/B: --replace, --variant-question or --variant-env")
 
     setup = {"prompts": {"control": prompt, "variant": prompt},
-             "questions": {}, "tool": None, "old": "", "new": ""}
+             "questions": {}, "tool": None, "old": "", "new": "", "env": None}
+
+    if variant_env:
+        # A behaviour switch rather than text: the variant runs with KEY=VALUE
+        # in the environment, the control with KEY absent. Whether it arrived
+        # is not a property of the prompt, so arrival() is not asked; the
+        # record carries what the run actually did instead (see run()).
+        key, sep, value = variant_env.partition("=")
+        if not sep or not key:
+            raise SystemExit("--variant-env takes KEY=VALUE")
+        setup["env"] = (key, value)
+        setup["variable"] = {"kind": "env", "key": key, "value": value}
+        return setup
 
     if args.variant_question:
         setup["variable"] = {"kind": "question", "variant": args.variant_question}
@@ -313,6 +349,8 @@ def main():
     parser.add_argument("--target", default="prompt", help="prompt, or tool:<name>")
     parser.add_argument("--variant-question",
                         help="the variant arm asks this instead of the case's question")
+    parser.add_argument("--variant-env",
+                        help="KEY=VALUE set for the variant arm and unset for the control")
     parser.add_argument("--context", help="kubeconfig context to measure against")
     parser.add_argument("--json", default="results/prompt-ab.json")
     args = parser.parse_args()

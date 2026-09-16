@@ -30,6 +30,20 @@ def _load(name):
 ab = _load("ab_prompt")
 agent = ab.agent
 
+# A sentence that is in SYSTEM_PROMPT and occurs once, for the replace-mode
+# tests. It is prompt content, so it moves when the prompt does -- decision 46
+# replaced "137 is SIGKILL:" with this on 2026-09-16 and five tests here failed
+# on text that no longer existed. If that happens again, pick another unique
+# sentence; the assertion below says which.
+PROMPT_SENTENCE = "An exit code above 128 is a signal:"
+
+
+def test_the_sentence_these_tests_edit_is_in_the_prompt():
+    assert agent.SYSTEM_PROMPT.count(PROMPT_SENTENCE) == 1, (
+        f"{PROMPT_SENTENCE!r} is no longer a unique sentence of SYSTEM_PROMPT; "
+        "the replace-mode tests below need a sentence that is")
+
+
 CASE = {
     "name": "synthetic",
     "question": "Why is the thing broken?",
@@ -39,7 +53,7 @@ CASE = {
 
 def _args(**overrides):
     base = {"marker": ab.DEFAULT_MARKER, "replace": None, "new": None,
-            "target": "prompt", "variant_question": None}
+            "target": "prompt", "variant_question": None, "variant_env": None}
     base.update(overrides)
     return argparse.Namespace(**base)
 
@@ -88,12 +102,12 @@ def _restore_prompt(monkeypatch):
 
 class TestBuildSetup:
     def test_replace_changes_exactly_that_text_in_the_variant(self):
-        old = "137 is SIGKILL:"
-        setup = ab.build_setup(_args(replace=old, new="An exit code above 128 is a signal:"))
+        old = PROMPT_SENTENCE
+        setup = ab.build_setup(_args(replace=old, new="SIGNAL SENTENCE:"))
         control, variant = setup["prompts"]["control"], setup["prompts"]["variant"]
         assert control == agent.SYSTEM_PROMPT
         assert old in control and old not in variant
-        assert variant == control.replace(old, "An exit code above 128 is a signal:")
+        assert variant == control.replace(old, "SIGNAL SENTENCE:")
 
     def test_text_that_is_not_unique_is_refused(self):
         # "the" occurs many times; replacing the first would edit a sentence
@@ -119,7 +133,7 @@ class TestBuildSetup:
 
     def test_two_variables_at_once_are_refused(self):
         with pytest.raises(SystemExit, match="one variable"):
-            ab.build_setup(_args(replace="137 is SIGKILL:", new="x",
+            ab.build_setup(_args(replace=PROMPT_SENTENCE, new="x",
                                  variant_question="another question?"))
 
 
@@ -160,7 +174,7 @@ class TestArrival:
 class TestRun:
     def test_a_delivered_variant_is_graded_and_records_the_checker_inputs(self, monkeypatch):
         calls = _deliver(monkeypatch)
-        setup = ab.build_setup(_args(replace="137 is SIGKILL:", new="SIGNAL SENTENCE:"))
+        setup = ab.build_setup(_args(replace=PROMPT_SENTENCE, new="SIGNAL SENTENCE:"))
         setup["questions"] = {"control": CASE["question"], "variant": CASE["question"]}
 
         record = ab.run(CASE, "variant", setup, "qwen3")
@@ -190,7 +204,7 @@ class TestRun:
         # passes the case, so without the arrival check this run would be
         # counted as the variant arm scoring a pass.
         _deliver(monkeypatch, sends=agent.SYSTEM_PROMPT)
-        setup = ab.build_setup(_args(replace="137 is SIGKILL:", new="SIGNAL SENTENCE:"))
+        setup = ab.build_setup(_args(replace=PROMPT_SENTENCE, new="SIGNAL SENTENCE:"))
         setup["questions"] = {"control": CASE["question"], "variant": CASE["question"]}
 
         record = ab.run(CASE, "variant", setup, "qwen3")
@@ -210,7 +224,7 @@ class TestRun:
             raise RuntimeError("Server disconnected without sending a response.")
 
         monkeypatch.setattr(agent, "ask", dropped)
-        setup = ab.build_setup(_args(replace="137 is SIGKILL:", new="SIGNAL SENTENCE:"))
+        setup = ab.build_setup(_args(replace=PROMPT_SENTENCE, new="SIGNAL SENTENCE:"))
         setup["questions"] = {"control": CASE["question"], "variant": CASE["question"]}
 
         record = ab.run(CASE, "variant", setup, "qwen3")
@@ -222,7 +236,7 @@ class TestRun:
 
     def test_the_control_arm_is_delivered_unchanged(self, monkeypatch):
         calls = _deliver(monkeypatch)
-        setup = ab.build_setup(_args(replace="137 is SIGKILL:", new="SIGNAL SENTENCE:"))
+        setup = ab.build_setup(_args(replace=PROMPT_SENTENCE, new="SIGNAL SENTENCE:"))
         setup["questions"] = {"control": CASE["question"], "variant": CASE["question"]}
 
         record = ab.run(CASE, "control", setup, "qwen3")
@@ -249,3 +263,55 @@ class TestRenderedDescription:
 
     def test_an_unknown_tool_is_none_rather_than_empty(self):
         assert ab.rendered_description(list(agent.TOOLS.values()), "no_such_tool") is None
+
+
+class TestAnEnvironmentSwitchArm:
+    """
+    For a behaviour switch rather than text -- the target prefetch -- the
+    variant runs with KEY=VALUE set and the control with it absent, and the
+    record says what the loop was handed.
+    """
+
+    def test_only_the_variant_sees_the_variable_and_it_is_restored(self, monkeypatch):
+        import os
+
+        seen = {}
+
+        def fake_chat(model, messages, think, timeout=None):
+            return {"message": "ok"}, think
+
+        def fake_ask(question, model=None, evidence=False):
+            seen[os.environ.get("TRIAGE_PREFETCH_TARGET")] = True
+            agent._chat(model, [{"role": "system", "content": agent.SYSTEM_PROMPT}], None)
+            calls = ([{"name": "describe_pod", "arguments": {}, "prefetched": True}]
+                     if os.environ.get("TRIAGE_PREFETCH_TARGET") == "on" else [])
+            return {"answer": "held by a finalizer", "tool_calls": calls,
+                    "confidence": "grounded", "unverified": [], "evidence": [{}],
+                    "draft": "x"}
+
+        monkeypatch.setattr(agent, "_chat", fake_chat)
+        monkeypatch.setattr(agent, "ask", fake_ask)
+        monkeypatch.setattr(ab, "resident", lambda model: True)
+        monkeypatch.setattr(ab.k8s, "active_context", lambda: "test")
+        monkeypatch.setenv("TRIAGE_PREFETCH_TARGET", "was-set-before")
+
+        setup = ab.build_setup(_args(variant_env="TRIAGE_PREFETCH_TARGET=on"))
+        setup["questions"] = {"control": CASE["question"], "variant": CASE["question"]}
+
+        variant = ab.run(CASE, "variant", setup, "qwen3")
+        assert os.environ["TRIAGE_PREFETCH_TARGET"] == "was-set-before"
+        control = ab.run(CASE, "control", setup, "qwen3")
+        assert os.environ["TRIAGE_PREFETCH_TARGET"] == "was-set-before"
+
+        assert set(seen) == {"on", None}
+        assert variant["prefetched"] == 1 and variant["env"] == {"TRIAGE_PREFETCH_TARGET": "on"}
+        assert control["prefetched"] == 0 and control["env"] == {"TRIAGE_PREFETCH_TARGET": None}
+        assert variant.get("void") is None and control.get("void") is None
+
+    def test_a_malformed_switch_is_refused(self):
+        with pytest.raises(SystemExit, match="KEY=VALUE"):
+            ab.build_setup(_args(variant_env="TRIAGE_PREFETCH_TARGET"))
+
+    def test_an_env_arm_is_one_variable(self):
+        with pytest.raises(SystemExit, match="one variable"):
+            ab.build_setup(_args(variant_env="K=V", variant_question="another?"))

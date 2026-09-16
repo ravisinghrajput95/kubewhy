@@ -1,0 +1,1358 @@
+[
+ {
+  "case": "pending_behind_a_higher_priority_pod",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": true,
+  "seconds": 169.8,
+  "confidence": "partial",
+  "model_resident": false,
+  "started_at": "2026-09-15T23:45:35",
+  "load_before": 3.96,
+  "load_after": 3.05,
+  "low_power_mode": true,
+  "unverified": [
+   "6",
+   "8",
+   "5494",
+   "1000000",
+   "evicted"
+  ],
+  "tools": [
+   "list_deployments",
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespaces": "uncovered2",
+    "workload": "filler",
+    "only_unhealthy": true
+   },
+   {
+    "name": "filler-566dddfd7b-szczg",
+    "namespace": "uncovered2"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"filler\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"local-only\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"billing-api:3.2.1\"]}, \"urgent\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/filler\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"filler-566dddfd7b-szczg\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"filler-566dddfd7b-szczg\", \"namespace\": \"uncovered2\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"9\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Insufficient cpu.\", \"priority_class\": \"low-batch\", \"priority\": 1, \"earlier_pods_preempted\": [{\"pod\": \"filler-566dddfd7b-phhr6\", \"age\": \"3m\", \"by\": \"urgent-6d8cdc5494-drvpl\", \"by_priority\": 1000000, \"by_priority_class\": \"high-urgent\"}, {\"pod\": \"filler-566dddfd7b-4562h\", \"age\": \"25m\", \"by_uid\": \"8a68abeb-a766-4236-8070-d88ddd4234cd\"}]}}"
+   }
+  ],
+  "draft": "The **filler** deployment in `uncovered2` has no running pods because its pod (`filler-566dddfd7b-szczg`) is **Pending** due to **Insufficient CPU** on the node. Here's why:\n\n1. **Node Resource Exhaustion**:  \n   - The node has **0/1 available CPUs**, and the pod requires **9 CPUs** (as per `resources.requests`).  \n   - No node has enough CPU to schedule this pod.\n\n2. **Priority Preemption**:  \n   - A higher-priority pod (`urgent-6d8cdc5494-drvpl` with priority `1000000`) preempted this pod.  \n   - Your pod has a lower priority (`priority: 1`), so it was evicted to make room for the higher-priority workload.\n\n---\n\n### \u2705 Solution\n- **Check node CPU usage**: Ensure nodes have sufficient CPU capacity.  \n- **Adjust priorities**: If the `filler` pod should run despite higher-priority workloads, increase its priority or adjust the `priority-class`.  \n- **Scale nodes**: Add more nodes or increase CPU allocation if the cluster is consistently under pressure.  \n\nThe pod will remain in `Pending` until the node has enough CPU or the preempting pod is removed.",
+  "answer": "The **filler** deployment in `uncovered2` has no running pods because its pod (`filler-566dddfd7b-szczg`) is **Pending** due to **Insufficient CPU** on the node. Here's why:\n\n1. **Node Resource Exhaustion**:  \n   - The node has **0/1 available CPUs**, and the pod requires **9 CPUs** (as per `resources.requests`).  \n   - No node has enough CPU to schedule this pod.\n\n2. **Priority Preemption**:  \n   - A higher-priority pod (`urgent-6d8cdc5494-drvpl` with priority `[unverified: 1000000]`) preempted this pod.  \n   - Your pod has a lower priority (`priority: 1`), so it was [unverified: evicted] to make room for the higher-priority workload.\n\n---\n\n### \u2705 Solution\n- **Check node CPU usage**: Ensure nodes have sufficient CPU capacity.  \n- **Adjust priorities**: If the `filler` pod should run despite higher-priority workloads, increase its priority or adjust the `priority-class`.  \n- **Scale nodes**: Add more nodes or increase CPU allocation if the cluster is consistently under pressure.  \n\nThe pod will remain in `Pending` until the node has enough CPU or the preempting pod is removed.\n\n---\n**Evidence audit.**\n5 of 12 stated values could not be traced to any tool result for the workload they were stated about: `6`, `8`, `5494`, `1000000`, `evicted`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "named 'add more nodes' alongside the answer",
+   "stated ['6', '8', '5494', '1000000', 'evicted'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 169707.7,
+   "tool_ms": 45.6,
+   "rounds": 4,
+   "round_ms": [
+    92608.8,
+    20840.2,
+    16957.1,
+    39301.7
+   ],
+   "slowest_round_ms": 92608.8,
+   "model_share": 1.0,
+   "wall_ms": 169758.0,
+   "unaccounted_ms": 4.7,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "namespace",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "566",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "566"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "filler.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "containers.app.requests.cpu",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "6",
+     "kind": "number"
+    },
+    {
+     "claim": "8",
+     "kind": "number"
+    },
+    {
+     "claim": "5494",
+     "kind": "number"
+    },
+    {
+     "claim": "1000000",
+     "kind": "number"
+    },
+    {
+     "claim": "evicted",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "1000000",
+    "evicted"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "4520cc721c77",
+  "target": {
+   "kind": "workload",
+   "name": "filler",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "pending_behind_a_higher_priority_pod",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": true,
+  "seconds": 181.8,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-15T23:48:25",
+  "load_before": 3.05,
+  "load_after": 2.8,
+  "low_power_mode": true,
+  "unverified": [
+   "diskpressure",
+   "memorypressure",
+   "3"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "list_nodes"
+  ],
+  "arguments": [
+   {
+    "namespaces": "uncovered2",
+    "workload": "filler"
+   },
+   {
+    "name": "filler-566dddfd7b-szczg",
+    "namespace": "uncovered2"
+   },
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/filler\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"filler-566dddfd7b-szczg\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"filler-566dddfd7b-szczg\", \"namespace\": \"uncovered2\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"9\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Insufficient cpu.\", \"priority_class\": \"low-batch\", \"priority\": 1, \"earlier_pods_preempted\": [{\"pod\": \"filler-566dddfd7b-phhr6\", \"age\": \"4m\", \"by\": \"urgent-6d8cdc5494-drvpl\", \"by_priority\": 1000000, \"by_priority_class\": \"high-urgent\"}, {\"pod\": \"filler-566dddfd7b-4562h\", \"age\": \"26m\", \"by_uid\": \"8a68abeb-a766-4236-8070-d88ddd4234cd\"}]}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-close-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The **filler** deployment in `uncovered2` has no running pods because its single pod (`filler-566dddfd7b-szczg`) is **Pending** due to **priority preemption** and **CPU resource constraints**, despite the node having sufficient allocatable CPU. Here's the full breakdown:\n\n---\n\n### **1. Node Resource Availability**\n- **Node**: `kubewhy-close-control-plane`  \n- **Allocatable CPU**: 15 (the pod requests 9, so 6 CPU units remain).  \n- **Pressure**: No MemoryPressure or DiskPressure (node is healthy).  \n- **Unschedulable**: `false` (scheduler is active).  \n\n**Conclusion**: The node has **enough CPU** to run the pod, but scheduling is blocked by **priority rules**.\n\n---\n\n### **2. Priority Preemption Conflict**\n- The pod has a **low priority** (`priority_class: low-batch`, `priority: 1`).  \n- **Higher-priority pods** (e.g., `urgent-6d8cdc5494-drvpl`, priority `1000000`) are already running and **preempting** the filler pod.  \n- The scheduler cannot evict these higher-priority pods unless they are manually terminated or the filler pod\u2019s priority is increased.  \n\n**Key Issue**: The filler pod\u2019s low priority prevents it from running until preempted pods are removed or resources are freed.\n\n---\n\n### **3. Resolution Steps**\n- **Option 1**: **Scale up the node\u2019s CPU** to ensure the filler pod can run without preemption.  \n- **Option 2**: **Adjust the filler pod\u2019s priority** to a higher value (e.g., `high-batch`) to bypass preempted pods.  \n- **Option 3**: **Evict or scale down higher-priority pods** (e.g., `urgent-6d8cdc5494-drvpl`) to free resources.  \n\n---\n\n### **Summary**\nThe pod is not failing due to resource shortages but is **blocked by priority rules**. The node has enough CPU, but the scheduler cannot schedule the pod until higher-priority workloads are adjusted.",
+  "answer": "The **filler** deployment in `uncovered2` has no running pods because its single pod (`filler-566dddfd7b-szczg`) is **Pending** due to **priority preemption** and **CPU resource constraints**, despite the node having sufficient allocatable CPU. Here's the full breakdown:\n\n---\n\n### **1. Node Resource Availability**\n- **Node**: `kubewhy-close-control-plane`  \n- **Allocatable CPU**: 15 (the pod requests 9, so 6 CPU units remain).  \n- **Pressure**: No [unverified: MemoryPressure] or [unverified: DiskPressure] (node is healthy).  \n- **Unschedulable**: `false` (scheduler is active).  \n\n**Conclusion**: The node has **enough CPU** to run the pod, but scheduling is blocked by **priority rules**.\n\n---\n\n### **2. Priority Preemption Conflict**\n- The pod has a **low priority** (`priority_class: low-batch`, `priority: 1`).  \n- **Higher-priority pods** (e.g., `urgent-6d8cdc5494-drvpl`, priority `1000000`) are already running and **preempting** the filler pod.  \n- The scheduler cannot evict these higher-priority pods unless they are manually terminated or the filler pod\u2019s priority is increased.  \n\n**Key Issue**: The filler pod\u2019s low priority prevents it from running until preempted pods are removed or resources are freed.\n\n---\n\n### **[unverified: 3]. Resolution Steps**\n- **Option 1**: **Scale up the node\u2019s CPU** to ensure the filler pod can run without preemption.  \n- **Option 2**: **Adjust the filler pod\u2019s priority** to a higher value (e.g., `high-batch`) to bypass preempted pods.  \n- **Option [unverified: 3]**: **Evict or scale down higher-priority pods** (e.g., `urgent-6d8cdc5494-drvpl`) to free resources.  \n\n---\n\n### **Summary**\nThe pod is not failing due to resource shortages but is **blocked by priority rules**. The node has enough CPU, but the scheduler cannot schedule the pod until higher-priority workloads are adjusted.\n\n---\n**Evidence audit.**\n3 of 12 stated values could not be traced to any tool result for the workload they were stated about: `diskpressure`, `memorypressure`, `3`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['diskpressure', 'memorypressure', '3'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 181721.1,
+   "tool_ms": 40.8,
+   "rounds": 5,
+   "round_ms": [
+    39437.6,
+    16844.0,
+    37899.8,
+    25511.4,
+    62028.3
+   ],
+   "slowest_round_ms": 62028.3,
+   "model_share": 1.0,
+   "wall_ms": 181770.7,
+   "unaccounted_ms": 8.9,
+   "slept_ms": 4.6
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "namespace",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "566",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "566"
+      }
+     ]
+    },
+    {
+     "claim": "6",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.requests.cpu",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "15",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "list_nodes",
+       "field": "kubewhy-close-control-plane.allocatable_cpu",
+       "value": "15"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "namespace",
+       "value": "2"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "diskpressure",
+     "kind": "status"
+    },
+    {
+     "claim": "memorypressure",
+     "kind": "status"
+    },
+    {
+     "claim": "3",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "DiskPressure",
+    "MemoryPressure",
+    "3",
+    "3"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "936146ec9d69",
+  "target": {
+   "kind": "workload",
+   "name": "filler",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "pending_behind_a_higher_priority_pod",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": true,
+  "seconds": 282.0,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-15T23:51:27",
+  "load_before": 2.8,
+  "load_after": 2.28,
+  "low_power_mode": true,
+  "unverified": [
+   "9"
+  ],
+  "tools": [
+   "list_deployments",
+   "list_deployments",
+   "list_pods",
+   "list_nodes",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "workload": "filler"
+   },
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "filler"
+   },
+   {},
+   {
+    "name": "filler-566dddfd7b-szczg",
+    "namespace": "uncovered2"
+   },
+   {
+    "name": "filler-566dddfd7b-szczg",
+    "namespace": "uncovered2",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"error\": \"TypeError: list_deployments() got an unexpected keyword argument 'workload'\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_deployments",
+    "result": "{\"filler\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"local-only\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"billing-api:3.2.1\"]}, \"urgent\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_pods",
+    "result": "{\"filler-566dddfd7b-szczg\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-close-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   },
+   {
+    "id": "tool-5",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"filler-566dddfd7b-szczg\", \"namespace\": \"uncovered2\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"9\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Insufficient cpu.\", \"priority_class\": \"low-batch\", \"priority\": 1, \"earlier_pods_preempted\": [{\"pod\": \"filler-566dddfd7b-phhr6\", \"age\": \"9m\", \"by\": \"urgent-6d8cdc5494-drvpl\", \"by_priority\": 1000000, \"by_priority_class\": \"high-urgent\"}, {\"pod\": \"filler-566dddfd7b-4562h\", \"age\": \"31m\", \"by_uid\": \"8a68abeb-a766-4236-8070-d88ddd4234cd\"}]}}"
+   },
+   {
+    "id": "tool-6",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"filler-566dddfd7b-szczg\", \"events\": [{\"reason\": \"FailedScheduling\", \"count\": 17, \"age\": \"17s\", \"message\": \"0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Insufficient cpu.\"}]}"
+   }
+  ],
+  "draft": "The **filler** deployment in the **uncovered2** namespace has no running pod because its pod (**filler-566dddfd7b-szczg**) is **Pending** due to **CPU insufficiency caused by priority preemption**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n- The pod **requests 9 CPU**, but the node (**kubewhy-close-control-plane**) has **15 allocatable CPU**, which seems sufficient. However, the pod is **preempted** by higher-priority workloads.\n- The **urgent** deployment (priority class `high-urgent`, priority `1000000`) has preempted the **filler** pod, leaving **no CPU available** for it. This is confirmed by:\n  - The **scheduling** block in `describe_pod` showing:  \n    `\"0/1 nodes are available: 1 Insufficient cpu\"` (due to preemption).\n  - The **latest pod event**:  \n    `\"FailedScheduling: 0/1 nodes are available: 1 Insufficient cpu\"` (preemption message).\n\n---\n\n### **Why It\u2019s Happening**\n- **Priority Preemption**: The `urgent` deployment\u2019s pods have a higher priority (`1000000`) than the `filler` pod (which has a priority of `1` via its priority class `low-batch`). Kubernetes preempted the `filler` pod to make room for the higher-priority `urgent` pods.\n- **Resource Overcommit**: While the node has enough CPU, the preemption leaves **no capacity** for the `filler` pod, even though the node isn\u2019t fully utilized.\n\n---\n\n### **Solution**\n1. **Adjust Priorities**:  \n   - Lower the priority of the `urgent` deployment or increase the CPU request for the `filler` pod to ensure it gets scheduled.  \n   - Example: Set `filler`\u2019s priority class to `high-urgent` or adjust its CPU request to match available capacity.\n2. **Verify Resource Allocation**:  \n   - Check if other pods on the node are consuming CPU, potentially exceeding allocatable limits.  \n   - Use `kubectl top node` to confirm CPU usage vs. allocatable.\n3. **Review Tolerations/Taints**:  \n   - Ensure the `filler` pod\u2019s tolerations align with the node\u2019s taints (if any).\n\n---\n\n### **Next Steps**\n- Use `kubectl describe pod` on the `filler` pod to confirm preemption details.  \n- Monitor the `urgent` deployment\u2019s resource usage to ensure it\u2019s not overcommitting the node.  \n\nThis is a **priority-based scheduling issue**, not a resource shortage.",
+  "answer": "The **filler** deployment in the **uncovered2** namespace has no running pod because its pod (**filler-566dddfd7b-szczg**) is **Pending** due to **CPU insufficiency caused by priority preemption**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n- The pod **requests [unverified: 9] CPU**, but the node (**kubewhy-close-control-plane**) has **15 allocatable CPU**, which seems sufficient. However, the pod is **preempted** by higher-priority workloads.\n- The **urgent** deployment (priority class `high-urgent`, priority `1000000`) has preempted the **filler** pod, leaving **no CPU available** for it. This is confirmed by:\n  - The **scheduling** block in `describe_pod` showing:  \n    `\"0/1 nodes are available: 1 Insufficient cpu\"` (due to preemption).\n  - The **latest pod event**:  \n    `\"FailedScheduling: 0/1 nodes are available: 1 Insufficient cpu\"` (preemption message).\n\n---\n\n### **Why It\u2019s Happening**\n- **Priority Preemption**: The `urgent` deployment\u2019s pods have a higher priority (`1000000`) than the `filler` pod (which has a priority of `1` via its priority class `low-batch`). Kubernetes preempted the `filler` pod to make room for the higher-priority `urgent` pods.\n- **Resource Overcommit**: While the node has enough CPU, the preemption leaves **no capacity** for the `filler` pod, even though the node isn\u2019t fully utilized.\n\n---\n\n### **Solution**\n1. **Adjust Priorities**:  \n   - Lower the priority of the `urgent` deployment or increase the CPU request for the `filler` pod to ensure it gets scheduled.  \n   - Example: Set `filler`\u2019s priority class to `high-urgent` or adjust its CPU request to match available capacity.\n2. **Verify Resource Allocation**:  \n   - Check if other pods on the node are consuming CPU, potentially exceeding allocatable limits.  \n   - Use `kubectl top node` to confirm CPU usage vs. allocatable.\n3. **Review Tolerations/Taints**:  \n   - Ensure the `filler` pod\u2019s tolerations align with the node\u2019s taints (if any).\n\n---\n\n### **Next Steps**\n- Use `kubectl describe pod` on the `filler` pod to confirm preemption details.  \n- Monitor the `urgent` deployment\u2019s resource usage to ensure it\u2019s not overcommitting the node.  \n\nThis is a **priority-based scheduling issue**, not a resource shortage.\n\n---\n**Evidence audit.**\n1 of 14 stated values could not be traced to any tool result for the workload they were stated about: `9`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['9'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 281952.6,
+   "tool_ms": 39.7,
+   "rounds": 8,
+   "round_ms": [
+    64228.2,
+    27323.6,
+    20867.4,
+    17780.1,
+    24652.7,
+    52543.7,
+    23488.1,
+    51068.9
+   ],
+   "slowest_round_ms": 64228.2,
+   "model_share": 1.0,
+   "wall_ms": 281999.1,
+   "unaccounted_ms": 6.8,
+   "slept_ms": 1.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "describe_pod",
+       "field": "namespace",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "566",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "566"
+      }
+     ]
+    },
+    {
+     "claim": "15",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "list_nodes",
+       "field": "kubewhy-close-control-plane.allocatable_cpu",
+       "value": "15"
+      }
+     ]
+    },
+    {
+     "claim": "1000000",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[0].by_priority",
+       "value": "1000000"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "filler.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "filler.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1000000",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[0].by_priority",
+       "value": "1000000"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "9",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "9"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "47cf6fdd9a84",
+  "target": {
+   "kind": "workload",
+   "name": "filler",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "pending_behind_a_higher_priority_pod",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": true,
+  "seconds": 226.3,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-15T23:56:09",
+  "load_before": 2.28,
+  "load_after": 3.09,
+  "low_power_mode": true,
+  "unverified": [
+   "6",
+   "8",
+   "5494",
+   "15"
+  ],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "list_nodes",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "filler"
+   },
+   {},
+   {
+    "name": "filler-566dddfd7b-szczg",
+    "namespace": "uncovered2"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"filler\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"local-only\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"billing-api:3.2.1\"]}, \"urgent\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"filler-566dddfd7b-szczg\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-close-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"filler-566dddfd7b-szczg\", \"namespace\": \"uncovered2\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"9\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Insufficient cpu.\", \"priority_class\": \"low-batch\", \"priority\": 1, \"earlier_pods_preempted\": [{\"pod\": \"filler-566dddfd7b-phhr6\", \"age\": \"14m\", \"by\": \"urgent-6d8cdc5494-drvpl\", \"by_priority\": 1000000, \"by_priority_class\": \"high-urgent\"}, {\"pod\": \"filler-566dddfd7b-4562h\", \"age\": \"36m\", \"by_uid\": \"8a68abeb-a766-4236-8070-d88ddd4234cd\"}]}}"
+   }
+  ],
+  "draft": "The **filler** deployment in the **uncovered2** namespace has no running pods because the pod is **Pending** and unable to schedule due to **Insufficient CPU** on the node `kubewhy-close-control-plane`. Here's the breakdown:\n\n### Key Findings:\n1. **Pod Status**:  \n   - The pod `filler-566dddfd7b-szczg` is **Pending** with no node assigned.  \n   - The scheduling failure message explicitly states:  \n     `\"0/1 nodes are available: 1 Insufficient cpu\"`.\n\n2. **Resource Request vs. Allocatable**:  \n   - The pod requests **9 CPU** (`requests.cpu: 9`), but the node has **15 CPUs allocatable**.  \n   - However, the node\u2019s CPU is **already allocated** to higher-priority workloads.\n\n3. **Priority Preemption**:  \n   - The pod was preempted by a higher-priority pod (`urgent-6d8cdc5494-drvpl`) with:  \n     - **Priority class**: `high-urgent`  \n     - **Priority value**: `1000000` (vs. `filler`\u2019s `1`).  \n   - This is confirmed by the `earlier_pods_preempted` field, showing the filler pod was preempted by a higher-priority workload.\n\n4. **Node Health**:  \n   - The node `kubewhy-close-control-plane` is **ready** and not under pressure (`pressure: null`).  \n   - It has **15 CPUs** and **8Gi memory** available, which should suffice for the filler pod\u2019s request.\n\n---\n\n### Root Cause:\nThe **filler** pod cannot schedule because **higher-priority workloads** (e.g., `urgent-6d8cdc5494-drvpl`) are consuming the node\u2019s CPU, leaving insufficient capacity for the filler pod. This is a **priority-based scheduling conflict**.\n\n---\n\n### Next Steps:\n1. **Adjust Priorities**:  \n   - Lower the priority of the preempting pod (`urgent-6d8cdc5494-drvpl`) or increase the filler pod\u2019s priority to ensure it gets scheduled.  \n   - Example: Update the `priorityClassName` or `priority` field in the filler deployment\u2019s spec.\n\n2. **Check Resource Allocation**:  \n   - Verify if the node\u2019s CPU is oversubscribed. If not, the issue is purely priority-based.  \n   - Use `kubectl describe node kubewhy-close-control-plane` to check `Allocatable` and `Capacity` values.\n\n3. **Monitor Preemption**:  \n   - If preemption is intentional (e.g., for critical workloads), ensure the filler pod\u2019s priority is set appropriately to avoid starvation.  \n\nBy resolving the priority conflict or reallocating resources, the filler pod should be scheduled successfully.",
+  "answer": "The **filler** deployment in the **uncovered2** namespace has no running pods because the pod is **Pending** and unable to schedule due to **Insufficient CPU** on the node `kubewhy-close-control-plane`. Here's the breakdown:\n\n### Key Findings:\n1. **Pod Status**:  \n   - The pod `filler-566dddfd7b-szczg` is **Pending** with no node assigned.  \n   - The scheduling failure message explicitly states:  \n     `\"0/1 nodes are available: 1 Insufficient cpu\"`.\n\n2. **Resource Request vs. Allocatable**:  \n   - The pod requests **9 CPU** (`requests.cpu: 9`), but the node has **[unverified: 15] CPUs allocatable**.  \n   - However, the node\u2019s CPU is **already allocated** to higher-priority workloads.\n\n3. **Priority Preemption**:  \n   - The pod was preempted by a higher-priority pod (`urgent-6d8cdc5494-drvpl`) with:  \n     - **Priority class**: `high-urgent`  \n     - **Priority value**: `1000000` (vs. `filler`\u2019s `1`).  \n   - This is confirmed by the `earlier_pods_preempted` field, showing the filler pod was preempted by a higher-priority workload.\n\n4. **Node Health**:  \n   - The node `kubewhy-close-control-plane` is **ready** and not under pressure (`pressure: null`).  \n   - It has **[unverified: 15] CPUs** and **[unverified: 8Gi] memory** available, which should suffice for the filler pod\u2019s request.\n\n---\n\n### Root Cause:\nThe **filler** pod cannot schedule because **higher-priority workloads** (e.g., `urgent-6d8cdc5494-drvpl`) are consuming the node\u2019s CPU, leaving insufficient capacity for the filler pod. This is a **priority-based scheduling conflict**.\n\n---\n\n### Next Steps:\n1. **Adjust Priorities**:  \n   - Lower the priority of the preempting pod (`urgent-6d8cdc5494-drvpl`) or increase the filler pod\u2019s priority to ensure it gets scheduled.  \n   - Example: Update the `priorityClassName` or `priority` field in the filler deployment\u2019s spec.\n\n2. **Check Resource Allocation**:  \n   - Verify if the node\u2019s CPU is oversubscribed. If not, the issue is purely priority-based.  \n   - Use `kubectl describe node kubewhy-close-control-plane` to check `Allocatable` and `Capacity` values.\n\n3. **Monitor Preemption**:  \n   - If preemption is intentional (e.g., for critical workloads), ensure the filler pod\u2019s priority is set appropriately to avoid starvation.  \n\nBy resolving the priority conflict or reallocating resources, the filler pod should be scheduled successfully.\n\n---\n**Evidence audit.**\n4 of 16 stated values could not be traced to any tool result for the workload they were stated about: `6`, `8`, `5494`, `15`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['6', '8', '5494', '15'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 226292.4,
+   "tool_ms": 29.6,
+   "rounds": 6,
+   "round_ms": [
+    21928.1,
+    24973.9,
+    25649.2,
+    64196.5,
+    30954.1,
+    58590.6
+   ],
+   "slowest_round_ms": 64196.5,
+   "model_share": 1.0,
+   "wall_ms": 226330.7,
+   "unaccounted_ms": 8.6,
+   "slept_ms": 0.3
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "describe_pod",
+       "field": "namespace",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "566",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "566"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "filler.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "list_nodes",
+       "field": "kubewhy-close-control-plane.allocatable_memory",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "list_nodes",
+       "field": "kubewhy-close-control-plane.allocatable_memory",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "15",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "list_nodes",
+       "field": "kubewhy-close-control-plane.allocatable_cpu",
+       "value": "15"
+      }
+     ]
+    },
+    {
+     "claim": "1000000",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[0].by_priority",
+       "value": "1000000"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "filler.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "8",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[0].by",
+       "value": "8"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "6",
+     "kind": "number"
+    },
+    {
+     "claim": "8",
+     "kind": "number"
+    },
+    {
+     "claim": "5494",
+     "kind": "number"
+    },
+    {
+     "claim": "15",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "15",
+    "8Gi",
+    "15"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "75c7a8293737",
+  "target": {
+   "kind": "workload",
+   "name": "filler",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "pending_behind_a_higher_priority_pod",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": true,
+  "seconds": 99.8,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-15T23:59:55",
+  "load_before": 3.09,
+  "load_after": 3.11,
+  "low_power_mode": true,
+  "unverified": [
+   "evicted"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespaces": [
+     "uncovered2"
+    ],
+    "workload": "filler"
+   },
+   {
+    "name": "filler-566dddfd7b-szczg",
+    "namespace": "uncovered2"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/filler\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"filler-566dddfd7b-szczg\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"filler-566dddfd7b-szczg\", \"namespace\": \"uncovered2\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"9\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: 1 Insufficient cpu. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Insufficient cpu.\", \"priority_class\": \"low-batch\", \"priority\": 1, \"earlier_pods_preempted\": [{\"pod\": \"filler-566dddfd7b-phhr6\", \"age\": \"16m\", \"by\": \"urgent-6d8cdc5494-drvpl\", \"by_priority\": 1000000, \"by_priority_class\": \"high-urgent\"}, {\"pod\": \"filler-566dddfd7b-4562h\", \"age\": \"38m\", \"by_uid\": \"8a68abeb-a766-4236-8070-d88ddd4234cd\"}]}}"
+   }
+  ],
+  "draft": "The pod `filler-566dddfd7b-szczg` is **Pending** due to **insufficient CPU resources** on the node. Here's why:\n\n- **Node CPU Pressure**: The node has 0/1 available CPU cores, and the pod requests 9 CPUs, which exceeds the node's capacity.\n- **Priority Preemption**: A higher-priority pod (`urgent-6d8cdc5494-drvpl`) with priority `1000000` preempted this pod, leaving no CPU for it. The preempted pod `filler-566dddfd7b-phhr6` (age: 16m) and another (`filler-566dddfd7b-4562h`, age: 38m) were also evicted.\n\n### Next Steps\n1. **Check Node Resources**: Ensure the node has enough CPU to satisfy the pod's request (9 CPUs). If not, consider scaling up the node or reducing resource requests.\n2. **Review Priority Classes**: The pod's priority class (`low-batch`) is lower than the preempting pod's (`high-urgent`). Adjust priorities or use Quality of Service (QoS) settings if this is unintended.\n3. **Investigate Preempted Pods**: The evicted pods (`filler-566dddfd7b-phhr6` and `filler-566dddfd7b-4562h`) may indicate recurring resource contention. Check their logs or adjust their configurations.",
+  "answer": "The pod `filler-566dddfd7b-szczg` is **Pending** due to **insufficient CPU resources** on the node. Here's why:\n\n- **Node CPU Pressure**: The node has 0/1 available CPU cores, and the pod requests 9 CPUs, which exceeds the node's capacity.\n- **Priority Preemption**: A higher-priority pod (`urgent-6d8cdc5494-drvpl`) with priority `1000000` preempted this pod, leaving no CPU for it. The preempted pod `filler-566dddfd7b-phhr6` (age: 16m) and another (`filler-566dddfd7b-4562h`, age: 38m) were also [unverified: evicted].\n\n### Next Steps\n1. **Check Node Resources**: Ensure the node has enough CPU to satisfy the pod's request (9 CPUs). If not, consider scaling up the node or reducing resource requests.\n2. **Review Priority Classes**: The pod's priority class (`low-batch`) is lower than the preempting pod's (`high-urgent`). Adjust priorities or use Quality of Service (QoS) settings if this is unintended.\n3. **Investigate Preempted Pods**: The [unverified: evicted] pods (`filler-566dddfd7b-phhr6` and `filler-566dddfd7b-4562h`) may indicate recurring resource contention. Check their logs or adjust their configurations.\n\n---\n**Evidence audit.**\n1 of 23 stated values could not be traced to any tool result for the workload they were stated about: `evicted`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['evicted'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 99795.8,
+   "tool_ms": 32.9,
+   "rounds": 3,
+   "round_ms": [
+    36600.6,
+    20450.0,
+    42745.1
+   ],
+   "slowest_round_ms": 42745.1,
+   "model_share": 1.0,
+   "wall_ms": 99830.6,
+   "unaccounted_ms": 1.9,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "566",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "566"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.message",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.requests.cpu",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "6",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "8",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[0].by",
+       "value": "8"
+      }
+     ]
+    },
+    {
+     "claim": "5494",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[0].by",
+       "value": "5494"
+      }
+     ]
+    },
+    {
+     "claim": "1000000",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[0].by_priority",
+       "value": "1000000"
+      }
+     ]
+    },
+    {
+     "claim": "6",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "566",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "566"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "16",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[0].age",
+       "value": "16"
+      }
+     ]
+    },
+    {
+     "claim": "566",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "566"
+      }
+     ]
+    },
+    {
+     "claim": "4562",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[1].pod",
+       "value": "4562"
+      }
+     ]
+    },
+    {
+     "claim": "38",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[1].age",
+       "value": "38"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.requests.cpu",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "6",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "566",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/filler.example",
+       "value": "566"
+      }
+     ]
+    },
+    {
+     "claim": "4562",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.earlier_pods_preempted[1].pod",
+       "value": "4562"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "evicted",
+     "kind": "status"
+    },
+    {
+     "claim": "evicted",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "evicted",
+    "evicted"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "2b789bc3450c",
+  "target": {
+   "kind": "workload",
+   "name": "filler",
+   "namespace": "uncovered2"
+  }
+ }
+]

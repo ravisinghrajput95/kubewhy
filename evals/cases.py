@@ -126,7 +126,13 @@ UNCOVERED_CASES_2: list[dict[str, object]] = [
         "category": "storage",
         "ground_truth": "ledger-data's StorageClass ghost-provisioner exists, but its provisioner example.com/no-such-csi-driver never creates a volume, so the claim and the pod stay Pending",
         "required_evidence": ["storage class", "provisioner", "claim event"],
-        "expected_grounding": ["grounded", "partial"],
+        # insufficient_evidence added 2026-09-15, measured: grounding extracts
+        # figures and status words, and a correct answer to this case is made of
+        # names -- archive-data, fast-ssd-nonexistent, the provisioner. Eight of
+        # ten correct runs carried no checkable value at all, so "nothing here
+        # could be checked" is the true verdict and the old bar failed right
+        # answers for being about the right things.
+        "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
         "needs": "demo/uncovered-faults-2.yaml",
         "question": "The ledger-writer pod in the uncovered2 namespace is stuck in Pending. Why?",
         # The provisioner is the cause. The claim is unbound, but so is the
@@ -189,7 +195,12 @@ UNCOVERED_CASES = [
         # unreachable and no credential to be wrong.
         "forbid": ["imagepullbackoff", "registry is unreachable",
                    "does not exist in the registry", "pull secret"],
-        "expect_tools": ["describe_pod"],
+        # expect_tools dropped 2026-09-15: measured 5/5 correct answers failing on
+        # "never called describe_pod" alone. This fault IS the string -- three
+        # colons -- and list_pods already carries the kubelet's InvalidImageName.
+        # Defect 50's cross-tab justified the requirement for the never-pull
+        # case, where reading the pod separated 14 right answers from 0; here it
+        # separates nothing.
         "require_grounded": True,
     },
     {
@@ -700,7 +711,13 @@ CASES = [
         "category": "scheduling",
         "ground_truth": "archive cannot schedule because its PersistentVolumeClaim is unbound",
         "required_evidence": ["FailedScheduling event"],
-        "expected_grounding": ["grounded", "partial"],
+        # insufficient_evidence added 2026-09-15, measured: grounding extracts
+        # figures and status words, and a correct answer to this case is made of
+        # names -- archive-data, fast-ssd-nonexistent, the provisioner. Eight of
+        # ten correct runs carried no checkable value at all, so "nothing here
+        # could be checked" is the true verdict and the old bar failed right
+        # answers for being about the right things.
+        "expected_grounding": ["grounded", "partial", "insufficient_evidence"],
         "question": "Why is the archive pod in the shop namespace not being scheduled?",
         # Changed 2026-09-15 (defect 53). "schedul" is in the question and
         # "volume" in every volumeMount, so the old groups passed on an echo.

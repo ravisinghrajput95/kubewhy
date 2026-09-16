@@ -6,6 +6,76 @@ signatures and response shapes may still change.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-16
+
+Everything a diagnosis could not previously see about a pod that never
+started, and two checker defects that were scoring correct answers wrong.
+
+**Numbered as a patch by the owner's decision.** By this file's own semver
+note it adds a tool and response fields, which would argue for 0.3.0; the
+response shapes it adds are additive and no field was removed or renamed.
+
+**0.2.1 shipped without an entry here.** It carried the Postgres-backed
+shared state for the watch controller's lease, verified from the registry on
+2026-09-12.
+
+### Added
+
+- **`list_jobs`, and Jobs in `scan_cluster`.** A Job enforces
+  `activeDeadlineSeconds` and `backoffLimit` itself and records
+  `DeadlineExceeded` or `BackoffLimitExceeded` on the Job, then deletes its
+  pods -- so the workload had no pod for any pod-level tool to read and the
+  scan called the namespace clean.
+- **Controllers with no pods in `scan_cluster`.** A Deployment, DaemonSet or
+  StatefulSet whose pods are rejected at admission -- an exhausted quota is
+  the ordinary case -- is reported as a `NoPods` row with the
+  controller-manager's reason, instead of a clean namespace.
+- **Terminating pods that are stuck.** Past its grace period a pod carries a
+  `terminating` block in `scan_cluster`, `list_pods` and `describe_pod` with
+  how long, whether the grace is spent, and the finalizers holding it --
+  which are the answer, not a detail.
+- **Why no node took a Pending pod**, in `describe_pod`: the scheduler's own
+  reason and message, the `nodeSelector`, required node affinity, the
+  tolerations the pod sets, its priority class, the claims it mounts with
+  each claim's phase, StorageClass, whether that class exists, its
+  provisioner and the claim's newest event, and earlier pods of the same
+  workload the scheduler preempted with what preempted them.
+- **Superseded scheduling warnings are marked.** A `FailedScheduling` warning
+  the scheduler has since overruled -- by a later attempt failing differently,
+  or by scheduling the pod -- carries `superseded` saying which.
+
+### Fixed
+
+- **The contradiction checker was calling correct answers wrong.** It read a
+  denial as a claim when the negator followed the phrase ("the OOM killer is
+  not the cause"), when a negating noun preceded it ("instead of
+  `OOMKilled`"), inside a concession, when the answer restated the rule the
+  system prompt teaches, and in a question. It also judged a clause against
+  the wrong pod when the evidence detailed two. Replayed over 1816 recorded
+  runs: 19 findings removed, none added, 15 verdicts out of `contradicted`
+  and none into it.
+- **Eval cases graded on tools rather than answers.** Three cases demanded a
+  tool the fixes above made redundant, and two accepted words from their own
+  question. Replayed over every recorded run; no historical pass lost.
+
+### Changed
+
+- **RBAC.** The ClusterRole gains `batch/jobs`, `apps/daemonsets` and
+  `apps/statefulsets`. **Re-apply `deploy/rbac.yaml`, or upgrade the chart,
+  or those rows are lost** -- the scan swallows the 403 and keeps every other
+  finding, so the upgrade is safe in either order.
+- **Demo fixtures no longer name their own fault.** Three images said what was
+  wrong with them; a paired A/B measured that the model answers from the name
+  rather than reading the pod. They are now ordinary-looking names.
+
+### Not tested
+
+- HA on a released image. The shared-state code ships and the lease was
+  measured on GKE against a build of `main`, never against a published image.
+- vLLM's own tool-call parser. The wire path is proven through an
+  OpenAI-protocol server; vLLM itself has never run here.
+- EKS, and browser paint automation.
+
 ## [0.2.0] - 2026-08-26
 
 A minor rather than a patch release: the grounding contract changed what

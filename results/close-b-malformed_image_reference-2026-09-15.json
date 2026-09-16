@@ -1,0 +1,492 @@
+[
+ {
+  "case": "malformed_image_reference",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 57.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T11:46:54",
+  "load_before": 6.29,
+  "load_after": 3.84,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   },
+   {
+    "namespace": "uncovered",
+    "workload": "catalog-api",
+    "only_unhealthy": true
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"catalog-api\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"REGISTRY.example.com/Catalog_Api:::v1\"]}, \"report-worker\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"session-cache\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"catalog-api-77544dc879-f4h5d\": {\"status\": \"InvalidImageName\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\"}}"
+   }
+  ],
+  "draft": "The `catalog-api` deployment fails because its container image name is invalid. The image `REGISTRY.example.com/Catalog_Api:::v1` contains three colons, which is malformed. Kubernetes cannot parse this as a valid Docker image name. \n\n**Fix**: Correct the image name in the deployment configuration to use a single colon, e.g., `REGISTRY.example.com/Catalog_Api:v1`.",
+  "answer": "The `catalog-api` deployment fails because its container image name is invalid. The image `REGISTRY.example.com/Catalog_Api:::v1` contains three colons, which is malformed. Kubernetes cannot parse this as a valid Docker image name. \n\n**Fix**: Correct the image name in the deployment configuration to use a single colon, e.g., `REGISTRY.example.com/Catalog_Api:v1`.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 56959.8,
+   "tool_ms": 14.5,
+   "rounds": 3,
+   "round_ms": [
+    17982.5,
+    15586.1,
+    23391.2
+   ],
+   "slowest_round_ms": 23391.2,
+   "model_share": 1.0,
+   "wall_ms": 56975.3,
+   "unaccounted_ms": 0.9,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "catalog-api.desired",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "5da981e4a833",
+  "target": {
+   "kind": "workload",
+   "name": "catalog-api",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "malformed_image_reference",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 70.6,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T11:47:51",
+  "load_before": 3.84,
+  "load_after": 3.16,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   },
+   {
+    "namespace": "uncovered",
+    "only_unhealthy": true,
+    "workload": "catalog-api"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"catalog-api\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"REGISTRY.example.com/Catalog_Api:::v1\"]}, \"report-worker\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"session-cache\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"catalog-api-77544dc879-f4h5d\": {\"status\": \"InvalidImageName\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\"}}"
+   }
+  ],
+  "draft": "The catalog-api deployment failed to start because the image name is invalid. The pod `catalog-api-77544dc879-f4h5d` reports an `InvalidImageName` status, likely due to a malformed image URL like `REGISTRY.example.com/Catalog_Api:::v1` (extra colon in the tag). \n\n**Fix:**  \nUpdate the image name in the deployment configuration to use a single colon, e.g., `REGISTRY.example.com/Catalog_Api:v1`, then redeploy.",
+  "answer": "The catalog-api deployment failed to start because the image name is invalid. The pod `catalog-api-77544dc879-f4h5d` reports an `InvalidImageName` status, likely due to a malformed image URL like `REGISTRY.example.com/Catalog_Api:::v1` (extra colon in the tag). \n\n**Fix:**  \nUpdate the image name in the deployment configuration to use a single colon, e.g., `REGISTRY.example.com/Catalog_Api:v1`, then redeploy.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 70557.8,
+   "tool_ms": 13.7,
+   "rounds": 3,
+   "round_ms": [
+    24992.6,
+    20457.5,
+    25107.6
+   ],
+   "slowest_round_ms": 25107.6,
+   "model_share": 1.0,
+   "wall_ms": 70572.1,
+   "unaccounted_ms": 0.6,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "catalog-api.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "4",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "5",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "879",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "77544",
+     "kind": "number",
+     "evidence": []
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "780b0492d6f3",
+  "target": {
+   "kind": "workload",
+   "name": "catalog-api",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "malformed_image_reference",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 78.6,
+  "confidence": "insufficient_evidence",
+  "model_resident": true,
+  "started_at": "2026-09-16T11:49:01",
+  "load_before": 3.16,
+  "load_after": 2.34,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   },
+   {
+    "namespace": "uncovered",
+    "workload": "catalog-api"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"catalog-api\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"REGISTRY.example.com/Catalog_Api:::v1\"]}, \"report-worker\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"session-cache\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"catalog-api-77544dc879-f4h5d\": {\"status\": \"InvalidImageName\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\"}}"
+   }
+  ],
+  "draft": "The `catalog-api` pod is failing to start because the image name is invalid. The error `InvalidImageName` indicates the container image specified in the deployment cannot be pulled. Verify the image name in your deployment configuration (e.g., `catalog-api` deployment YAML) and ensure it matches an accessible registry path like `REGISTRY.example.com/Catalog_Api:::v1`. Correct the image name and redeploy to resolve this.",
+  "answer": "The `catalog-api` pod is failing to start because the image name is invalid. The error `InvalidImageName` indicates the container image specified in the deployment cannot be pulled. Verify the image name in your deployment configuration (e.g., `catalog-api` deployment YAML) and ensure it matches an accessible registry path like `REGISTRY.example.com/Catalog_Api:::v1`. Correct the image name and redeploy to resolve this.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called describe_pod",
+   "grounding verdict 'insufficient_evidence', expected one of ['grounded', 'partial']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 78608.9,
+   "tool_ms": 11.3,
+   "rounds": 3,
+   "round_ms": [
+    35127.8,
+    22127.4,
+    21353.7
+   ],
+   "slowest_round_ms": 35127.8,
+   "model_share": 1.0,
+   "wall_ms": 78620.7,
+   "unaccounted_ms": 0.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "39f9a41c79ce",
+  "target": {
+   "kind": "workload",
+   "name": "catalog-api",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "malformed_image_reference",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 60.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T11:50:20",
+  "load_before": 2.34,
+  "load_after": 2.29,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   },
+   {
+    "only_unhealthy": true,
+    "namespace": "uncovered",
+    "workload": "catalog-api"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"catalog-api\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"REGISTRY.example.com/Catalog_Api:::v1\"]}, \"report-worker\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"session-cache\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"catalog-api-77544dc879-f4h5d\": {\"status\": \"InvalidImageName\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\"}}"
+   }
+  ],
+  "draft": "The catalog-api pod failed to start because the image name is invalid. The image name `REGISTRY.example.com/Catalog_Api:::v1` contains three colons (`:::`), which is malformed. Kubernetes cannot parse this as a valid Docker image name. \n\n**Fix:**  \nUpdate the image name in the deployment configuration to use a single colon for the tag, e.g., `REGISTRY.example.com/Catalog_Api:v1`. This will resolve the invalid image name error and allow the pod to pull the image successfully.",
+  "answer": "The catalog-api pod failed to start because the image name is invalid. The image name `REGISTRY.example.com/Catalog_Api:::v1` contains three colons (`:::`), which is malformed. Kubernetes cannot parse this as a valid Docker image name. \n\n**Fix:**  \nUpdate the image name in the deployment configuration to use a single colon for the tag, e.g., `REGISTRY.example.com/Catalog_Api:v1`. This will resolve the invalid image name error and allow the pod to pull the image successfully.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 59983.6,
+   "tool_ms": 12.6,
+   "rounds": 3,
+   "round_ms": [
+    16161.7,
+    23429.6,
+    20392.3
+   ],
+   "slowest_round_ms": 23429.6,
+   "model_share": 1.0,
+   "wall_ms": 59997.0,
+   "unaccounted_ms": 0.8,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "catalog-api.desired",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "806be29dc3c0",
+  "target": {
+   "kind": "workload",
+   "name": "catalog-api",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "malformed_image_reference",
+  "model": "qwen3",
+  "context": "kind-kubewhy-close",
+  "think": true,
+  "passed": false,
+  "seconds": 61.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-16T11:51:20",
+  "load_before": 2.29,
+  "load_after": 2.63,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   },
+   {
+    "namespace": "uncovered",
+    "only_unhealthy": true,
+    "workload": "catalog-api"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"catalog-api\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"REGISTRY.example.com/Catalog_Api:::v1\"]}, \"report-worker\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"session-cache\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"catalog-api-77544dc879-f4h5d\": {\"status\": \"InvalidImageName\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-close-control-plane\"}}"
+   }
+  ],
+  "draft": "The pod `catalog-api-77544dc879-f4h5d` failed to start because the image name is invalid. The error `InvalidImageName` indicates the container image specified in the deployment's spec cannot be resolved. Check the registry URL and image name in the deployment configuration. For example, if the image is meant to be pulled from a private registry, ensure the registry is accessible and the credentials are correctly configured. If it's a public registry, verify the image name syntax (e.g., `REGISTRY.example.com/Catalog_Api:::v1` might have an extra `::` or typo). Correct the image name and retry.",
+  "answer": "The pod `catalog-api-77544dc879-f4h5d` failed to start because the image name is invalid. The error `InvalidImageName` indicates the container image specified in the deployment's spec cannot be resolved. Check the registry URL and image name in the deployment configuration. For example, if the image is meant to be pulled from a private registry, ensure the registry is accessible and the credentials are correctly configured. If it's a public registry, verify the image name syntax (e.g., `REGISTRY.example.com/Catalog_Api:::v1` might have an extra `::` or typo). Correct the image name and retry.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 61747.6,
+   "tool_ms": 13.1,
+   "rounds": 3,
+   "round_ms": [
+    22116.9,
+    12469.3,
+    27161.5
+   ],
+   "slowest_round_ms": 27161.5,
+   "model_share": 1.0,
+   "wall_ms": 61761.4,
+   "unaccounted_ms": 0.7,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "4",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "5",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "879",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "77544",
+     "kind": "number",
+     "evidence": []
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "c2afc3860a91",
+  "target": {
+   "kind": "workload",
+   "name": "catalog-api",
+   "namespace": "uncovered"
+  }
+ }
+]
