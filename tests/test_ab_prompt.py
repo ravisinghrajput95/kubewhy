@@ -76,7 +76,9 @@ def _deliver(monkeypatch, sends=None):
         agent._chat(model, [{"role": "system", "content": system},
                             {"role": "user", "content": question}], None)
         result = {"answer": "held by a finalizer", "tool_calls": [],
-                  "confidence": "grounded", "unverified": []}
+                  "confidence": "grounded", "unverified": [],
+                  "timing": {"rounds": 1, "model_ms": 900.0, "tool_ms": 24.0,
+                             "wall_ms": 930.0}}
         # The real contract: agent.ask drops "evidence" and "draft" unless
         # asked for them. The first version of this stub returned both
         # unconditionally, so the test asserting a record carries the draft
@@ -188,6 +190,9 @@ class TestRun:
         assert record["draft"] == "held by a finalizer"
         assert record["evidence"], "a record without evidence cannot be replayed"
         assert record["rounds_sent"] == 1
+        # A latency A/B is read off the loop's clocks, not the harness's.
+        assert record["timing"] == {"rounds": 1, "model_ms": 900.0,
+                                    "tool_ms": 24.0, "wall_ms": 930.0}
 
     def test_the_stub_follows_the_real_ask_contract(self):
         # The stub above only means something if agent.ask really does make

@@ -258,6 +258,10 @@ def run(case, arm, setup, model):
         "draft": result.get("draft"),
         "contradictions": result.get("contradictions", []),
         "nudges": result.get("nudges", 0),
+        # Where the wall clock went, from the loop's own clocks: model against
+        # tool time and per-round durations. `seconds` above includes the
+        # harness; a latency A/B has to be read off this.
+        "timing": result.get("timing"),
         "policies": result.get("policies", 0),
         "answer": answer,
         "chars": len(answer),
