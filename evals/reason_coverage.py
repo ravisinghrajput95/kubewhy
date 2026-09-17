@@ -127,6 +127,14 @@ REASONS = {
     # waiting reason already listed. Found by applying a fixture and reading
     # what came back, which is the only way this list gets to be right.
     "InspectFailed": "event",
+    # Same again, 2026-09-16: a live cluster carrying every fixture reported
+    # both of these and this file's own report named them as missing from the
+    # denominator. `Preempting` was already here and is the scheduler deciding;
+    # `Preempted` is what lands on the pod that lost, and it is the one a
+    # diagnosis has to read. `ExternalProvisioning` is what a claim waiting on
+    # a provisioner nothing serves reports, which is defect 54's storage case.
+    "Preempted": "event",
+    "ExternalProvisioning": "event",
 }
 
 # Reported by a healthy cluster and not failures: excluded from the

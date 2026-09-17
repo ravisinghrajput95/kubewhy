@@ -504,8 +504,10 @@ methods, sample sizes, and several entries that say the author's prediction
 was wrong and what corrected it. This half is not the problem.
 
 **Product completeness: 6.** The tool diagnoses roughly half of what
-Kubernetes can break — **23 of 49** enumerated failure reasons on a live
-cluster, measured 2026-09-10 — and that denominator is the kubelet's own
+Kubernetes can break — **27 of 51** enumerated failure reasons on a live
+cluster, measured 2026-09-16 (25 of the 49 that list then held; `Preempted` and
+`ExternalProvisioning` were added to it after the same run reported them and
+the script named them as missing) — and that denominator is the kubelet's own
 reason list, so controller-level failures like `ReplicaFailure` are not in it
 at all. **Its headline HA feature did ship**: `0.2.1` carries the shared-state
 code, verified from the registry 2026-09-12, and what was never done is
@@ -615,9 +617,9 @@ were failing correct answers are fixed; the three owner decisions are applied.
    - Four contradiction-checker false-positive shapes: **fixed and replayed
      2026-09-17** (2089 records, 6 findings removed, 0 added, 5 verdicts out of
      `contradicted`, 0 in). Defect 56 carries the guards.
-   - `evals/reason_coverage.py`'s REASONS list lacks `Preempted` and
-     `ExternalProvisioning`, which a live cluster emits (25 of 49 measured, 27 of
-     51 with them).
+   - Reason coverage re-measured on a live cluster 2026-09-16: **27 of 51**
+     (`Preempted` and `ExternalProvisioning` added to the list after that run
+     named them). It was 23 of 49 on 2026-09-10.
    - **A/B trap:** unset now means on, so vary `TRIAGE_PREFETCH_TARGET=off` and
      analyse with `results/prefetch/analyse.py --prefetch-arm control`.
 
