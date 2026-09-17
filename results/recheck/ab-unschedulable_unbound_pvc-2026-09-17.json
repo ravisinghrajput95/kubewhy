@@ -1,0 +1,770 @@
+[
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:33:46.426087+00:00",
+  "load_before": 0.69,
+  "load_after": 0.71,
+  "seconds": 17.7,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "archive",
+    "namespaces": "shop"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"shop/archive\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"archive-77ff685b48-pp28z\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 462, \"age\": \"1m\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   }
+  ],
+  "draft": "The `archive` pod in the `shop` namespace is not being scheduled because it requires a PersistentVolumeClaim (PVC) that cannot be fulfilled. Specifically:\n\n- The PVC `archive-data` references a **non-existent storage class** `fast-ssd-nonexistent`.\n- The kubelet reports the pod as `Unschedulable` with the error:  \n  `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.\"`\n\n### Solution\n1. **Verify the storage class** `fast-ssd-nonexistent` exists in your cluster. If it doesn't, create it or update the PVC to use an existing storage class.\n2. **Check PVC configuration** to ensure it aligns with available storage classes and resource limits.\n\nThis is a storage configuration issue, not a workload or node problem.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 17676.6,
+   "tool_ms": 20.9,
+   "rounds": 1,
+   "round_ms": [
+    17676.6
+   ],
+   "slowest_round_ms": 17676.6,
+   "model_share": 0.999,
+   "wall_ms": 17699.1,
+   "unaccounted_ms": 1.6,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The `archive` pod in the `shop` namespace is not being scheduled because it requires a PersistentVolumeClaim (PVC) that cannot be fulfilled. Specifically:\n\n- The PVC `archive-data` references a **non-existent storage class** `fast-ssd-nonexistent`.\n- The kubelet reports the pod as `Unschedulable` with the error:  \n  `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.\"`\n\n### Solution\n1. **Verify the storage class** `fast-ssd-nonexistent` exists in your cluster. If it doesn't, create it or update the PVC to use an existing storage class.\n2. **Check PVC configuration** to ensure it aligns with available storage classes and resource limits.\n\nThis is a storage configuration issue, not a workload or node problem.",
+  "chars": 741,
+  "hedges": []
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:34:04.128164+00:00",
+  "load_before": 0.71,
+  "load_after": 0.55,
+  "seconds": 49.2,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "only_unhealthy": true,
+    "namespace": "shop",
+    "workload": "archive"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-pp28z\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 462, \"age\": \"2m\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   }
+  ],
+  "draft": "The **archive pod** in the `shop` namespace is not scheduling because it has an **unbound PersistentVolumeClaim (PVC)** for `archive-data`, which depends on a non-existent storage class `fast-ssd-nonexistent`. Here's the breakdown:\n\n1. **Root Cause**:  \n   - The PVC `archive-data` is in **Pending** state due to the missing storage class.  \n   - The storage class `fast-ssd-nonexistent` does not exist in the cluster (confirmed by the `ProvisioningFailed` event).  \n\n2. **Immediate Fix**:  \n   - **Create the missing storage class** or correct the PVC to use an existing one (e.g., `fast-ssd` or another valid class).  \n   - Verify the storage class exists via `kubectl get storageclass` and adjust the PVC spec accordingly.  \n\n3. **Why It Matters**:  \n   - Kubernetes cannot schedule pods with unbound PVCs. The scheduler waits for the PVC to be bound before proceeding.  \n\nOnce the storage class is fixed, the PVC will bind, and the pod will attempt to schedule automatically.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 49185.9,
+   "tool_ms": 31.1,
+   "rounds": 3,
+   "round_ms": [
+    13591.2,
+    9566.8,
+    26028.0
+   ],
+   "slowest_round_ms": 26028.0,
+   "model_share": 0.999,
+   "wall_ms": 49219.6,
+   "unaccounted_ms": 2.6,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The **archive pod** in the `shop` namespace is not scheduling because it has an **unbound PersistentVolumeClaim (PVC)** for `archive-data`, which depends on a non-existent storage class `fast-ssd-nonexistent`. Here's the breakdown:\n\n1. **Root Cause**:  \n   - The PVC `archive-data` is in **Pending** state due to the missing storage class.  \n   - The storage class `fast-ssd-nonexistent` does not exist in the cluster (confirmed by the `ProvisioningFailed` event).  \n\n2. **Immediate Fix**:  \n   - **Create the missing storage class** or correct the PVC to use an existing one (e.g., `fast-ssd` or another valid class).  \n   - Verify the storage class exists via `kubectl get storageclass` and adjust the PVC spec accordingly.  \n\n3. **Why It Matters**:  \n   - Kubernetes cannot schedule pods with unbound PVCs. The scheduler waits for the PVC to be bound before proceeding.  \n\nOnce the storage class is fixed, the PVC will bind, and the pod will attempt to schedule automatically.",
+  "chars": 979,
+  "hedges": []
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:34:53.350809+00:00",
+  "load_before": 0.55,
+  "load_after": 0.55,
+  "seconds": 100.4,
+  "rounds_sent": 5,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "archive"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   },
+   {
+    "limit": 5,
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-pp28z\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 462, \"age\": \"3m\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"events\": [{\"reason\": \"FailedScheduling\", \"count\": 25, \"age\": \"3m\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\"}]}"
+   }
+  ],
+  "draft": "The **archive pod** in the `shop` namespace is not being scheduled due to a **PersistentVolumeClaim (PVC)** issue tied to a missing storage class. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n1. **PVC Dependency**:  \n   The pod depends on a PVC named `archive-data`, which requests the non-existent storage class `fast-ssd-nonexistent`.  \n   - The PVC is in a **Pending** state because the storage class does not exist in the cluster.\n\n2. **Scheduler Block**:  \n   The pod is marked **Unschedulable** because the scheduler cannot bind it to a node without resolving the PVC dependency.  \n   - The error message from `describe_pod` and `get_pod_events` explicitly states:  \n     `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\"`.\n\n3. **Storage Class Missing**:  \n   The storage class `fast-ssd-nonexistent` is invalid. The PVC's events show **462 ProvisioningFailed** warnings, confirming the storage class is absent.\n\n---\n\n### **Fix**\n- **Correct the Storage Class**:  \n  Update the PVC `archive-data` to use a valid storage class (e.g., `fast-ssd` or another existing class).  \n  - Example fix:  \n    ```yaml\n    spec:\n      volumes:\n        - name: archive-data\n          persistentVolumeClaim:\n            claimName: archive-data\n    ---\n    spec:\n      volumes:\n        - name: archive-data\n          persistentVolumeClaim:\n            claimName: archive-data\n            storageClassName: fast-ssd  # Use an existing class\n    ```\n\n- **Verify Storage Class Existence**:  \n  Ensure the storage class `fast-ssd` (or your chosen class) exists in the cluster. If not, create it or adjust the PVC accordingly.\n\n---\n\n### **Next Steps**\n- After fixing the storage class reference, the PVC will be provisioned, allowing the pod to schedule.  \n- Use `get_pod_events` again to monitor progress once the PVC is bound.  \n\nThis is a **storage-class misconfiguration**, not a pod or container issue. No node pressure or resource limits are involved.",
+  "contradictions": [],
+  "nudges": 1,
+  "timing": {
+   "model_ms": 100391.3,
+   "tool_ms": 28.2,
+   "rounds": 5,
+   "round_ms": [
+    15099.7,
+    9741.2,
+    27383.8,
+    17942.1,
+    30224.4
+   ],
+   "slowest_round_ms": 30224.4,
+   "model_share": 1.0,
+   "wall_ms": 100425.8,
+   "unaccounted_ms": 6.3,
+   "slept_ms": 1.5
+  },
+  "policies": 0,
+  "answer": "The **archive pod** in the `shop` namespace is not being scheduled due to a **PersistentVolumeClaim (PVC)** issue tied to a missing storage class. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n1. **PVC Dependency**:  \n   The pod depends on a PVC named `archive-data`, which requests the non-existent storage class `fast-ssd-nonexistent`.  \n   - The PVC is in a **Pending** state because the storage class does not exist in the cluster.\n\n2. **Scheduler Block**:  \n   The pod is marked **Unschedulable** because the scheduler cannot bind it to a node without resolving the PVC dependency.  \n   - The error message from `describe_pod` and `get_pod_events` explicitly states:  \n     `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\"`.\n\n3. **Storage Class Missing**:  \n   The storage class `fast-ssd-nonexistent` is invalid. The PVC's events show **462 ProvisioningFailed** warnings, confirming the storage class is absent.\n\n---\n\n### **Fix**\n- **Correct the Storage Class**:  \n  Update the PVC `archive-data` to use a valid storage class (e.g., `fast-ssd` or another existing class).  \n  - Example fix:  \n    ```yaml\n    spec:\n      volumes:\n        - name: archive-data\n          persistentVolumeClaim:\n            claimName: archive-data\n    ---\n    spec:\n      volumes:\n        - name: archive-data\n          persistentVolumeClaim:\n            claimName: archive-data\n            storageClassName: fast-ssd  # Use an existing class\n    ```\n\n- **Verify Storage Class Existence**:  \n  Ensure the storage class `fast-ssd` (or your chosen class) exists in the cluster. If not, create it or adjust the PVC accordingly.\n\n---\n\n### **Next Steps**\n- After fixing the storage class reference, the PVC will be provisioned, allowing the pod to schedule.  \n- Use `get_pod_events` again to monitor progress once the PVC is bound.  \n\nThis is a **storage-class misconfiguration**, not a pod or container issue. No node pressure or resource limits are involved.",
+  "chars": 1986,
+  "hedges": []
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:36:33.779669+00:00",
+  "load_before": 0.55,
+  "load_after": 0.63,
+  "seconds": 25.9,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "archive",
+    "namespaces": "shop"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"shop/archive\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"archive-77ff685b48-pp28z\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 462, \"age\": \"4m\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   }
+  ],
+  "draft": "The **archive pod** in the **shop namespace** is not scheduled because it has an unbound PersistentVolumeClaim (PVC) for `archive-data`, which refers to a non-existent storage class `fast-ssd-nonexistent`. Here's the breakdown:\n\n1. **Root Cause**:  \n   - The PVC `archive-data` is in **Pending** state due to the storage class `fast-ssd-nonexistent` not existing in the cluster.  \n   - The scheduler cannot assign the pod to a node without resolving this PVC.\n\n2. **Action Needed**:  \n   - Verify if the storage class `fast-ssd-nonexistent` was intended to be created.  \n   - If it's a typo, correct the storage class name in the PVC specification.  \n   - If the storage class is supposed to exist, ensure it is properly provisioned (e.g., via a CSI driver or cloud provider).\n\n3. **Next Steps**:  \n   - Check the storage class existence with `kubectl get storageclass`.  \n   - Update the PVC to use a valid storage class or create the missing one.  \n\nThis issue is unrelated to the pod's container configuration or node availability\u2014it\u2019s a storage setup problem.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 25902.5,
+   "tool_ms": 36.9,
+   "rounds": 1,
+   "round_ms": [
+    25902.5
+   ],
+   "slowest_round_ms": 25902.5,
+   "model_share": 0.999,
+   "wall_ms": 25942.7,
+   "unaccounted_ms": 3.3,
+   "slept_ms": 0.8
+  },
+  "policies": 0,
+  "answer": "The **archive pod** in the **shop namespace** is not scheduled because it has an unbound PersistentVolumeClaim (PVC) for `archive-data`, which refers to a non-existent storage class `fast-ssd-nonexistent`. Here's the breakdown:\n\n1. **Root Cause**:  \n   - The PVC `archive-data` is in **Pending** state due to the storage class `fast-ssd-nonexistent` not existing in the cluster.  \n   - The scheduler cannot assign the pod to a node without resolving this PVC.\n\n2. **Action Needed**:  \n   - Verify if the storage class `fast-ssd-nonexistent` was intended to be created.  \n   - If it's a typo, correct the storage class name in the PVC specification.  \n   - If the storage class is supposed to exist, ensure it is properly provisioned (e.g., via a CSI driver or cloud provider).\n\n3. **Next Steps**:  \n   - Check the storage class existence with `kubectl get storageclass`.  \n   - Update the PVC to use a valid storage class or create the missing one.  \n\nThis issue is unrelated to the pod's container configuration or node availability\u2014it\u2019s a storage setup problem.",
+  "chars": 1063,
+  "hedges": []
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:36:59.725172+00:00",
+  "load_before": 0.63,
+  "load_after": 0.61,
+  "seconds": 27.2,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "archive",
+    "namespaces": "shop"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"shop/archive\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"archive-77ff685b48-pp28z\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 462, \"age\": \"4m\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   }
+  ],
+  "draft": "The **archive pod** in the **shop namespace** is not scheduled because it requires a **PersistentVolumeClaim (PVC)** named `archive-data` that references a non-existent storage class `fast-ssd-nonexistent`. Here's the breakdown:\n\n1. **Root Cause**:  \n   - The PVC `archive-data` is in **Pending** state due to the storage class `fast-ssd-nonexistent` not existing in the cluster.  \n   - The pod cannot schedule without fulfilling its PVC requirements.\n\n2. **Immediate Action**:  \n   - **Verify** if the storage class `fast-ssd-nonexistent` was intended to exist. Check for typos or misconfigurations.  \n   - If it\u2019s a typo, correct the storage class name in the PVC to a valid one (e.g., `fast-ssd` or another existing class).  \n   - If the storage class is no longer needed, remove the PVC reference from the pod's configuration.\n\n3. **Why It Matters**:  \n   - Kubernetes enforces PVCs for workloads with volume claims. Without a valid storage class, the PVC remains unbound, and the pod cannot proceed to **Running** state.  \n\nOnce the storage class issue is resolved, the PVC will be provisioned, and the pod will be scheduled.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 27133.7,
+   "tool_ms": 37.2,
+   "rounds": 1,
+   "round_ms": [
+    27133.7
+   ],
+   "slowest_round_ms": 27133.7,
+   "model_share": 0.999,
+   "wall_ms": 27173.6,
+   "unaccounted_ms": 2.7,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The **archive pod** in the **shop namespace** is not scheduled because it requires a **PersistentVolumeClaim (PVC)** named `archive-data` that references a non-existent storage class `fast-ssd-nonexistent`. Here's the breakdown:\n\n1. **Root Cause**:  \n   - The PVC `archive-data` is in **Pending** state due to the storage class `fast-ssd-nonexistent` not existing in the cluster.  \n   - The pod cannot schedule without fulfilling its PVC requirements.\n\n2. **Immediate Action**:  \n   - **Verify** if the storage class `fast-ssd-nonexistent` was intended to exist. Check for typos or misconfigurations.  \n   - If it\u2019s a typo, correct the storage class name in the PVC to a valid one (e.g., `fast-ssd` or another existing class).  \n   - If the storage class is no longer needed, remove the PVC reference from the pod's configuration.\n\n3. **Why It Matters**:  \n   - Kubernetes enforces PVCs for workloads with volume claims. Without a valid storage class, the PVC remains unbound, and the pod cannot proceed to **Running** state.  \n\nOnce the storage class issue is resolved, the PVC will be provisioned, and the pod will be scheduled.",
+  "chars": 1130,
+  "hedges": []
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:37:26.901934+00:00",
+  "load_before": 0.61,
+  "load_after": 0.46,
+  "seconds": 40.7,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "archive"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-pp28z\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 482, \"age\": \"31s\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   }
+  ],
+  "draft": "The `archive` pod in the `shop` namespace is not scheduling because it requires a PersistentVolumeClaim (PVC) that references a non-existent StorageClass (`fast-ssd-nonexistent`). Here's the breakdown:\n\n1. **Root Cause**:  \n   - The PVC `archive-data` is in `Pending` state because the StorageClass `fast-ssd-nonexistent` does not exist in the cluster.  \n   - The StorageClass is missing, so the PVC cannot be provisioned.\n\n2. **Next Steps**:  \n   - **Verify StorageClass Existence**: Check if `fast-ssd-nonexistent` was intended to be created. If not, correct the StorageClass name in the PVC or create the missing class.  \n   - **Clean Up Orphaned PVCs**: If the StorageClass is no longer needed, delete the PVCs bound to it to avoid lingering failures.  \n\nOnce the StorageClass is fixed or the PVCs are updated, the pod will requeue for scheduling.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 40644.9,
+   "tool_ms": 26.3,
+   "rounds": 3,
+   "round_ms": [
+    13662.8,
+    8529.7,
+    18452.4
+   ],
+   "slowest_round_ms": 18452.4,
+   "model_share": 0.999,
+   "wall_ms": 40673.7,
+   "unaccounted_ms": 2.5,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The `archive` pod in the `shop` namespace is not scheduling because it requires a PersistentVolumeClaim (PVC) that references a non-existent StorageClass (`fast-ssd-nonexistent`). Here's the breakdown:\n\n1. **Root Cause**:  \n   - The PVC `archive-data` is in `Pending` state because the StorageClass `fast-ssd-nonexistent` does not exist in the cluster.  \n   - The StorageClass is missing, so the PVC cannot be provisioned.\n\n2. **Next Steps**:  \n   - **Verify StorageClass Existence**: Check if `fast-ssd-nonexistent` was intended to be created. If not, correct the StorageClass name in the PVC or create the missing class.  \n   - **Clean Up Orphaned PVCs**: If the StorageClass is no longer needed, delete the PVCs bound to it to avoid lingering failures.  \n\nOnce the StorageClass is fixed or the PVCs are updated, the pod will requeue for scheduling.",
+  "chars": 851,
+  "hedges": []
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:38:07.578865+00:00",
+  "load_before": 0.46,
+  "load_after": 0.73,
+  "seconds": 40.6,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "archive"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-pp28z\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 482, \"age\": \"1m\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   }
+  ],
+  "draft": "The **archive pod** in the `shop` namespace is not scheduling because it requires a **non-existent StorageClass** (`fast-ssd-nonexistent`) for its PersistentVolumeClaim (PVC). Here's the breakdown:\n\n- **Root Cause**: The PVC `archive-data` requests a StorageClass that doesn't exist in the cluster. The StorageClass `fast-ssd-nonexistent` is missing, so the PVC cannot be provisioned.\n- **Impact**: The pod remains in **Pending** state until the PVC is resolved.\n- **Fix**: \n  1. Verify if the StorageClass `fast-ssd-nonexistent` should exist. \n  2. If it's a typo or misconfiguration, correct the StorageClass name in the PVC to match an existing class (e.g., `fast-ssd`).\n  3. If the StorageClass is intentional, create it with the appropriate provisioner and parameters.\n\nNo node pressure or resource issues are detected here\u2014the pod is blocked by the missing PVC.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 40546.6,
+   "tool_ms": 26.1,
+   "rounds": 3,
+   "round_ms": [
+    10559.7,
+    8325.6,
+    21661.3
+   ],
+   "slowest_round_ms": 21661.3,
+   "model_share": 0.999,
+   "wall_ms": 40574.7,
+   "unaccounted_ms": 2.0,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The **archive pod** in the `shop` namespace is not scheduling because it requires a **non-existent StorageClass** (`fast-ssd-nonexistent`) for its PersistentVolumeClaim (PVC). Here's the breakdown:\n\n- **Root Cause**: The PVC `archive-data` requests a StorageClass that doesn't exist in the cluster. The StorageClass `fast-ssd-nonexistent` is missing, so the PVC cannot be provisioned.\n- **Impact**: The pod remains in **Pending** state until the PVC is resolved.\n- **Fix**: \n  1. Verify if the StorageClass `fast-ssd-nonexistent` should exist. \n  2. If it's a typo or misconfiguration, correct the StorageClass name in the PVC to match an existing class (e.g., `fast-ssd`).\n  3. If the StorageClass is intentional, create it with the appropriate provisioner and parameters.\n\nNo node pressure or resource issues are detected here\u2014the pod is blocked by the missing PVC.",
+  "chars": 867,
+  "hedges": []
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:38:48.156731+00:00",
+  "load_before": 0.73,
+  "load_after": 1.15,
+  "seconds": 17.1,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "archive",
+    "namespaces": "shop"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"shop/archive\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"archive-77ff685b48-pp28z\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 482, \"age\": \"1m\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   }
+  ],
+  "draft": "The `archive` pod in the `shop` namespace is not scheduled because it depends on a PersistentVolumeClaim (PVC) named `archive-data` that cannot be provisioned. The PVC references a non-existent storage class `fast-ssd-nonexistent`, which is causing the scheduler to mark the pod as unschedulable. \n\n**Fix:**  \nVerify the storage class name in the PVC configuration. If `fast-ssd-nonexistent` is incorrect, update it to a valid storage class name that exists in your cluster. If the storage class is intentional, ensure it is properly created. \n\nThis error is tied to the PVC's storage class configuration, not the pod itself.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 17034.2,
+   "tool_ms": 35.4,
+   "rounds": 1,
+   "round_ms": [
+    17034.2
+   ],
+   "slowest_round_ms": 17034.2,
+   "model_share": 0.998,
+   "wall_ms": 17071.0,
+   "unaccounted_ms": 1.4,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The `archive` pod in the `shop` namespace is not scheduled because it depends on a PersistentVolumeClaim (PVC) named `archive-data` that cannot be provisioned. The PVC references a non-existent storage class `fast-ssd-nonexistent`, which is causing the scheduler to mark the pod as unschedulable. \n\n**Fix:**  \nVerify the storage class name in the PVC configuration. If `fast-ssd-nonexistent` is incorrect, update it to a valid storage class name that exists in your cluster. If the storage class is intentional, ensure it is properly created. \n\nThis error is tied to the PVC's storage class configuration, not the pod itself.",
+  "chars": 625,
+  "hedges": []
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:39:05.231440+00:00",
+  "load_before": 1.15,
+  "load_after": 0.82,
+  "seconds": 30.9,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "archive",
+    "namespaces": "shop"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"shop/archive\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"archive-77ff685b48-pp28z\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 482, \"age\": \"1m\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   }
+  ],
+  "draft": "The **archive pod** in the **shop namespace** is not being scheduled because it depends on a **PersistentVolumeClaim (PVC)** that references a non-existent storage class. Here's the breakdown:\n\n1. **Root Cause**:  \n   The PVC `archive-data` requests a storage class named `fast-ssd-nonexistent`, which **does not exist** in the cluster. This causes the PVC to remain in a **Pending** state, making the pod unschedulable.\n\n2. **Impact**:  \n   The pod cannot schedule until the PVC is bound. The error message explicitly states:  \n   `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims\"`.\n\n3. **Fix Steps**:  \n   - **Verify the storage class**: Check if `fast-ssd-nonexistent` is a typo or misconfigured. Ensure the correct storage class exists (e.g., `fast-ssd` or another valid name).  \n   - **Correct the PVC**: Update the PVC to reference an existing storage class.  \n   - **Or, remove the PVC**: If the application does not require persistent storage, delete the PVC to allow the pod to schedule without it.  \n\nThis is a storage configuration issue, not a pod or node problem.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 30810.5,
+   "tool_ms": 37.1,
+   "rounds": 1,
+   "round_ms": [
+    30810.5
+   ],
+   "slowest_round_ms": 30810.5,
+   "model_share": 0.999,
+   "wall_ms": 30849.9,
+   "unaccounted_ms": 2.3,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The **archive pod** in the **shop namespace** is not being scheduled because it depends on a **PersistentVolumeClaim (PVC)** that references a non-existent storage class. Here's the breakdown:\n\n1. **Root Cause**:  \n   The PVC `archive-data` requests a storage class named `fast-ssd-nonexistent`, which **does not exist** in the cluster. This causes the PVC to remain in a **Pending** state, making the pod unschedulable.\n\n2. **Impact**:  \n   The pod cannot schedule until the PVC is bound. The error message explicitly states:  \n   `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims\"`.\n\n3. **Fix Steps**:  \n   - **Verify the storage class**: Check if `fast-ssd-nonexistent` is a typo or misconfigured. Ensure the correct storage class exists (e.g., `fast-ssd` or another valid name).  \n   - **Correct the PVC**: Update the PVC to reference an existing storage class.  \n   - **Or, remove the PVC**: If the application does not require persistent storage, delete the PVC to allow the pod to schedule without it.  \n\nThis is a storage configuration issue, not a pod or node problem.",
+  "chars": 1103,
+  "hedges": []
+ },
+ {
+  "case": "unschedulable_unbound_pvc",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why is the archive pod in the shop namespace not being scheduled?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:39:36.084388+00:00",
+  "load_before": 0.82,
+  "load_after": 1.5,
+  "seconds": 47.8,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "shop",
+    "only_unhealthy": true,
+    "workload": "archive"
+   },
+   {
+    "name": "archive-77ff685b48-pp28z",
+    "namespace": "shop"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"archive-77ff685b48-pp28z\": {\"status\": \"Pending\", \"ready\": \"0/0\", \"restarts\": 0, \"node\": null}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"archive-77ff685b48-pp28z\", \"namespace\": \"shop\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"archive-data\", \"phase\": \"Pending\", \"storage_class\": \"fast-ssd-nonexistent\", \"storage_class_exists\": false, \"event\": {\"type\": \"Warning\", \"reason\": \"ProvisioningFailed\", \"count\": 482, \"age\": \"2m\", \"message\": \"storageclass.storage.k8s.io \\\"fast-ssd-nonexistent\\\" not found\"}}]}}"
+   }
+  ],
+  "draft": "The **archive pod** in the `shop` namespace is not scheduling because it requires a **non-existent storage class** (`fast-ssd-nonexistent`). Here's the breakdown:\n\n1. **Root Cause**:  \n   - The pod's PersistentVolumeClaim (PVC) `archive-data` references a storage class that does not exist in the cluster.  \n   - The PVC is in **Pending** state, and the storage class `fast-ssd-nonexistent` is missing.\n\n2. **Impact**:  \n   - The pod cannot be scheduled until the PVC is bound to a PersistentVolume (PV).  \n   - The scheduler is blocked due to the unbound PVC.\n\n3. **Fix**:  \n   - **Correct the storage class name** in the PVC specification to an existing storage class (e.g., `fast-ssd` or another valid class).  \n   - Ensure the storage class exists in the cluster (e.g., by checking `kubectl get storageclass`).\n\nOnce the storage class is fixed, the PVC will be provisioned, and the pod will be scheduled.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 47810.2,
+   "tool_ms": 27.4,
+   "rounds": 3,
+   "round_ms": [
+    13273.4,
+    10642.8,
+    23894.0
+   ],
+   "slowest_round_ms": 23894.0,
+   "model_share": 0.999,
+   "wall_ms": 47840.4,
+   "unaccounted_ms": 2.8,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The **archive pod** in the `shop` namespace is not scheduling because it requires a **non-existent storage class** (`fast-ssd-nonexistent`). Here's the breakdown:\n\n1. **Root Cause**:  \n   - The pod's PersistentVolumeClaim (PVC) `archive-data` references a storage class that does not exist in the cluster.  \n   - The PVC is in **Pending** state, and the storage class `fast-ssd-nonexistent` is missing.\n\n2. **Impact**:  \n   - The pod cannot be scheduled until the PVC is bound to a PersistentVolume (PV).  \n   - The scheduler is blocked due to the unbound PVC.\n\n3. **Fix**:  \n   - **Correct the storage class name** in the PVC specification to an existing storage class (e.g., `fast-ssd` or another valid class).  \n   - Ensure the storage class exists in the cluster (e.g., by checking `kubectl get storageclass`).\n\nOnce the storage class is fixed, the PVC will be provisioned, and the pod will be scheduled.",
+  "chars": 908,
+  "hedges": []
+ }
+]

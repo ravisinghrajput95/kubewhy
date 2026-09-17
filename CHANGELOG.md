@@ -17,6 +17,13 @@ signatures and response shapes may still change.
   accuracy loss measured (29/35 against 33/35 by hand, not significant).
   A question the model would have answered in its first two rounds anyway gets
   slower, by 10s to 23s on the one such case measured. VALIDATION.md defect 55.
+- **The prefetch fires only for questions asking what is wrong, and arrives as
+  tool results.** Asked who deployed a workload, it had handed over the
+  crashing pod, and every answer volunteered a diagnosis (a case that was 13/13
+  `insufficient_evidence` scored 0/3). And cluster text, injection payloads
+  included, had reached the model in the user message. Re-measured on the fixed
+  tree over 35 paired runs: median rounds 4 to 2, wall clock 84.6s to 54.5s,
+  32/35 correct by hand with it off and on. VALIDATION.md defect 56.
 
 ## [0.3.0] - 2026-09-16
 

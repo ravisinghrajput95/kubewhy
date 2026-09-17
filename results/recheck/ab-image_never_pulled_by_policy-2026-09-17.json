@@ -1,0 +1,797 @@
+[
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:40:24.371340+00:00",
+  "load_before": 1.5,
+  "load_after": 1.13,
+  "seconds": 52.6,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "local-only",
+    "namespaces": "uncovered2"
+   },
+   {
+    "name": "local-only-657d685fc8-7b8nc",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/local-only\": {\"status\": \"ErrImageNeverPull\", \"pods\": 1, \"example\": \"local-only-657d685fc8-7b8nc\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"local-only-657d685fc8-7b8nc\", \"namespace\": \"uncovered2\", \"status\": \"ErrImageNeverPull\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"app\": {\"image\": \"billing-api:3.2.1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ErrImageNeverPull\", \"waiting_message\": \"Container image \\\"billing-api:3.2.1\\\" is not present with pull policy of Never\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The scan identified **uncovered2/local-only** as the sole workload with issues. Here's the breakdown:\n\n- **uncovered2/local-only**:  \n  The deployment fails because the container image `billing-api:3.2.1` cannot be pulled. The pod's status shows `ErrImageNeverPull`, indicating the kubelet is configured with a pull policy of `Never`. Since the image isn't present locally, the container cannot start.  \n\n### Solution:  \n1. **Verify the image exists** in the registry (private or public).  \n2. **Update the pull policy** in the deployment spec to `Always` or `IfNotPresent` to allow the kubelet to fetch the image.  \n3. Ensure the image tag `3.2.1` is correct and matches an existing image.  \n4. If using a private registry, confirm credentials are provided via a Kubernetes secret.  \n\nNo other workloads were reported in the scan.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 52574.6,
+   "tool_ms": 13.3,
+   "rounds": 2,
+   "round_ms": [
+    23743.8,
+    28830.7
+   ],
+   "slowest_round_ms": 28830.7,
+   "model_share": 1.0,
+   "wall_ms": 52590.3,
+   "unaccounted_ms": 2.4,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The scan identified **uncovered2/local-only** as the sole workload with issues. Here's the breakdown:\n\n- **uncovered2/local-only**:  \n  The deployment fails because the container image `billing-api:3.2.1` cannot be pulled. The pod's status shows `ErrImageNeverPull`, indicating the kubelet is configured with a pull policy of `Never`. Since the image isn't present locally, the container cannot start.  \n\n### Solution:  \n1. **Verify the image exists** in the registry (private or public).  \n2. **Update the pull policy** in the deployment spec to `Always` or `IfNotPresent` to allow the kubelet to fetch the image.  \n3. Ensure the image tag `3.2.1` is correct and matches an existing image.  \n4. If using a private registry, confirm credentials are provided via a Kubernetes secret.  \n\nNo other workloads were reported in the scan.",
+  "chars": 831,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:41:16.964484+00:00",
+  "load_before": 1.13,
+  "load_after": 1.47,
+  "seconds": 71.3,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "workload": "local-only",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"filler\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"local-only\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"billing-api:3.2.1\"]}, \"urgent\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"local-only-657d685fc8-7b8nc\": {\"status\": \"ErrImageNeverPull\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-wire-control-plane\"}}"
+   }
+  ],
+  "draft": "The deployment's pod `local-only-657d685fc8-7b8nc` is failing to start because the container image cannot be pulled. The status `ErrImageNeverPull` indicates the image specified in the deployment configuration is either invalid, unreachable, or lacks proper authentication. Verify the image name and registry details in the deployment's spec, and ensure the registry is accessible from the node `kubewhy-wire-control-plane`.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 71270.2,
+   "tool_ms": 15.8,
+   "rounds": 3,
+   "round_ms": [
+    40955.3,
+    12904.6,
+    17410.3
+   ],
+   "slowest_round_ms": 40955.3,
+   "model_share": 1.0,
+   "wall_ms": 71287.5,
+   "unaccounted_ms": 1.5,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The deployment's pod `local-only-657d685fc8-7b8nc` is failing to start because the container image cannot be pulled. The status `ErrImageNeverPull` indicates the image specified in the deployment configuration is either invalid, unreachable, or lacks proper authentication. Verify the image name and registry details in the deployment's spec, and ensure the registry is accessible from the node `kubewhy-wire-control-plane`.",
+  "chars": 424,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:42:28.255223+00:00",
+  "load_before": 1.47,
+  "load_after": 1.25,
+  "seconds": 55.1,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "local-only"
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [
+   "named 'registry is unreachable' alongside the answer",
+   "named 'network' alongside the answer"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"filler\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"local-only\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"billing-api:3.2.1\"]}, \"urgent\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"local-only-657d685fc8-7b8nc\": {\"status\": \"ErrImageNeverPull\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-wire-control-plane\"}}"
+   }
+  ],
+  "draft": "The deployment's pod `local-only-657d685fc8-7b8nc` is failing to start because the container image **cannot be pulled** (`ErrImageNeverPull`). This typically means:\n\n1. **Invalid or unreachable image**: The image `billing-api:3.2.1` (from the deployment) does not exist in any registry, or the registry is unreachable.\n2. **Authentication issues**: If the image is private, the cluster lacks valid credentials to pull it.\n3. **Network restrictions**: The node `kubewhy-wire-control-plane` cannot access the registry due to firewall rules or misconfigured DNS.\n\n### Next Steps\n- Verify the image name and tag in the deployment spec.\n- Check if the registry (e.g., Docker Hub, private registry) is accessible from the node.\n- Ensure credentials for private registries are correctly configured via Kubernetes secrets.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 55060.3,
+   "tool_ms": 14.2,
+   "rounds": 3,
+   "round_ms": [
+    18650.1,
+    13966.7,
+    22443.5
+   ],
+   "slowest_round_ms": 22443.5,
+   "model_share": 1.0,
+   "wall_ms": 55076.7,
+   "unaccounted_ms": 2.2,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The deployment's pod `local-only-657d685fc8-7b8nc` is failing to start because the container image **cannot be pulled** (`ErrImageNeverPull`). This typically means:\n\n1. **Invalid or unreachable image**: The image `billing-api:3.2.1` (from the deployment) does not exist in any registry, or the registry is unreachable.\n2. **Authentication issues**: If the image is private, the cluster lacks valid credentials to pull it.\n3. **Network restrictions**: The node `kubewhy-wire-control-plane` cannot access the registry due to firewall rules or misconfigured DNS.\n\n### Next Steps\n- Verify the image name and tag in the deployment spec.\n- Check if the registry (e.g., Docker Hub, private registry) is accessible from the node.\n- Ensure credentials for private registries are correctly configured via Kubernetes secrets.",
+  "chars": 814,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:43:23.335146+00:00",
+  "load_before": 1.25,
+  "load_after": 0.9,
+  "seconds": 49.4,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "local-only",
+    "namespaces": "uncovered2"
+   },
+   {
+    "name": "local-only-657d685fc8-7b8nc",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/local-only\": {\"status\": \"ErrImageNeverPull\", \"pods\": 1, \"example\": \"local-only-657d685fc8-7b8nc\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"local-only-657d685fc8-7b8nc\", \"namespace\": \"uncovered2\", \"status\": \"ErrImageNeverPull\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"app\": {\"image\": \"billing-api:3.2.1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ErrImageNeverPull\", \"waiting_message\": \"Container image \\\"billing-api:3.2.1\\\" is not present with pull policy of Never\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The scan identified one workload in the `uncovered2` namespace:  \n**uncovered2/local-only** is failing due to `ErrImageNeverPull` \u2014 the container image `billing-api:3.2.1` cannot be pulled because the pull policy is set to `Never`, and the image is not present locally.  \n\nNo other workloads were reported in the namespace. The issue is isolated to this deployment.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 49373.8,
+   "tool_ms": 22.1,
+   "rounds": 2,
+   "round_ms": [
+    16510.1,
+    32863.7
+   ],
+   "slowest_round_ms": 32863.7,
+   "model_share": 1.0,
+   "wall_ms": 49397.2,
+   "unaccounted_ms": 1.3,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The scan identified one workload in the `uncovered2` namespace:  \n**uncovered2/local-only** is failing due to `ErrImageNeverPull` \u2014 the container image `billing-api:3.2.1` cannot be pulled because the pull policy is set to `Never`, and the image is not present locally.  \n\nNo other workloads were reported in the namespace. The issue is isolated to this deployment.",
+  "chars": 365,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:44:12.735510+00:00",
+  "load_before": 0.9,
+  "load_after": 1.48,
+  "seconds": 54.5,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "local-only",
+    "namespaces": "uncovered2"
+   },
+   {
+    "name": "local-only-657d685fc8-7b8nc",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/local-only\": {\"status\": \"ErrImageNeverPull\", \"pods\": 1, \"example\": \"local-only-657d685fc8-7b8nc\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"local-only-657d685fc8-7b8nc\", \"namespace\": \"uncovered2\", \"status\": \"ErrImageNeverPull\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"app\": {\"image\": \"billing-api:3.2.1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ErrImageNeverPull\", \"waiting_message\": \"Container image \\\"billing-api:3.2.1\\\" is not present with pull policy of Never\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The scan reported one workload: **uncovered2/local-only**. Here's the full analysis:\n\n**uncovered2/local-only**  \n- **Status**: `ErrImageNeverPull` (pod is not ready).  \n- **Cause**: The container image `billing-api:3.2.1` cannot be pulled because the pull policy is set to `Never`, and the image is not present locally or in the registry.  \n- **Pod**: `local-only-657d685fc8-7b8nc` on node `kubewhy-wire-control-plane`.  \n- **Action Needed**: Verify the image exists in the registry, ensure the pull policy is `Always` or `IfNotPresent`, or confirm the image is built and pushed to the registry.  \n\nNo other workloads were reported in the scan. The issue is isolated to the `local-only` deployment in `uncovered2`.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 54464.7,
+   "tool_ms": 22.4,
+   "rounds": 2,
+   "round_ms": [
+    19019.1,
+    35445.6
+   ],
+   "slowest_round_ms": 35445.6,
+   "model_share": 1.0,
+   "wall_ms": 54489.2,
+   "unaccounted_ms": 2.2,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The scan reported one workload: **uncovered2/local-only**. Here's the full analysis:\n\n**uncovered2/local-only**  \n- **Status**: `ErrImageNeverPull` (pod is not ready).  \n- **Cause**: The container image `billing-api:3.2.1` cannot be pulled because the pull policy is set to `Never`, and the image is not present locally or in the registry.  \n- **Pod**: `local-only-657d685fc8-7b8nc` on node `kubewhy-wire-control-plane`.  \n- **Action Needed**: Verify the image exists in the registry, ensure the pull policy is `Always` or `IfNotPresent`, or confirm the image is built and pushed to the registry.  \n\nNo other workloads were reported in the scan. The issue is isolated to the `local-only` deployment in `uncovered2`.",
+  "chars": 715,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:45:07.227509+00:00",
+  "load_before": 1.48,
+  "load_after": 1.59,
+  "seconds": 76.2,
+  "rounds_sent": 4,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "local-only"
+   },
+   {
+    "name": "local-only-657d685fc8-7b8nc",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "named 'does not exist in the registry' alongside the answer"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"filler\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"local-only\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"billing-api:3.2.1\"]}, \"urgent\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"local-only-657d685fc8-7b8nc\": {\"status\": \"ErrImageNeverPull\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-wire-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"local-only-657d685fc8-7b8nc\", \"namespace\": \"uncovered2\", \"status\": \"ErrImageNeverPull\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"app\": {\"image\": \"billing-api:3.2.1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ErrImageNeverPull\", \"waiting_message\": \"Container image \\\"billing-api:3.2.1\\\" is not present with pull policy of Never\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The deployment fails because the container image `billing-api:3.2.1` cannot be pulled, and the pull policy is set to `Never`. Here's why:\n\n- **Image Not Found**: The image `billing-api:3.2.1` does not exist in the registry (or the kubelet cannot access it). The pull policy `Never` instructs the kubelet to skip pulling the image entirely.\n- **No Credentials**: If the image is in a private registry, the kubelet lacks credentials to authenticate and pull it.\n- **Typo or Misconfiguration**: The image name might be incorrect, or the registry URL might be missing (e.g., `registry.example.com/billing-api:3.2.1`).\n\n**Fix**:  \n1. Verify the image exists in the registry (e.g., `docker pull billing-api:3.2.1`).  \n2. If it's a private registry, ensure the kubelet has credentials via a `Secret` or registry configuration.  \n3. Change the pull policy to `IfNotPresent` or `Always` if the image should be pulled from a different source.  \n4. Push the image to the registry if it's missing.  \n\nExample fix for pull policy:  \n```yaml\nimagePullPolicy: IfNotPresent\n```",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 76168.0,
+   "tool_ms": 21.1,
+   "rounds": 4,
+   "round_ms": [
+    14599.9,
+    11727.6,
+    15335.4,
+    34505.1
+   ],
+   "slowest_round_ms": 34505.1,
+   "model_share": 1.0,
+   "wall_ms": 76192.0,
+   "unaccounted_ms": 2.9,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The deployment fails because the container image `billing-api:3.2.1` cannot be pulled, and the pull policy is set to `Never`. Here's why:\n\n- **Image Not Found**: The image `billing-api:3.2.1` does not exist in the registry (or the kubelet cannot access it). The pull policy `Never` instructs the kubelet to skip pulling the image entirely.\n- **No Credentials**: If the image is in a private registry, the kubelet lacks credentials to authenticate and pull it.\n- **Typo or Misconfiguration**: The image name might be incorrect, or the registry URL might be missing (e.g., `registry.example.com/billing-api:3.2.1`).\n\n**Fix**:  \n1. Verify the image exists in the registry (e.g., `docker pull billing-api:3.2.1`).  \n2. If it's a private registry, ensure the kubelet has credentials via a `Secret` or registry configuration.  \n3. Change the pull policy to `IfNotPresent` or `Always` if the image should be pulled from a different source.  \n4. Push the image to the registry if it's missing.  \n\nExample fix for pull policy:  \n```yaml\nimagePullPolicy: IfNotPresent\n```",
+  "chars": 1061,
+  "hedges": [
+   "might be"
+  ]
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:46:23.422799+00:00",
+  "load_before": 1.59,
+  "load_after": 1.12,
+  "seconds": 98.8,
+  "rounds_sent": 5,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": false,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods",
+   "get_pod_events"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2"
+   },
+   {
+    "namespace": "uncovered2",
+    "workload": "local-only",
+    "only_unhealthy": true
+   },
+   {
+    "name": "local-only-657d685fc8-7b8nc",
+    "namespace": "uncovered2",
+    "limit": 5
+   }
+  ],
+  "failures": [
+   "never called describe_pod"
+  ],
+  "notes": [
+   "named 'pull secret' alongside the answer",
+   "named 'network' alongside the answer"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"filler\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"local-only\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"billing-api:3.2.1\"]}, \"urgent\": {\"desired\": 1, \"ready\": 1, \"available\": 1, \"healthy\": true, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"local-only-657d685fc8-7b8nc\": {\"status\": \"ErrImageNeverPull\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-wire-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"local-only-657d685fc8-7b8nc\", \"events\": [{\"reason\": \"ErrImageNeverPull\", \"count\": 606, \"age\": \"15s\", \"message\": \"Container image \\\"billing-api:3.2.1\\\" is not present with pull policy of Never\"}]}"
+   }
+  ],
+  "draft": "The **local-only** deployment in the `uncovered2` namespace is failing because the container image `billing-api:3.2.1` cannot be pulled, and the pull policy is set to **Never**. Here's the breakdown:\n\n### Root Cause\n- **Error**: `ErrImageNeverPull`  \n- **Pod**: `local-only-657d685fc8-7b8nc`  \n- **Image**: `billing-api:3.2.1`  \n- **Pull Policy**: `Never` (the pod will not attempt to pull the image from a registry).\n\n### Why It Fails\n1. **Image Not Found**: The image `billing-api:3.2.1` does not exist in any registry (public or private) accessible to the node.  \n2. **Pull Policy Misconfiguration**: The `Never` pull policy instructs the kubelet to skip pulling the image entirely. If the image isn\u2019t preloaded on the node, the pod cannot start.  \n3. **Private Registry?**: If the image is in a private registry, the pod lacks the necessary pull secret to authenticate.  \n\n### Next Steps\n- **Verify Image Existence**: Confirm the image `billing-api:3.2.1` exists in the registry (e.g., Docker Hub, private registry).  \n- **Check Pull Policy**: If the image is in a private registry, change the pull policy to `Always` or `IfNotPresent` and add the appropriate pull secret to the namespace.  \n- **Network Access**: Ensure the node has network access to the registry (e.g., firewall rules, DNS resolution).  \n\nThis error is not about the application code but about the image being unavailable or misconfigured. Fixing the image reference or pull policy will resolve the issue.",
+  "contradictions": [],
+  "nudges": 1,
+  "timing": {
+   "model_ms": 98755.9,
+   "tool_ms": 18.6,
+   "rounds": 5,
+   "round_ms": [
+    16122.0,
+    11852.1,
+    24992.1,
+    16783.6,
+    29006.1
+   ],
+   "slowest_round_ms": 29006.1,
+   "model_share": 1.0,
+   "wall_ms": 98777.7,
+   "unaccounted_ms": 3.2,
+   "slept_ms": 0.3
+  },
+  "policies": 0,
+  "answer": "The **local-only** deployment in the `uncovered2` namespace is failing because the container image `billing-api:3.2.1` cannot be pulled, and the pull policy is set to **Never**. Here's the breakdown:\n\n### Root Cause\n- **Error**: `ErrImageNeverPull`  \n- **Pod**: `local-only-657d685fc8-7b8nc`  \n- **Image**: `billing-api:3.2.1`  \n- **Pull Policy**: `Never` (the pod will not attempt to pull the image from a registry).\n\n### Why It Fails\n1. **Image Not Found**: The image `billing-api:3.2.1` does not exist in any registry (public or private) accessible to the node.  \n2. **Pull Policy Misconfiguration**: The `Never` pull policy instructs the kubelet to skip pulling the image entirely. If the image isn\u2019t preloaded on the node, the pod cannot start.  \n3. **Private Registry?**: If the image is in a private registry, the pod lacks the necessary pull secret to authenticate.  \n\n### Next Steps\n- **Verify Image Existence**: Confirm the image `billing-api:3.2.1` exists in the registry (e.g., Docker Hub, private registry).  \n- **Check Pull Policy**: If the image is in a private registry, change the pull policy to `Always` or `IfNotPresent` and add the appropriate pull secret to the namespace.  \n- **Network Access**: Ensure the node has network access to the registry (e.g., firewall rules, DNS resolution).  \n\nThis error is not about the application code but about the image being unavailable or misconfigured. Fixing the image reference or pull policy will resolve the issue.",
+  "chars": 1478,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:48:02.203871+00:00",
+  "load_before": 1.12,
+  "load_after": 0.82,
+  "seconds": 76.7,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "local-only",
+    "namespaces": "uncovered2"
+   },
+   {
+    "name": "local-only-657d685fc8-7b8nc",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/local-only\": {\"status\": \"ErrImageNeverPull\", \"pods\": 1, \"example\": \"local-only-657d685fc8-7b8nc\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"local-only-657d685fc8-7b8nc\", \"namespace\": \"uncovered2\", \"status\": \"ErrImageNeverPull\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"app\": {\"image\": \"billing-api:3.2.1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ErrImageNeverPull\", \"waiting_message\": \"Container image \\\"billing-api:3.2.1\\\" is not present with pull policy of Never\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The deployment `uncovered2/local-only` fails because the container image `billing-api:3.2.1` cannot be pulled. The pod status shows `ErrImageNeverPull`, indicating the image is missing and the pull policy is set to `Never`.  \n\n**Solution:**  \n1. Verify the image name and tag (`billing-api:3.2.1`) is correct and exists in your registry or built locally.  \n2. If the image is supposed to be local, ensure it was successfully built and pushed to the registry.  \n3. If external access is needed, change the pull policy to `Always` or `IfNotPresent` in the deployment spec.  \n\nNo other workloads were reported by the scan.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 76696.2,
+   "tool_ms": 21.6,
+   "rounds": 2,
+   "round_ms": [
+    23218.7,
+    53477.5
+   ],
+   "slowest_round_ms": 53477.5,
+   "model_share": 1.0,
+   "wall_ms": 76719.1,
+   "unaccounted_ms": 1.2,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The deployment `uncovered2/local-only` fails because the container image `billing-api:3.2.1` cannot be pulled. The pod status shows `ErrImageNeverPull`, indicating the image is missing and the pull policy is set to `Never`.  \n\n**Solution:**  \n1. Verify the image name and tag (`billing-api:3.2.1`) is correct and exists in your registry or built locally.  \n2. If the image is supposed to be local, ensure it was successfully built and pushed to the registry.  \n3. If external access is needed, change the pull policy to `Always` or `IfNotPresent` in the deployment spec.  \n\nNo other workloads were reported by the scan.",
+  "chars": 619,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:49:18.926524+00:00",
+  "load_before": 0.82,
+  "load_after": 0.77,
+  "seconds": 81.0,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "local-only",
+    "namespaces": "uncovered2"
+   },
+   {
+    "name": "local-only-657d685fc8-7b8nc",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "named 'network' alongside the answer"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/local-only\": {\"status\": \"ErrImageNeverPull\", \"pods\": 1, \"example\": \"local-only-657d685fc8-7b8nc\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"local-only-657d685fc8-7b8nc\", \"namespace\": \"uncovered2\", \"status\": \"ErrImageNeverPull\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"app\": {\"image\": \"billing-api:3.2.1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ErrImageNeverPull\", \"waiting_message\": \"Container image \\\"billing-api:3.2.1\\\" is not present with pull policy of Never\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The deployment `uncovered2/local-only` fails because the container image `billing-api:3.2.1` is not present on the node, and the pull policy is set to `Never`. Here's the breakdown:\n\n1. **Workload**: `uncovered2/local-only`  \n   - **Status**: `ErrImageNeverPull`  \n   - **Cause**: The image `billing-api:3.2.1` is not available locally, and the pull policy is `Never`, so the node cannot fetch it from any registry.  \n   - **Pod Example**: `local-only-657d685fc8-7b8nc`  \n   - **Node**: `kubewhy-wire-control-plane`  \n\nNo other workloads were reported by the scan. The issue is isolated to this deployment.  \n\n**Fix**:  \n- Verify the image name and registry details.  \n- Ensure the node has access to the registry (e.g., correct credentials, network policies).  \n- Push the image to a registry accessible by the node or preload it into the node's local registry.  \n- Adjust the pull policy to `IfNotPresent` or `Always` if the image should be pulled from a registry.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 80932.6,
+   "tool_ms": 16.4,
+   "rounds": 2,
+   "round_ms": [
+    29860.6,
+    51072.0
+   ],
+   "slowest_round_ms": 51072.0,
+   "model_share": 1.0,
+   "wall_ms": 80951.4,
+   "unaccounted_ms": 2.3,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The deployment `uncovered2/local-only` fails because the container image `billing-api:3.2.1` is not present on the node, and the pull policy is set to `Never`. Here's the breakdown:\n\n1. **Workload**: `uncovered2/local-only`  \n   - **Status**: `ErrImageNeverPull`  \n   - **Cause**: The image `billing-api:3.2.1` is not available locally, and the pull policy is `Never`, so the node cannot fetch it from any registry.  \n   - **Pod Example**: `local-only-657d685fc8-7b8nc`  \n   - **Node**: `kubewhy-wire-control-plane`  \n\nNo other workloads were reported by the scan. The issue is isolated to this deployment.  \n\n**Fix**:  \n- Verify the image name and registry details.  \n- Ensure the node has access to the registry (e.g., correct credentials, network policies).  \n- Push the image to a registry accessible by the node or preload it into the node's local registry.  \n- Adjust the pull policy to `IfNotPresent` or `Always` if the image should be pulled from a registry.",
+  "chars": 966,
+  "hedges": []
+ },
+ {
+  "case": "image_never_pulled_by_policy",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "The local-only deployment in the uncovered2 namespace will not start. Why?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T08:50:39.881524+00:00",
+  "load_before": 0.77,
+  "load_after": 1.13,
+  "seconds": 71.0,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered2",
+    "only_unhealthy": true,
+    "workload": "local-only"
+   },
+   {
+    "name": "local-only-657d685fc8-7b8nc",
+    "namespace": "uncovered2"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"local-only-657d685fc8-7b8nc\": {\"status\": \"ErrImageNeverPull\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-wire-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"local-only-657d685fc8-7b8nc\", \"namespace\": \"uncovered2\", \"status\": \"ErrImageNeverPull\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"app\": {\"image\": \"billing-api:3.2.1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ErrImageNeverPull\", \"waiting_message\": \"Container image \\\"billing-api:3.2.1\\\" is not present with pull policy of Never\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The deployment fails because the container image `billing-api:3.2.1` cannot be pulled, and the pull policy is set to `Never`. Here's why:\n\n1. **Image Not Found**: The image `billing-api:3.2.1` does not exist locally on the node (`kubewhy-wire-control-plane`) or in the registry. The `Never` pull policy means the pod will not attempt to fetch it from a registry.\n\n2. **Missing Image or Registry Access**:\n   - Verify the image name and tag are correct. A typo or outdated tag (e.g., `3.2.1` vs. `latest`) could cause this.\n   - Ensure the image is pushed to the registry and accessible. If the registry requires authentication, the pod lacks the necessary secrets.\n\n3. **Fix Options**:\n   - **Pull the image manually** on the node using `docker pull` (if using Docker) or the appropriate CLI for the container runtime.\n   - **Adjust the pull policy** to `IfNotPresent` or `Always` in the deployment spec to allow the pod to fetch the image from the registry.\n   - **Add secrets** for registry authentication if required.\n\nWithout the image or registry access, the pod cannot start. Adjust the image name/tag or pull policy to resolve this.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 70935.4,
+   "tool_ms": 18.1,
+   "rounds": 3,
+   "round_ms": [
+    19566.6,
+    21656.2,
+    29712.6
+   ],
+   "slowest_round_ms": 29712.6,
+   "model_share": 1.0,
+   "wall_ms": 70955.6,
+   "unaccounted_ms": 2.1,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The deployment fails because the container image `billing-api:3.2.1` cannot be pulled, and the pull policy is set to `Never`. Here's why:\n\n1. **Image Not Found**: The image `billing-api:3.2.1` does not exist locally on the node (`kubewhy-wire-control-plane`) or in the registry. The `Never` pull policy means the pod will not attempt to fetch it from a registry.\n\n2. **Missing Image or Registry Access**:\n   - Verify the image name and tag are correct. A typo or outdated tag (e.g., `3.2.1` vs. `latest`) could cause this.\n   - Ensure the image is pushed to the registry and accessible. If the registry requires authentication, the pod lacks the necessary secrets.\n\n3. **Fix Options**:\n   - **Pull the image manually** on the node using `docker pull` (if using Docker) or the appropriate CLI for the container runtime.\n   - **Adjust the pull policy** to `IfNotPresent` or `Always` in the deployment spec to allow the pod to fetch the image from the registry.\n   - **Add secrets** for registry authentication if required.\n\nWithout the image or registry access, the pod cannot start. Adjust the image name/tag or pull policy to resolve this.",
+  "chars": 1139,
+  "hedges": []
+ }
+]

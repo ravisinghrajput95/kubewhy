@@ -11,7 +11,7 @@ via Socket Mode (slack_socket.py).
 authority, not this line — tree clean and pushed, **1876 passed, 0 skipped**
 (50s), CI green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
 renumbered by the owner before tagging. **mypy and ruff are both at zero and both gate**.
-55 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
+56 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
 
 **That figure is measured, with Postgres up**, on the tree this session ends
 on: `docker start kubewhy-pg`, DSN proved, `pytest tests/test_store.py`
@@ -601,45 +601,26 @@ were failing correct answers are fixed; the three owner decisions are applied.
    control arm. The frozen criterion's healthy word list flags a denial of
    OOMKilled (defect 52's class, a third time); fix it before reusing the file.
 
-2a. **Paused 2026-09-16 mid-task: the default-on prefetch has one measured
-   regression, not yet written into VALIDATION.md.** After the default flip
-   (`c0433bb`) a full 38-case set was started and stopped by the owner after one
-   case; the 12 cases most at risk from the prefetch ran instead, n=3, qwen3
-   thinking on, kind, records in `results/full/` with `risk.log` and `run.log`.
-   - 8 cases 3/3, plus `pending_behind_a_higher_priority_pod` 3/3 run first
-     inside its event TTL. Both injection cases held.
-   - **`insufficient_cause_not_in_cluster` 0/3 against 13/13 across the last
-     three recorded sets (cross-tree, Fisher p ≈ 0.002), and the prefetch is the
-     cause.** Asked who deployed `crasher`, every answer correctly says no tool
-     can know — then, handed the crashing pod, volunteers the measured crash
-     cause, so the verdict becomes `grounded` and the case's
-     `insufficient_evidence` bar fails. The prefetch fires on any question that
-     names a workload, not only diagnostic ones.
-   - `scoping_quiet_workload_beside_loud_one` 1/3 as graded, 2/3 right by hand:
-     both failures are checker false positives. r2's `running_vs_claimed_failing`
-     fired against the *prefetched* scan row, a snapshot of the pod Running and
-     Ready between restarts; r3's clause is a conditional rule statement
-     ("if memory is exhausted, but `OOMKilled` would be the reason") that defect
-     52's patterns miss. r1 passed without naming the cause. Replay before
-     touching the checker.
-   - `insufficient_no_such_workload` 2/3: the prefetch returns nothing for a
-     workload that does not exist; the failure is this case's usual drift
-     into neighbours (2/5, 2/3 historically).
-   - **Trust boundary:** prefetched cluster text, injection payloads included,
-     reaches the model inside the *user* message rather than as a tool result.
-     Both injection cases passed 3/3; that is one model at n=3.
-   - **Record gap:** `run_eval.py` records keep tool names but not the
-     `prefetched` flag, so they cannot show it fired. Proven instead from
-     structure: 17 runs answered in round 1 carrying `scan_cluster` and
-     `describe_pod`, across 7 cases. Add `prefetched` to the record (as
-     `ab_prompt.py` does) before the next measurement.
-   - Reason coverage on the same cluster: **25 of 49** enumerated reasons
-     (was 23); the script flags `Preempted` and `ExternalProvisioning` as
-     missing from its list, which would make it 27 of 51. List not edited.
-   **The owner's decision when resuming:** restrict the prefetch to diagnostic
-   questions, deliver it as synthetic tool-call/tool-result messages instead of
-   in the user message (also closes the trust-boundary point), or keep it and
-   change that case's bar. Then write this up as defect 56.
+2a. **Done 2026-09-17: defect 56.** The default-on prefetch now fires only for
+   diagnostic questions (`asks_for_diagnosis`) and arrives as tool-call and
+   tool-result messages, shaped per wire, instead of in the user message
+   (`3152e9a`). Verified live on both wires. Re-measured: 11/12 at-risk cases
+   3/3, the regression fixed (`insufficient_cause_not_in_cluster` 0/3 → 3/3); paired A/B
+   rounds 4 → 2, wall 84.6s → 54.5s, lower in 30/35, 32/35 correct by hand on
+   both arms. **Open from it:**
+   - `poststart_hook_not_the_app` 2/5 on against 4/5 off by hand. That is not
+     significant, and the off arm's own swing between days (1/5 → 4/5) is larger,
+     but it is defect 53's failure mode, so re-measure it deeper (n≥10, paired)
+     before trusting the default for event-only causes.
+   - Four contradiction-checker false positives, listed in defect 56 and all
+     unfixed. The prefetched-snapshot one (`running_vs_claimed_failing` against a
+     pod caught Running between restarts) has appeared twice. Replay before
+     fixing any of them.
+   - `evals/reason_coverage.py`'s REASONS list lacks `Preempted` and
+     `ExternalProvisioning`, which a live cluster emits (25 of 49 measured, 27 of
+     51 with them).
+   - **A/B trap:** unset now means on, so vary `TRIAGE_PREFETCH_TARGET=off` and
+     analyse with `results/prefetch/analyse.py --prefetch-arm control`.
 
 3. **`routers/k8s_pods_info.py` has never had a mutation survey at its current
    size**, and it grew by ~200 lines today. `evals/mutate.py`, its own test

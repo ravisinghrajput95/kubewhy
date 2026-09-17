@@ -1,0 +1,829 @@
+[
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:10:59.466475+00:00",
+  "load_before": 1.06,
+  "load_after": 0.97,
+  "seconds": 28.0,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "memory-hog",
+    "namespaces": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/memory-hog\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-c4rms\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 13, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-c4rms_demo(82530907-f6bc-4257-8fd1-7b3553c4f861)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod \"memory-hog-bc76968c6-c4rms\" keeps restarting because its container \"hog\" is being **OOMKilled** (out-of-memory killed) by the kernel. Here's why:\n\n- **Memory limits**: The container is limited to **64MiB of RAM** but likely exceeds this threshold during operation. The stress tool in the `polinux/stress` image aggressively uses memory, causing the kernel to terminate it.\n- **Exit code 137**: This confirms the container was killed by the OOM killer, not a crash in the application code.\n- **CrashLoopBackOff**: Kubernetes detects the crash and delays restarting the pod to avoid rapid failures.\n\n**Fix**: Increase the memory limit in the pod's resource configuration (e.g., set `limits.memory` to a higher value like `256Mi`) or reduce the workload to stay within the allocated memory.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 27959.6,
+   "tool_ms": 30.4,
+   "rounds": 1,
+   "round_ms": [
+    27959.6
+   ],
+   "slowest_round_ms": 27959.6,
+   "model_share": 0.999,
+   "wall_ms": 27992.3,
+   "unaccounted_ms": 2.3,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The pod \"memory-hog-bc76968c6-c4rms\" keeps restarting because its container \"hog\" is being **OOMKilled** (out-of-memory killed) by the kernel. Here's why:\n\n- **Memory limits**: The container is limited to **64MiB of RAM** but likely exceeds this threshold during operation. The stress tool in the `polinux/stress` image aggressively uses memory, causing the kernel to terminate it.\n- **Exit code 137**: This confirms the container was killed by the OOM killer, not a crash in the application code.\n- **CrashLoopBackOff**: Kubernetes detects the crash and delays restarting the pod to avoid rapid failures.\n\n**Fix**: Increase the memory limit in the pod's resource configuration (e.g., set `limits.memory` to a higher value like `256Mi`) or reduce the workload to stay within the allocated memory.",
+  "chars": 796,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:11:27.462001+00:00",
+  "load_before": 0.97,
+  "load_after": 1.63,
+  "seconds": 94.4,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "memory leak"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "memory-hog"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo"
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['memory leak'] with no measurement behind it"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-c4rms\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 13, \"node\": \"kubewhy-wire-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 13, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-c4rms_demo(82530907-f6bc-4257-8fd1-7b3553c4f861)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod keeps restarting because the container `hog` is being **killed by the kernel's out-of-memory (OOM) killer** (`OOMKilled` exit code 137). Here's why:\n\n- **Memory limits are too low**: The container is limited to **64MiB of RAM** (`limits.memory: 64Mi`), but the `polinux/stress` image is designed to consume significant memory. If the container exceeds this limit, the OOM killer terminates it.\n- **CrashLoopBackOff**: Kubernetes detects the crash and delays restarts (5m0s backoff) to avoid overwhelming the system.\n- **ConfigMap volume**: The pod mounts a ConfigMap (`kube-root-ca.crt`), but this is unrelated to the memory issue.\n\n### Fix\n1. **Increase memory limits**: Adjust the container's `limits.memory` to a higher value (e.g., `256Mi` or more) in the deployment spec.\n2. **Monitor actual usage**: Verify if the stress tool actually requires more memory than allocated. If not, the limits are overly restrictive.\n3. **Check for leaks**: If the container shouldn't use so much memory, investigate for memory leaks or misconfigurations in the application.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 94382.8,
+   "tool_ms": 20.0,
+   "rounds": 3,
+   "round_ms": [
+    26387.0,
+    30039.0,
+    37956.9
+   ],
+   "slowest_round_ms": 37956.9,
+   "model_share": 1.0,
+   "wall_ms": 94405.9,
+   "unaccounted_ms": 3.0,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The pod keeps restarting because the container `hog` is being **killed by the kernel's out-of-memory (OOM) killer** (`OOMKilled` exit code 137). Here's why:\n\n- **Memory limits are too low**: The container is limited to **64MiB of RAM** (`limits.memory: 64Mi`), but the `polinux/stress` image is designed to consume significant memory. If the container exceeds this limit, the OOM killer terminates it.\n- **CrashLoopBackOff**: Kubernetes detects the crash and delays restarts (5m0s backoff) to avoid overwhelming the system.\n- **ConfigMap volume**: The pod mounts a ConfigMap (`kube-root-ca.crt`), but this is unrelated to the memory issue.\n\n### Fix\n1. **Increase memory limits**: Adjust the container's `limits.memory` to a higher value (e.g., `256Mi` or more) in the deployment spec.\n2. **Monitor actual usage**: Verify if the stress tool actually requires more memory than allocated. If not, the limits are overly restrictive.\n3. **Check for leaks**: If the container shouldn't use so much memory, investigate for [unverified: memory leaks] or misconfigurations in the application.\n\n---\n**Evidence audit.**\n1 of 8 stated values could not be traced to any tool result for the workload they were stated about: `memory leak`. Treat these as inference, not measurement.",
+  "chars": 1267,
+  "hedges": []
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:13:01.871714+00:00",
+  "load_before": 1.63,
+  "load_after": 1.36,
+  "seconds": 49.4,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "128"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "memory-hog"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo"
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['128'] with no measurement behind it"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-c4rms\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 13, \"node\": \"kubewhy-wire-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 13, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-c4rms_demo(82530907-f6bc-4257-8fd1-7b3553c4f861)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod is restarting because the container was **OOMKilled** (Out-Of-Memory Killed) by the kernel, indicating it exceeded its memory limit. Here's why:\n\n- **Memory Limits**: The container has a memory limit of `64Mi` (64 MB), but the `stress` tool in the image likely allocates more memory than allowed, triggering the OOM killer.\n- **Exit Code**: The exit code `137` confirms this (128 + signal 13 = SIGKILL).\n- **Restart Policy**: The `CrashLoopBackOff` status means Kubernetes is intentionally restarting the pod after a 5-minute delay following the crash.\n\n**Fix**: Increase the memory limit in the pod's resource requests/limits. For example, raise `memory` from `64Mi` to `256Mi` or higher, depending on the workload's needs.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 49362.3,
+   "tool_ms": 18.2,
+   "rounds": 3,
+   "round_ms": [
+    17166.2,
+    11510.1,
+    20686.0
+   ],
+   "slowest_round_ms": 20686.0,
+   "model_share": 1.0,
+   "wall_ms": 49383.2,
+   "unaccounted_ms": 2.8,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The pod is restarting because the container was **OOMKilled** (Out-Of-Memory Killed) by the kernel, indicating it exceeded its memory limit. Here's why:\n\n- **Memory Limits**: The container has a memory limit of `64Mi` (64 MB), but the `stress` tool in the image likely allocates more memory than allowed, triggering the OOM killer.\n- **Exit Code**: The exit code `137` confirms this ([unverified: 128] + signal 13 = SIGKILL).\n- **Restart Policy**: The `CrashLoopBackOff` status means Kubernetes is intentionally restarting the pod after a 5-minute delay following the crash.\n\n**Fix**: Increase the memory limit in the pod's resource requests/limits. For example, raise `memory` from `64Mi` to `256Mi` or higher, depending on the workload's needs.\n\n---\n**Evidence audit.**\n1 of 7 stated values could not be traced to any tool result for the workload they were stated about: `128`. Treat these as inference, not measurement.",
+  "chars": 922,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:13:51.259992+00:00",
+  "load_before": 1.36,
+  "load_after": 2.68,
+  "seconds": 95.3,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "list_nodes"
+  ],
+  "arguments": [
+   {
+    "workload": "memory-hog",
+    "namespaces": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo"
+   },
+   {}
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/memory-hog\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-c4rms\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 13, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-c4rms_demo(82530907-f6bc-4257-8fd1-7b3553c4f861)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-wire-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The memory-hog pod in the `demo` namespace keeps restarting due to **Out-Of-Memory (OOM) kills** caused by its memory limits being insufficient for the workload. Here's the full diagnosis:\n\n---\n\n### **Key Findings**\n1. **Pod Status**:  \n   - The pod `memory-hog-bc76968c6-c4rms` is in `CrashLoopBackOff` with 13 restarts.  \n   - The container `hog` was **OOMKilled** (exit code 137), indicating it exceeded its memory limit of **64Mi**.\n\n2. **Memory Limits vs. Usage**:  \n   - The container's memory limit (`64Mi`) is likely too low for the `polinux/stress` image, which may not respect memory constraints. This causes the container to consume more memory than allocated, triggering the OOM killer.\n\n3. **Node Pressure**:  \n   - The node `kubewhy-wire-control-plane` has **no memory pressure** (`pressure: null`) and ample allocatable memory (**8GB**). This rules out node-level resource exhaustion as the cause.\n\n---\n\n### **Root Cause**\nThe pod's memory limit is insufficient for the workload. The OOM killer terminates the container when it exceeds the allocated memory, leading to repeated restarts. The node itself is not under memory pressure, so the issue is entirely with the pod's configuration.\n\n---\n\n### **Fix**\n1. **Increase Memory Limits**:  \n   - Raise the `limits.memory` value in the pod's spec (e.g., `128Mi` or higher) to match the application's requirements.  \n   - Ensure the application respects memory limits (e.g., by using `--memory` flags or configuring resource constraints).\n\n2. **Verify Application Behavior**:  \n   - Confirm the `polinux/stress` image behaves predictably within the new memory limits to avoid future OOM events.\n\n3. **Monitor Resource Usage**:  \n   - Use `get_top_memory_processes` or Prometheus to track memory usage and adjust limits dynamically if needed.\n\n---\n\n### **Summary**\nThe pod restarts because its memory limit is too low for the workload. The node has sufficient resources, so the solution lies in adjusting the pod's memory configuration.",
+  "contradictions": [],
+  "nudges": 1,
+  "timing": {
+   "model_ms": 95290.7,
+   "tool_ms": 44.5,
+   "rounds": 3,
+   "round_ms": [
+    32438.7,
+    22396.6,
+    40455.4
+   ],
+   "slowest_round_ms": 40455.4,
+   "model_share": 1.0,
+   "wall_ms": 95340.1,
+   "unaccounted_ms": 4.9,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The memory-hog pod in the `demo` namespace keeps restarting due to **Out-Of-Memory (OOM) kills** caused by its memory limits being insufficient for the workload. Here's the full diagnosis:\n\n---\n\n### **Key Findings**\n1. **Pod Status**:  \n   - The pod `memory-hog-bc76968c6-c4rms` is in `CrashLoopBackOff` with 13 restarts.  \n   - The container `hog` was **OOMKilled** (exit code 137), indicating it exceeded its memory limit of **64Mi**.\n\n2. **Memory Limits vs. Usage**:  \n   - The container's memory limit (`64Mi`) is likely too low for the `polinux/stress` image, which may not respect memory constraints. This causes the container to consume more memory than allocated, triggering the OOM killer.\n\n3. **Node Pressure**:  \n   - The node `kubewhy-wire-control-plane` has **no memory pressure** (`pressure: null`) and ample allocatable memory (**8GB**). This rules out node-level resource exhaustion as the cause.\n\n---\n\n### **Root Cause**\nThe pod's memory limit is insufficient for the workload. The OOM killer terminates the container when it exceeds the allocated memory, leading to repeated restarts. The node itself is not under memory pressure, so the issue is entirely with the pod's configuration.\n\n---\n\n### **Fix**\n1. **Increase Memory Limits**:  \n   - Raise the `limits.memory` value in the pod's spec (e.g., `128Mi` or higher) to match the application's requirements.  \n   - Ensure the application respects memory limits (e.g., by using `--memory` flags or configuring resource constraints).\n\n2. **Verify Application Behavior**:  \n   - Confirm the `polinux/stress` image behaves predictably within the new memory limits to avoid future OOM events.\n\n3. **Monitor Resource Usage**:  \n   - Use `get_top_memory_processes` or Prometheus to track memory usage and adjust limits dynamically if needed.\n\n---\n\n### **Summary**\nThe pod restarts because its memory limit is too low for the workload. The node has sufficient resources, so the solution lies in adjusting the pod's memory configuration.",
+  "chars": 1997,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:15:26.603382+00:00",
+  "load_before": 2.68,
+  "load_after": 2.37,
+  "seconds": 30.3,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "memory leak"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "workload": "memory-hog",
+    "namespaces": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo"
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['memory leak'] with no measurement behind it"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/memory-hog\": {\"status\": \"OOMKilled\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-c4rms\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"OOMKilled\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 14, \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The **memory-hog pod** in the `demo` namespace is restarting because it's being **killed by the OOM (Out-Of-Memory) killer**. Here's why:\n\n- **Exit code 137** confirms the container was terminated by the OOM killer, and the `last_termination.reason` field shows `\"OOMKilled\"`.\n- The container has **memory limits set to 64Mi** (`limits.memory: 64Mi`), but the application likely exceeds this limit, triggering the OOM killer.\n- It has **14 restarts**, indicating a persistent memory exhaustion loop.\n\n### Fix\n- **Increase the memory limit** in the pod's resource requests/limits (e.g., `limits.memory: 128Mi`).\n- **Optimize the application** to use less memory or split workloads into smaller containers.\n- Check for **memory leaks** in the `polinux/stress` image or application logic. \n\nDo not ignore this: repeated OOMKilled events can degrade node performance and risk cluster stability.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 30266.1,
+   "tool_ms": 33.4,
+   "rounds": 1,
+   "round_ms": [
+    30266.1
+   ],
+   "slowest_round_ms": 30266.1,
+   "model_share": 0.999,
+   "wall_ms": 30300.9,
+   "unaccounted_ms": 1.4,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The **memory-hog pod** in the `demo` namespace is restarting because it's being **killed by the OOM (Out-Of-Memory) killer**. Here's why:\n\n- **Exit code 137** confirms the container was terminated by the OOM killer, and the `last_termination.reason` field shows `\"OOMKilled\"`.\n- The container has **memory limits set to 64Mi** (`limits.memory: 64Mi`), but the application likely exceeds this limit, triggering the OOM killer.\n- It has **14 restarts**, indicating a persistent memory exhaustion loop.\n\n### Fix\n- **Increase the memory limit** in the pod's resource requests/limits (e.g., `limits.memory: 128Mi`).\n- **Optimize the application** to use less memory or split workloads into smaller containers.\n- Check for **[unverified: memory leaks]** in the `polinux/stress` image or application logic. \n\nDo not ignore this: repeated OOMKilled events can degrade node performance and risk cluster stability.\n\n---\n**Evidence audit.**\n1 of 5 stated values could not be traced to any tool result for the workload they were stated about: `memory leak`. Treat these as inference, not measurement.",
+  "chars": 1088,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:15:56.907296+00:00",
+  "load_before": 2.37,
+  "load_after": 2.04,
+  "seconds": 65.2,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "memory-hog"
+   },
+   {
+    "namespace": "demo",
+    "name": "memory-hog-bc76968c6-c4rms"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-c4rms\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 14, \"node\": \"kubewhy-wire-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 14, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-c4rms_demo(82530907-f6bc-4257-8fd1-7b3553c4f861)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod keeps restarting because it's being **killed by the OOM (Out-Of-Memory) killer** (`OOMKilled` termination reason). Here's why:\n\n- **Memory limits are too low**: The pod is limited to `64Mi` memory (as per `limits.memory`), but the `stress` container in `polinux/stress` aggressively allocates memory. When it exceeds the limit, the kernel kills the pod.\n- **Exit code 137**: This confirms the container was terminated by the OOM killer (`SIGKILL`).\n\n### Fix\nIncrease the memory limit in the pod's configuration (e.g., set `limits.memory` to `128Mi` or higher) to prevent the OOM killer from terminating it. Alternatively, reduce the stress workload if this is a test environment.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 65153.8,
+   "tool_ms": 21.1,
+   "rounds": 3,
+   "round_ms": [
+    17732.3,
+    20374.1,
+    27047.4
+   ],
+   "slowest_round_ms": 27047.4,
+   "model_share": 1.0,
+   "wall_ms": 65180.1,
+   "unaccounted_ms": 5.3,
+   "slept_ms": 3.9
+  },
+  "policies": 0,
+  "answer": "The pod keeps restarting because it's being **killed by the OOM (Out-Of-Memory) killer** (`OOMKilled` termination reason). Here's why:\n\n- **Memory limits are too low**: The pod is limited to `64Mi` memory (as per `limits.memory`), but the `stress` container in `polinux/stress` aggressively allocates memory. When it exceeds the limit, the kernel kills the pod.\n- **Exit code 137**: This confirms the container was terminated by the OOM killer (`SIGKILL`).\n\n### Fix\nIncrease the memory limit in the pod's configuration (e.g., set `limits.memory` to `128Mi` or higher) to prevent the OOM killer from terminating it. Alternatively, reduce the stress workload if this is a test environment.",
+  "chars": 687,
+  "hedges": []
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:17:02.090695+00:00",
+  "load_before": 2.04,
+  "load_after": 1.8,
+  "seconds": 84.2,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "workload": "memory-hog"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-c4rms\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 14, \"node\": \"kubewhy-wire-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 14, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-c4rms_demo(82530907-f6bc-4257-8fd1-7b3553c4f861)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod keeps restarting because the container was **killed by the kernel's out-of-memory (OOM) killer** (`OOMKilled`), indicating it exceeded its memory limit. Here's why:\n\n- **Memory limits are too low**: The container is limited to `64Mi` of memory, but the `polinux/stress` image likely allocates more memory than this limit, triggering the OOM killer.\n- **Exit code 137**: This confirms the container was sent `SIGKILL` (kill signal) by the OOM killer.\n- **CrashLoopBackOff**: The kubelet restarts the pod every 5 minutes after it crashes, leading to the loop.\n\n### Fix\nIncrease the memory limit in the pod's configuration. For example, set `memory: \"256Mi\"` in the container's resource limits. Monitor memory usage to ensure the new limit suffices.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 84161.6,
+   "tool_ms": 17.5,
+   "rounds": 3,
+   "round_ms": [
+    28760.0,
+    24059.1,
+    31342.5
+   ],
+   "slowest_round_ms": 31342.5,
+   "model_share": 1.0,
+   "wall_ms": 84181.7,
+   "unaccounted_ms": 2.7,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The pod keeps restarting because the container was **killed by the kernel's out-of-memory (OOM) killer** (`OOMKilled`), indicating it exceeded its memory limit. Here's why:\n\n- **Memory limits are too low**: The container is limited to `64Mi` of memory, but the `polinux/stress` image likely allocates more memory than this limit, triggering the OOM killer.\n- **Exit code 137**: This confirms the container was sent `SIGKILL` (kill signal) by the OOM killer.\n- **CrashLoopBackOff**: The kubelet restarts the pod every 5 minutes after it crashes, leading to the loop.\n\n### Fix\nIncrease the memory limit in the pod's configuration. For example, set `memory: \"256Mi\"` in the container's resource limits. Monitor memory usage to ensure the new limit suffices.",
+  "chars": 754,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:18:26.276721+00:00",
+  "load_before": 1.8,
+  "load_after": 2.08,
+  "seconds": 95.2,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "memory-hog",
+    "namespaces": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "container": "hog",
+    "tail": 50,
+    "name": "memory-hog-bc76968c6-c4rms"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/memory-hog\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-c4rms\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 14, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-c4rms_demo(82530907-f6bc-4257-8fd1-7b3553c4f861)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"source\": \"current\", \"logs\": \"stress: info: [1] dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd\", \"container\": \"hog\"}"
+   }
+  ],
+  "draft": "The pod `memory-hog-bc76968c6-c4rms` keeps restarting because its container `hog` is **intentionally allocating memory beyond its limits**, triggering the kernel's **out-of-memory (OOM) killer**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n- **Container behavior**: The `stress` tool (from the image `polinux/stress`) is explicitly designed to consume memory. The log `stress: info: [1] dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd` confirms it is allocating memory (`1 vm` = 1 virtual memory unit, which is a memory hog).\n- **Resource limits**: The container is limited to **64Mi of memory** (`limits.memory: 64Mi`), but the stress tool exceeds this, causing the OOM killer to terminate it.\n- **Restart policy**: The `CrashLoopBackOff` policy restarts the pod repeatedly after each crash.\n\n---\n\n### **Key Findings**\n1. **Exit code 137** (signal `SIGKILL`) confirms the OOM killer terminated the container.\n2. **Memory limits** are insufficient for the workload's design.\n3. **14 restarts** indicate the pod has been crashing and restarting frequently.\n4. **Logs** show no application errors, but confirm the stress tool is running as expected.\n\n---\n\n### **Solution**\n1. **Increase memory limits** in the pod's configuration (e.g., `memory: 128Mi` or higher) to match the workload's requirements.\n2. **Optimize the workload** if this is unintended: adjust the stress tool's parameters (e.g., `--vm 0` to disable memory hogginess) or replace it with a less resource-intensive process.\n3. **Monitor resource usage** to ensure the new limits do not cause other resource contention.\n\nThis is a **resource constraint issue**, not a code bug. Adjusting limits or tuning the workload will resolve the restarts.",
+  "contradictions": [],
+  "nudges": 1,
+  "timing": {
+   "model_ms": 95149.8,
+   "tool_ms": 43.0,
+   "rounds": 3,
+   "round_ms": [
+    36650.2,
+    21023.5,
+    37476.1
+   ],
+   "slowest_round_ms": 37476.1,
+   "model_share": 1.0,
+   "wall_ms": 95198.7,
+   "unaccounted_ms": 6.0,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The pod `memory-hog-bc76968c6-c4rms` keeps restarting because its container `hog` is **intentionally allocating memory beyond its limits**, triggering the kernel's **out-of-memory (OOM) killer**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n- **Container behavior**: The `stress` tool (from the image `polinux/stress`) is explicitly designed to consume memory. The log `stress: info: [1] dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd` confirms it is allocating memory (`1 vm` = 1 virtual memory unit, which is a memory hog).\n- **Resource limits**: The container is limited to **64Mi of memory** (`limits.memory: 64Mi`), but the stress tool exceeds this, causing the OOM killer to terminate it.\n- **Restart policy**: The `CrashLoopBackOff` policy restarts the pod repeatedly after each crash.\n\n---\n\n### **Key Findings**\n1. **Exit code 137** (signal `SIGKILL`) confirms the OOM killer terminated the container.\n2. **Memory limits** are insufficient for the workload's design.\n3. **14 restarts** indicate the pod has been crashing and restarting frequently.\n4. **Logs** show no application errors, but confirm the stress tool is running as expected.\n\n---\n\n### **Solution**\n1. **Increase memory limits** in the pod's configuration (e.g., `memory: 128Mi` or higher) to match the workload's requirements.\n2. **Optimize the workload** if this is unintended: adjust the stress tool's parameters (e.g., `--vm 0` to disable memory hogginess) or replace it with a less resource-intensive process.\n3. **Monitor resource usage** to ensure the new limits do not cause other resource contention.\n\nThis is a **resource constraint issue**, not a code bug. Adjusting limits or tuning the workload will resolve the restarts.",
+  "chars": 1709,
+  "hedges": []
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:20:01.481550+00:00",
+  "load_before": 2.08,
+  "load_after": 1.97,
+  "seconds": 99.1,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 2,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "memory leak"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "arguments": [
+   {
+    "workload": "memory-hog",
+    "namespaces": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo",
+    "container": "hog",
+    "tail": 50
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['memory leak'] with no measurement behind it"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/memory-hog\": {\"status\": \"OOMKilled\", \"pods\": 1, \"example\": \"memory-hog-bc76968c6-c4rms\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"OOMKilled\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 15, \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"source\": \"current\", \"logs\": \"stress: info: [1] dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd\", \"container\": \"hog\"}"
+   }
+  ],
+  "draft": "The pod `memory-hog-bc76968c6-c4rms` keeps restarting due to **out-of-memory (OOM) kills** caused by the container exceeding its memory limit of **64Mi**. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **OOMKilled by the Kernel**:  \n   - The container (`polinux/stress`) is being terminated by the Linux OOM killer (`OOMKilled`) when it exceeds the memory limit of **64Mi**. This is confirmed by the `last_termination.reason` in `describe_pod` and the restart count (15 restarts).\n\n2. **Stress Tool Behavior**:  \n   - The logs from the `hog` container show it is running the `stress` tool, which is designed to stress CPU, memory, and I/O. The log line `stress: info: [1] dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd` indicates it is allocating memory (1 vm = 1 virtual memory unit, likely 1MiB).  \n   - If the stress tool is misconfigured or the workload is not properly constrained, it could rapidly exhaust the 64Mi limit, triggering the OOM killer.\n\n3. **No Explicit Memory Error in Logs**:  \n   - The `get_pod_logs` output does not show direct memory exhaustion warnings (e.g., `MemoryLimitExceeded`), but the OOM killer acts as a last resort when the system runs out of memory. This suggests the container\u2019s memory usage spikes beyond the limit, even if the tool itself does not log the exact overflow.\n\n---\n\n### **Recommendations**\n1. **Adjust Memory Limits**:  \n   - Increase the memory limit in the pod\u2019s resource requests/limits (e.g., `limits.memory: 128Mi`) to accommodate the stress tool\u2019s workload.  \n   - Ensure `requests.memory` is set to a value that reflects the minimum memory needed to run the application without triggering OOM kills.\n\n2. **Optimize Workload**:  \n   - Verify the stress tool\u2019s configuration to ensure it does not allocate more memory than necessary. For example, use `stress --vm 1 --vm-bytes 100M --vm-keep` to control memory usage.\n\n3. **Monitor and Debug**:  \n   - Use `get_pod_logs` with a higher `tail` value (e.g., 100) to capture more context if the issue is intermittent.  \n   - Check for memory leaks in the application by inspecting the container\u2019s behavior under load.\n\n---\n\n### **Summary**\nThe pod restarts because the `stress` tool in the container exceeds the 64Mi memory limit, triggering the OOM killer. While the logs do not explicitly show memory exhaustion, the OOM killer\u2019s intervention confirms the container is using more memory than allowed. Adjusting the memory limits or optimizing the workload will resolve this issue.",
+  "contradictions": [],
+  "nudges": 1,
+  "timing": {
+   "model_ms": 98999.9,
+   "tool_ms": 45.5,
+   "rounds": 3,
+   "round_ms": [
+    37153.7,
+    14989.5,
+    46856.8
+   ],
+   "slowest_round_ms": 46856.8,
+   "model_share": 1.0,
+   "wall_ms": 99050.0,
+   "unaccounted_ms": 4.6,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The pod `memory-hog-bc76968c6-c4rms` keeps restarting due to **out-of-memory (OOM) kills** caused by the container exceeding its memory limit of **64Mi**. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **OOMKilled by the Kernel**:  \n   - The container (`polinux/stress`) is being terminated by the Linux OOM killer (`OOMKilled`) when it exceeds the memory limit of **64Mi**. This is confirmed by the `last_termination.reason` in `describe_pod` and the restart count (15 restarts).\n\n2. **Stress Tool Behavior**:  \n   - The logs from the `hog` container show it is running the `stress` tool, which is designed to stress CPU, memory, and I/O. The log line `stress: info: [1] dispatching hogs: 0 cpu, 0 io, 1 vm, 0 hdd` indicates it is allocating memory (1 vm = 1 virtual memory unit, likely 1MiB).  \n   - If the stress tool is misconfigured or the workload is not properly constrained, it could rapidly exhaust the 64Mi limit, triggering the OOM killer.\n\n3. **No Explicit Memory Error in Logs**:  \n   - The `get_pod_logs` output does not show direct memory exhaustion warnings (e.g., `MemoryLimitExceeded`), but the OOM killer acts as a last resort when the system runs out of memory. This suggests the container\u2019s memory usage spikes beyond the limit, even if the tool itself does not log the exact overflow.\n\n---\n\n### **Recommendations**\n1. **Adjust Memory Limits**:  \n   - Increase the memory limit in the pod\u2019s resource requests/limits (e.g., `limits.memory: 128Mi`) to accommodate the stress tool\u2019s workload.  \n   - Ensure `requests.memory` is set to a value that reflects the minimum memory needed to run the application without triggering OOM kills.\n\n2. **Optimize Workload**:  \n   - Verify the stress tool\u2019s configuration to ensure it does not allocate more memory than necessary. For example, use `stress --vm 1 --vm-bytes 100M --vm-keep` to control memory usage.\n\n3. **Monitor and Debug**:  \n   - Use `get_pod_logs` with a higher `tail` value (e.g., 100) to capture more context if the issue is intermittent.  \n   - Check for [unverified: memory leaks] in the application by inspecting the container\u2019s behavior under load.\n\n---\n\n### **Summary**\nThe pod restarts because the `stress` tool in the container exceeds the 64Mi memory limit, triggering the OOM killer. While the logs do not explicitly show memory exhaustion, the OOM killer\u2019s intervention confirms the container is using more memory than allowed. Adjusting the memory limits or optimizing the workload will resolve this issue.\n\n---\n**Evidence audit.**\n1 of 14 stated values could not be traced to any tool result for the workload they were stated about: `memory leak`. Treat these as inference, not measurement.",
+  "chars": 2687,
+  "hedges": [
+   "likely",
+   "suggests"
+  ]
+ },
+ {
+  "case": "oomkill_root_cause",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why does the memory-hog pod in the demo namespace keep restarting?",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-17T07:21:40.536391+00:00",
+  "load_before": 1.97,
+  "load_after": 1.83,
+  "seconds": 67.6,
+  "rounds_sent": 3,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "partial",
+  "unverified": [
+   "9"
+  ],
+  "tools": [
+   "list_pods",
+   "describe_pod"
+  ],
+  "arguments": [
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "memory-hog"
+   },
+   {
+    "name": "memory-hog-bc76968c6-c4rms",
+    "namespace": "demo"
+   }
+  ],
+  "failures": [],
+  "notes": [
+   "stated ['9'] with no measurement behind it"
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"memory-hog-bc76968c6-c4rms\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 15, \"node\": \"kubewhy-wire-control-plane\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"memory-hog-bc76968c6-c4rms\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"hog\": {\"image\": \"polinux/stress\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"100m\", \"memory\": \"64Mi\"}, \"ready\": false, \"restarts\": 15, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=hog pod=memory-hog-bc76968c6-c4rms_demo(82530907-f6bc-4257-8fd1-7b3553c4f861)\", \"last_termination\": {\"reason\": \"OOMKilled\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod `memory-hog-bc76968c6-c4rms` keeps restarting because it is being **killed by the kernel's out-of-memory (OOM) killer** (`OOMKilled`), causing a `CrashLoopBackOff` loop. Here's why:\n\n- **Memory limits are too low**: The container is limited to **64MiB of memory** (as set in `limits.memory`), but the `stress` image (used by `polinux/stress`) is likely consuming more memory than allocated, triggering the OOM killer.\n- **Exit code 137**: This confirms the container was killed by `kill -9` (SIGKILL) due to memory pressure.\n- **Requests vs. limits**: The memory request is only **32MiB**, which might be insufficient for the workload. Kubernetes may not evict the pod immediately if it's under memory pressure, but the OOM killer will act as a last resort.\n\n### Fix\nIncrease the memory limit in the pod's configuration (e.g., set `limits.memory` to a higher value like `256Mi` or more, depending on the workload). If this is a scheduled job, also check if the `activeDeadlineSeconds` is set appropriately to avoid premature termination.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 67607.5,
+   "tool_ms": 22.3,
+   "rounds": 3,
+   "round_ms": [
+    21905.5,
+    19399.6,
+    26302.4
+   ],
+   "slowest_round_ms": 26302.4,
+   "model_share": 1.0,
+   "wall_ms": 67631.6,
+   "unaccounted_ms": 1.8,
+   "slept_ms": 0.0
+  },
+  "policies": 0,
+  "answer": "The pod `memory-hog-bc76968c6-c4rms` keeps restarting because it is being **killed by the kernel's out-of-memory (OOM) killer** (`OOMKilled`), causing a `CrashLoopBackOff` loop. Here's why:\n\n- **Memory limits are too low**: The container is limited to **64MiB of memory** (as set in `limits.memory`), but the `stress` image (used by `polinux/stress`) is likely consuming more memory than allocated, triggering the OOM killer.\n- **Exit code 137**: This confirms the container was killed by `kill -9` (SIGKILL) due to memory pressure.\n- **Requests vs. limits**: The memory request is only **32MiB**, which might be insufficient for the workload. Kubernetes may not evict the pod immediately if it's under memory pressure, but the OOM killer will act as a last resort.\n\n### Fix\nIncrease the memory limit in the pod's configuration (e.g., set `limits.memory` to a higher value like `256Mi` or more, depending on the workload). If this is a scheduled job, also check if the `activeDeadlineSeconds` is set appropriately to avoid premature termination.\n\n---\n**Evidence audit.**\n1 of 8 stated values could not be traced to any tool result for the workload they were stated about: `9`. Treat these as inference, not measurement.",
+  "chars": 1219,
+  "hedges": [
+   "likely",
+   "might be"
+  ]
+ }
+]

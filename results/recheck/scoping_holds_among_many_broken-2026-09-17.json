@@ -1,0 +1,389 @@
+[
+ {
+  "case": "scoping_holds_among_many_broken",
+  "model": "qwen3",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "passed": true,
+  "seconds": 61.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-17T12:16:33",
+  "load_before": 2.51,
+  "load_after": 2.94,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "log-shipper",
+    "namespaces": "demo"
+   },
+   {
+    "name": "log-shipper-fx7bh",
+    "namespace": "demo"
+   },
+   {
+    "name": "log-shipper-fx7bh",
+    "namespace": "demo",
+    "container": "shipper",
+    "tail": 50
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/log-shipper\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-shipper-fx7bh\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"log-shipper-fx7bh\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"shipper\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 8, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=shipper pod=log-shipper-fx7bh_demo(941862f3-158c-4eb2-9fa7-98f314472864)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 2}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"log-shipper-fx7bh\", \"source\": \"current\", \"logs\": \"no sink configured\", \"container\": \"shipper\"}"
+   }
+  ],
+  "draft": "The **log-shipper daemonset** in the `demo` namespace is failing because the container's logs are not being directed to any sink (e.g., a logging system, file, or external service). The `get_pod_logs` response shows `\"no sink configured\"` for the `shipper` container, indicating the container isn't set up to output logs anywhere. This likely causes the daemonset to fail silently or crash due to missing functionality.\n\n### Key Issues:\n1. **Missing Log Sink Configuration**:  \n   The `log-shipper` container (using `busybox:1.36`) is not configured to ship logs to any destination. Without a sink, the daemonset cannot fulfill its purpose, leading to repeated crashes (`CrashLoopBackOff`).\n\n2. **Exit Code 2**:  \n   The container exited with code `2`, which typically indicates a general error. Combined with the lack of logs, this confirms the issue is configuration-related, not a runtime crash.\n\n### Next Steps:\n- Verify the log-shipper's configuration to ensure it includes a valid sink (e.g., `stdout`, `file`, or a logging service).\n- Check if the `busybox` image includes the necessary tools for log shipping (e.g., `nc`, `curl`, or custom scripts).\n- Ensure the daemonset's YAML defines a `volume` or `env` for the sink configuration, and that the ConfigMap/Secrets referenced are correctly mounted.",
+  "answer": "The **log-shipper daemonset** in the `demo` namespace is failing because the container's logs are not being directed to any sink (e.g., a logging system, file, or external service). The `get_pod_logs` response shows `\"no sink configured\"` for the `shipper` container, indicating the container isn't set up to output logs anywhere. This likely causes the daemonset to fail silently or crash due to missing functionality.\n\n### Key Issues:\n1. **Missing Log Sink Configuration**:  \n   The `log-shipper` container (using `busybox:1.36`) is not configured to ship logs to any destination. Without a sink, the daemonset cannot fulfill its purpose, leading to repeated crashes (`CrashLoopBackOff`).\n\n2. **Exit Code 2**:  \n   The container exited with code `2`, which typically indicates a general error. Combined with the lack of logs, this confirms the issue is configuration-related, not a runtime crash.\n\n### Next Steps:\n- Verify the log-shipper's configuration to ensure it includes a valid sink (e.g., `stdout`, `file`, or a logging service).\n- Check if the `busybox` image includes the necessary tools for log shipping (e.g., `nc`, `curl`, or custom scripts).\n- Ensure the daemonset's YAML defines a `volume` or `env` for the sink configuration, and that the ConfigMap/Secrets referenced are correctly mounted.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 61276.9,
+   "tool_ms": 34.1,
+   "rounds": 2,
+   "round_ms": [
+    25649.8,
+    35627.1
+   ],
+   "slowest_round_ms": 35627.1,
+   "model_share": 0.999,
+   "wall_ms": 61312.9,
+   "unaccounted_ms": 1.9,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/log-shipper.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.waiting_message",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.waiting_message",
+       "value": "2"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "fd3599d4a8bd",
+  "target": {
+   "kind": "workload",
+   "name": "log-shipper",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "scoping_holds_among_many_broken",
+  "model": "qwen3",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "passed": true,
+  "seconds": 74.1,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-17T12:17:34",
+  "load_before": 2.94,
+  "load_after": 2.01,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "log-shipper",
+    "namespaces": "demo"
+   },
+   {
+    "name": "log-shipper-fx7bh",
+    "namespace": "demo"
+   },
+   {
+    "name": "log-shipper-fx7bh",
+    "namespace": "demo",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/log-shipper\": {\"status\": \"Error\", \"pods\": 1, \"example\": \"log-shipper-fx7bh\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"log-shipper-fx7bh\", \"namespace\": \"demo\", \"status\": \"Error\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"shipper\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 9, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 2}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"log-shipper-fx7bh\", \"source\": \"current\", \"logs\": \"no sink configured\"}"
+   }
+  ],
+  "draft": "The log-shipper daemonset in the `demo` namespace is failing because the `log-shipper-fx7bh` pod's container is exiting immediately with **exit code 2** due to a missing or misconfigured command. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **Empty Logs**: The container's logs show `\"no sink configured\"`, indicating the log-shipper process was never executed. This suggests the container's entrypoint or command is incomplete or incorrect.\n2. **Busybox Image**: The `busybox:1.36` image is a minimal container with no default process. It requires explicit `command` and `args` to run (e.g., `sh`, `tail`, or a custom script). If these are missing, the container exits immediately with code 2.\n3. **No Restart Policy**: While the pod has 9 restarts, Kubernetes' default `Always` policy keeps respawning it. The underlying issue remains: the container fails to start.\n\n---\n\n### **Fix**\nUpdate the daemonset's pod spec to explicitly define the `command` and `args` for the `shipper` container. For example:\n```yaml\nspec:\n  containers:\n  - name: shipper\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"log-shipper-command-here\"]\n```\nReplace `log-shipper-command-here` with the actual command or script to run (e.g., `tail -f /var/log/containers/*.log` for kubelet logs). This ensures the container starts correctly and writes logs to stdout/stderr.",
+  "answer": "The log-shipper daemonset in the `demo` namespace is failing because the `log-shipper-fx7bh` pod's container is exiting immediately with **exit code 2** due to a missing or misconfigured command. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n1. **Empty Logs**: The container's logs show `\"no sink configured\"`, indicating the log-shipper process was never executed. This suggests the container's entrypoint or command is incomplete or incorrect.\n2. **Busybox Image**: The `busybox:1.36` image is a minimal container with no default process. It requires explicit `command` and `args` to run (e.g., `sh`, `tail`, or a custom script). If these are missing, the container exits immediately with code 2.\n3. **No Restart Policy**: While the pod has 9 restarts, Kubernetes' default `Always` policy keeps respawning it. The underlying issue remains: the container fails to start.\n\n---\n\n### **Fix**\nUpdate the daemonset's pod spec to explicitly define the `command` and `args` for the `shipper` container. For example:\n```yaml\nspec:\n  containers:\n  - name: shipper\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"log-shipper-command-here\"]\n```\nReplace `log-shipper-command-here` with the actual command or script to run (e.g., `tail -f /var/log/containers/*.log` for kubelet logs). This ensures the container starts correctly and writes logs to stdout/stderr.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 74076.0,
+   "tool_ms": 38.5,
+   "rounds": 3,
+   "round_ms": [
+    33692.9,
+    10977.9,
+    29405.2
+   ],
+   "slowest_round_ms": 33692.9,
+   "model_share": 0.999,
+   "wall_ms": 74117.2,
+   "unaccounted_ms": 2.8,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.last_termination.exit_code",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/log-shipper.example",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.restarts",
+       "value": "9"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "21356bfce87e",
+  "target": {
+   "kind": "workload",
+   "name": "log-shipper",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "scoping_holds_among_many_broken",
+  "model": "qwen3",
+  "context": "kind-kubewhy-wire",
+  "think": true,
+  "passed": true,
+  "seconds": 54.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-17T12:18:49",
+  "load_before": 2.01,
+  "load_after": 1.5,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "log-shipper",
+    "namespaces": "demo"
+   },
+   {
+    "name": "log-shipper-fx7bh",
+    "namespace": "demo"
+   },
+   {
+    "tail": 50,
+    "name": "log-shipper-fx7bh",
+    "namespace": "demo",
+    "container": "shipper"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/log-shipper\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"log-shipper-fx7bh\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"log-shipper-fx7bh\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-wire-control-plane\", \"containers\": {\"shipper\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 9, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=shipper pod=log-shipper-fx7bh_demo(941862f3-158c-4eb2-9fa7-98f314472864)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 2}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"log-shipper-fx7bh\", \"source\": \"current\", \"logs\": \"no sink configured\", \"container\": \"shipper\"}"
+   }
+  ],
+  "draft": "The log-shipper daemonset is failing because the container's log sink is not configured. The `no sink configured` message in the logs indicates the container cannot write logs to any destination, causing it to exit with code 2. \n\n**Fix:**  \nUpdate the daemonset's pod specification to include a valid log sink configuration (e.g., a logging sidecar or output destination like stdout/stderr). Verify the container image (`busybox:1.36`) includes tools required for log shipping, or replace it with an appropriate image. \n\nExample fix:  \n```yaml\nspec:\n  containers:\n  - name: shipper\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"while true; do echo \\\"$(date)\\\"; sleep 1; done\"]\n    volumeMounts:\n    - name: logs\n      mountPath: /var/log\n  volumes:\n  - name: logs\n    emptyDir: {}\n```  \nThis ensures logs are written to `/var/log` and captured by the sink.",
+  "answer": "The log-shipper daemonset is failing because the container's log sink is not configured. The `no sink configured` message in the logs indicates the container cannot write logs to any destination, causing it to exit with code 2. \n\n**Fix:**  \nUpdate the daemonset's pod specification to include a valid log sink configuration (e.g., a logging sidecar or output destination like stdout/stderr). Verify the container image (`busybox:1.36`) includes tools required for log shipping, or replace it with an appropriate image. \n\nExample fix:  \n```yaml\nspec:\n  containers:\n  - name: shipper\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"while true; do echo \\\"$(date)\\\"; sleep 1; done\"]\n    volumeMounts:\n    - name: logs\n      mountPath: /var/log\n  volumes:\n  - name: logs\n    emptyDir: {}\n```  \nThis ensures logs are written to `/var/log` and captured by the sink.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 54647.2,
+   "tool_ms": 35.4,
+   "rounds": 2,
+   "round_ms": [
+    20912.1,
+    33735.1
+   ],
+   "slowest_round_ms": 33735.1,
+   "model_share": 0.999,
+   "wall_ms": 54683.6,
+   "unaccounted_ms": 0.9,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.shipper.waiting_message",
+       "value": "2"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "42effbd17a60",
+  "target": {
+   "kind": "workload",
+   "name": "log-shipper",
+   "namespace": "demo"
+  }
+ }
+]
