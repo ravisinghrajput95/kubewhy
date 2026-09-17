@@ -624,8 +624,14 @@ were failing correct answers are fixed; the three owner decisions are applied.
      analyse with `results/prefetch/analyse.py --prefetch-arm control`.
 
 3. **`routers/k8s_pods_info.py` has never had a mutation survey at its current
-   size**, and it grew by ~200 lines today. `evals/mutate.py`, its own test
-   file first, then read the survivors. It is CPU-heavy: nothing else may run.
+   size** (2413 lines, 55 functions). `evals/mutate.py`, then read the
+   survivors. It is CPU-heavy: nothing else may run. **Started 2026-09-17 with
+   `--tests tests/test_k8s_projection.py tests/test_agent_loop.py
+   tests/test_api.py tests/test_controller.py tests/test_mcp_server.py
+   tests/test_redaction.py` and stopped by the owner at ~line 795 of 2413,
+   about 16 minutes in, with 30 survivors reported. Nothing was kept:** a third
+   of a module is not a survey, and `--json` had not been written yet. Budget
+   45-60 minutes for the whole file on that test set.
 
 4. **Open, with evidence, not yet acted on:**
    - `scan_references` is never called for an unbound claim — 0 of 15 runs
