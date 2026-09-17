@@ -8,7 +8,7 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-16 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1876 passed, 0 skipped**
+authority, not this line — tree clean and pushed, **1897 passed, 0 skipped**
 (50s), CI green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
 renumbered by the owner before tagging. **mypy and ruff are both at zero and both gate**.
 56 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
@@ -612,10 +612,9 @@ were failing correct answers are fixed; the three owner decisions are applied.
      significant, and the off arm's own swing between days (1/5 → 4/5) is larger,
      but it is defect 53's failure mode, so re-measure it deeper (n≥10, paired)
      before trusting the default for event-only causes.
-   - Four contradiction-checker false positives, listed in defect 56 and all
-     unfixed. The prefetched-snapshot one (`running_vs_claimed_failing` against a
-     pod caught Running between restarts) has appeared twice. Replay before
-     fixing any of them.
+   - Four contradiction-checker false-positive shapes: **fixed and replayed
+     2026-09-17** (2089 records, 6 findings removed, 0 added, 5 verdicts out of
+     `contradicted`, 0 in). Defect 56 carries the guards.
    - `evals/reason_coverage.py`'s REASONS list lacks `Preempted` and
      `ExternalProvisioning`, which a live cluster emits (25 of 49 measured, 27 of
      51 with them).

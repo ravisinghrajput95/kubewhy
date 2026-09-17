@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1876 passing, **0 skipped**, in 50s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1897 passing, **0 skipped**, in 50s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -3797,7 +3797,8 @@ on 2026-09-16 and 4/5 on 2026-09-17. With that much run-to-run spread, a 4/5
 against 2/5 split (Fisher p = 0.52) says nothing on its own. Recorded as the
 case to watch, not as a finding.
 
-**Four more contradiction-checker false positives, found by reading answers:**
+**Four more contradiction-checker false-positive shapes, found by reading
+answers, and fixed the same day:**
 
 | clause | shape | seen |
 |---|---|---|
@@ -3806,8 +3807,19 @@ case to watch, not as a finding.
 | "- The **OOMKilled** claim was incorrect:" | denial, cut by the splitter | once |
 | "SIGKILL from the kernel (if memory is exhausted, but `OOMKilled` would be the reason)" | conditional rule statement | once |
 
-None has been fixed. Every checker change here is replayed over the recorded
-corpus before it is believed, and that has not been done.
+**Fixed and replayed 2026-09-17.** The guards are positional, as defect 52's
+were: a generic failure phrase whose subject directly before it is a probe,
+hook or check is not a claim about the pod; a counterfactual ("would be the
+reason") after the phrase; an adjective denial ("the claim was incorrect")
+alongside "not" and "never"; and the rule statement with the acronym spelled
+out and markup between the conditional and its subject. Replayed before
+against after over **2089 records: 6 findings removed -- the 5 clauses above
+plus one more of the rule-statement shape the replay found -- 0 added, 5
+verdicts out of `contradicted` and 0 into it.** Six mechanisms each disabled in
+turn, each failing at least one test; the new class inherits defect 52's
+`CLAIMS`, so a fix that stops either rule firing at all fails those too. The
+probe guard deliberately does not reach `_NOT_READY`'s "readiness probe is
+failing", which does contradict `ready = true`, and a test holds that line.
 
 **The frozen criterion was revised once more, before this measurement.** The
 healthy case's word list had flagged a denial of OOMKilled in defect 55; it now

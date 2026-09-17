@@ -152,6 +152,27 @@ _NOT_READY = (
     "failing its readiness probe",
     "readiness probe is failing",
 )
+# The subject directly before a generic failure phrase, when it is not the pod.
+# "The liveness probe is failing repeatedly" says the probe fails, which is why
+# a Running pod restarts -- it does not claim the pod is not running. Both
+# recorded clauses came from `scoping_quiet_workload_beside_loud_one`, whose
+# pod really does restart on a failing probe, and one of them says "it is
+# **Running** and **Ready**, but the probe is failing" in the same sentence.
+# Only for the generic phrases: "readiness probe is failing" is in _NOT_READY
+# on purpose, because a failing readiness probe does contradict ready = true.
+_ANOTHER_SUBJECT = re.compile(
+    r"\b(?:liveness|readiness|startup|health)?[\s\W]*"
+    r"(?:probe|hook|check|script|command|test)\s*$")
+
+
+def _about_something_else(lowered, phrase):
+    """Whether the thing said to be failing is a probe or hook, not the pod."""
+    start = lowered.find(phrase)
+    if start < 0:
+        return False
+    return bool(_ANOTHER_SUBJECT.search(lowered[:start].rstrip(_MARKUP_CHARS)))
+
+
 _NOT_RUNNING = (
     "is not running",
     "are not running",
@@ -240,7 +261,10 @@ _DENIED_AFTER = re.compile(
     r"(?:\s*\([^)]{0,40}\))?"
     r"(?:\s+(?!because\b|and\b|but\b|so\b|which\b|since\b|as\b|while\b|when\b"
     r"|if\b|it\b|that\b|this\b)[\w'\u2019-]+)?"
-    r"\s*\)?\s*(?:is|was|were|are|has\s+been)\s+(?:not|never)\b")
+    r"\s*\)?\s*(?:is|was|were|are|has\s+been)\s+"
+    # "not" and "never", and the adjectives that deny just as flatly:
+    # "- The **OOMKilled** claim was incorrect:" (2026-09-17, poststart A/B).
+    r"(?:not|never|incorrect|wrong|false|mistaken|unfounded|unsupported)\b")
 
 # 2. A negating noun directly before it: "instead of `OOMKilled`",
 #    "the absence of OOMKilled", "lack of OOMKilled confirmation". Directly --
@@ -264,6 +288,8 @@ _DENIED_BEFORE = re.compile(
 _CONCESSION = re.compile(r"^\W*(?:while|although|though|even though)\b")
 
 _MARKUP_CHARS = "`\"'*_( "
+
+_COUNTERFACTUAL = re.compile(r"^[\w'\u2019-]*\W{0,4}would\s+(?:be|have|show|say|read)\b")
 
 
 def _asserted(lowered, phrase):
@@ -296,6 +322,13 @@ def _asserted(lowered, phrase):
     if _DENIED_AFTER.match(tail):
         return False
 
+    # A counterfactual names the phrase as what WOULD have been seen:
+    # "SIGKILL from the kernel (if memory is exhausted, but `OOMKilled` would
+    # be the `reason`)". The measured reason is what the clause is contrasting
+    # against, so it claims the opposite of what it was flagged for.
+    if _COUNTERFACTUAL.match(tail):
+        return False
+
     if _CONCESSION.match(lowered):
         comma = lowered.find(",")
         if comma < 0 or start < comma:
@@ -326,8 +359,15 @@ _REASON_CONTRAST = re.compile(
 
 
 _OOM_RULE_STATEMENT = re.compile(
-    r"\b(?:when|if|whenever)\s+(?:the\s+)?(?:kernel['\u2019]?s?\s+|linux\s+)?"
-    r"oom[- ]?killer\s+(?:terminat|kill|end|stop)"
+    # Markup may sit between the conditional and its subject: the recorded
+    # clause is "*only if* the kernel's ..." and \s+ stopped at the asterisk.
+    r"\b(?:when|if|whenever)[\s*_`]+(?:the\s+)?(?:kernel['\u2019]?s?\s+|linux\s+)?"
+    # "the kernel's out-of-memory (OOM) killer terminated the container" --
+    # the same rule with the acronym expanded, 2026-09-17.
+    # The acronym may be spelled out and then not repeated: "the kernel's
+    # out-of-memory (OOM) killer terminated the container".
+    r"(?:out[- ]of[- ]memory\s*(?:\([^)]{0,20}\))?\s*)?"
+    r"(?:oom[- ]?)?killer\s+(?:terminat|kill|end|stop)"
     r"|\b(?:sets?|writes?|records?|uses?)\b[^.]{0,30}?oomkilled\W{0,3}"
     r"(?:\s+\w+)?\s+for\s+(?:an?\s+)?oom[- ]?kill")
 
@@ -716,7 +756,8 @@ def scan(answer, tool_outputs):
                     "ready reported true by the tools", clause, entries,
                     "ready"))
             hit = next((p for p in _NOT_RUNNING
-                        if p in lowered and _asserted(lowered, p)), None)
+                        if p in lowered and _asserted(lowered, p)
+                        and not _about_something_else(lowered, p)), None)
             if hit and known.get("status", "").startswith("running"):
                 findings.append(_finding(
                     "running_vs_claimed_failing", hit,

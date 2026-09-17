@@ -513,6 +513,82 @@ class TestDenialsTheBackwardWindowCannotSee:
         assert found and found[0]["rule"] == "termination_reason_vs_memory_cause"
 
 
+class TestFalsePositivesTheRecheckRead(TestDenialsTheBackwardWindowCannotSee):
+    """
+    Defect 56. Four more shapes, every clause recorded, found by reading the
+    answers of the 2026-09-16/17 sets rather than by counting them. Replayed
+    over 2089 records: 6 findings removed, 0 added, 5 verdicts out of
+    `contradicted` and none into it.
+
+    Inherits the defect 52 CLAIMS, so a fix here that stops the rule firing at
+    all fails those too.
+    """
+
+    RUNNING = ("scan_cluster", {"demo/slow-starter": {
+        "status": "Running", "ready": "1/1", "pods": 1,
+        "example": "slow-starter-1"}})
+
+    NOT_CLAIMS = [
+        # A counterfactual: the phrase is what would have been seen.
+        "- **SIGKILL** from the kernel (if memory is exhausted, but "
+        "`OOMKilled` would be the `reason`).",
+        # A denial that says so with an adjective rather than "not".
+        "- The **OOMKilled** claim was incorrect:",
+        # The rule again, with the acronym spelled out and markup between the
+        # conditional and its subject.
+        "The kubelet sets the `last_termination.reason` field to "
+        '**"OOMKilled"** *only if* the kernel\'s out-of-memory (OOM) killer '
+        "terminated the container.",
+        "The kubelet sets `OOMKilled` as the reason **only if** the "
+        "kernel\u2019s out-of-memory killer terminated the container.",
+    ]
+
+    ABOUT_THE_PROBE = [
+        "The liveness probe is failing repeatedly, causing the container to "
+        "restart.",
+        'The pod is not "crashing" in the traditional sense\u2014it is '
+        "**Running** and **Ready**, but the probe is failing to detect it as "
+        "healthy, leading to termination.",
+        "The startup check is failing, so the kubelet restarts it.",
+    ]
+
+    ABOUT_THE_POD = [
+        # The counter: the same rule, on the pod itself, still fires.
+        "The pod is failing and has not come back.",
+        "The deployment is failing to stay up.",
+    ]
+
+    @pytest.mark.parametrize("clause", NOT_CLAIMS)
+    def test_a_recorded_non_claim_is_not_a_contradiction(self, clause):
+        assert grounding.check(clause, ev(self.KILLED))["contradictions"] == []
+
+    @pytest.mark.parametrize("clause", ABOUT_THE_PROBE)
+    def test_a_failing_probe_is_not_a_claim_that_the_pod_is_not_running(self, clause):
+        """
+        A Running, Ready pod whose liveness probe fails is exactly what this
+        fixture is: the probe failing is why it restarts. Both recorded
+        clauses came from `scoping_quiet_workload_beside_loud_one`, and the
+        scan row they were measured against was a snapshot taken between
+        restarts -- which the prefetch makes the first evidence in every run.
+        """
+        assert grounding.check(clause, ev(self.RUNNING))["contradictions"] == []
+
+    @pytest.mark.parametrize("clause", ABOUT_THE_POD)
+    def test_the_same_claim_about_the_pod_is_still_caught(self, clause):
+        found = grounding.check(clause, ev(self.RUNNING))["contradictions"]
+        assert found and found[0]["rule"] == "running_vs_claimed_failing"
+
+    def test_a_readiness_probe_failure_still_contradicts_ready(self):
+        """
+        `_NOT_READY` carries "readiness probe is failing" on purpose: a
+        failing readiness probe does contradict ready = true, and the guard
+        above must not reach it.
+        """
+        found = grounding.check("The readiness probe is failing.",
+                                ev(self.RUNNING))["contradictions"]
+        assert found and found[0]["rule"] == "ready_vs_claimed_not_ready"
+
+
 class TestTheOomSpellingsTheModelActuallyUses:
     """
     The tuple carried "oom killed" and "oom-killed" and nothing else in that
