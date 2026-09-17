@@ -47,6 +47,11 @@ cases and reading each disagreement with the grader:
 - oomkill: "OOMKill the process" matched no term. Added `oomkill`.
 - crashloop: "database" plus "connect" admitted a guess from a truncated log.
   Now the port, or "database" with "refused".
+
+Revised 2026-09-17, before the re-measurement on 3152e9a and after defect 55
+had read its runs by hand: the healthy case's `wrong` was a word list and
+flagged a denial of OOMKilled. It is now grounding.check(), as poststart's is.
+Replayed over defect 55's 70 records it reproduces the hand count exactly.
 """
 import os
 import re
@@ -109,8 +114,10 @@ def judge(record):
     elif case == "healthy_not_reported_broken":
         out["right"] = _any(text, ["healthy", "running normally", "no issue", "not broken",
                                    "functioning", "no problem"])
-        out["wrong"] = [t for t in ["crashloop", "oomkilled", "is not healthy", "unhealthy",
-                                    "not ready", "is failing"] if t in text]
+        # Was a word list, and it flagged "no termination reasons (like
+        # OOMKilled) were reported" -- a denial -- in defect 55. Now the
+        # contradiction checker, which reads assertions and not words.
+        out["wrong"] = out["contradicted"]
         out["right"] = out["right"] and not out["wrong"]
     elif case == "crashloop_root_cause":
         out["right"] = "5432" in text or ("database" in text and "refused" in text)

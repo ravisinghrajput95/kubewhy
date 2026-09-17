@@ -18,6 +18,8 @@ import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
+PREFETCH_IN_CONTROL = False
+
 crit = SourceFileLoader("crit", str(Path(__file__).with_name("criterion.py"))).load_module()
 
 
@@ -64,12 +66,15 @@ def pairs(records):
         if {one["arm"], two["arm"]} != {"control", "variant"} or one["case"] != two["case"]:
             raise SystemExit(f"records {i},{i + 1} are not one pair")
         by = {one["arm"]: one, two["arm"]: two}
-        out.append((by["control"], by["variant"]))
+        if PREFETCH_IN_CONTROL:
+            out.append((by["variant"], by["control"]))
+        else:
+            out.append((by["control"], by["variant"]))
     return out
 
 
 def main(paths):
-    pooled = {"control": [], "variant": []}
+    pooled = {"off": [], "on": []}
     all_pairs = []
     print(f"{'case':<30} {'arm':<7} {'right':>5} {'looked':>6} {'grader':>6} "
           f"{'rounds med':>10} {'wall med s':>10} {'model med s':>11} {'tool med ms':>11}")
@@ -81,7 +86,7 @@ def main(paths):
         voids = [(c, v) for c, v in case_pairs if c.get("void") or v.get("void")]
         usable = [(c, v) for c, v in case_pairs if (c, v) not in leaks and (c, v) not in voids]
         name = records[0]["case"]
-        for arm, index in (("control", 0), ("variant", 1)):
+        for arm, index in (("off", 0), ("on", 1)):
             rows = [p[index] for p in usable]
             judged = [crit.judge(r) for r in rows]
             for r, j in zip(rows, judged, strict=True):
@@ -104,25 +109,33 @@ def main(paths):
     for key, label in (("wall_ms", "wall"), ("model_ms", "model"), ("rounds", "rounds")):
         diffs = [(v["timing"][key] - c["timing"][key]) for c, v in all_pairs]
         scale = 1000 if key.endswith("_ms") else 1
-        print(f"  {label:<6} variant - control: median {statistics.median(diffs) / scale:+.1f}, "
+        print(f"  {label:<6} on - off: median {statistics.median(diffs) / scale:+.1f}, "
               f"mean {statistics.mean(diffs) / scale:+.1f}; "
-              f"variant lower in {sum(d < 0 for d in diffs)}/{len(diffs)}, higher in "
+              f"on lower in {sum(d < 0 for d in diffs)}/{len(diffs)}, higher in "
               f"{sum(d > 0 for d in diffs)}; sign p={sign_test(diffs):.4g}, "
               f"permutation p={permutation(diffs):.4g}")
 
     right = {arm: sum(j["right"] for _, j in pooled[arm]) for arm in pooled}
     n = {arm: len(pooled[arm]) for arm in pooled}
-    p = fisher_two_sided(right["control"], n["control"] - right["control"],
-                         right["variant"], n["variant"] - right["variant"])
-    print(f"\n  right: control {right['control']}/{n['control']}, "
-          f"variant {right['variant']}/{n['variant']}, Fisher p={p:.4g}")
+    p = fisher_two_sided(right["off"], n["off"] - right["off"],
+                         right["on"], n["on"] - right["on"])
+    print(f"\n  right: prefetch off {right['off']}/{n['off']}, "
+          f"on {right['on']}/{n['on']}, Fisher p={p:.4g}")
     discordant = [(crit.judge(c)["right"], crit.judge(v)["right"]) for c, v in all_pairs]
     only_c = sum(1 for a, b in discordant if a and not b)
     only_v = sum(1 for a, b in discordant if b and not a)
     exact = sign_test([1] * only_v + [-1] * only_c)
-    print(f"  paired: right in control only {only_c}, variant only {only_v}, "
+    print(f"  paired: right with prefetch off only {only_c}, on only {only_v}, "
           f"exact McNemar p={exact:.4g}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    # Since the prefetch went on by default, an A/B varies
+    # TRIAGE_PREFETCH_TARGET=off in the variant arm and the control carries the
+    # prefetch. --prefetch-arm control swaps the arms before anything is read,
+    # so every table below still reads "without" against "with".
+    args = sys.argv[1:]
+    if args[:2] == ["--prefetch-arm", "control"]:
+        PREFETCH_IN_CONTROL = True
+        args = args[2:]
+    main(args)

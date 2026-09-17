@@ -551,6 +551,12 @@ def main():
                 # checker getting stricter.
                 "unverified": result.get("unverified", []),
                 "tools": [c["name"] for c in result.get("tool_calls", [])],
+                # How many of those the loop was handed rather than asked for.
+                # They lead the trace. Without this, the 2026-09-16 at-risk
+                # set could only show the prefetch fired by inference -- runs
+                # answering in round 1 while carrying scan_cluster.
+                "prefetched": sum(1 for c in result.get("tool_calls", [])
+                                  if c.get("prefetched")),
                 # The arguments too, because for several tools the name is not
                 # the behaviour. scan_cluster() and scan_cluster(workload='x')
                 # return different things -- the second reports one workload
