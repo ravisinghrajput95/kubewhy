@@ -584,6 +584,39 @@ class TestFailover:
         assert gate.chat("m", [{"role": "user", "content": "q"}],
                          [], False).content == "ok"
 
+    def test_prefetched_calls_alone_do_not_tie_a_run_to_a_wire(self):
+        """
+        Prefetched calls are written wire-neutral and shaped by whichever
+        backend sends them. Counting them as started made every prefetched run
+        unable to fail over before its first round.
+        """
+        gate = gateway(target(provider="broken"),
+                       target(mode="api", provider="otherwire",
+                              endpoint="http://localhost:8000/v1",
+                              model="other"),
+                       fallback_enabled=True)
+        prefetched = [{"role": "user", "content": "q"},
+                      {"role": "assistant", "content": "", "prefetch": [
+                          {"id": "prefetch-1", "name": "scan_cluster", "arguments": {}}]},
+                      {"role": "tool", "content": "{}",
+                       "prefetch": {"id": "prefetch-1", "name": "scan_cluster"}}]
+
+        assert gate.chat("m", prefetched, [], False).content == "ok"
+
+    def test_a_real_turn_after_the_prefetch_still_ties_it(self):
+        gate = gateway(target(provider="broken"),
+                       target(mode="api", provider="otherwire",
+                              endpoint="http://localhost:8000/v1",
+                              model="other"),
+                       fallback_enabled=True)
+        started = [{"role": "user", "content": "q"},
+                   {"role": "assistant", "content": "", "prefetch": []},
+                   {"role": "assistant", "content": ""},
+                   {"role": "tool", "tool_name": "list_pods", "content": "{}"}]
+
+        with pytest.raises(ConnectionError):
+            gate.chat("m", started, [], False)
+
     def test_a_run_in_progress_may_move_between_providers_sharing_a_wire(self):
         gate = gateway(target(provider="broken"),
                        target(provider="recorder", model="second"),

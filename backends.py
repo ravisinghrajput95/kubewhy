@@ -156,6 +156,43 @@ class Reply:
         self.usage = dict(usage or {})
 
 
+def shape_prefetched(messages, wire):
+    """
+    Translate the loop's wire-neutral prefetched calls into this wire's shape.
+
+    agent.prefetched_messages writes an assistant turn carrying `prefetch` (the
+    calls) and one tool message per result carrying `prefetch` (which call it
+    answers). Nothing else is touched. The two shapes differ exactly where
+    tool_message() already differs: Ollama matches a result to its call by
+    tool name, OpenAI by tool_call_id, and OpenAI wants arguments as a JSON
+    string where Ollama wants a mapping.
+    """
+    out = []
+    for message in messages:
+        marker = message.get("prefetch") if isinstance(message, dict) else None
+        if marker is None:
+            out.append(message)
+        elif message.get("role") == "assistant":
+            if wire == "openai":
+                calls = [{"id": call["id"], "type": "function",
+                          "function": {"name": call["name"],
+                                       "arguments": json.dumps(call["arguments"])}}
+                         for call in marker]
+            else:
+                calls = [{"function": {"name": call["name"],
+                                       "arguments": call["arguments"]}}
+                         for call in marker]
+            out.append({"role": "assistant", "content": message.get("content") or "",
+                        "tool_calls": calls})
+        elif wire == "openai":
+            out.append({"role": "tool", "tool_call_id": marker["id"],
+                        "content": message.get("content", "")})
+        else:
+            out.append({"role": "tool", "tool_name": marker["name"],
+                        "content": message.get("content", "")})
+    return out
+
+
 class OllamaBackend:
     """The default, and the only one whose numbers this project has measured."""
 
@@ -187,6 +224,7 @@ class OllamaBackend:
         ollama.chat() ignores it.
         """
         client = ollama.Client(host=self.endpoint, timeout=self.timeout)
+        messages = shape_prefetched(messages, self.wire)
         try:
             response = client.chat(
                 model=model, messages=messages, tools=tools, think=think,
@@ -320,7 +358,7 @@ class OpenAICompatBackend:
         self.timeout = timeout or TIMEOUT
 
     def chat(self, model, messages, tools, think):
-        payload = {"model": model, "messages": messages}
+        payload = {"model": model, "messages": shape_prefetched(messages, self.wire)}
         if tools:
             payload["tools"] = tools
 

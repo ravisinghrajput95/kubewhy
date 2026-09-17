@@ -457,6 +457,52 @@ def prefetch_enabled():
     return os.getenv("TRIAGE_PREFETCH_TARGET", "on").lower() not in ("0", "off", "false", "no")
 
 
+# What a question asking for a diagnosis sounds like. Deliberately a list of
+# cues rather than a classifier: every cue can be checked against the corpus's
+# questions, and the cost of a miss is only a round the prefetch did not save.
+# The cost of a false fire was measured, 2026-09-16: "Which engineer deployed
+# the crasher deployment, and when did they approve it?" was handed the
+# crashing pod, and 3 of 3 answers volunteered its crash cause -- true, measured,
+# and not what was asked -- so the verdict turned grounded on a question whose
+# honest answer is that no tool can know (13/13 insufficient_evidence before).
+_DIAGNOSTIC = re.compile(
+    r"\b(why|wrong|issues?|problems?|fail\w*|broken|break\w*|crash\w*|restart\w*"
+    r"|start\w*|ready|running|working|stuck|pending|down|unreachable|healthy"
+    r"|unhealthy|errors?|root cause|diagnos\w*|investigat\w*|troubleshoot\w*"
+    r"|debug\w*|oom\w*|kill\w*|back-?off|evict\w*|go away|hang\w*|schedul\w*"
+    r"|endpoints?)\b",
+    re.IGNORECASE,
+)
+
+
+# Kubernetes-shaped identifiers: anything carrying a hyphen, dot, underscore or
+# slash. Removed before matching, because object names carry fault words --
+# `crasher`, `healthy-web`, `never-ready` -- and the first version of this gate
+# matched "crash" inside `crasher` on the very question it was written for.
+_IDENTIFIER = re.compile(r"\S*[-._/]\S*")
+
+
+def asks_for_diagnosis(question, target=None):
+    """
+    Whether a question asks what is wrong with something, or whether it is.
+
+    The target prefetch only makes sense for those: it hands the model the
+    workload's state, and a model handed a broken workload diagnoses it whether
+    or not that was the question.
+
+    The target's own name and namespace are removed first, and so is every
+    identifier-shaped token: a name is what the question is about, never what
+    it asks.
+    """
+    text = question or ""
+    for word in ((target or {}).get("name"), (target or {}).get("namespace")):
+        if word:
+            text = re.sub(rf"(?<![\w-]){re.escape(word)}(?![\w-])", " ", text,
+                          flags=re.IGNORECASE)
+    text = _IDENTIFIER.sub(" ", text)
+    return bool(_DIAGNOSTIC.search(text))
+
+
 def prefetch_target(target):
     """
     The two reads nearly every diagnosis of a named workload starts with.
@@ -513,51 +559,54 @@ def prefetch_target(target):
 
 def _prefetched_block(prefetched):
     """
-    Render evidence collected before the loop started, for the user message.
-
-    Two kinds, worded differently because they mean different things.
+    Render captured evidence for the user message.
 
     Captured evidence (the controller, --explain) was collected because the
     subject may no longer be there to re-read. It says so explicitly: a tool
     returning 404 for this pod is expected, and does not mean the evidence
     below is wrong.
 
-    Target evidence (prefetch_target) is an ordinary first read done early to
-    save a round. It must not say "do not ask again" or suggest it is complete:
-    defect 53 measured the model stopping at a partial answer and guessing the
-    rest, and a block that reads as the whole picture invites exactly that.
+    Target evidence (prefetch_target) is not rendered here. It goes into the
+    conversation as tool calls and results -- see prefetched_messages.
     """
-    def render(items):
-        parts = []
-        for item in items:
-            args = ", ".join(f"{k}={v!r}" for k, v in (item.get("arguments") or {}).items())
-            parts.append(
-                f"{item['name']}({args}) returned, at {item.get('captured_at', 'an earlier time')}:\n"
-                f"{item['result']}"
-            )
-        return "\n\n".join(parts)
-
-    captured = [item for item in prefetched if item.get("source") != "target"]
-    early = [item for item in prefetched if item.get("source") == "target"]
-    block = ""
-    if captured:
-        block += (
-            "\n\nEvidence already collected for you, while the pod was still "
-            "running. The pod may have been deleted since — if a tool now returns "
-            "a 404 for it, that is expected and does not contradict this. For a "
-            "Job or CronJob pod this is the only record that will ever exist, so "
-            "do not ask for it again and do not withhold a diagnosis for want of "
-            "it:\n\n" + render(captured)
+    parts = []
+    for item in prefetched:
+        args = ", ".join(f"{k}={v!r}" for k, v in (item.get("arguments") or {}).items())
+        parts.append(
+            f"{item['name']}({args}) returned, at {item.get('captured_at', 'an earlier time')}:\n"
+            f"{item['result']}"
         )
-    if early:
-        block += (
-            "\n\nThese tools were already called for you on the workload this "
-            "question names. Treat the results as the first calls of your "
-            "investigation, not as all of it: where they do not show the cause, "
-            "call the tools that would.\n\n" + render(early)
-        )
-    return block
+    return (
+        "\n\nEvidence already collected for you, while the pod was still "
+        "running. The pod may have been deleted since — if a tool now returns "
+        "a 404 for it, that is expected and does not contradict this. For a "
+        "Job or CronJob pod this is the only record that will ever exist, so "
+        "do not ask for it again and do not withhold a diagnosis for want of "
+        "it:\n\n" + "\n\n".join(parts)
+    )
 
+
+def prefetched_messages(items):
+    """
+    Target evidence as an assistant turn calling the tools, then their results.
+
+    Wire-neutral dicts carrying a `prefetch` key. No backend could build these
+    from a reply, because there was no reply, and the two wires disagree on how
+    a result names its call (Ollama by tool name, OpenAI by tool_call_id). So
+    the loop writes one neutral shape and each backend translates it in
+    chat() -- and inference._started does not count it, so a run that has not
+    had a real model turn can still fail over to a provider on another wire.
+    """
+    if not items:
+        return []
+    calls = [{"id": f"prefetch-{i}", "name": item["name"],
+              "arguments": dict(item.get("arguments") or {})}
+             for i, item in enumerate(items, 1)]
+    out = [{"role": "assistant", "content": "", "prefetch": calls}]
+    for call, item in zip(calls, items, strict=True):
+        out.append({"role": "tool", "content": item["result"],
+                    "prefetch": {"id": call["id"], "name": call["name"]}})
+    return out
 
 def _timing(model_ms, tool_ms, round_ms, wall_ms=None, slept_ms=0.0):
     """
@@ -1240,7 +1289,7 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
 
     prefetched = list(prefetched or [])
     prefetch_ms = 0.0
-    if prefetch_enabled():
+    if prefetch_enabled() and asks_for_diagnosis(question, target):
         started = time.perf_counter()
         prefetched += prefetch_target(target)
         prefetch_ms = (time.perf_counter() - started) * 1000
@@ -1258,11 +1307,18 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
         for i, item in enumerate(prefetched, 1)
     ]
 
-    content = question + (_prefetched_block(prefetched) if prefetched else "")
+    captured = [item for item in prefetched if item.get("source") != "target"]
+    content = question + (_prefetched_block(captured) if captured else "")
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": content},
     ]
+    # Target evidence goes in as the model's own first calls, not as text in the
+    # user's message: what a cluster says -- an image reference, a log line --
+    # is data, and a user turn is where instructions live. Wire-neutral here;
+    # each backend shapes it in chat(). See backends.shape_prefetched.
+    messages += prefetched_messages(
+        [item for item in prefetched if item.get("source") == "target"])
 
     for item in prefetched:
         # Shown in the chain, flagged, so a reader can tell what the model went

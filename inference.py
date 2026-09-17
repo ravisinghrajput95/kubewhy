@@ -555,9 +555,15 @@ def _started(messages):
     are the same dict on every protocol. So a run that has called nothing can
     move to a provider speaking a different wire, and a run that has cannot.
     """
+    # Prefetched calls are written wire-neutral and shaped by whichever backend
+    # sends them (backends.shape_prefetched), so they do not tie a run to a
+    # wire. Without this, turning the prefetch on made every run "started"
+    # before its first round, and a primary down at the start could no longer
+    # fail over to a provider speaking the other protocol.
     return any(
         (message.get("role") if isinstance(message, dict)
          else getattr(message, "role", None)) in ("assistant", "tool")
+        and not (isinstance(message, dict) and "prefetch" in message)
         for message in messages
     )
 

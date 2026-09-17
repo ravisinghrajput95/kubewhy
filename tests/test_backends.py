@@ -299,6 +299,72 @@ class TestOpenAIProtocol:
             self.backend().chat("qwen3", [], [], think=False)
         assert "tools" not in post.call_args.kwargs["json"]
 
+    def test_prefetched_calls_are_sent_in_this_protocol(self):
+        """
+        Matched by tool_call_id, arguments as a JSON string. A result naming
+        its call by tool name here is a 400 from a hosted API.
+        """
+        import agent
+
+        neutral = agent.prefetched_messages([
+            {"name": "scan_cluster", "arguments": {"workload": "crasher"}, "result": "{}"}])
+        with self.post(openai_reply(content="ok")) as post:
+            self.backend().chat("qwen3", [{"role": "user", "content": "q"}, *neutral],
+                                [], think=False)
+        sent = post.call_args.kwargs["json"]["messages"]
+
+        assert sent[1] == {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "prefetch-1", "type": "function",
+             "function": {"name": "scan_cluster", "arguments": '{"workload": "crasher"}'}}]}
+        assert sent[2] == {"role": "tool", "tool_call_id": "prefetch-1", "content": "{}"}
+
+
+class TestPrefetchedCallsAreShapedPerWire:
+    """
+    The loop writes prefetched calls once, wire-neutral, because there is no
+    model reply to build them from and the two protocols disagree on how a
+    result names its call.
+    """
+
+    NEUTRAL = [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "", "prefetch": [
+            {"id": "prefetch-1", "name": "scan_cluster", "arguments": {"workload": "w"}},
+            {"id": "prefetch-2", "name": "describe_pod", "arguments": {"name": "p"}}]},
+        {"role": "tool", "content": "row", "prefetch": {"id": "prefetch-1", "name": "scan_cluster"}},
+        {"role": "tool", "content": "pod", "prefetch": {"id": "prefetch-2", "name": "describe_pod"}},
+    ]
+
+    def test_ollama_matches_by_name_with_mapping_arguments(self):
+        shaped = backends.shape_prefetched(self.NEUTRAL, "ollama")
+
+        assert shaped[0] == {"role": "user", "content": "q"}
+        assert shaped[1]["tool_calls"][1] == {
+            "function": {"name": "describe_pod", "arguments": {"name": "p"}}}
+        assert shaped[3] == {"role": "tool", "tool_name": "describe_pod", "content": "pod"}
+
+    def test_openai_matches_by_id_with_string_arguments(self):
+        shaped = backends.shape_prefetched(self.NEUTRAL, "openai")
+
+        assert shaped[1]["tool_calls"][0]["function"]["arguments"] == '{"workload": "w"}'
+        assert shaped[3] == {"role": "tool", "tool_call_id": "prefetch-2", "content": "pod"}
+
+    def test_nothing_else_is_touched(self):
+        plain = [{"role": "user", "content": "q"},
+                 {"role": "tool", "tool_name": "list_pods", "content": "{}"}]
+        raw = MagicMock()
+
+        assert backends.shape_prefetched([*plain, raw], "openai") == [*plain, raw]
+
+    def test_the_ollama_client_receives_the_shaped_messages(self):
+        with patch("backends.ollama.Client") as client:
+            client.return_value.chat.return_value = ollama_reply(content="ok")
+            backends.get().chat("qwen3", self.NEUTRAL, [], think=False)
+        sent = client.return_value.chat.call_args.kwargs["messages"]
+
+        assert not any("prefetch" in m for m in sent)
+        assert sent[2] == {"role": "tool", "tool_name": "scan_cluster", "content": "row"}
+
 
 class TestAFactoryOnlyGetsArgumentsItTakes:
     """
