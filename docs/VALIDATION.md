@@ -4111,13 +4111,33 @@ off:
 
 Fisher p = 0.0026 on calling `list_jobs`, 0.0130 on passing.
 
-**This is a before/after across trees, not an A/B, and must not be quoted as
-one.** The 19 off-runs are other days and other trees. What the records do
-establish without any cross-tree comparison is the mechanism: 0 of 3 runs made
-a call of their own where 19 of 19 previously did, and the prefetched row
-contains the whole answer. A paired arm
-(`ab_prompt.py --case job_killed_by_its_own_deadline --repeat 5 --variant-env
-TRIAGE_PREFETCH_TARGET=off`) is the next measurement, not this one.
+That comparison is a before/after across trees, not an A/B, so it was not left
+as the finding.
+
+**Measured paired the same day**, `ab_prompt.py --case
+job_killed_by_its_own_deadline --repeat 5 --variant-env
+TRIAGE_PREFETCH_TARGET=off`, arms alternating, same cluster, tree `445db59`,
+records in `results/deadline-ab/`. **0 leaks: every control run carried 1
+prefetched call and every variant run 0**, which is the counter that the
+variable actually arrived.
+
+| arm | called `list_jobs` | made a call of its own | passed | median |
+|---|---|---|---|---|
+| control (prefetch **on**, the default) | **1/5** | 1/5 | **1/5** | 20.3s |
+| variant (prefetch **off**) | **5/5** | 5/5 | **5/5** | 32.6s |
+
+**Fisher p = 0.0476 on both**, which at 5-versus-5 is very close to the floor
+the design can reach; the effect is real and the sample is small. The four
+failing control runs all failed on `never called list_jobs` and were graded
+`insufficient_evidence` or `partial`. The historical record above agrees with
+the paired arm, which is why it is kept, but the paired arm is the measurement.
+
+**The cost is legible here in a way defect 55 could not see it.** The prefetch
+made this case 12 seconds faster at the median and wrong four times out of
+five. Defect 55 measured latency against accuracy across seven cases and found
+no accuracy loss; this is the case where the trade is visible, and it is
+visible because the prefetched row is a *complete* answer rather than a partial
+one.
 
 **And it corrects an open item.** The handoff carried
 `poststart_hook_not_the_app` as "2/5 with the prefetch against 4/5 without ...

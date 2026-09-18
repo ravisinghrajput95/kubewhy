@@ -1,0 +1,665 @@
+[
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": false,
+  "started_at": "2026-09-18T10:29:00.020343+00:00",
+  "load_before": 3.39,
+  "load_after": 2.94,
+  "seconds": 44.8,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 1,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "list_jobs"
+  ],
+  "arguments": [
+   {
+    "workload": "nightly-rollup",
+    "namespaces": "uncovered"
+   },
+   {
+    "namespace": "uncovered"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/nightly-rollup\": {\"status\": \"Failed\", \"pods\": 0, \"reason\": \"DeadlineExceeded\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_jobs",
+    "result": "{\"nightly-rollup\": {\"completions\": \"0/1\", \"failed_pods\": 1, \"status\": \"Failed\", \"reason\": \"DeadlineExceeded\", \"message\": \"Job was active longer than specified deadline\", \"active_deadline_seconds\": 20, \"backoff_limit\": 0, \"pods_remaining\": 0, \"images\": [\"busybox:1.36\"]}, \"schema-migrate\": {\"completions\": \"0/1\", \"failed_pods\": 2, \"status\": \"Failed\", \"reason\": \"BackoffLimitExceeded\", \"message\": \"Job has reached the specified backoff limit\", \"backoff_limit\": 1, \"pods_remaining\": 2, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The **nightly-rollup** job in the `uncovered` namespace failed due to **DeadlineExceeded**, meaning it ran longer than its specified `activeDeadlineSeconds` of 20 seconds. This is a deliberate termination by the Job controller to prevent indefinite execution. \n\n- **Cause**: The job's deadline was reached, and it was stopped intentionally.  \n- **Pods**: All associated pods were deleted (pods_remaining: 0), as expected for a deadline-based termination.  \n- **Action**: No further pod analysis is needed\u2014the failure is tied to the job's own configuration and deadline.  \n\nThis is not a crash but a controlled shutdown. Check the job's `activeDeadlineSeconds` and ensure it aligns with expected runtime.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 44729.9,
+   "tool_ms": 31.7,
+   "rounds": 2,
+   "round_ms": [
+    24118.7,
+    20611.2
+   ],
+   "slowest_round_ms": 24118.7,
+   "model_share": 0.999,
+   "wall_ms": 44764.1,
+   "unaccounted_ms": 2.5,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The **nightly-rollup** job in the `uncovered` namespace failed due to **DeadlineExceeded**, meaning it ran longer than its specified `activeDeadlineSeconds` of 20 seconds. This is a deliberate termination by the Job controller to prevent indefinite execution. \n\n- **Cause**: The job's deadline was reached, and it was stopped intentionally.  \n- **Pods**: All associated pods were deleted (pods_remaining: 0), as expected for a deadline-based termination.  \n- **Action**: No further pod analysis is needed\u2014the failure is tied to the job's own configuration and deadline.  \n\nThis is not a crash but a controlled shutdown. Check the job's `activeDeadlineSeconds` and ensure it aligns with expected runtime.",
+  "chars": 703,
+  "hedges": []
+ },
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-18T10:29:44.787065+00:00",
+  "load_before": 2.94,
+  "load_after": 2.7,
+  "seconds": 31.9,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_jobs"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_jobs",
+    "result": "{\"nightly-rollup\": {\"completions\": \"0/1\", \"failed_pods\": 1, \"status\": \"Failed\", \"reason\": \"DeadlineExceeded\", \"message\": \"Job was active longer than specified deadline\", \"active_deadline_seconds\": 20, \"backoff_limit\": 0, \"pods_remaining\": 0, \"images\": [\"busybox:1.36\"]}, \"schema-migrate\": {\"completions\": \"0/1\", \"failed_pods\": 2, \"status\": \"Failed\", \"reason\": \"BackoffLimitExceeded\", \"message\": \"Job has reached the specified backoff limit\", \"backoff_limit\": 1, \"pods_remaining\": 2, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The **nightly-rollup** job failed due to **DeadlineExceeded**. It ran longer than its specified `activeDeadlineSeconds` of 20 seconds and was terminated intentionally by Kubernetes. The job did not retry (backoff limit was 0), and its pods were deleted after the deadline. This is not a container crash but a scheduled termination. Check the job's `activeDeadlineSeconds` and `backoffLimit` in its spec for the configured constraints. No pod logs exist since the pods were deleted.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 31906.4,
+   "tool_ms": 10.6,
+   "rounds": 2,
+   "round_ms": [
+    11760.9,
+    20145.5
+   ],
+   "slowest_round_ms": 20145.5,
+   "model_share": 1.0,
+   "wall_ms": 31918.1,
+   "unaccounted_ms": 1.2,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The **nightly-rollup** job failed due to **DeadlineExceeded**. It ran longer than its specified `activeDeadlineSeconds` of 20 seconds and was terminated intentionally by Kubernetes. The job did not retry (backoff limit was 0), and its pods were deleted after the deadline. This is not a container crash but a scheduled termination. Check the job's `activeDeadlineSeconds` and `backoffLimit` in its spec for the configured constraints. No pod logs exist since the pods were deleted.",
+  "chars": 481,
+  "hedges": []
+ },
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-18T10:30:16.708025+00:00",
+  "load_before": 2.7,
+  "load_after": 2.86,
+  "seconds": 32.6,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_jobs"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_jobs",
+    "result": "{\"nightly-rollup\": {\"completions\": \"0/1\", \"failed_pods\": 1, \"status\": \"Failed\", \"reason\": \"DeadlineExceeded\", \"message\": \"Job was active longer than specified deadline\", \"active_deadline_seconds\": 20, \"backoff_limit\": 0, \"pods_remaining\": 0, \"images\": [\"busybox:1.36\"]}, \"schema-migrate\": {\"completions\": \"0/1\", \"failed_pods\": 2, \"status\": \"Failed\", \"reason\": \"BackoffLimitExceeded\", \"message\": \"Job has reached the specified backoff limit\", \"backoff_limit\": 1, \"pods_remaining\": 2, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The **nightly-rollup** job failed due to **DeadlineExceeded**, meaning it ran longer than the `activeDeadlineSeconds` (20 seconds) specified in its configuration. The job did not retry (`backoffLimit`: 0), and its pods were deleted after the deadline was reached. This is an intentional termination by Kubernetes, not a crash. \n\nNo pod logs exist for this job since the pods were deleted. Check the job's `activeDeadlineSeconds` and `backoffLimit` in its spec to adjust the timeout or retry policy if needed.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 32565.5,
+   "tool_ms": 11.3,
+   "rounds": 2,
+   "round_ms": [
+    13875.9,
+    18689.6
+   ],
+   "slowest_round_ms": 18689.6,
+   "model_share": 1.0,
+   "wall_ms": 32578.1,
+   "unaccounted_ms": 1.3,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The **nightly-rollup** job failed due to **DeadlineExceeded**, meaning it ran longer than the `activeDeadlineSeconds` (20 seconds) specified in its configuration. The job did not retry (`backoffLimit`: 0), and its pods were deleted after the deadline was reached. This is an intentional termination by Kubernetes, not a crash. \n\nNo pod logs exist for this job since the pods were deleted. Check the job's `activeDeadlineSeconds` and `backoffLimit` in its spec to adjust the timeout or retry policy if needed.",
+  "chars": 508,
+  "hedges": []
+ },
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-18T10:30:49.290013+00:00",
+  "load_before": 2.86,
+  "load_after": 2.99,
+  "seconds": 23.1,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 1,
+  "passed": false,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "scan_cluster"
+  ],
+  "arguments": [
+   {
+    "workload": "nightly-rollup",
+    "namespaces": "uncovered"
+   }
+  ],
+  "failures": [
+   "never called list_jobs"
+  ],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/nightly-rollup\": {\"status\": \"Failed\", \"pods\": 0, \"reason\": \"DeadlineExceeded\"}}"
+   }
+  ],
+  "draft": "The `nightly-rollup` job in the `uncovered` namespace failed due to **DeadlineExceeded**, meaning the Job ran past its `activeDeadlineSeconds` duration and was terminated intentionally by the Job controller. This is not a container crash but a deliberate termination to prevent prolonged execution. \n\nNo pods remain from this Job, as they are typically deleted upon deadline expiration. To understand the root cause, check the Job's `activeDeadlineSeconds` configuration and verify if the workload was expected to complete within that timeframe. Since no pods exist, container logs or exit codes are unavailable. \n\nNext steps:  \n1. Inspect the Job's spec to confirm `activeDeadlineSeconds`.  \n2. Review the Job's `status.conditions` for additional context (e.g., `Failed`, `Complete`).  \n3. Ensure the workload's dependencies or resource limits (CPU/memory) weren't inadvertently causing delays.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 23076.0,
+   "tool_ms": 23.2,
+   "rounds": 1,
+   "round_ms": [
+    23076.0
+   ],
+   "slowest_round_ms": 23076.0,
+   "model_share": 0.999,
+   "wall_ms": 23100.0,
+   "unaccounted_ms": 0.8,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The `nightly-rollup` job in the `uncovered` namespace failed due to **DeadlineExceeded**, meaning the Job ran past its `activeDeadlineSeconds` duration and was terminated intentionally by the Job controller. This is not a container crash but a deliberate termination to prevent prolonged execution. \n\nNo pods remain from this Job, as they are typically deleted upon deadline expiration. To understand the root cause, check the Job's `activeDeadlineSeconds` configuration and verify if the workload was expected to complete within that timeframe. Since no pods exist, container logs or exit codes are unavailable. \n\nNext steps:  \n1. Inspect the Job's spec to confirm `activeDeadlineSeconds`.  \n2. Review the Job's `status.conditions` for additional context (e.g., `Failed`, `Complete`).  \n3. Ensure the workload's dependencies or resource limits (CPU/memory) weren't inadvertently causing delays.",
+  "chars": 895,
+  "hedges": []
+ },
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-18T10:31:12.393100+00:00",
+  "load_before": 2.99,
+  "load_after": 3.11,
+  "seconds": 20.3,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 1,
+  "passed": false,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "scan_cluster"
+  ],
+  "arguments": [
+   {
+    "workload": "nightly-rollup",
+    "namespaces": "uncovered"
+   }
+  ],
+  "failures": [
+   "never called list_jobs"
+  ],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/nightly-rollup\": {\"status\": \"Failed\", \"pods\": 0, \"reason\": \"DeadlineExceeded\"}}"
+   }
+  ],
+  "draft": "The `nightly-rollup` job in the `uncovered` namespace failed due to **DeadlineExceeded**, meaning it ran past its `activeDeadlineSeconds` duration and was terminated intentionally by Kubernetes. This is not a container crash but a job completion condition: the job was stopped on purpose after exceeding its allowed runtime. Check the job's `activeDeadlineSeconds` configuration to verify the expected timeline. No pod logs or container exit codes apply here, as the job's controller enforced the termination.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 20248.9,
+   "tool_ms": 25.9,
+   "rounds": 1,
+   "round_ms": [
+    20248.9
+   ],
+   "slowest_round_ms": 20248.9,
+   "model_share": 0.999,
+   "wall_ms": 20275.1,
+   "unaccounted_ms": 0.4,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The `nightly-rollup` job in the `uncovered` namespace failed due to **DeadlineExceeded**, meaning it ran past its `activeDeadlineSeconds` duration and was terminated intentionally by Kubernetes. This is not a container crash but a job completion condition: the job was stopped on purpose after exceeding its allowed runtime. Check the job's `activeDeadlineSeconds` configuration to verify the expected timeline. No pod logs or container exit codes apply here, as the job's controller enforced the termination.",
+  "chars": 509,
+  "hedges": []
+ },
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-18T10:31:32.670333+00:00",
+  "load_before": 3.11,
+  "load_after": 3.39,
+  "seconds": 32.6,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_jobs"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_jobs",
+    "result": "{\"nightly-rollup\": {\"completions\": \"0/1\", \"failed_pods\": 1, \"status\": \"Failed\", \"reason\": \"DeadlineExceeded\", \"message\": \"Job was active longer than specified deadline\", \"active_deadline_seconds\": 20, \"backoff_limit\": 0, \"pods_remaining\": 0, \"images\": [\"busybox:1.36\"]}, \"schema-migrate\": {\"completions\": \"0/1\", \"failed_pods\": 2, \"status\": \"Failed\", \"reason\": \"BackoffLimitExceeded\", \"message\": \"Job has reached the specified backoff limit\", \"backoff_limit\": 1, \"pods_remaining\": 2, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The **nightly-rollup** job in the **uncovered** namespace failed due to **DeadlineExceeded**. The job ran longer than its specified `activeDeadlineSeconds` of 20 seconds, triggering a forced termination. Since the `backoffLimit` was set to 0, the job did not retry and immediately terminated after exceeding the deadline. \n\nTo resolve this, check the job's configuration to ensure the deadline aligns with the expected task duration. If the job requires more time, increase `activeDeadlineSeconds` or investigate why it exceeded the allowed runtime. \n\nNo pod logs are available since the pods were deleted after the job completed.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 32543.6,
+   "tool_ms": 16.4,
+   "rounds": 2,
+   "round_ms": [
+    13815.0,
+    18728.6
+   ],
+   "slowest_round_ms": 18728.6,
+   "model_share": 0.999,
+   "wall_ms": 32560.9,
+   "unaccounted_ms": 0.9,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The **nightly-rollup** job in the **uncovered** namespace failed due to **DeadlineExceeded**. The job ran longer than its specified `activeDeadlineSeconds` of 20 seconds, triggering a forced termination. Since the `backoffLimit` was set to 0, the job did not retry and immediately terminated after exceeding the deadline. \n\nTo resolve this, check the job's configuration to ensure the deadline aligns with the expected task duration. If the job requires more time, increase `activeDeadlineSeconds` or investigate why it exceeded the allowed runtime. \n\nNo pod logs are available since the pods were deleted after the job completed.",
+  "chars": 630,
+  "hedges": []
+ },
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-18T10:32:05.234535+00:00",
+  "load_before": 3.39,
+  "load_after": 4.02,
+  "seconds": 33.3,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_jobs"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_jobs",
+    "result": "{\"nightly-rollup\": {\"completions\": \"0/1\", \"failed_pods\": 1, \"status\": \"Failed\", \"reason\": \"DeadlineExceeded\", \"message\": \"Job was active longer than specified deadline\", \"active_deadline_seconds\": 20, \"backoff_limit\": 0, \"pods_remaining\": 0, \"images\": [\"busybox:1.36\"]}, \"schema-migrate\": {\"completions\": \"0/1\", \"failed_pods\": 2, \"status\": \"Failed\", \"reason\": \"BackoffLimitExceeded\", \"message\": \"Job has reached the specified backoff limit\", \"backoff_limit\": 1, \"pods_remaining\": 2, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The **nightly-rollup** job in the **uncovered** namespace failed due to **DeadlineExceeded**. The Job ran longer than its specified `activeDeadlineSeconds` of 20 seconds and was terminated intentionally by the controller. This is not a container crash but a scheduled termination. \n\n### Key details:\n- **Reason**: `DeadlineExceeded` (job exceeded its time limit).\n- **Pods**: All pods were deleted (`pods_remaining: 0`), so logs are unavailable.\n- **Next steps**: Check the job's `activeDeadlineSeconds` configuration and verify if the workload's delay was unexpected. Adjust the deadline or investigate bottlenecks if the job's duration is critical.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 33313.3,
+   "tool_ms": 10.9,
+   "rounds": 2,
+   "round_ms": [
+    13587.8,
+    19725.5
+   ],
+   "slowest_round_ms": 19725.5,
+   "model_share": 1.0,
+   "wall_ms": 33325.2,
+   "unaccounted_ms": 0.9,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The **nightly-rollup** job in the **uncovered** namespace failed due to **DeadlineExceeded**. The Job ran longer than its specified `activeDeadlineSeconds` of 20 seconds and was terminated intentionally by the controller. This is not a container crash but a scheduled termination. \n\n### Key details:\n- **Reason**: `DeadlineExceeded` (job exceeded its time limit).\n- **Pods**: All pods were deleted (`pods_remaining: 0`), so logs are unavailable.\n- **Next steps**: Check the job's `activeDeadlineSeconds` configuration and verify if the workload's delay was unexpected. Adjust the deadline or investigate bottlenecks if the job's duration is critical.",
+  "chars": 650,
+  "hedges": []
+ },
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-18T10:32:38.563725+00:00",
+  "load_before": 4.02,
+  "load_after": 3.59,
+  "seconds": 18.3,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 1,
+  "passed": false,
+  "confidence": "insufficient_evidence",
+  "unverified": [],
+  "tools": [
+   "scan_cluster"
+  ],
+  "arguments": [
+   {
+    "workload": "nightly-rollup",
+    "namespaces": "uncovered"
+   }
+  ],
+  "failures": [
+   "never called list_jobs"
+  ],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/nightly-rollup\": {\"status\": \"Failed\", \"pods\": 0, \"reason\": \"DeadlineExceeded\"}}"
+   }
+  ],
+  "draft": "The `nightly-rollup` job in the `uncovered` namespace failed due to **DeadlineExceeded**, meaning the Job ran past its `activeDeadlineSeconds` and was terminated intentionally by the Job controller. This is not a crash but a deliberate stoppage to prevent resource exhaustion. The associated pods were likely deleted as part of this process. No pod logs or exit codes exist for this Job, as the failure reason is recorded solely on the Job resource itself.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 18310.9,
+   "tool_ms": 20.4,
+   "rounds": 1,
+   "round_ms": [
+    18310.9
+   ],
+   "slowest_round_ms": 18310.9,
+   "model_share": 0.999,
+   "wall_ms": 18332.0,
+   "unaccounted_ms": 0.8,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The `nightly-rollup` job in the `uncovered` namespace failed due to **DeadlineExceeded**, meaning the Job ran past its `activeDeadlineSeconds` and was terminated intentionally by the Job controller. This is not a crash but a deliberate stoppage to prevent resource exhaustion. The associated pods were likely deleted as part of this process. No pod logs or exit codes exist for this Job, as the failure reason is recorded solely on the Job resource itself.",
+  "chars": 456,
+  "hedges": [
+   "likely"
+  ]
+ },
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-control",
+  "arm": "control",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-18T10:32:56.899747+00:00",
+  "load_before": 3.59,
+  "load_after": 3.24,
+  "seconds": 15.4,
+  "rounds_sent": 1,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": null
+  },
+  "prefetched": 1,
+  "passed": false,
+  "confidence": "partial",
+  "unverified": [
+   "job controller-enforced"
+  ],
+  "tools": [
+   "scan_cluster"
+  ],
+  "arguments": [
+   {
+    "workload": "nightly-rollup",
+    "namespaces": "uncovered"
+   }
+  ],
+  "failures": [
+   "never called list_jobs",
+   "unverified claims: ['job controller-enforced']"
+  ],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/nightly-rollup\": {\"status\": \"Failed\", \"pods\": 0, \"reason\": \"DeadlineExceeded\"}}"
+   }
+  ],
+  "draft": "The nightly-rollup job in the uncovered namespace failed due to **DeadlineExceeded**, meaning it ran past its `activeDeadlineSeconds` specification. This is a Job controller-enforced termination, not a container crash. The container was killed intentionally by the Job's own deadline, and no pod logs or events exist for this workload since its pods were deleted after the termination. \n\nNo further investigation into pods is needed\u2014the failure is tied to the Job's configuration and timeline, not application errors.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 15333.2,
+   "tool_ms": 23.5,
+   "rounds": 1,
+   "round_ms": [
+    15333.2
+   ],
+   "slowest_round_ms": 15333.2,
+   "model_share": 0.998,
+   "wall_ms": 15358.0,
+   "unaccounted_ms": 1.3,
+   "slept_ms": 0.1
+  },
+  "policies": 0,
+  "answer": "The nightly-rollup job in the uncovered namespace failed due to **DeadlineExceeded**, meaning it ran past its `activeDeadlineSeconds` specification. This is a [unverified: Job controller-enforced] termination, not a container crash. The container was killed intentionally by the Job's own deadline, and no pod logs or events exist for this workload since its pods were deleted after the termination. \n\nNo further investigation into pods is needed\u2014the failure is tied to the Job's configuration and timeline, not application errors.\n\n---\n**Evidence audit.**\n1 of 1 stated values could not be traced to any tool result for the workload they were stated about: `job controller-enforced`. Treat these as inference, not measurement.",
+  "chars": 727,
+  "hedges": []
+ },
+ {
+  "case": "job_killed_by_its_own_deadline",
+  "model": "qwen3-variant",
+  "arm": "variant",
+  "variable": {
+   "kind": "env",
+   "key": "TRIAGE_PREFETCH_TARGET",
+   "value": "off"
+  },
+  "question": "Why did the nightly-rollup job in the uncovered namespace fail?",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "model_resident": true,
+  "started_at": "2026-09-18T10:33:12.261559+00:00",
+  "load_before": 3.24,
+  "load_after": 2.96,
+  "seconds": 40.3,
+  "rounds_sent": 2,
+  "env": {
+   "TRIAGE_PREFETCH_TARGET": "off"
+  },
+  "prefetched": 0,
+  "passed": true,
+  "confidence": "grounded",
+  "unverified": [],
+  "tools": [
+   "list_jobs"
+  ],
+  "arguments": [
+   {
+    "namespace": "uncovered"
+   }
+  ],
+  "failures": [],
+  "notes": [],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_jobs",
+    "result": "{\"nightly-rollup\": {\"completions\": \"0/1\", \"failed_pods\": 1, \"status\": \"Failed\", \"reason\": \"DeadlineExceeded\", \"message\": \"Job was active longer than specified deadline\", \"active_deadline_seconds\": 20, \"backoff_limit\": 0, \"pods_remaining\": 0, \"images\": [\"busybox:1.36\"]}, \"schema-migrate\": {\"completions\": \"0/1\", \"failed_pods\": 2, \"status\": \"Failed\", \"reason\": \"BackoffLimitExceeded\", \"message\": \"Job has reached the specified backoff limit\", \"backoff_limit\": 1, \"pods_remaining\": 2, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The **nightly-rollup** job failed due to **DeadlineExceeded**, meaning it ran longer than the `activeDeadlineSeconds` (20 seconds) specified in its configuration. This is a job-level termination, not a container crash. The pods created by this job were deleted after the deadline was reached, so their logs are no longer available. \n\n### Key details:\n- **Cause**: The job's tasks took longer than the allowed 20-second window.\n- **Action Needed**: Review the job's `activeDeadlineSeconds` and investigate why the tasks exceeded this limit (e.g., long-running processes, deadlocks, or misconfigured workloads).\n- **Pods**: No pods remain, so logs cannot be retrieved. Check the job's configuration and ensure the workload aligns with the deadline. \n\nThis is a scheduling/timeout issue, not a container failure.",
+  "contradictions": [],
+  "nudges": 0,
+  "timing": {
+   "model_ms": 40241.8,
+   "tool_ms": 11.0,
+   "rounds": 2,
+   "round_ms": [
+    14263.1,
+    25978.7
+   ],
+   "slowest_round_ms": 25978.7,
+   "model_share": 1.0,
+   "wall_ms": 40253.8,
+   "unaccounted_ms": 0.9,
+   "slept_ms": 0.2
+  },
+  "policies": 0,
+  "answer": "The **nightly-rollup** job failed due to **DeadlineExceeded**, meaning it ran longer than the `activeDeadlineSeconds` (20 seconds) specified in its configuration. This is a job-level termination, not a container crash. The pods created by this job were deleted after the deadline was reached, so their logs are no longer available. \n\n### Key details:\n- **Cause**: The job's tasks took longer than the allowed 20-second window.\n- **Action Needed**: Review the job's `activeDeadlineSeconds` and investigate why the tasks exceeded this limit (e.g., long-running processes, deadlocks, or misconfigured workloads).\n- **Pods**: No pods remain, so logs cannot be retrieved. Check the job's configuration and ensure the workload aligns with the deadline. \n\nThis is a scheduling/timeout issue, not a container failure.",
+  "chars": 809,
+  "hedges": []
+ }
+]

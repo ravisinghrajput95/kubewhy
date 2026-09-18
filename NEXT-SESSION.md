@@ -594,21 +594,26 @@ defects 58 to 62.
      477 claims resolve to identifier fields, so the metric is mostly sound and
      the defect is at the tails.
 
-2. **Defect 61: a paired A/B on `job_killed_by_its_own_deadline`.** ~10 minutes,
-   and it is the highest-value measurement outstanding.
+2. **Defect 61 is measured, and the owner has a decision to make.** The paired
+   A/B ran 2026-09-18 on tree `445db59`, records in `results/deadline-ab/`,
+   0 leaks: **control (prefetch on) 1/5 called `list_jobs` and 1/5 passed;
+   variant (prefetch off) 5/5 and 5/5. Fisher p = 0.0476 on both.** The prefetch
+   made this case 12s faster at the median and wrong four times in five.
 
-       .venv/bin/python -u evals/ab_prompt.py --case job_killed_by_its_own_deadline \
-         --repeat 5 --variant-env TRIAGE_PREFETCH_TARGET=off --context <ctx> \
-         --json results/<...>.json
+   **The decision: the target prefetch is on by default, and on at least one
+   fault type it is the reason the answer is wrong.** Defect 55 turned it on
+   for a median of two rounds and 30s saved across seven cases with no accuracy
+   loss measured at n=35; defect 61 is the counter-example, and the mechanism
+   says which cases are exposed -- the ones where the prefetched `scan_cluster`
+   row is a *complete* answer rather than a partial one, so there is nothing
+   left to send the model to another tool. Candidates, none applied:
+   - leave it, and accept that Job-shaped faults answer from the scan row;
+   - do not prefetch when `scan_cluster` returns a row with `pods: 0`, which is
+     exactly the shape that carries its whole cause;
+   - drop the scan row from the prefetch and hand over only `describe_pod`.
 
-   Today's record is 0/3 with the prefetch on against 18/19 calling `list_jobs`
-   across 19 runs with it off, Fisher p = 0.0026 — **but that is a before/after
-   across trees, not an A/B, and must not be published as one.** The mechanism
-   is not in doubt: the prefetched scan row
-   `{"uncovered/nightly-rollup": {"status":"Failed","pods":0,"reason":"DeadlineExceeded"}}`
-   is the whole answer, and 3 of 3 runs made no call of their own. Analyse with
-   `results/prefetch/analyse.py --prefetch-arm control`, and remember unset
-   means ON, so the variant arm is the one that sets `off`.
+   Whichever is chosen, measure it paired on this case and on defect 55's seven,
+   and remember unset means ON so the variant arm is the one that sets `off`.
 
 3. **The handoff's old item 2a is answered: drop the deep
    `poststart_hook_not_the_app` re-measurement.** Pooled over every recorded
