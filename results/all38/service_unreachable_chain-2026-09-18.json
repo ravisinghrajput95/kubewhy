@@ -1,0 +1,628 @@
+[
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 104.2,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T13:21:58",
+  "load_before": 0.78,
+  "load_after": 1.43,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 0,
+  "arguments": [
+   {
+    "name": "crasher-svc",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "crasher"
+   },
+   {
+    "name": "crasher-5964d99948-d7gwj",
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-d7gwj",
+    "namespace": "demo",
+    "tail": 10
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_service_endpoints",
+    "result": "{\"service\": \"crasher-svc\", \"namespace\": \"demo\", \"type\": \"ClusterIP\", \"selector\": {\"app\": \"crasher\"}, \"ports\": [{\"port\": 80, \"target_port\": \"8080\"}], \"ready_endpoints\": [], \"not_ready_endpoints\": [\"10.244.0.2\"], \"diagnosis\": \"no ready endpoints: 1 pod(s) match the selector but none are ready -- inspect those pods, they are crashing or failing a readiness probe\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"crasher-5964d99948-d7gwj\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 8, \"node\": \"kubewhy-recheck-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-d7gwj\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 8, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-d7gwj_demo(ea1e5ec1-a44d-40a1-a171-71654aa32560)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-d7gwj\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"}"
+   }
+  ],
+  "draft": "The crasher-svc service is unreachable because its pod `crasher-5964d99948-d7gwj` is crashing with exit code 1 due to a **database connection failure**. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\nThe application in the pod is trying to connect to a PostgreSQL database on port 5432 but is unable to establish a connection. This could be due to:\n- The database service being unavailable or misconfigured.\n- Incorrect database host/port settings in the pod's environment or configuration.\n- Network policies blocking traffic between the pod and the database.\n\n### Next Steps:\n1. **Verify the database service** (e.g., `db-service` in the same namespace) is running and has endpoints:\n   ```bash\n   kubectl get service db-service -n demo\n   kubectl get endpoints db-service -n demo\n   ```\n2. **Check database pod status** (if it's a standalone pod):\n   ```bash\n   kubectl get pods -l app=db -n demo\n   kubectl logs <db-pod-name> -n demo\n   ```\n3. **Validate connection parameters** in the pod's environment or ConfigMap to ensure the host/port match the database service's endpoints.\n\nThis is a configuration issue, not a resource exhaustion or Kubernetes fault. Fixing the database connection will resolve the crash loop.",
+  "answer": "The crasher-svc service is unreachable because its pod `crasher-5964d99948-d7gwj` is crashing with exit code 1 due to a **database connection failure**. The logs show:\n\n```\nFATAL: could not connect to db:5432: connection refused\n```\n\n### Root Cause:\nThe application in the pod is trying to connect to a PostgreSQL database on port 5432 but is unable to establish a connection. This could be due to:\n- The database service being unavailable or misconfigured.\n- Incorrect database host/port settings in the pod's environment or configuration.\n- Network policies blocking traffic between the pod and the database.\n\n### Next Steps:\n1. **Verify the database service** (e.g., `db-service` in the same namespace) is running and has endpoints:\n   ```bash\n   kubectl get service db-service -n demo\n   kubectl get endpoints db-service -n demo\n   ```\n2. **Check database pod status** (if it's a standalone pod):\n   ```bash\n   kubectl get pods -l app=db -n demo\n   kubectl logs <db-pod-name> -n demo\n   ```\n3. **Validate connection parameters** in the pod's environment or ConfigMap to ensure the host/port match the database service's endpoints.\n\nThis is a configuration issue, not a resource exhaustion or Kubernetes fault. Fixing the database connection will resolve the crash loop.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 104198.9,
+   "tool_ms": 45.2,
+   "rounds": 5,
+   "round_ms": [
+    11437.5,
+    15181.2,
+    24642.3,
+    15530.4,
+    37407.6
+   ],
+   "slowest_round_ms": 37407.6,
+   "model_share": 1.0,
+   "wall_ms": 104247.8,
+   "unaccounted_ms": 3.8,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_service_endpoints",
+       "field": "not_ready_endpoints[0]",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "5964",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5964"
+      }
+     ]
+    },
+    {
+     "claim": "99948",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "99948"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "38ddd4d53251",
+  "target": {
+   "kind": "service",
+   "name": "crasher-svc",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 135.6,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T13:23:42",
+  "load_before": 1.43,
+  "load_after": 0.5,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 0,
+  "arguments": [
+   {
+    "name": "crasher-svc",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "crasher-svc"
+   },
+   {
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-d7gwj",
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-d7gwj",
+    "namespace": "demo",
+    "tail": 50
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_service_endpoints",
+    "result": "{\"service\": \"crasher-svc\", \"namespace\": \"demo\", \"type\": \"ClusterIP\", \"selector\": {\"app\": \"crasher\"}, \"ports\": [{\"port\": 80, \"target_port\": \"8080\"}], \"ready_endpoints\": [], \"not_ready_endpoints\": [\"10.244.0.2\"], \"diagnosis\": \"no ready endpoints: 1 pod(s) match the selector but none are ready -- inspect those pods, they are crashing or failing a readiness probe\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"result\": \"no pods of workload crasher-svc in namespace demo\"}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_pods",
+    "result": "{\"bad-image-5d98458fcd-4c6rw\": {\"status\": \"ImagePullBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"crasher-5964d99948-d7gwj\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 8, \"node\": \"kubewhy-recheck-control-plane\"}, \"log-shipper-zp4zz\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 8, \"node\": \"kubewhy-recheck-control-plane\"}, \"memory-hog-bc76968c6-dhr5p\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 8, \"node\": \"kubewhy-recheck-control-plane\"}, \"needs-db-758f45b6c9-4ppp4\": {\"status\": \"Init:CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"never-ready-848784c697-sfj72\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"nightly-sync-29828615-n8qmq\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"nightly-sync-29828620-2xbzl\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"nightly-sync-29828625-98kmz\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"nightly-sync-29828630-8xfw5\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"slow-starter-7c4f8c9965-vd2kx\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 9, \"node\": \"kubewhy-recheck-control-plane\"}, \"backup-29828632-p68sp\": {\"status\": \"Completed\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"backup-29828633-hw5v4\": {\"status\": \"Completed\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"backup-29828634-wq9g9\": {\"status\": \"Completed\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"healthy-web-6f79bc6fcb-dvfzh\": {\"status\": \"Running\", \"ready\": \"1/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"healthy-web-6f79bc6fcb-s5g85\": {\"status\": \"Running\", \"ready\": \"1/1\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}, \"sidecar-app\": {\"status\": \"Running\", \"ready\": \"2/2\", \"restarts\": 0, \"node\": \"kubewhy-recheck-control-plane\"}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-d7gwj\", \"namespace\": \"demo\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 8, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=crasher pod=crasher-5964d99948-d7gwj_demo(ea1e5ec1-a44d-40a1-a171-71654aa32560)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-5",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-d7gwj\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\"}"
+   }
+  ],
+  "draft": "The crasher-svc service is unreachable because its pod `crasher-5964d99948-d7gwj` is crashing with a **database connection error**. Here's the breakdown:\n\n1. **Root Cause**:  \n   The container fails to connect to the database at `db:5432` with a `connection refused` error. This indicates either:\n   - The database service (`db`) is not running or unreachable.\n   - The database is misconfigured (e.g., wrong port, credentials, or host).\n   - Network policies or firewalls block traffic to the database.\n\n2. **Pod Status**:  \n   The pod is in `CrashLoopBackOff` due to repeated crashes (8 restarts). The exit code `1` and log error confirm the database connection failure.\n\n3. **Next Steps**:  \n   - Verify the database service (`db`) is running and accessible in the `demo` namespace.  \n   - Check the database's port (`5432`) and ensure it is open.  \n   - Confirm the database credentials and configuration in the pod's environment or secrets.  \n   - If the database is in a different namespace, ensure the service is correctly exposed via a headless service or DNS.  \n\nFixing the database connection will resolve the crash loop and restore service reachability.",
+  "answer": "The crasher-svc service is unreachable because its pod `crasher-5964d99948-d7gwj` is crashing with a **database connection error**. Here's the breakdown:\n\n1. **Root Cause**:  \n   The container fails to connect to the database at `db:5432` with a `connection refused` error. This indicates either:\n   - The database service (`db`) is not running or unreachable.\n   - The database is misconfigured (e.g., wrong port, credentials, or host).\n   - Network policies or firewalls block traffic to the database.\n\n2. **Pod Status**:  \n   The pod is in `CrashLoopBackOff` due to repeated crashes (8 restarts). The exit code `1` and log error confirm the database connection failure.\n\n3. **Next Steps**:  \n   - Verify the database service (`db`) is running and accessible in the `demo` namespace.  \n   - Check the database's port (`5432`) and ensure it is open.  \n   - Confirm the database credentials and configuration in the pod's environment or secrets.  \n   - If the database is in a different namespace, ensure the service is correctly exposed via a headless service or DNS.  \n\nFixing the database connection will resolve the crash loop and restore service reachability.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 135515.9,
+   "tool_ms": 62.4,
+   "rounds": 6,
+   "round_ms": [
+    10486.2,
+    9350.7,
+    30357.8,
+    31559.8,
+    23839.6,
+    29921.8
+   ],
+   "slowest_round_ms": 31559.8,
+   "model_share": 1.0,
+   "wall_ms": 135586.1,
+   "unaccounted_ms": 7.8,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "5964",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5964"
+      }
+     ]
+    },
+    {
+     "claim": "99948",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "99948"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "8",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_service_endpoints",
+       "field": "ports[0].port",
+       "value": "8"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "list_pods",
+       "field": "crasher-5964d99948-d7gwj.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "list_pods",
+       "field": "log-shipper-zp4zz.ready",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-5",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "084143c210c7",
+  "target": {
+   "kind": "service",
+   "name": "crasher-svc",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "service_unreachable_chain",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 117.7,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-18T13:25:58",
+  "load_before": 0.5,
+  "load_after": 1.65,
+  "low_power_mode": true,
+  "unverified": [
+   "10"
+  ],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 0,
+  "arguments": [
+   {
+    "name": "crasher-svc",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "crasher"
+   },
+   {
+    "name": "crasher-5964d99948-d7gwj",
+    "namespace": "demo"
+   },
+   {
+    "name": "crasher-5964d99948-d7gwj",
+    "namespace": "demo",
+    "container": "crasher",
+    "tail": 10
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_service_endpoints",
+    "result": "{\"service\": \"crasher-svc\", \"namespace\": \"demo\", \"type\": \"ClusterIP\", \"selector\": {\"app\": \"crasher\"}, \"ports\": [{\"port\": 80, \"target_port\": \"8080\"}], \"ready_endpoints\": [], \"not_ready_endpoints\": [\"10.244.0.2\"], \"diagnosis\": \"no ready endpoints: 1 pod(s) match the selector but none are ready -- inspect those pods, they are crashing or failing a readiness probe\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"crasher-5964d99948-d7gwj\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 9, \"node\": \"kubewhy-recheck-control-plane\"}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"crasher-5964d99948-d7gwj\", \"namespace\": \"demo\", \"status\": \"Error\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"crasher\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 9, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"crasher-5964d99948-d7gwj\", \"source\": \"current\", \"logs\": \"connecting to database...\\nFATAL: could not connect to db:5432: connection refused\", \"container\": \"crasher\"}"
+   }
+  ],
+  "draft": "The `crasher-svc` service is unreachable because its pod `crasher-5964d99948-d7gwj` is crashing due to a **database connection failure**. Here's the breakdown:\n\n### Root Cause\n- **Logs**: The container logs show it is trying to connect to a database at `db:5432` (default PostgreSQL port) but receives `connection refused`. This indicates:\n  - The database service (`db`) is **not running** or **unreachable** from the pod.\n  - The pod's configuration (e.g., environment variables, config maps) is pointing to an incorrect hostname, port, or network.\n\n### Why It\u2019s Unreachable\n1. **Crash Loop**: The container exits with code `1` (application error) because it cannot connect to the database. This triggers repeated restarts (9 total), but the underlying issue persists.\n2. **No Ready Endpoints**: The pod matches the service selector but fails readiness checks due to the database connection failure, so no traffic is routed to it.\n\n---\n\n### Fix Steps\n1. **Verify Database Availability**:\n   - Check if the database service (`db`) is running in the same namespace (`demo`) using `kubectl get pods -l app=db`.\n   - Ensure the database is listening on port `5432` and is accessible from the pod's network.\n\n2. **Check Pod Configuration**:\n   - Inspect the pod's environment variables or config maps (e.g., `kube-root-ca.crt` volume) to confirm the database connection string (hostname, port, credentials).\n\n3. **Fix Connectivity**:\n   - If the database is in a different namespace, ensure the service is exposed correctly (e.g., via a headless service or DNS entry).\n   - If the database is external, ensure firewall rules allow traffic from the pod's IP to the database's IP:port.\n\n4. **Adjust Readiness Probes**:\n   - If the app requires time to initialize (e.g., wait for the database), configure a readiness probe with an appropriate `initialDelaySeconds` to avoid premature termination.\n\n---\n\n### Example Commands\n```bash\n# Check database pod\nkubectl get pods -l app=db -n demo\n\n# Check pod logs again (if fixed, logs will show successful DB connection)\nkubectl logs crasher-5964d99948-d7gwj -n demo --tail=10\n```\n\nWithout resolving the database connection issue, the service will remain unreachable.",
+  "answer": "The `crasher-svc` service is unreachable because its pod `crasher-5964d99948-d7gwj` is crashing due to a **database connection failure**. Here's the breakdown:\n\n### Root Cause\n- **Logs**: The container logs show it is trying to connect to a database at `db:5432` (default PostgreSQL port) but receives `connection refused`. This indicates:\n  - The database service (`db`) is **not running** or **unreachable** from the pod.\n  - The pod's configuration (e.g., environment variables, config maps) is pointing to an incorrect hostname, port, or network.\n\n### Why It\u2019s Unreachable\n1. **Crash Loop**: The container exits with code `1` (application error) because it cannot connect to the database. This triggers repeated restarts (9 total), but the underlying issue persists.\n2. **No Ready Endpoints**: The pod matches the service selector but fails readiness checks due to the database connection failure, so no traffic is routed to it.\n\n---\n\n### Fix Steps\n1. **Verify Database Availability**:\n   - Check if the database service (`db`) is running in the same namespace (`demo`) using `kubectl get pods -l app=db`.\n   - Ensure the database is listening on port `5432` and is accessible from the pod's network.\n\n2. **Check Pod Configuration**:\n   - Inspect the pod's environment variables or config maps (e.g., `kube-root-ca.crt` volume) to confirm the database connection string (hostname, port, credentials).\n\n3. **Fix Connectivity**:\n   - If the database is in a different namespace, ensure the service is exposed correctly (e.g., via a headless service or DNS entry).\n   - If the database is external, ensure firewall rules allow traffic from the pod's IP to the database's IP:port.\n\n4. **Adjust Readiness Probes**:\n   - If the app requires time to initialize (e.g., wait for the database), configure a readiness probe with an appropriate `initialDelaySeconds` to avoid premature termination.\n\n---\n\n### Example Commands\n```bash\n# Check database pod\nkubectl get pods -l app=db -n demo\n\n# Check pod logs again (if fixed, logs will show successful DB connection)\nkubectl logs crasher-5964d99948-d7gwj -n demo --tail=[unverified: 10]\n```\n\nWithout resolving the database connection issue, the service will remain unreachable.\n\n---\n**Evidence audit.**\n1 of 11 stated values could not be traced to any tool result for the workload they were stated about: `10`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['10'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 117630.7,
+   "tool_ms": 41.4,
+   "rounds": 6,
+   "round_ms": [
+    13040.7,
+    9301.2,
+    11919.6,
+    29001.1,
+    14627.9,
+    39740.1
+   ],
+   "slowest_round_ms": 39740.1,
+   "model_share": 1.0,
+   "wall_ms": 117676.4,
+   "unaccounted_ms": 4.3,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "5964",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5964"
+      }
+     ]
+    },
+    {
+     "claim": "99948",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "99948"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_service_endpoints",
+       "field": "not_ready_endpoints[0]",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "9",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "crasher-5964d99948-d7gwj.restarts",
+       "value": "9"
+      }
+     ]
+    },
+    {
+     "claim": "5432",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_logs",
+       "field": "logs",
+       "value": "5432"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "5964",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "5964"
+      }
+     ]
+    },
+    {
+     "claim": "99948",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "describe_pod",
+       "field": "pod",
+       "value": "99948"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "10",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "10"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "4fc758c589f7",
+  "target": {
+   "kind": "service",
+   "name": "crasher-svc",
+   "namespace": "demo"
+  }
+ }
+]

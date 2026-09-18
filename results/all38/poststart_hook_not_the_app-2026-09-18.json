@@ -1,0 +1,556 @@
+[
+ {
+  "case": "poststart_hook_not_the_app",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": false,
+  "seconds": 229.9,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-18T15:04:46",
+  "load_before": 0.58,
+  "load_after": 1.1,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled",
+   "memory leak",
+   "pidpressure",
+   "memorypressure",
+   "diskpressure"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "session-cache",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "session-cache-dc5c4b66d-j5hx8",
+    "namespace": "uncovered"
+   },
+   {
+    "namespace": "uncovered",
+    "tail": 50,
+    "name": "session-cache-dc5c4b66d-j5hx8"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/session-cache\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"session-cache-dc5c4b66d-j5hx8\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"session-cache-dc5c4b66d-j5hx8\", \"namespace\": \"uncovered\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 25, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=app pod=session-cache-dc5c4b66d-j5hx8_uncovered(10fe288d-5805-4b32-80b2-76acb31b7583)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"result\": \"no logs available for pod session-cache-dc5c4b66d-j5hx8\"}"
+   }
+  ],
+  "draft": "The session-cache deployment in the **uncovered namespace** keeps restarting due to **CrashLoopBackOff**, with the container exiting with **code 137 (SIGKILL)**. Here's the accurate diagnosis based on the evidence:\n\n---\n\n### **1. Exit Code 137 (SIGKILL) but No OOMKilled Reason**\n- The container exited with **code 137**, which is the standard exit code for **SIGKILL** (a forced termination signal). However, the `last_termination.reason` field shows `\"Error\"`, not `\"OOMKilled\"`.\n- **Key Insight**: The kubelet only sets the reason to `\"OOMKilled\"` if the kernel\u2019s OOM killer terminated the container. Since the reason is `\"Error\"`, the **SIGKILL was not caused by the OOM killer**. The killer\u2019s identity (e.g., another process, system daemon, or external signal) is unknown.\n\n---\n\n### **2. No Memory Limits Defined**\n- The container has **no memory limits** (`limits: {}`), meaning it can consume all available memory on the node. While this could indirectly lead to OOM issues, the absence of `\"OOMKilled\"` in the reason suggests the crash was **not triggered by memory exhaustion**.\n- **Possible Scenarios**:\n  - The container\u2019s application has a **memory leak or infinite loop**, causing it to consume resources until it is forcibly killed.\n  - Another process on the node (e.g., a system daemon or another pod) **sent a SIGKILL** to the container for unrelated reasons.\n\n---\n\n### **3. Missing Logs and Application Instability**\n- **No logs available** from `get_pod_logs` means the container either:\n  - Crashed immediately without writing logs (e.g., due to a segmentation fault or unhandled exception).\n  - Has a misconfigured logging setup (e.g., no stdout/stderr redirection).\n- **Application Fault**: The container may have a **bug** (e.g., unhandled signals, resource leaks, or crashes) that causes it to terminate without logging.\n\n---\n\n### **4. Node-Level Pressure (Unclear)**\n- The pod runs on node `kubewhy-recheck-control-plane`. While **node-level pressure** (e.g., memory or disk pressure) could indirectly contribute to crashes, the absence of `\"OOMKilled\"` in the reason means this is **not the direct cause**.\n- **Action Needed**: Run `list_nodes` to check if the node has `MemoryPressure`, `DiskPressure`, or `PIDPressure` conditions. This would clarify if node-level constraints are a factor.\n\n---\n\n### **5. ConfigMap Mounting (Not the Cause)**\n- The container mounts a ConfigMap (`kube-root-ca.crt`), but `updates_in_place: true` means changes to this ConfigMap won\u2019t affect the container unless it restarts. This is unrelated to the crash.\n\n---\n\n### **Summary**\nThe session-cache deployment is restarting due to **SIGKILL (exit code 137)**, but the **cause is not the OOM killer** (since `last_termination.reason` is `\"Error\"`). The container has **no memory limits**, which could contribute to instability, but the crash is likely due to **application-specific issues** (e.g., bugs, resource leaks) or **external signals** from the node. Without logs or node pressure confirmation, the exact cause remains **unsettled**. \n\n**Next Steps**:\n1. Run `list_nodes` to check for node-level resource pressure.\n2. Inspect `get_pod_events` for scheduling or image pull errors.\n3. Add memory limits to the container to prevent unexpected termination.\n4. Debug the application for unhandled exceptions or resource leaks.",
+  "answer": "The session-cache deployment in the **uncovered namespace** keeps restarting due to **CrashLoopBackOff**, with the container exiting with **code 137 (SIGKILL)**. Here's the accurate diagnosis based on the evidence:\n\n---\n\n### **1. Exit Code 137 (SIGKILL) but No [unverified: OOMKilled] Reason**\n- The container exited with **code 137**, which is the standard exit code for **SIGKILL** (a forced termination signal). However, the `last_termination.reason` field shows `\"Error\"`, not `\"[unverified: OOMKilled]\"`.\n- **Key Insight**: The kubelet only sets the reason to `\"[unverified: OOMKilled]\"` if the kernel\u2019s OOM killer terminated the container. Since the reason is `\"Error\"`, the **SIGKILL was not caused by the OOM killer**. The killer\u2019s identity (e.g., another process, system daemon, or external signal) is unknown.\n\n---\n\n### **2. No Memory Limits Defined**\n- The container has **no memory limits** (`limits: {}`), meaning it can consume all available memory on the node. While this could indirectly lead to OOM issues, the absence of `\"[unverified: OOMKilled]\"` in the reason suggests the crash was **not triggered by memory exhaustion**.\n- **Possible Scenarios**:\n  - The container\u2019s application has a **[unverified: memory leak] or infinite loop**, causing it to consume resources until it is forcibly killed.\n  - Another process on the node (e.g., a system daemon or another pod) **sent a SIGKILL** to the container for unrelated reasons.\n\n---\n\n### **3. Missing Logs and Application Instability**\n- **No logs available** from `get_pod_logs` means the container either:\n  - Crashed immediately without writing logs (e.g., due to a segmentation fault or unhandled exception).\n  - Has a misconfigured logging setup (e.g., no stdout/stderr redirection).\n- **Application Fault**: The container may have a **bug** (e.g., unhandled signals, resource leaks, or crashes) that causes it to terminate without logging.\n\n---\n\n### **4. Node-Level Pressure (Unclear)**\n- The pod runs on node `kubewhy-recheck-control-plane`. While **node-level pressure** (e.g., memory or disk pressure) could indirectly contribute to crashes, the absence of `\"[unverified: OOMKilled]\"` in the reason means this is **not the direct cause**.\n- **Action Needed**: Run `list_nodes` to check if the node has `[unverified: MemoryPressure]`, `[unverified: DiskPressure]`, or `[unverified: PIDPressure]` conditions. This would clarify if node-level constraints are a factor.\n\n---\n\n### **5. ConfigMap Mounting (Not the Cause)**\n- The container mounts a ConfigMap (`kube-root-ca.crt`), but `updates_in_place: true` means changes to this ConfigMap won\u2019t affect the container unless it restarts. This is unrelated to the crash.\n\n---\n\n### **Summary**\nThe session-cache deployment is restarting due to **SIGKILL (exit code 137)**, but the **cause is not the OOM killer** (since `last_termination.reason` is `\"Error\"`). The container has **no memory limits**, which could contribute to instability, but the crash is likely due to **application-specific issues** (e.g., bugs, resource leaks) or **external signals** from the node. Without logs or node pressure confirmation, the exact cause remains **unsettled**. \n\n**Next Steps**:\n1. Run `list_nodes` to check for node-level resource pressure.\n2. Inspect `get_pod_events` for scheduling or image pull errors.\n3. Add memory limits to the container to prevent unexpected termination.\n4. Debug the application for unhandled exceptions or resource leaks.\n\n---\n**Evidence audit.**\n5 of 12 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`, `memory leak`, `pidpressure`, `memorypressure`, `diskpressure`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 1,
+  "failures": [
+   "none of ['poststart', 'post-start', 'lifecycle hook', 'hook'] in answer",
+   "never called get_pod_events",
+   "unverified claims: ['oomkilled', 'memory leak', 'pidpressure', 'memorypressure', 'diskpressure']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 229818.4,
+   "tool_ms": 25.6,
+   "rounds": 4,
+   "round_ms": [
+    39445.3,
+    56914.2,
+    66716.4,
+    66742.5
+   ],
+   "slowest_round_ms": 66742.5,
+   "model_share": 1.0,
+   "wall_ms": 229857.7,
+   "unaccounted_ms": 13.7,
+   "slept_ms": 0.7
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/session-cache.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    },
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    },
+    {
+     "claim": "memory leak",
+     "kind": "cause"
+    },
+    {
+     "claim": "pidpressure",
+     "kind": "status"
+    },
+    {
+     "claim": "memorypressure",
+     "kind": "status"
+    },
+    {
+     "claim": "diskpressure",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "OOMKilled",
+    "OOMKilled",
+    "OOMKilled",
+    "OOMKilled",
+    "memory leak",
+    "OOMKilled",
+    "PIDPressure",
+    "MemoryPressure",
+    "DiskPressure"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "3e4f0e543a82",
+  "target": {
+   "kind": "workload",
+   "name": "session-cache",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "poststart_hook_not_the_app",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": false,
+  "seconds": 194.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T15:08:36",
+  "load_before": 1.1,
+  "load_after": 0.5,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "session-cache",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "session-cache-dc5c4b66d-j5hx8",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "session-cache-dc5c4b66d-j5hx8",
+    "namespace": "uncovered",
+    "container": "app",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/session-cache\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"session-cache-dc5c4b66d-j5hx8\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"session-cache-dc5c4b66d-j5hx8\", \"namespace\": \"uncovered\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 26, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=app pod=session-cache-dc5c4b66d-j5hx8_uncovered(10fe288d-5805-4b32-80b2-76acb31b7583)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"result\": \"no logs available for pod session-cache-dc5c4b66d-j5hx8\"}"
+   }
+  ],
+  "draft": "The `session-cache` deployment in the `uncovered` namespace is restarting due to **CrashLoopBackOff**, with the last container termination marked as **\"Error\"** and **exit code 137** (SIGKILL). Here's the accurate diagnosis based on the evidence:\n\n### Key Evidence:\n1. **Exit Code 137 (SIGKILL)**:  \n   - The container was forcibly terminated by the kernel, but the **cause is unspecified**. While exit code 137 confirms a signal-based termination, the `last_termination.reason` field shows \"Error,\" which is a generic placeholder. The **OOM killer** would explicitly set `reason` to `\"OOMKilled\"` if the kill was due to memory pressure. Since it is not, the termination likely came from another source (e.g., a manual kill, a system signal, or a kubelet action).\n\n2. **Empty Memory Limits**:  \n   - The container\u2019s memory `requests` and `limits` are undefined, meaning it is not constrained by resource limits. This could allow it to consume excessive memory, but **without logs or node pressure data**, this remains speculative.\n\n3. **No Logs Available**:  \n   - `get_pod_logs` returned \"no logs available,\" so application-specific errors (e.g., memory leaks, crashes, or misconfigurations) cannot be diagnosed from the container\u2019s output.\n\n### Workload Summary:\n- **uncovered/session-cache**:  \n  - Status: `CrashLoopBackOff` (pod repeatedly crashing and restarting).  \n  - Cause: Exit code 137 (SIGKILL) with `last_termination.reason` = \"Error\" (unspecified killer).  \n  - Action Needed:  \n    - Define memory `requests` and `limits` in the deployment to prevent unbounded resource usage.  \n    - Check node pressure via `list_nodes` to rule out cluster-level resource exhaustion.  \n\n### Conclusion:\nThe deployment restarts because the container was killed by an unspecified process (not the OOM killer). The exact cause requires further investigation into node resource pressure and application-specific logs.",
+  "answer": "The `session-cache` deployment in the `uncovered` namespace is restarting due to **CrashLoopBackOff**, with the last container termination marked as **\"Error\"** and **exit code 137** (SIGKILL). Here's the accurate diagnosis based on the evidence:\n\n### Key Evidence:\n1. **Exit Code 137 (SIGKILL)**:  \n   - The container was forcibly terminated by the kernel, but the **cause is unspecified**. While exit code 137 confirms a signal-based termination, the `last_termination.reason` field shows \"Error,\" which is a generic placeholder. The **OOM killer** would explicitly set `reason` to `\"OOMKilled\"` if the kill was due to memory pressure. Since it is not, the termination likely came from another source (e.g., a manual kill, a system signal, or a kubelet action).\n\n2. **Empty Memory Limits**:  \n   - The container\u2019s memory `requests` and `limits` are undefined, meaning it is not constrained by resource limits. This could allow it to consume excessive memory, but **without logs or node pressure data**, this remains speculative.\n\n3. **No Logs Available**:  \n   - `get_pod_logs` returned \"no logs available,\" so application-specific errors (e.g., memory leaks, crashes, or misconfigurations) cannot be diagnosed from the container\u2019s output.\n\n### Workload Summary:\n- **uncovered/session-cache**:  \n  - Status: `CrashLoopBackOff` (pod repeatedly crashing and restarting).  \n  - Cause: Exit code 137 (SIGKILL) with `last_termination.reason` = \"Error\" (unspecified killer).  \n  - Action Needed:  \n    - Define memory `requests` and `limits` in the deployment to prevent unbounded resource usage.  \n    - Check node pressure via `list_nodes` to rule out cluster-level resource exhaustion.  \n\n### Conclusion:\nThe deployment restarts because the container was killed by an unspecified process (not the OOM killer). The exact cause requires further investigation into node resource pressure and application-specific logs.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 1,
+  "reconciles": 1,
+  "failures": [
+   "none of ['poststart', 'post-start', 'lifecycle hook', 'hook'] in answer",
+   "never called get_pod_events"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 194648.3,
+   "tool_ms": 49.0,
+   "rounds": 6,
+   "round_ms": [
+    44355.9,
+    37114.5,
+    21382.6,
+    14661.8,
+    35094.7,
+    42038.8
+   ],
+   "slowest_round_ms": 44355.9,
+   "model_share": 1.0,
+   "wall_ms": 194707.4,
+   "unaccounted_ms": 10.1,
+   "slept_ms": 2.7
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/session-cache.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/session-cache.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "ab2d242f98ac",
+  "target": {
+   "kind": "workload",
+   "name": "session-cache",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "poststart_hook_not_the_app",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": false,
+  "seconds": 194.0,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-18T15:11:51",
+  "load_before": 0.5,
+  "load_after": 1.07,
+  "low_power_mode": true,
+  "unverified": [
+   "256",
+   "512",
+   "memory leak"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs",
+   "list_nodes"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "session-cache",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "session-cache-dc5c4b66d-j5hx8",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "session-cache-dc5c4b66d-j5hx8",
+    "namespace": "uncovered",
+    "tail": 50
+   },
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/session-cache\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"session-cache-dc5c4b66d-j5hx8\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"session-cache-dc5c4b66d-j5hx8\", \"namespace\": \"uncovered\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 26, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=app pod=session-cache-dc5c4b66d-j5hx8_uncovered(10fe288d-5805-4b32-80b2-76acb31b7583)\", \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 137}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"result\": \"no logs available for pod session-cache-dc5c4b66d-j5hx8\"}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-recheck-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The **session-cache** deployment in the `uncovered` namespace keeps restarting due to **CrashLoopBackOff**, caused by the container being terminated with **exit code 137** (`SIGKILL`). However, the `last_termination.reason` is **\"Error\"**, which means the kubelet did not explicitly record the cause of the termination (e.g., OOM Killer, application crash, or manual kill). Here's the revised diagnosis:\n\n---\n\n### **Root Cause**\n1. **SIGKILL Termination**:  \n   The container was forcibly terminated by the kernel with **exit code 137** (`SIGKILL`), indicating an abrupt kill. However, the kubelet did not specify the reason (e.g., OOM Killer, application crash, or external intervention), as reflected in `last_termination.reason = \"Error\"`.\n\n2. **No Memory Limits**:  \n   The container uses `busybox:1.36` with **no memory limits** set (`limits: {}`). This allows the container to consume all available memory on the node. If the application leaks memory or exceeds the node\u2019s capacity, the kubelet may kill the container, but this is not explicitly tied to the OOM Killer here.\n\n3. **No Logs Available**:  \n   The pod logs are empty, making it impossible to diagnose the exact application-level cause (e.g., crashes, infinite loops, or resource leaks).\n\n4. **Node Health**:  \n   The node `kubewhy-recheck-control-plane` is **not under memory or disk pressure** (`pressure: null`), ruling out node-level resource exhaustion as the cause.\n\n---\n\n### **Next Steps**\n1. **Set Resource Limits**:  \n   Define `resources.requests.memory` and `resources.limits.memory` in the deployment\u2019s container spec to prevent abrupt termination. Example:\n   ```yaml\n   resources:\n     requests:\n       memory: \"256Mi\"\n     limits:\n       memory: \"512Mi\"\n   ```\n\n2. **Check Application Behavior**:  \n   If the container runs a custom script, ensure it doesn\u2019t have memory leaks or infinite loops. For `busybox`, verify it\u2019s not running background processes that consume memory.\n\n3. **Inspect Pod Events**:  \n   Use `get_pod_events` to check for warnings or errors that might explain the termination (e.g., image pull failures, scheduling issues, or kubelet actions).\n\n4. **Monitor Resource Usage**:  \n   Use `kubectl top pod` (with Metrics Server) to check memory usage. If the pod consistently hits its memory limit, adjust `limits` accordingly.\n\n---\n\n### **Key Takeaway**\nThe **exit code 137** confirms the container was killed by `SIGKILL`, but the **reason field** (`Error`) does not specify the cause. The node is healthy, so the issue likely stems from the application\u2019s behavior or missing resource constraints. Without logs, the exact cause remains unresolved, and further investigation is needed.",
+  "answer": "The **session-cache** deployment in the `uncovered` namespace keeps restarting due to **CrashLoopBackOff**, caused by the container being terminated with **exit code 137** (`SIGKILL`). However, the `last_termination.reason` is **\"Error\"**, which means the kubelet did not explicitly record the cause of the termination (e.g., OOM Killer, application crash, or manual kill). Here's the revised diagnosis:\n\n---\n\n### **Root Cause**\n1. **SIGKILL Termination**:  \n   The container was forcibly terminated by the kernel with **exit code 137** (`SIGKILL`), indicating an abrupt kill. However, the kubelet did not specify the reason (e.g., OOM Killer, application crash, or external intervention), as reflected in `last_termination.reason = \"Error\"`.\n\n2. **No Memory Limits**:  \n   The container uses `busybox:1.36` with **no memory limits** set (`limits: {}`). This allows the container to consume all available memory on the node. If the application leaks memory or exceeds the node\u2019s capacity, the kubelet may kill the container, but this is not explicitly tied to the OOM Killer here.\n\n3. **No Logs Available**:  \n   The pod logs are empty, making it impossible to diagnose the exact application-level cause (e.g., crashes, infinite loops, or resource leaks).\n\n4. **Node Health**:  \n   The node `kubewhy-recheck-control-plane` is **not under memory or disk pressure** (`pressure: null`), ruling out node-level resource exhaustion as the cause.\n\n---\n\n### **Next Steps**\n1. **Set Resource Limits**:  \n   Define `resources.requests.memory` and `resources.limits.memory` in the deployment\u2019s container spec to prevent abrupt termination. Example:\n   ```yaml\n   resources:\n     requests:\n       memory: \"[unverified: 256Mi]\"\n     limits:\n       memory: \"[unverified: 512Mi]\"\n   ```\n\n2. **Check Application Behavior**:  \n   If the container runs a custom script, ensure it doesn\u2019t have [unverified: memory leaks] or infinite loops. For `busybox`, verify it\u2019s not running background processes that consume memory.\n\n3. **Inspect Pod Events**:  \n   Use `get_pod_events` to check for warnings or errors that might explain the termination (e.g., image pull failures, scheduling issues, or kubelet actions).\n\n4. **Monitor Resource Usage**:  \n   Use `kubectl top pod` (with Metrics Server) to check memory usage. If the pod consistently hits its memory limit, adjust `limits` accordingly.\n\n---\n\n### **Key Takeaway**\nThe **exit code 137** confirms the container was killed by `SIGKILL`, but the **reason field** (`Error`) does not specify the cause. The node is healthy, so the issue likely stems from the application\u2019s behavior or missing resource constraints. Without logs, the exact cause remains unresolved, and further investigation is needed.\n\n---\n**Evidence audit.**\n3 of 7 stated values could not be traced to any tool result for the workload they were stated about: `256`, `512`, `memory leak`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 1,
+  "failures": [
+   "none of ['poststart', 'post-start', 'lifecycle hook', 'hook'] in answer",
+   "never called get_pod_events",
+   "unverified claims: ['256', '512', 'memory leak']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 193981.0,
+   "tool_ms": 47.0,
+   "rounds": 5,
+   "round_ms": [
+    28138.0,
+    45456.3,
+    25339.1,
+    43103.3,
+    51944.4
+   ],
+   "slowest_round_ms": 51944.4,
+   "model_share": 1.0,
+   "wall_ms": 194040.1,
+   "unaccounted_ms": 12.1,
+   "slept_ms": 0.7
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/session-cache.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    },
+    {
+     "claim": "137",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "137"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "256",
+     "kind": "number"
+    },
+    {
+     "claim": "512",
+     "kind": "number"
+    },
+    {
+     "claim": "memory leak",
+     "kind": "cause"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "256Mi",
+    "512Mi",
+    "memory leaks"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "cd79ce4edf39",
+  "target": {
+   "kind": "workload",
+   "name": "session-cache",
+   "namespace": "uncovered"
+  }
+ }
+]

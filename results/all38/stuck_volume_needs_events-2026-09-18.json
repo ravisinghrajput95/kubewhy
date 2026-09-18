@@ -1,0 +1,353 @@
+[
+ {
+  "case": "stuck_volume_needs_events",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 85.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T14:03:04",
+  "load_before": 1.6,
+  "load_after": 1.11,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "missing-configmap-volume",
+    "namespaces": "config-faults"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"config-faults/missing-configmap-volume\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-configmap-volume\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"missing-configmap-volume\", \"namespace\": \"config-faults\", \"status\": \"ContainerCreating\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ContainerCreating\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"nginx-conf\", \"via\": \"volume\", \"updates_in_place\": true}, {\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-volume\", \"events\": [{\"reason\": \"FailedMount\", \"count\": 36, \"age\": \"2m\", \"message\": \"MountVolume.SetUp failed for volume \\\"conf\\\" : configmap \\\"nginx-conf\\\" not found\"}, {\"reason\": \"FailedScheduling\", \"count\": 1, \"age\": \"59m\", \"message\": \"0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\", \"superseded\": \"the pod was scheduled after this\"}]}"
+   }
+  ],
+  "draft": "The pod `missing-configmap-volume` in the `config-faults` namespace is stuck in **ContainerCreating** due to a **missing ConfigMap** (`nginx-conf`). Here's the breakdown:\n\n1. **Root Cause**:  \n   - The kubelet reports a `FailedMount` event (36 occurrences) stating:  \n     *\"MountVolume.SetUp failed for volume \\\"conf\\\": configmap \\\"nginx-conf\\\" not found\"*.  \n     This confirms the pod cannot mount the `nginx-conf` ConfigMap, which is explicitly referenced in its volume configuration.  \n\n2. **Why It Stuck**:  \n   - The pod\u2019s volume mounts depend on two ConfigMaps: `nginx-conf` (custom) and `kube-root-ca.crt` (standard). While `kube-root-ca.crt` likely exists, `nginx-conf` is missing in the `config-faults` namespace.  \n   - Kubernetes blocks pod creation until all volume mounts are resolved, causing the pod to remain in `ContainerCreating`.\n\n3. **Next Steps**:  \n   - **Verify existence**: Check if `nginx-conf` exists in `config-faults` with `kubectl get configmap -n config-faults nginx-conf`.  \n   - **Create the ConfigMap**: If missing, create it using `kubectl create configmap nginx-conf --from-file=... -n config-faults`.  \n   - **Validate spec**: Ensure the pod\u2019s YAML correctly references the ConfigMap names and paths in the volume mounts.  \n\nThe scheduling event (`FailedScheduling`) is outdated (superseded) and unrelated to the current issue. The critical problem is the missing ConfigMap.",
+  "answer": "The pod `missing-configmap-volume` in the `config-faults` namespace is stuck in **ContainerCreating** due to a **missing ConfigMap** (`nginx-conf`). Here's the breakdown:\n\n1. **Root Cause**:  \n   - The kubelet reports a `FailedMount` event (36 occurrences) stating:  \n     *\"MountVolume.SetUp failed for volume \\\"conf\\\": configmap \\\"nginx-conf\\\" not found\"*.  \n     This confirms the pod cannot mount the `nginx-conf` ConfigMap, which is explicitly referenced in its volume configuration.  \n\n2. **Why It Stuck**:  \n   - The pod\u2019s volume mounts depend on two ConfigMaps: `nginx-conf` (custom) and `kube-root-ca.crt` (standard). While `kube-root-ca.crt` likely exists, `nginx-conf` is missing in the `config-faults` namespace.  \n   - Kubernetes blocks pod creation until all volume mounts are resolved, causing the pod to remain in `ContainerCreating`.\n\n3. **Next Steps**:  \n   - **Verify existence**: Check if `nginx-conf` exists in `config-faults` with `kubectl get configmap -n config-faults nginx-conf`.  \n   - **Create the ConfigMap**: If missing, create it using `kubectl create configmap nginx-conf --from-file=... -n config-faults`.  \n   - **Validate spec**: Ensure the pod\u2019s YAML correctly references the ConfigMap names and paths in the volume mounts.  \n\nThe scheduling event (`FailedScheduling`) is outdated (superseded) and unrelated to the current issue. The critical problem is the missing ConfigMap.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 85307.2,
+   "tool_ms": 18.3,
+   "rounds": 3,
+   "round_ms": [
+    32882.3,
+    20543.3,
+    31881.6
+   ],
+   "slowest_round_ms": 32882.3,
+   "model_share": 1.0,
+   "wall_ms": 85329.6,
+   "unaccounted_ms": 4.1,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "containercreating",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-volume.status",
+       "value": "containercreating"
+      }
+     ]
+    },
+    {
+     "claim": "36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "36"
+      }
+     ]
+    },
+    {
+     "claim": "containercreating",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-volume.status",
+       "value": "containercreating"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "d8b93bb86e6c",
+  "target": {
+   "kind": "workload",
+   "name": "missing-configmap-volume",
+   "namespace": "config-faults"
+  }
+ },
+ {
+  "case": "stuck_volume_needs_events",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 135.5,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T14:04:30",
+  "load_before": 1.11,
+  "load_after": 0.93,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "missing-configmap-volume",
+    "namespaces": "config-faults"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults"
+   },
+   {
+    "limit": 5,
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"config-faults/missing-configmap-volume\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-configmap-volume\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"missing-configmap-volume\", \"namespace\": \"config-faults\", \"status\": \"ContainerCreating\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ContainerCreating\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"nginx-conf\", \"via\": \"volume\", \"updates_in_place\": true}, {\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-volume\", \"events\": [{\"reason\": \"FailedMount\", \"count\": 38, \"age\": \"9s\", \"message\": \"MountVolume.SetUp failed for volume \\\"conf\\\" : configmap \\\"nginx-conf\\\" not found\"}]}"
+   }
+  ],
+  "draft": "The scan identified **config-faults/missing-configmap-volume** as the sole workload in the namespace with issues. Here's the full breakdown:\n\n---\n\n**Workload: `config-faults/missing-configmap-volume`**  \n**Status:** `ContainerCreating` (stuck)  \n**Reason:** The pod failed to mount a volume linked to the missing `nginx-conf` ConfigMap.  \n**Key Event:**  \n`MountVolume.SetUp failed for volume \"conf\": configmap \"nginx-conf\" not found` (repeated 38 times).  \n**Fix:**  \n1. Verify the ConfigMap exists via `kubectl get configmap nginx-conf -n config-faults`.  \n2. If missing, create it with `kubectl create configmap nginx-conf --from-file=... -n config-faults`.  \n3. Ensure the volume mount in the pod's YAML correctly references the ConfigMap (e.g., `configMapName: nginx-conf`).  \n\nNo other workloads in the `config-faults` namespace were reported by the scan. The pod remains stuck until the missing ConfigMap is resolved.",
+  "answer": "The scan identified **config-faults/missing-configmap-volume** as the sole workload in the namespace with issues. Here's the full breakdown:\n\n---\n\n**Workload: `config-faults/missing-configmap-volume`**  \n**Status:** `ContainerCreating` (stuck)  \n**Reason:** The pod failed to mount a volume linked to the missing `nginx-conf` ConfigMap.  \n**Key Event:**  \n`MountVolume.SetUp failed for volume \"conf\": configmap \"nginx-conf\" not found` (repeated 38 times).  \n**Fix:**  \n1. Verify the ConfigMap exists via `kubectl get configmap nginx-conf -n config-faults`.  \n2. If missing, create it with `kubectl create configmap nginx-conf --from-file=... -n config-faults`.  \n3. Ensure the volume mount in the pod's YAML correctly references the ConfigMap (e.g., `configMapName: nginx-conf`).  \n\nNo other workloads in the `config-faults` namespace were reported by the scan. The pod remains stuck until the missing ConfigMap is resolved.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 1,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 135497.7,
+   "tool_ms": 24.2,
+   "rounds": 3,
+   "round_ms": [
+    53139.3,
+    28625.8,
+    53732.7
+   ],
+   "slowest_round_ms": 53732.7,
+   "model_share": 1.0,
+   "wall_ms": 135526.1,
+   "unaccounted_ms": 4.3,
+   "slept_ms": 2.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "containercreating",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-volume.status",
+       "value": "containercreating"
+      }
+     ]
+    },
+    {
+     "claim": "38",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_events",
+       "field": "events[0].count",
+       "value": "38"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "4e5480d3315c",
+  "target": {
+   "kind": "workload",
+   "name": "missing-configmap-volume",
+   "namespace": "config-faults"
+  }
+ },
+ {
+  "case": "stuck_volume_needs_events",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 115.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T14:06:45",
+  "load_before": 0.93,
+  "load_after": 0.74,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "missing-configmap-volume",
+    "namespaces": "config-faults"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-volume",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"config-faults/missing-configmap-volume\": {\"status\": \"ContainerCreating\", \"pods\": 1, \"example\": \"missing-configmap-volume\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"missing-configmap-volume\", \"namespace\": \"config-faults\", \"status\": \"ContainerCreating\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ContainerCreating\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"nginx-conf\", \"via\": \"volume\", \"updates_in_place\": true}, {\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-volume\", \"events\": [{\"reason\": \"FailedMount\", \"count\": 38, \"age\": \"2m\", \"message\": \"MountVolume.SetUp failed for volume \\\"conf\\\" : configmap \\\"nginx-conf\\\" not found\"}]}"
+   }
+  ],
+  "draft": "The pod `missing-configmap-volume` in the `config-faults` namespace is stuck in **ContainerCreating** due to a **missing ConfigMap**. Here's the breakdown:\n\n### Root Cause\n- **Event**: `FailedMount` with message:  \n  `\"MountVolume.SetUp failed for volume \\\"conf\\\": configmap \\\"nginx-conf\\\" not found\"`.  \n  This confirms the pod cannot mount the `nginx-conf` ConfigMap, which is required for the container to start.\n\n### Key Findings\n1. **Missing ConfigMap**:  \n   The pod references a ConfigMap named `nginx-conf` via a volume, but this ConfigMap does not exist in the `config-faults` namespace.  \n   - The second ConfigMap (`kube-root-ca.crt`) might also be missing or misconfigured, but the primary error is the absence of `nginx-conf`.\n\n2. **Volume Mount Failure**:  \n   The volume mount configuration in the pod's spec likely maps to these ConfigMaps, but without them, the kubelet cannot proceed with container creation.\n\n### Next Steps\n- **Verify ConfigMap Existence**:  \n  Run `kubectl get configmap -n config-faults` to confirm `nginx-conf` and `kube-root-ca.crt` exist.  \n  - If missing, create them with the correct data and structure.  \n- **Check Volume Mounts**:  \n  Ensure the pod's YAML defines `volumeMounts` with correct paths and names matching the ConfigMaps.  \n- **Fix Permissions/Paths**:  \n  If the ConfigMaps exist, verify permissions or paths in the volume mount configuration.\n\n### Resolution\nCreate the missing `nginx-conf` ConfigMap in the `config-faults` namespace, then restart the pod. This will resolve the volume mount failure and allow the container to proceed.",
+  "answer": "The pod `missing-configmap-volume` in the `config-faults` namespace is stuck in **ContainerCreating** due to a **missing ConfigMap**. Here's the breakdown:\n\n### Root Cause\n- **Event**: `FailedMount` with message:  \n  `\"MountVolume.SetUp failed for volume \\\"conf\\\": configmap \\\"nginx-conf\\\" not found\"`.  \n  This confirms the pod cannot mount the `nginx-conf` ConfigMap, which is required for the container to start.\n\n### Key Findings\n1. **Missing ConfigMap**:  \n   The pod references a ConfigMap named `nginx-conf` via a volume, but this ConfigMap does not exist in the `config-faults` namespace.  \n   - The second ConfigMap (`kube-root-ca.crt`) might also be missing or misconfigured, but the primary error is the absence of `nginx-conf`.\n\n2. **Volume Mount Failure**:  \n   The volume mount configuration in the pod's spec likely maps to these ConfigMaps, but without them, the kubelet cannot proceed with container creation.\n\n### Next Steps\n- **Verify ConfigMap Existence**:  \n  Run `kubectl get configmap -n config-faults` to confirm `nginx-conf` and `kube-root-ca.crt` exist.  \n  - If missing, create them with the correct data and structure.  \n- **Check Volume Mounts**:  \n  Ensure the pod's YAML defines `volumeMounts` with correct paths and names matching the ConfigMaps.  \n- **Fix Permissions/Paths**:  \n  If the ConfigMaps exist, verify permissions or paths in the volume mount configuration.\n\n### Resolution\nCreate the missing `nginx-conf` ConfigMap in the `config-faults` namespace, then restart the pod. This will resolve the volume mount failure and allow the container to proceed.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 115002.7,
+   "tool_ms": 25.4,
+   "rounds": 3,
+   "round_ms": [
+    54437.3,
+    23385.7,
+    37179.7
+   ],
+   "slowest_round_ms": 54437.3,
+   "model_share": 1.0,
+   "wall_ms": 115031.9,
+   "unaccounted_ms": 3.8,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "containercreating",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-volume.status",
+       "value": "containercreating"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "9ec070cdd252",
+  "target": {
+   "kind": "workload",
+   "name": "missing-configmap-volume",
+   "namespace": "config-faults"
+  }
+ }
+]

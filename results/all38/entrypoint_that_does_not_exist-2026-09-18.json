@@ -1,0 +1,404 @@
+[
+ {
+  "case": "entrypoint_that_does_not_exist",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 92.2,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T15:15:05",
+  "load_before": 1.07,
+  "load_after": 1.57,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "report-worker",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-s6g87",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-s6g87",
+    "namespace": "uncovered",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/report-worker\": {\"status\": \"RunContainerError\", \"pods\": 1, \"example\": \"report-worker-66d8ddbf9f-s6g87\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"report-worker-66d8ddbf9f-s6g87\", \"namespace\": \"uncovered\", \"status\": \"RunContainerError\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 30, \"waiting_reason\": \"RunContainerError\", \"waiting_message\": \"failed to create containerd task: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: \\\"/usr/local/bin/definitely-not-here\\\": stat /usr/local/bin/definitely-not-here: no such file or directory\", \"last_termination\": {\"reason\": \"StartError\", \"exit_code\": 128}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"result\": \"no logs available for pod report-worker-66d8ddbf9f-s6g87\"}"
+   }
+  ],
+  "draft": "The `report-worker` deployment is failing to start due to a **missing executable** in the container image. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n- The container attempted to execute the file `/usr/local/bin/definitely-not-here` but it **does not exist** in the `busybox:1.36` image.\n- This results in a `RunContainerError` with **exit code 128**, which indicates the container failed to initialize (e.g., the entry point/command is invalid or missing).\n\n---\n\n### **Why No Logs?**\n- The `get_pod_logs` call returned **no logs**, confirming the container did not produce any output before failing to start. This is consistent with the error message from the kubelet, which directly points to the missing binary.\n\n---\n\n### **Fix Steps**\n1. **Verify the Image**:  \n   Ensure the `busybox:1.36` image includes the required binary (`definitely-not-here`). If it's a custom build, rebuild the image with the correct files.\n\n2. **Check the Entry Point**:  \n   Confirm the deployment's `command` or `entrypoint` in the YAML points to a valid executable in the image (e.g., `/bin/sh` for `busybox`). For example:\n   ```yaml\n   containers:\n   - name: app\n     image: busybox:1.36\n     command: [\"/bin/sh\", \"-c\", \"echo 'Hello from busybox'\"]\n   ```\n\n3. **Use a Valid Image**:  \n   If the binary is not required, use a standard `busybox` image or replace it with a different image that includes the necessary tools.\n\n---\n\n### **Conclusion**\nThe deployment is blocked by a **missing file** in the container image, not by Kubernetes misconfiguration or resource limits. The exit code `128` and the kubelet's error message confirm this is a container initialization failure. No logs were available, but the root cause is clear.",
+  "answer": "The `report-worker` deployment is failing to start due to a **missing executable** in the container image. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n- The container attempted to execute the file `/usr/local/bin/definitely-not-here` but it **does not exist** in the `busybox:1.36` image.\n- This results in a `RunContainerError` with **exit code 128**, which indicates the container failed to initialize (e.g., the entry point/command is invalid or missing).\n\n---\n\n### **Why No Logs?**\n- The `get_pod_logs` call returned **no logs**, confirming the container did not produce any output before failing to start. This is consistent with the error message from the kubelet, which directly points to the missing binary.\n\n---\n\n### **Fix Steps**\n1. **Verify the Image**:  \n   Ensure the `busybox:1.36` image includes the required binary (`definitely-not-here`). If it's a custom build, rebuild the image with the correct files.\n\n2. **Check the Entry Point**:  \n   Confirm the deployment's `command` or `entrypoint` in the YAML points to a valid executable in the image (e.g., `/bin/sh` for `busybox`). For example:\n   ```yaml\n   containers:\n   - name: app\n     image: busybox:1.36\n     command: [\"/bin/sh\", \"-c\", \"echo 'Hello from busybox'\"]\n   ```\n\n3. **Use a Valid Image**:  \n   If the binary is not required, use a standard `busybox` image or replace it with a different image that includes the necessary tools.\n\n---\n\n### **Conclusion**\nThe deployment is blocked by a **missing file** in the container image, not by Kubernetes misconfiguration or resource limits. The exit code `128` and the kubelet's error message confirm this is a container initialization failure. No logs were available, but the root cause is clear.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 92139.2,
+   "tool_ms": 25.3,
+   "rounds": 3,
+   "round_ms": [
+    35758.0,
+    21814.9,
+    34566.4
+   ],
+   "slowest_round_ms": 35758.0,
+   "model_share": 1.0,
+   "wall_ms": 92168.4,
+   "unaccounted_ms": 3.9,
+   "slept_ms": 0.3
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "128",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "128"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "2489a9578c83",
+  "target": {
+   "kind": "workload",
+   "name": "report-worker",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "entrypoint_that_does_not_exist",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": false,
+  "seconds": 154.1,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-18T15:16:37",
+  "load_before": 1.57,
+  "load_after": 0.89,
+  "low_power_mode": true,
+  "unverified": [
+   "memorypressure",
+   "diskpressure"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs",
+   "list_nodes"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "report-worker",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-s6g87",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-s6g87",
+    "namespace": "uncovered",
+    "container": "app",
+    "tail": 50
+   },
+   {}
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/report-worker\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"report-worker-66d8ddbf9f-s6g87\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"report-worker-66d8ddbf9f-s6g87\", \"namespace\": \"uncovered\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 30, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=app pod=report-worker-66d8ddbf9f-s6g87_uncovered(35ef9b38-f983-41a8-9527-6cbef86d5d00)\", \"last_termination\": {\"reason\": \"StartError\", \"exit_code\": 128}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"result\": \"no logs available for pod report-worker-66d8ddbf9f-s6g87\"}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "list_nodes",
+    "result": "{\"kubewhy-recheck-control-plane\": {\"ready\": true, \"pressure\": null, \"conditions\": null, \"allocatable_cpu\": \"15\", \"allocatable_memory\": \"8125796Ki\", \"unschedulable\": false}}"
+   }
+  ],
+  "draft": "The **report-worker deployment** in the `uncovered` namespace is failing to start due to a **missing container command** in the `busybox` image. Here's the breakdown:\n\n### Key Findings:\n1. **Pod Status**:  \n   - CrashLoopBackOff with 30 restarts.  \n   - Last termination: `StartError` (exit code `128`, a signal, likely `SIGKILL`).  \n   - No logs available to diagnose the crash.\n\n2. **Container Configuration**:  \n   - The container uses the `busybox:1.36` image, which requires an explicit command (e.g., `sh`, `echo`) to run.  \n   - The deployment\u2019s container spec lacks `command` or `args`, causing the container to fail to start.\n\n3. **Node Pressure**:  \n   - The node `kubewhy-recheck-control-plane` has no pressure (`MemoryPressure`, `DiskPressure`, etc.), so resource eviction is not the cause.\n\n### Solution:\nUpdate the deployment\u2019s container spec to include a valid command. For example:\n```yaml\ncontainers:\n  - name: app\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"echo 'Container started'; sleep 3600\"]\n```\nThis ensures the container starts and runs a simple command, avoiding the `StartError`. If the container requires specific logic, replace the `echo` command with the actual application command.",
+  "answer": "The **report-worker deployment** in the `uncovered` namespace is failing to start due to a **missing container command** in the `busybox` image. Here's the breakdown:\n\n### Key Findings:\n1. **Pod Status**:  \n   - CrashLoopBackOff with 30 restarts.  \n   - Last termination: `StartError` (exit code `128`, a signal, likely `SIGKILL`).  \n   - No logs available to diagnose the crash.\n\n2. **Container Configuration**:  \n   - The container uses the `busybox:1.36` image, which requires an explicit command (e.g., `sh`, `echo`) to run.  \n   - The deployment\u2019s container spec lacks `command` or `args`, causing the container to fail to start.\n\n3. **Node Pressure**:  \n   - The node `kubewhy-recheck-control-plane` has no pressure (`[unverified: MemoryPressure]`, `[unverified: DiskPressure]`, etc.), so resource eviction is not the cause.\n\n### Solution:\nUpdate the deployment\u2019s container spec to include a valid command. For example:\n```yaml\ncontainers:\n  - name: app\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"echo 'Container started'; sleep 3600\"]\n```\nThis ensures the container starts and runs a simple command, avoiding the `StartError`. If the container requires specific logic, replace the `echo` command with the actual application command.\n\n---\n**Evidence audit.**\n2 of 5 stated values could not be traced to any tool result for the workload they were stated about: `memorypressure`, `diskpressure`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "none of ['runcontainererror', 'no such file', 'executable', 'entrypoint', 'not present in the image'] in answer",
+   "unverified claims: ['memorypressure', 'diskpressure']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 154088.9,
+   "tool_ms": 40.6,
+   "rounds": 4,
+   "round_ms": [
+    55788.2,
+    37961.2,
+    26106.1,
+    34233.4
+   ],
+   "slowest_round_ms": 55788.2,
+   "model_share": 1.0,
+   "wall_ms": 154134.6,
+   "unaccounted_ms": 5.1,
+   "slept_ms": 0.5
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "30",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.restarts",
+       "value": "30"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/report-worker.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "128",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "128"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "memorypressure",
+     "kind": "status"
+    },
+    {
+     "claim": "diskpressure",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "MemoryPressure",
+    "DiskPressure"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "c9e5fca85069",
+  "target": {
+   "kind": "workload",
+   "name": "report-worker",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "entrypoint_that_does_not_exist",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 66.2,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T15:19:11",
+  "load_before": 0.89,
+  "load_after": 0.65,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "report-worker",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-s6g87",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-s6g87",
+    "namespace": "uncovered",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/report-worker\": {\"status\": \"RunContainerError\", \"pods\": 1, \"example\": \"report-worker-66d8ddbf9f-s6g87\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"report-worker-66d8ddbf9f-s6g87\", \"namespace\": \"uncovered\", \"status\": \"RunContainerError\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 31, \"waiting_reason\": \"RunContainerError\", \"waiting_message\": \"failed to create containerd task: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: \\\"/usr/local/bin/definitely-not-here\\\": stat /usr/local/bin/definitely-not-here: no such file or directory\", \"last_termination\": {\"reason\": \"StartError\", \"exit_code\": 128}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"result\": \"no logs available for pod report-worker-66d8ddbf9f-s6g87\"}"
+   }
+  ],
+  "draft": "The `report-worker` deployment in the `uncovered` namespace is failing to start because the container cannot find the executable `definitely-not-here` in the `busybox:1.36` image. Here's the breakdown:\n\n- **Root Cause**: The container's entry point (`/usr/local/bin/definitely-not-here`) does not exist in the `busybox` image. The `busybox` image includes minimal binaries, and this specific file is missing.\n- **Exit Code**: The `StartError` (exit code 128) confirms the container failed to initialize.\n- **Logs**: No logs were available for the pod, but the error from `describe_pod` directly points to the missing executable.\n\n**Next Steps**:  \n- Verify the deployment's container configuration (command/entrypoint) to ensure it uses a valid binary present in the image (e.g., `sh` or `echo`).  \n- If a custom binary is required, rebuild the image with it included or switch to an appropriate base image.",
+  "answer": "The `report-worker` deployment in the `uncovered` namespace is failing to start because the container cannot find the executable `definitely-not-here` in the `busybox:1.36` image. Here's the breakdown:\n\n- **Root Cause**: The container's entry point (`/usr/local/bin/definitely-not-here`) does not exist in the `busybox` image. The `busybox` image includes minimal binaries, and this specific file is missing.\n- **Exit Code**: The `StartError` (exit code 128) confirms the container failed to initialize.\n- **Logs**: No logs were available for the pod, but the error from `describe_pod` directly points to the missing executable.\n\n**Next Steps**:  \n- Verify the deployment's container configuration (command/entrypoint) to ensure it uses a valid binary present in the image (e.g., `sh` or `echo`).  \n- If a custom binary is required, rebuild the image with it included or switch to an appropriate base image.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 66156.5,
+   "tool_ms": 28.0,
+   "rounds": 3,
+   "round_ms": [
+    25058.7,
+    20749.3,
+    20348.4
+   ],
+   "slowest_round_ms": 25058.7,
+   "model_share": 1.0,
+   "wall_ms": 66187.5,
+   "unaccounted_ms": 3.0,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "128",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "128"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "acdaa2b71358",
+  "target": {
+   "kind": "workload",
+   "name": "report-worker",
+   "namespace": "uncovered"
+  }
+ }
+]

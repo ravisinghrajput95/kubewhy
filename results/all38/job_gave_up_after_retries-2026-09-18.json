@@ -1,0 +1,368 @@
+[
+ {
+  "case": "job_gave_up_after_retries",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": false,
+  "seconds": 156.1,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-18T15:20:18",
+  "load_before": 0.65,
+  "load_after": 0.69,
+  "low_power_mode": true,
+  "unverified": [
+   "4"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "schema-migrate",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "schema-migrate-df9jx",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "schema-migrate-df9jx",
+    "namespace": "uncovered",
+    "container": "migrate",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/schema-migrate\": {\"status\": \"Error\", \"pods\": 2, \"example\": \"schema-migrate-df9jx\", \"fault\": \"crash\", \"reason\": \"BackoffLimitExceeded\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"schema-migrate-df9jx\", \"namespace\": \"uncovered\", \"status\": \"Error\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"migrate\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"schema-migrate-df9jx\", \"source\": \"current\", \"logs\": \"migration: relation \\\"users\\\" does not exist\", \"container\": \"migrate\"}"
+   }
+  ],
+  "draft": "The `schema-migrate` job in the `uncovered` namespace stopped running due to **BackoffLimitExceeded**, but the **root cause is a database schema error** revealed in the container logs. Here's the full breakdown:\n\n---\n\n### **1. Job Termination Reason**\n- **BackoffLimitExceeded**:  \n  The job\u2019s controller retried the task multiple times (likely due to container failures) but exceeded the `backoffLimit` (default: 4). This is a controller-enforced termination, not a container crash.  \n  - **Action**: Check the job\u2019s `spec.backoffLimit` and `activeDeadlineSeconds` via `list_jobs` to confirm the retry policy.\n\n---\n\n### **2. Container Failure Cause**\n- **Exit Code 1 (Generic Error)**:  \n  The `migrate` container exited with code `1`, but the logs clarify the **specific error**:  \n  ```\n  migration: relation \"users\" does not exist\n  ```  \n  This is a **PostgreSQL error** indicating the migration script attempted to access a table (`users`) that does not exist in the database. The job failed because the schema was incomplete or incorrect.\n\n---\n\n### **3. Why Retries Failed**\n- The container likely restarted repeatedly (restarts: 0 in the pod status, but retries are controller-driven).  \n- The migration script may have logic to retry on errors (e.g., idempotent operations), but the **schema issue persists**, causing the job to eventually hit the `backoffLimit`.\n\n---\n\n### **4. Next Steps**\n- **Fix the Database Schema**:  \n  Ensure the `users` table exists in the target database. Verify the migration script\u2019s dependencies (e.g., schema version, preconditions).  \n- **Adjust Retry Policy**:  \n  If the job is designed to retry on transient errors, increase `backoffLimit` or fix the schema issue to avoid unnecessary retries.  \n- **Validate Logs**:  \n  Confirm the logs are accurate by checking the container\u2019s log retention settings. If logs are truncated, use `get_pod_logs` with a higher `tail` value.\n\n---\n\n### **Summary**\nThe job stopped because the migration script failed due to a missing `users` table, triggering retries that exhausted the `backoffLimit`. The logs directly point to the schema error, which must be resolved to prevent future failures.",
+  "answer": "The `schema-migrate` job in the `uncovered` namespace stopped running due to **BackoffLimitExceeded**, but the **root cause is a database schema error** revealed in the container logs. Here's the full breakdown:\n\n---\n\n### **1. Job Termination Reason**\n- **BackoffLimitExceeded**:  \n  The job\u2019s controller retried the task multiple times (likely due to container failures) but exceeded the `backoffLimit` (default: [unverified: 4]). This is a controller-enforced termination, not a container crash.  \n  - **Action**: Check the job\u2019s `spec.backoffLimit` and `activeDeadlineSeconds` via `list_jobs` to confirm the retry policy.\n\n---\n\n### **2. Container Failure Cause**\n- **Exit Code 1 (Generic Error)**:  \n  The `migrate` container exited with code `1`, but the logs clarify the **specific error**:  \n  ```\n  migration: relation \"users\" does not exist\n  ```  \n  This is a **PostgreSQL error** indicating the migration script attempted to access a table (`users`) that does not exist in the database. The job failed because the schema was incomplete or incorrect.\n\n---\n\n### **3. Why Retries Failed**\n- The container likely restarted repeatedly (restarts: 0 in the pod status, but retries are controller-driven).  \n- The migration script may have logic to retry on errors (e.g., idempotent operations), but the **schema issue persists**, causing the job to eventually hit the `backoffLimit`.\n\n---\n\n### **[unverified: 4]. Next Steps**\n- **Fix the Database Schema**:  \n  Ensure the `users` table exists in the target database. Verify the migration script\u2019s dependencies (e.g., schema version, preconditions).  \n- **Adjust Retry Policy**:  \n  If the job is designed to retry on transient errors, increase `backoffLimit` or fix the schema issue to avoid unnecessary retries.  \n- **Validate Logs**:  \n  Confirm the logs are accurate by checking the container\u2019s log retention settings. If logs are truncated, use `get_pod_logs` with a higher `tail` value.\n\n---\n\n### **Summary**\nThe job stopped because the migration script failed due to a missing `users` table, triggering retries that exhausted the `backoffLimit`. The logs directly point to the schema error, which must be resolved to prevent future failures.\n\n---\n**Evidence audit.**\n1 of 4 stated values could not be traced to any tool result for the workload they were stated about: `4`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "unverified claims: ['4']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 156033.6,
+   "tool_ms": 31.3,
+   "rounds": 4,
+   "round_ms": [
+    44423.3,
+    51678.4,
+    20692.9,
+    39238.9
+   ],
+   "slowest_round_ms": 51678.4,
+   "model_share": 1.0,
+   "wall_ms": 156071.2,
+   "unaccounted_ms": 6.3,
+   "slept_ms": 0.5
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.migrate.image",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.migrate.image",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.migrate.restarts",
+       "value": "0"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "4",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "4",
+    "4"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "5e51438afa65",
+  "target": {
+   "kind": "workload",
+   "name": "schema-migrate",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "job_gave_up_after_retries",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": false,
+  "seconds": 73.7,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-18T15:22:54",
+  "load_before": 0.69,
+  "load_after": 1.07,
+  "low_power_mode": true,
+  "unverified": [
+   "6"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "schema-migrate",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "schema-migrate-df9jx",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "schema-migrate-df9jx",
+    "namespace": "uncovered",
+    "container": "migrate",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/schema-migrate\": {\"status\": \"Error\", \"pods\": 2, \"example\": \"schema-migrate-df9jx\", \"fault\": \"crash\", \"reason\": \"BackoffLimitExceeded\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"schema-migrate-df9jx\", \"namespace\": \"uncovered\", \"status\": \"Error\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"migrate\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"schema-migrate-df9jx\", \"source\": \"current\", \"logs\": \"migration: relation \\\"users\\\" does not exist\", \"container\": \"migrate\"}"
+   }
+  ],
+  "draft": "The `schema-migrate` job in the `uncovered` namespace stopped running due to a combination of factors:\n\n1. **Job Termination Reason**:  \n   The job failed with `BackoffLimitExceeded`, meaning the Job controller retried the task (likely due to pod failures) beyond the configured `backoffLimit` (default is 6). This is a controller-enforced termination, not a container crash.\n\n2. **Container Failure Cause**:  \n   The container exited with code `1`, a generic error. **Logs reveal the root cause**:  \n   ```\n   migration: relation \"users\" does not exist\n   ```  \n   This indicates the migration script attempted to access a PostgreSQL table (`users`) that did not exist in the database schema at the time of execution.\n\n3. **Retry Loop**:  \n   The job kept retrying (due to the container failing) until it exceeded its `backoffLimit`, at which point the Job controller terminated it intentionally.\n\n4. **Next Steps**:  \n   - Ensure the `users` table exists in the target database before rerunning the job.  \n   - Check the migration script for dependencies or schema version mismatches.  \n   - Verify the Job's `backoffLimit` and `activeDeadlineSeconds` settings if retries are intended.  \n\nThe job stopped because the container failed repeatedly (due to the missing table) and the controller enforced a retry limit.",
+  "answer": "The `schema-migrate` job in the `uncovered` namespace stopped running due to a combination of factors:\n\n1. **Job Termination Reason**:  \n   The job failed with `BackoffLimitExceeded`, meaning the Job controller retried the task (likely due to pod failures) beyond the configured `backoffLimit` (default is [unverified: 6]). This is a controller-enforced termination, not a container crash.\n\n2. **Container Failure Cause**:  \n   The container exited with code `1`, a generic error. **Logs reveal the root cause**:  \n   ```\n   migration: relation \"users\" does not exist\n   ```  \n   This indicates the migration script attempted to access a PostgreSQL table (`users`) that did not exist in the database schema at the time of execution.\n\n3. **Retry Loop**:  \n   The job kept retrying (due to the container failing) until it exceeded its `backoffLimit`, at which point the Job controller terminated it intentionally.\n\n4. **Next Steps**:  \n   - Ensure the `users` table exists in the target database before rerunning the job.  \n   - Check the migration script for dependencies or schema version mismatches.  \n   - Verify the Job's `backoffLimit` and `activeDeadlineSeconds` settings if retries are intended.  \n\nThe job stopped because the container failed repeatedly (due to the missing table) and the controller enforced a retry limit.\n\n---\n**Evidence audit.**\n1 of 2 stated values could not be traced to any tool result for the workload they were stated about: `6`. Treat these as inference, not measurement.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [
+   "unverified claims: ['6']"
+  ],
+  "notes": [],
+  "timing": {
+   "model_ms": 73650.2,
+   "tool_ms": 24.4,
+   "rounds": 3,
+   "round_ms": [
+    30128.1,
+    17196.4,
+    26325.7
+   ],
+   "slowest_round_ms": 30128.1,
+   "model_share": 1.0,
+   "wall_ms": 73678.8,
+   "unaccounted_ms": 4.3,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.migrate.image",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "6",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "6"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "b97e662856d9",
+  "target": {
+   "kind": "workload",
+   "name": "schema-migrate",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "job_gave_up_after_retries",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 61.6,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T15:24:08",
+  "load_before": 1.07,
+  "load_after": 1.12,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "schema-migrate",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "schema-migrate-df9jx",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "schema-migrate-df9jx",
+    "namespace": "uncovered",
+    "container": "migrate",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/schema-migrate\": {\"status\": \"Error\", \"pods\": 2, \"example\": \"schema-migrate-df9jx\", \"fault\": \"crash\", \"reason\": \"BackoffLimitExceeded\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"schema-migrate-df9jx\", \"namespace\": \"uncovered\", \"status\": \"Error\", \"node\": \"kubewhy-recheck-control-plane\", \"containers\": {\"migrate\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"last_termination\": {\"reason\": \"Error\", \"exit_code\": 1}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"schema-migrate-df9jx\", \"source\": \"current\", \"logs\": \"migration: relation \\\"users\\\" does not exist\", \"container\": \"migrate\"}"
+   }
+  ],
+  "draft": "The `schema-migrate` job in the `uncovered` namespace stopped running because it exceeded its `backoffLimit` retry count, triggering a `BackoffLimitExceeded` failure. This is a Job controller termination condition, not a container crash. The pod's container exited with code **1**, which corresponds to the error message in the logs:  \n**`migration: relation \"users\" does not exist`**.  \n\n### Root Cause:  \nThe job's migration script failed because the database table `users` was missing. This caused the migration to crash, triggering retries. Since the Job controller\u2019s `backoffLimit` was reached, it terminated the job, deleting the pods.  \n\n### Next Steps:  \n1. Verify if the `users` table exists in the target database.  \n2. Check the migration script for dependencies or schema version mismatches.  \n3. Adjust the Job\u2019s `backoffLimit` or fix the schema issue to prevent future failures.  \n\nThe job\u2019s failure was directly tied to the missing database table, not a configuration or resource issue.",
+  "answer": "The `schema-migrate` job in the `uncovered` namespace stopped running because it exceeded its `backoffLimit` retry count, triggering a `BackoffLimitExceeded` failure. This is a Job controller termination condition, not a container crash. The pod's container exited with code **1**, which corresponds to the error message in the logs:  \n**`migration: relation \"users\" does not exist`**.  \n\n### Root Cause:  \nThe job's migration script failed because the database table `users` was missing. This caused the migration to crash, triggering retries. Since the Job controller\u2019s `backoffLimit` was reached, it terminated the job, deleting the pods.  \n\n### Next Steps:  \n1. Verify if the `users` table exists in the target database.  \n2. Check the migration script for dependencies or schema version mismatches.  \n3. Adjust the Job\u2019s `backoffLimit` or fix the schema issue to prevent future failures.  \n\nThe job\u2019s failure was directly tied to the missing database table, not a configuration or resource issue.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 61545.0,
+   "tool_ms": 26.5,
+   "rounds": 3,
+   "round_ms": [
+    22125.0,
+    16595.5,
+    22824.5
+   ],
+   "slowest_round_ms": 22824.5,
+   "model_share": 1.0,
+   "wall_ms": 61574.2,
+   "unaccounted_ms": 2.6,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.migrate.image",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "596228462b21",
+  "target": {
+   "kind": "workload",
+   "name": "schema-migrate",
+   "namespace": "uncovered"
+  }
+ }
+]

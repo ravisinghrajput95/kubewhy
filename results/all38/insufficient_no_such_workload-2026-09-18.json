@@ -1,0 +1,415 @@
+[
+ {
+  "case": "insufficient_no_such_workload",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 149.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T14:35:50",
+  "load_before": 1.04,
+  "load_after": 1.16,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "list_pods"
+  ],
+  "prefetched": 0,
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "only_unhealthy": true,
+    "workload": "payments-gateway"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"result\": \"no pods of workload payments-gateway in namespace demo\"}"
+   }
+  ],
+  "draft": "The `payments-gateway` deployment is not found in the `demo` namespace. However, several other deployments in the same namespace are failing:\n\n- **`crasher`**: 0/1 replicas ready (likely crashing on startup).  \n- **`memory-hog`**: 0/1 replicas ready (resource exhaustion suspected).  \n- **`needs-db`**: 0/1 replicas ready (depends on a missing database).  \n- **`never-ready`**: 0/1 replicas ready (readiness probe failures).  \n- **`slow-starter`**: 0/1 replicas ready (application startup delay).  \n\n### Next Steps:  \n1. **Verify the deployment name**: Confirm `payments-gateway` is the correct name (check for typos or case sensitivity).  \n2. **Check other deployments**: Use `describe_pod` on the listed failing deployments to investigate crashes, resource limits, or probe failures.  \n3. **Review logs**: For deployments like `crasher` or `memory-hog`, inspect pod logs to identify root causes.  \n\nIf the deployment was recently created, it might not yet be in a pod listing. If it\u2019s missing entirely, investigate if it was deleted or never deployed.",
+  "answer": "The `payments-gateway` deployment is not found in the `demo` namespace. However, several other deployments in the same namespace are failing:\n\n- **`crasher`**: 0/1 replicas ready (likely crashing on startup).  \n- **`memory-hog`**: 0/1 replicas ready (resource exhaustion suspected).  \n- **`needs-db`**: 0/1 replicas ready (depends on a missing database).  \n- **`never-ready`**: 0/1 replicas ready (readiness probe failures).  \n- **`slow-starter`**: 0/1 replicas ready (application startup delay).  \n\n### Next Steps:  \n1. **Verify the deployment name**: Confirm `payments-gateway` is the correct name (check for typos or case sensitivity).  \n2. **Check other deployments**: Use `describe_pod` on the listed failing deployments to investigate crashes, resource limits, or probe failures.  \n3. **Review logs**: For deployments like `crasher` or `memory-hog`, inspect pod logs to identify root causes.  \n\nIf the deployment was recently created, it might not yet be in a pod listing. If it\u2019s missing entirely, investigate if it was deleted or never deployed.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 149220.4,
+   "tool_ms": 54.7,
+   "rounds": 4,
+   "round_ms": [
+    19161.5,
+    56401.5,
+    47434.9,
+    26222.5
+   ],
+   "slowest_round_ms": 56401.5,
+   "model_share": 1.0,
+   "wall_ms": 149280.8,
+   "unaccounted_ms": 5.8,
+   "slept_ms": 3.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.desired",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "list_deployments",
+       "field": "bad-image.desired",
+       "value": "1"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "343900080d28",
+  "target": {
+   "kind": "workload",
+   "name": "payments-gateway",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "insufficient_no_such_workload",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 66.8,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-18T14:38:20",
+  "load_before": 1.16,
+  "load_after": 0.72,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_pods",
+   "list_deployments"
+  ],
+  "prefetched": 0,
+  "arguments": [
+   {
+    "namespace": "demo",
+    "workload": "payments-gateway"
+   },
+   {
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_pods",
+    "result": "{\"result\": \"no pods of workload payments-gateway in namespace demo\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The `payments-gateway` deployment is not listed in the demo namespace deployments. However, several other deployments in the same namespace have 0 ready replicas:\n\n- **`bad-image`**: Uses `nginx:1.99.7` (likely an invalid or deprecated image)\n- **`crasher` / `memory-hog` / `needs-db` / `never-ready` / `slow-starter`**: All have 0 ready replicas, possibly due to configuration errors, resource constraints, or failed pulls.\n\nTo diagnose the missing `payments-gateway` deployment, check:\n1. If the deployment name is correct (case-sensitive)\n2. Its YAML configuration for syntax errors or misconfigurations\n3. Image availability via `docker pull` or registry access\n4. Namespace permissions or quotas\n\nThe existing unhealthy deployments suggest a broader issue with pod creation in the demo namespace.",
+  "answer": "The `payments-gateway` deployment is not listed in the demo namespace deployments. However, several other deployments in the same namespace have 0 ready replicas:\n\n- **`bad-image`**: Uses `nginx:1.99.7` (likely an invalid or deprecated image)\n- **`crasher` / `memory-hog` / `needs-db` / `never-ready` / `slow-starter`**: All have 0 ready replicas, possibly due to configuration errors, resource constraints, or failed pulls.\n\nTo diagnose the missing `payments-gateway` deployment, check:\n1. If the deployment name is correct (case-sensitive)\n2. Its YAML configuration for syntax errors or misconfigurations\n3. Image availability via `docker pull` or registry access\n4. Namespace permissions or quotas\n\nThe existing unhealthy deployments suggest a broader issue with pod creation in the demo namespace.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 66721.6,
+   "tool_ms": 55.8,
+   "rounds": 3,
+   "round_ms": [
+    26739.2,
+    11940.6,
+    28041.8
+   ],
+   "slowest_round_ms": 28041.8,
+   "model_share": 0.999,
+   "wall_ms": 66779.5,
+   "unaccounted_ms": 2.1,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "bad-image.ready",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "bad-image.images[0]",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "bad-image.images[0]",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_deployments",
+       "field": "bad-image.ready",
+       "value": "0"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "a91d72c5495f",
+  "target": {
+   "kind": "workload",
+   "name": "payments-gateway",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "insufficient_no_such_workload",
+  "model": "qwen3",
+  "context": "kind-kubewhy-recheck",
+  "think": true,
+  "passed": true,
+  "seconds": 59.3,
+  "confidence": "insufficient_evidence",
+  "model_resident": true,
+  "started_at": "2026-09-18T14:39:26",
+  "load_before": 0.72,
+  "load_after": 0.43,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "list_deployments",
+   "scan_cluster"
+  ],
+  "prefetched": 0,
+  "arguments": [
+   {
+    "namespace": "demo"
+   },
+   {
+    "only_unhealthy": true,
+    "namespaces": "demo",
+    "workload": "payments-gateway"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "scan_cluster",
+    "result": "{\"result\": \"no workload named payments-gateway exists in this cluster\"}"
+   }
+  ],
+  "draft": "The workload \"payments-gateway\" does not exist in the cluster. Could you verify the name or confirm if it's a different type of workload (e.g., Job, Pod, or Service)? If you meant one of the listed deployments in the demo namespace (like `bad-image` or `crasher`), please clarify.",
+  "answer": "The workload \"payments-gateway\" does not exist in the cluster. Could you verify the name or confirm if it's a different type of workload (e.g., Job, Pod, or Service)? If you meant one of the listed deployments in the demo namespace (like `bad-image` or `crasher`), please clarify.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 59207.7,
+   "tool_ms": 64.5,
+   "rounds": 3,
+   "round_ms": [
+    19388.0,
+    27127.6,
+    12692.1
+   ],
+   "slowest_round_ms": 27127.6,
+   "model_share": 0.999,
+   "wall_ms": 59273.3,
+   "unaccounted_ms": 1.1,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "a72e23ea33b3",
+  "target": {
+   "kind": "workload",
+   "name": "payments-gateway",
+   "namespace": "demo"
+  }
+ }
+]
