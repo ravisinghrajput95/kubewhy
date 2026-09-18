@@ -206,17 +206,40 @@ a page that blanked on every contradiction because nothing had ever rendered one
 
 ## Results
 
-- 977 automated tests
-- 907-run grounding replay, no regressions
-- 290 live evaluation runs across two inference configurations
+- 1,897 automated tests, 0 skipped with a real Postgres
+- 1,683-run grounding replay, no regressions, gating CI
+- 290 live evaluation runs across two inference configurations, plus a 114-run
+  full-corpus measurement on one tree
 - Read-only RBAC, redaction, egress policy and NetworkPolicy validated at runtime
 - Investigation context integrity proven end to end
 
+**The result the project is judged on, and the one it publishes first.** The
+corpus splits into the 29 fault types the prompts were written against and 9
+they were not. Measured 2026-09-18, 38 cases x 3 repeats on one kind cluster:
+
+| set | score | 95% CI |
+|---|---|---|
+| the 29 the prompts were written against | 84/87, **96.6%** | [90.3-98.8] |
+| the 9 they were not | 15/27, **55.6%** | [37.3-72.4] |
+
+Gap 41.0 points, Fisher p = 9.2e-07. Against the same split five days earlier,
+**neither half moved** (p = 0.2114 and p = 1.0000). The generalization gap is
+reproducible and has not closed.
+
+Every one of the 12 failures in the never-seen half was read by hand rather than
+counted. Eight named the right cause and missed a bar around it, and that
+reading produced five new defects in the grader and the prefetch -- including a
+latency optimisation that was ending the search one tool short of the value it
+needed.
+
 ## Limitations
 
-One cluster, one machine, one prompt configuration. n=5 per scenario. Real vLLM
-and EKS not tested. No browser paint automation. **Generalized diagnostic
-accuracy is not established and is not claimed.**
+One cluster, one machine, one prompt configuration. n=3 to n=5 per scenario.
+Real vLLM and EKS not tested. No browser paint automation. **Generalized
+diagnostic accuracy is measured and is not good: 55.6%, lower bound 37.3%.** In
+that measurement 43.9% of runs answered without making a tool call of their own,
+because a prefetch hands the model two reads before it starts -- so for those
+runs the number describes reading a scan row, not chaining tools to a cause.
 
 ## What I would build next
 

@@ -210,7 +210,7 @@ Details: [docs/INFERENCE.md](docs/INFERENCE.md).
 | Real vLLM | **Not tested** |
 | EKS | **Not tested** |
 | Browser paint automation | **Not tested** |
-| Generalized AI diagnostic accuracy | **Not established** |
+| Generalized AI diagnostic accuracy | **Measured, and the number is not good** — 55.6% [37.3–72.4] on unseen fault types |
 
 The defects found during development — an egress bypass, a target-extraction
 failure, two contradiction false-positive classes — are documented with their
@@ -218,6 +218,36 @@ detection, root cause, fix and regression evidence in
 [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## AI evaluation
+
+### The number that matters: what happens on faults nobody wrote a prompt for
+
+The corpus splits in two, and the headline is the average of them, so the
+headline alone is not worth quoting. Re-measured **2026-09-18** on one tree,
+qwen3 with thinking on, **38 cases × 3 repeats = 114 runs, 0 voids**, against a
+kind cluster carrying all six fixture files, every fault verified presenting by
+hand first:
+
+| set | score | 95% CI |
+|---|---|---|
+| headline, all 38 cases | 99/114, 86.8% | [79.4–91.9] |
+| the 29 the prompts were written against | 84/87, **96.6%** | [90.3–98.8] |
+| the 9 they were not | 15/27, **55.6%** | [37.3–72.4] |
+
+**Gap 41.0 points, Fisher p = 9.2e-07.** Against the previous measurement
+(2026-09-13: 90.8% and 53.3%) **neither half moved** — p = 0.2114 and
+p = 1.0000. What improved is the interval: the never-seen half is nine fault
+types now rather than five, which narrows it from 45 points wide to 35.
+
+**Three things to know before quoting 55.6%.** A prefetched tool call counts
+toward a case's `expect_tools`, so 18 of the 54 runs on tool-expectation cases
+met that bar only because the prefetch made the call. 50 of the 114 runs
+(43.9%) made no tool call of their own at all. And cases ran in a fixed order,
+so for faults whose cause lives in a Kubernetes event — which expire after an
+hour — the never-seen half was measured against older fixtures than the other
+half. Method, per-case scores and every failure read by hand:
+[docs/VALIDATION.md](docs/VALIDATION.md) defects 57 to 62.
+
+### The two-configuration comparison
 
 29 scenarios with declared ground truth, run 5 times per configuration against a
 live cluster:
@@ -255,7 +285,7 @@ Measurement scope:
 - **n=5 per scenario, 29 scenarios.** Enough to make per-scenario behaviour
   reproducible; not enough to rank two configurations. The overall model
   comparison is UNDETERMINED.
-- **Generalized diagnostic accuracy is not established** and is not claimed.
+- **Generalized diagnostic accuracy is measured, not good, and not improving.** 55.6% [37.3–72.4] on nine fault types the prompts were never written against, against 96.6% on the 29 they were. The lower bound of that interval is 37.3%.
 - **Answers vary between runs.** The same question can produce a different chain.
   The `confidence` field and the `tool_calls` trace tell you which measurements
   an answer actually rests on.

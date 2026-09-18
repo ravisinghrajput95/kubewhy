@@ -7,15 +7,20 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 (mcp_server.py), watch controller (controller.py), Streamlit UI (ui.py), Slack
 via Socket Mode (slack_socket.py).
 
-**State: `main` at the 2026-09-16 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1897 passed, 0 skipped**
-(50s), CI green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
+**State: `main` at the 2026-09-18 head — `git log --oneline -1` is the
+authority, not this line — tree clean and pushed, **1863 passed, 34 skipped**
+(49s, 1897 collected), CI
+green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
 renumbered by the owner before tagging. **mypy and ruff are both at zero and both gate**.
-56 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
+62 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
 
-**That figure is measured, with Postgres up**, on the tree this session ends
-on: `docker start kubewhy-pg`, DSN proved, `pytest tests/test_store.py`
-confirmed 113 passed and no `s` first. The previous line said 1711 passed and
+**Measured 2026-09-18 as 1863 passed, 34 skipped in 49s, with `kubewhy-pg`
+running but no `TRIAGE_TEST_PG_DSN` exported** — so the 34 Postgres tests
+skipped. The sum, 1897, is the invariant the gated test checks and it is
+unchanged. The 2026-09-16 session measured the same tree as 1897 passed and 0
+skipped with the DSN set; that DSN was not recovered this session and guessing
+it hung the run, so the split is quoted from that session and only the total is
+quoted from this one. The previous line said 1711 passed and
 34 skipped, and predicted 1745 with a database up "measure it rather than
 quoting that arithmetic" — the arithmetic was right about the method and the
 count has since moved anyway, because this session added tests.
@@ -104,7 +109,7 @@ two worth reading even if you are not touching `agent.py`: a one-sided
 assertion that admitted a value which was not a share, and eleven CLI tests
 that all patched out the function the CLI calls.
 
-Then "Pick up, in order" below. Everything under "What changed on 2026-08-26 /
+Then "Pick up, in order" below — the 2026-09-18 one, which replaces every list beneath it. Everything under "What changed on 2026-08-26 /
 27" is history.
 
 ## What landed on 2026-09-09/10: the Job gap, and two bounds
@@ -556,7 +561,146 @@ greps the state block's figures against a measured source the way
 `test_documented_measurements.py` already does for RUNBOOK.md. The second is
 more in this project's character.
 
-## Pick up, in order — written 2026-09-16, replaces every list below it
+## Pick up, in order — written 2026-09-18, replaces every list below it
+
+**Done 2026-09-18 — do not redo.** The whole corpus ran on one tree for the
+first time since the fixtures were renamed: **38 cases × 3 = 114 runs, 0 voids,
+2h24m**, records in `results/all38/` (outside the corpus glob), driver
+committed before the first case ran. **84/87 (96.6%) [90.3–98.8] on the cases
+the prompts were written against, 15/27 (55.6%) [37.3–72.4] on the nine they
+were not, gap 41.0 points, Fisher p = 9.2e-07.** Neither half moved against
+2026-09-13 (p = 0.2114 and p = 1.0000). README, VALIDATION's summary row,
+AI_EVALUATION and the case study all carry it. Defect 47 is marked superseded.
+Every one of the 12 never-seen failures was read by hand, and that reading is
+defects 58 to 62.
+
+1. **Three checker defects are recorded and NOT fixed, deliberately.** Each
+   needs `evals/replay_grounding.py` over the recorded corpus before the change
+   is believed, and that is the next piece of work.
+   - **Defect 58**: the contradiction checker flags `the absence of X` as a
+     claim about X. Noun-phrase denial; the verbal ones (`was not`, `no`) are
+     already guarded. A counter is written into the defect.
+   - **Defect 59**: the `unverified` path has **no denial handling at all** —
+     even `"The reason was not OOMKilled."` is listed as an unverified claim.
+     The negation guards from defects 45/52/56 live only on the contradiction
+     path. `require_grounded: True` turns this into a case failure and 10 of 38
+     cases carry it. Fixing 59 is the bigger win of the two: 2 of the 7
+     unverified-claim failures in the set were artefacts, and the other 5 were
+     the mechanism working correctly, so the fix must not blunt it.
+   - **Defect 60**: a zero-claim answer is graded `insufficient_evidence`, and
+     17 of 38 cases fail outright on that verdict. At the other tail, 4 of 94
+     runs were graded `grounded` on claims that all resolved to identifier
+     digits — the `2` in `uncovered2`, digits from a pod name. Sized: 18.7% of
+     477 claims resolve to identifier fields, so the metric is mostly sound and
+     the defect is at the tails.
+
+2. **Defect 61: a paired A/B on `job_killed_by_its_own_deadline`.** ~10 minutes,
+   and it is the highest-value measurement outstanding.
+
+       .venv/bin/python -u evals/ab_prompt.py --case job_killed_by_its_own_deadline \
+         --repeat 5 --variant-env TRIAGE_PREFETCH_TARGET=off --context <ctx> \
+         --json results/<...>.json
+
+   Today's record is 0/3 with the prefetch on against 18/19 calling `list_jobs`
+   across 19 runs with it off, Fisher p = 0.0026 — **but that is a before/after
+   across trees, not an A/B, and must not be published as one.** The mechanism
+   is not in doubt: the prefetched scan row
+   `{"uncovered/nightly-rollup": {"status":"Failed","pods":0,"reason":"DeadlineExceeded"}}`
+   is the whole answer, and 3 of 3 runs made no call of their own. Analyse with
+   `results/prefetch/analyse.py --prefetch-arm control`, and remember unset
+   means ON, so the variant arm is the one that sets `off`.
+
+3. **The handoff's old item 2a is answered: drop the deep
+   `poststart_hook_not_the_app` re-measurement.** Pooled over every recorded
+   run, prefetch off is 3/14 and on is 2/13, Fisher p = 1.0000. The "4/5 off"
+   was one day's slice. The case is hard, not prefetch-sensitive; a paired n≥10
+   would confirm a null. Its 0/3 today is a real wrong answer — never called
+   `get_pod_events`, then invented `oomkilled`, `memory leak`, `256`, `512` and
+   three node-pressure conditions. Worth fixing as a *prompt* problem, not as a
+   measurement.
+
+4. **Defect 62 changes how this set must be run next time.** Cases ran in a
+   fixed order, so the pre-existing half was measured at T+0..1h30 and the
+   never-seen half at T+1h30..2h30, by which point kind's one-hour event TTL had
+   aged out `report-worker`'s `RunContainerError` event and `drain-hook`'s
+   `FailedPreStopHook`, and `report-worker`'s backoff had grown to 5m0s.
+   **Interleave or randomise case order, or re-apply the fixtures at the
+   halfway point, and say which was done.** Also: `nightly-sync` has
+   `failedJobsHistoryLimit: 6` on a `*/5` schedule, so its pod — the only place
+   `FATAL: upstream returned 503` exists — is collected after ~30 minutes.
+
+5. **A security review ran 2026-09-18 and found four things. None is fixed and
+   none is recorded as a defect yet — that was left as the owner's call.**
+   - **Pod logs reach the model inside the *user* turn on the controller and
+     `--explain` paths.** `_prefetched_block` (agent.py) is reached from
+     `controller.py` via `capture_pod_logs`. Defect 56 moved the target
+     prefetch out of the user message for exactly this reason and left this
+     path behind, and the wrapper text is imperative ("do not ask for it again
+     and do not withhold a diagnosis for want of it"), so injected log text
+     sits inside an instruction block. Demonstrated with the real
+     `log-injector` payload. **The two injection eval cases only cover the
+     agent path**, where logs arrive as tool results;
+     `evals/run_controller_eval.py` has five cases and none is adversarial.
+     Impact is bounded — every tool is read-only — so the realistic harm is a
+     falsified or suppressed finding posted to Slack.
+   - **Three container-derived strings bypass redaction** while the event
+     message beside them is redacted: `waiting_message`, the probe `exec`
+     handler, and the PodScheduled condition message in
+     `routers/k8s_pods_info.py`. Proven by running one credential-bearing
+     string through both paths. The probe command is the sharpest — a probe
+     routinely carries a DSN or `-p$PASSWORD`.
+   - **The hourly ceiling is enforced on one of three human-driven surfaces.**
+     `limits.check/record` appears only in `app.py`; neither `ui.py` nor
+     `slack_socket.py` imports `limits`. Slack also answers plain `message`
+     events, not only `app_mention`, ignores `SLACK_CHANNEL` on input, and
+     spawns one unbounded thread per message.
+   - **uvicorn's proxy-header rewrite vs the loopback check** (`identity.py`).
+     Verified: uvicorn 0.51.0 and `fastapi run` default to
+     `proxy_headers=True, forwarded_allow_ips=127.0.0.1`, so with the defaults
+     this is availability (valid proxied requests refused), **not** a bypass.
+     It becomes a bypass if `FORWARDED_ALLOW_IPS` is widened — which is the
+     obvious "fix" for the refusals. Nothing pins `--no-proxy-headers`.
+
+   Verified clean in the same review: no `subprocess`/`eval`/`exec`/`pickle`/
+   `yaml.load`; SQL parameterised; constant-time bearer compare that fails
+   closed on an empty token; read-only RBAC with no `secrets` verb; literal
+   `env.value` never projected; audit stores `result_chars` and never tool
+   output; chart defaults `runAsNonRoot`, `drop: ALL`, `readOnlyRootFilesystem`,
+   seccomp `RuntimeDefault`; the egress classifier agrees with httpx on 12 of 13
+   adversarial host strings and httpx rejects the 13th.
+
+6. **`routers/k8s_pods_info.py` has still never had a full mutation survey**
+   (2413 lines, 55 functions). Unchanged from the last handoff: `evals/mutate.py`,
+   CPU-heavy, nothing else may run, budget 45–60 minutes with
+   `--tests tests/test_k8s_projection.py tests/test_agent_loop.py tests/test_api.py
+   tests/test_controller.py tests/test_mcp_server.py tests/test_redaction.py`.
+   The 2026-09-17 attempt was stopped at ~line 795 of 2413 and nothing was kept.
+
+7. **Still open, with evidence, not acted on.**
+   - `scan_references` is never called for an unbound claim — 0 of 15 runs
+     across three arms.
+   - `image_never_pulled_by_policy` is 2/3; today's failure was defect 60, not
+     the old "answers from `list_pods`" shape, which did not recur.
+   - `stuck_terminating_finalizer` is 1/3; both failures were defect 59.
+   - The documentation archive: ~400KB across three files, four state-block
+     claims tested, the rest not.
+
+**Traps, carried forward and added to.**
+- **The Docker VM has 8GiB and other projects share it.** `k8s-agent-dev`
+  restarts itself when Docker starts; leave it alone and check free memory
+  before creating a cluster.
+- **Ollama can restart itself mid-batch.** It did not on 2026-09-18, but check
+  for missing `results/<batch>/<case>-*.json` afterwards regardless. Note
+  `run_eval` exits **1** for a case that did not pass every repeat, so a
+  non-zero exit in the driver log is a score, not an abort — an abort looks
+  like a missing file or a traceback.
+- **A `Preempted` event lives one hour.** Re-trigger immediately before, run
+  that case first. Done correctly on 2026-09-18.
+- **`drain-hook` only becomes the fault once deleted**, `--wait=false`.
+- **Do not write a wait condition that requires the config-faults volume pods
+  or `cert-rotator` to settle.** They sit in ContainerCreating by design.
+
+## Pick up, in order — 2026-09-16, superseded by the list above
 
 **Done 2026-09-14/15/16 — do not redo.** Defects 50 to 54 are closed and
 written up in `docs/VALIDATION.md`; every record is in `results/`, with the

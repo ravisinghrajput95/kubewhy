@@ -7,7 +7,8 @@ mean, and — at least as importantly — what they do not.
 
 `evals/cases.py`, 38 scenarios. The first 29 are the published baseline below;
 the other 9 are fault types the system prompt was never written against, and
-`evals/split_by_novelty.py` scores the two halves separately. Each declares:
+`evals/split_by_novelty.py` scores the two halves separately — **96.6% against
+55.6% when both were last run on one tree**, which is why the split exists. Each declares:
 
 | field | meaning |
 |---|---|
@@ -124,7 +125,78 @@ independent facts about the model would overstate the evidence.
 `evals/compare_paired.py` pairs at scenario level and runs a two-sided sign test
 on the discordant scenarios.
 
-## Results — 2026-08-25
+## Results — the generalization split, 2026-09-18
+
+**This is the result the tool is actually judged on, and it comes first for that
+reason.** `evals/split_by_novelty.py` scores the two halves of the corpus
+separately, because the headline is their average and the average describes
+neither: one half is a tool that explains faults its author enumerated, the
+other is a tool that explains Kubernetes.
+
+Re-measured on one tree across all 38 cases — the first set to do so since the
+fixtures were renamed, three case bars changed, the contradiction checker was
+fixed twice and the target prefetch was turned on by default. qwen3 via Ollama,
+thinking on, **38 × 3 = 114 runs, 0 voids**, one kind cluster with all six
+fixture files, every fault verified presenting by hand before any model time was
+spent, one `run_eval` invocation per case. Records in `results/all38/`.
+
+| set | score | 95% CI |
+|---|---|---|
+| headline, all 38 cases | 99/114, 86.8% | [79.4–91.9] |
+| the 29 the prompts were written against | 84/87, **96.6%** | [90.3–98.8] |
+| the 9 they were not | 15/27, **55.6%** | [37.3–72.4] |
+
+**Gap 41.0 points, Fisher p = 9.2e-07**, computed by `split_by_novelty.py`
+itself; its `--self-check` requires that function to reproduce three published
+values and to return 1.0 on a table with no gap.
+
+| | 2026-09-13 (regraded) | 2026-09-18 | Fisher p |
+|---|---|---|---|
+| prompts written against it | 79/87, 90.8% | 84/87, 96.6% | 0.2114 |
+| never-seen fault types | 8/15, 53.3% | 15/27, 55.6% | **1.0000** |
+
+**Neither half moved.** The generalization gap is reproducible, not a one-off,
+and five days of fixes to fixtures, tools and checkers did not shift it. What
+improved is precision: the never-seen half is nine fault types rather than five,
+so its interval narrowed from 45 points to 35.
+
+Per case, never-seen half: `claim_waiting_on_a_missing_provisioner` 3/3,
+`malformed_image_reference` 3/3, `pending_behind_a_higher_priority_pod` 3/3,
+`entrypoint_that_does_not_exist` 2/3, `image_never_pulled_by_policy` 2/3,
+`job_gave_up_after_retries` 1/3, `stuck_terminating_finalizer` 1/3,
+`job_killed_by_its_own_deadline` 0/3, `poststart_hook_not_the_app` 0/3.
+
+### What the failures were, read one at a time
+
+**Of the 12 failures in the never-seen half, 8 named the right cause and missed
+a bar around it.** Counting them as diagnostic failures would overstate the
+problem; counting them as passes would hide four real ones. All twelve were read
+by hand and the reading produced five new defects:
+
+| what it was | how many | where |
+|---|---|---|
+| grader artefact — a denial read as a claim | 3 runs | defects 58, 59 |
+| grader artefact — the verdict tracked the answer's wording | 2 runs | defect 60 |
+| the prefetch ended the search before the tool holding the value | 3 cases | defect 61 |
+| the evidence expired or was sampled in the wrong state | 2 runs | defect 62 |
+| **the checker was right — an invented value** | 5 runs | — |
+| **a genuinely wrong diagnosis** | `poststart_hook_not_the_app`, 3 runs | — |
+
+### Three caveats that belong with the number
+
+1. **A prefetched call counts toward `expect_tools`.** A case requiring a tool
+   the prefetch supplies can no longer fail that bar. Of the 54 runs on the 18
+   cases that declare `expect_tools`, **18 (33.3%) met it only because the
+   prefetch made the call** — six cases, every one expecting `describe_pod`.
+2. **50 of 114 runs (43.9%) made no tool call of their own.** For those runs
+   this measures whether the model can read a scan row and one `describe_pod`,
+   not whether it can chain tools to a cause.
+3. **Case order was fixed.** The pre-existing half ran in the first ninety
+   minutes and the never-seen half in the last hour, against fixtures whose
+   Kubernetes events had begun to expire. For event-borne causes the split is
+   partly confounded with fixture age — see defect 62.
+
+## Results — the two-configuration comparison, 2026-08-25
 
 | Metric | qwen3 (local) | gpt-4o-mini (API) |
 |---|---|---|

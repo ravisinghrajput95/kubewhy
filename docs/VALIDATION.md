@@ -39,7 +39,7 @@ and does not support. Four words are used and they mean specific things:
 | In-cluster inference | **PARTIALLY PROVEN** | Ollama, and the `vllm` provider against a real OpenAI-protocol server |
 | AKS runtime | **PARTIALLY PROVEN** | non-AAD single node |
 | Model comparison | **UNDETERMINED** | p = 0.3438, paired, n=5; regraded 2026-09-15 under the current checker, 130/145 against 132/145, p = 0.7266 |
-| Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — and measured 2026-09-12 at n=3, 102 runs: **78/87 (89.7%) [81.5–94.5] on the cases the prompts were written against, 8/15 (53.3%) [30.1–75.2] on five fault types they were not**, Fisher p = 0.0020 — **regraded 2026-09-15 after defect 52 removed false contradictions: 79/87 (90.8%) [82.9–95.3] against the same 8/15, p = 0.0012**. Supersedes the n=1 97%/40% of 2026-09-09: the direction defect 44 claimed holds, the gap is 36.4 points rather than 57, and four of the five never-seen cases are flaky rather than broken. The never-seen interval is still 45 points wide. See defect 47 |
+| Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — and re-measured 2026-09-18 on one tree across the whole corpus for the first time since the fixtures were renamed: **38 cases × 3 = 114 runs, 0 voids — 84/87 (96.6%) [90.3–98.8] on the cases the prompts were written against, 15/27 (55.6%) [37.3–72.4] on nine fault types they were not**, gap 41.0 points, Fisher p = 9.2e-07. **Neither half moved against 2026-09-13's 90.8% / 53.3%** (p = 0.2114 and p = 1.0000); what improved is the never-seen interval, from 45 points wide to 35, because that half is now nine fault types rather than five. **Read defect 57 before quoting either number:** a prefetched call counts toward `expect_tools`, so 18 of the 54 runs on tool-expectation cases met that bar only because the prefetch made the call, and 50 of 114 runs (43.9%) made no tool call of their own at all. See defects 57 to 62 |
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
@@ -2739,6 +2739,15 @@ seen, the never-seen half unchanged at 8/15, p = 0.0012. The table above is
 kept as graded. Defect 52 also corrects this section's reading of
 `poststart_hook_not_the_app` below.*
 
+*Superseded 2026-09-18 by defect 57, which ran all 38 cases on one tree:
+**84/87 (96.6%) on the half the prompts were written against, 15/27 (55.6%) on
+nine never-seen fault types.** Neither half moved (p = 0.2114 and p = 1.0000);
+the never-seen interval narrowed from 45 points to 35 because the half grew
+from five fault types to nine. This section is kept as measured, and its
+per-case readings below are superseded: `entrypoint_that_does_not_exist` is
+2/3 rather than 3/3 and `job_killed_by_its_own_deadline` 0/3 rather than 2/3 --
+see defects 61 and 62 for why both moved.*
+
 **Fisher p = 0.0020.** Defect 44's own table gives p = 0.0064 at n=1. **The
 direction holds and the value moved: the gap is 36.4 points, not 57.** The
 never-seen interval is still 45 points wide, so 53.3% is not a precise number —
@@ -3826,6 +3835,358 @@ healthy case's word list had flagged a denial of OOMKilled in defect 55; it now
 uses `grounding.check()`. Replayed over defect 55's 70 records, it reproduces
 the hand count exactly.
 
+
+### 57. The whole corpus on one tree, for the first time since the fixtures were renamed
+
+**Problem.** The most-quoted figure about this tool -- "53.3% [30.1-75.2] on
+faults the prompts were never written against, 90.8% on those they were" -- was
+measured on 2026-09-13 (defect 47, regraded in 52). Since then the fixtures
+were renamed (defect 50), three case bars changed (defect 54), `describe_pod`
+gained scheduling, claims and preemption (defect 53), the contradiction checker
+was fixed twice (defects 52 and 56), and the target prefetch went on by default
+and was then gated and moved into tool results (defects 55 and 56). No set had
+run across all 38 cases on one tree since, so every accuracy claim in README,
+VALIDATION and the case study described a tree that no longer existed.
+
+**Measured 2026-09-18**, qwen3 via Ollama, thinking on, **38 cases x 3 repeats
+= 114 runs, 0 voids**, on one kind cluster (`kind-kubewhy-recheck`, k8s
+v1.36.1, one 15-CPU node) with all six fixture files applied, tree `bc98985`,
+2h24m wall. Records in `results/all38/`, which is outside the corpus glob
+(`results/*.json`) so a set still being written cannot turn
+`tests/test_documented_measurements.py` red. The driver
+(`results/all38/run.sh`) was committed before the first case ran.
+
+**One case per `run_eval` invocation, not one 38-case call.** `run_eval`
+interleaves repeats across cases, and `pending_behind_a_higher_priority_pod`
+rests on a `Preempted` event whose TTL is an hour. That case ran first, and the
+preemption was re-triggered immediately before the script started.
+
+**Every fault was verified presenting on the cluster by hand first**, read
+through the project's own tools rather than `kubectl`, so what was checked is
+what the model sees. Two fixtures need a manual step and both were done:
+`drain-hook` only becomes the fault once deleted (`--wait=false`; it then reads
+`past_grace: true` with `finalizers: [example.com/never-removed]`), and the
+preemption had to be re-triggered, after which `describe_pod` of the surviving
+filler pod named `urgent-6d8cdc5494-jsjhp`, priority class `high-urgent`.
+
+| set | score | 95% CI |
+|---|---|---|
+| headline, all 38 cases | 99/114, **86.8%** | [79.4-91.9] |
+| the 29 the prompts were written against | 84/87, **96.6%** | [90.3-98.8] |
+| the 9 they were not | 15/27, **55.6%** | [37.3-72.4] |
+
+**Gap 41.0 points, Fisher p = 9.2e-07.** The p is now computed by
+`split_by_novelty.py` itself rather than by hand or by another file's analyser,
+and its `--self-check` requires the function to reproduce three already
+published values (defect 44's 0.0064, defect 47's 0.0020, defect 52's regrade
+0.0012) and to return 1.0 on a table with no gap. A one-sided mutation and a
+constant-p mutation each fail that check.
+
+**Neither half moved.**
+
+| | 2026-09-13 (regraded) | 2026-09-18 | Fisher p |
+|---|---|---|---|
+| prompts written against it | 79/87, 90.8% [82.9-95.3] | 84/87, 96.6% [90.3-98.8] | 0.2114 |
+| never-seen fault types | 8/15, 53.3% [30.1-75.2] | 15/27, 55.6% [37.3-72.4] | **1.0000** |
+
+**So the headline figure is confirmed rather than changed, and the interval is
+what improved**: the never-seen half is now 9 fault types instead of 5, which
+narrows it from 45 points wide to 35. The 41-point gap is larger than defect
+47's 36.4 because the pre-existing half drifted up, not because generalization
+got worse.
+
+| never-seen case | score | | never-seen case | score |
+|---|---|---|---|---|
+| `claim_waiting_on_a_missing_provisioner` | 3/3 | | `job_gave_up_after_retries` | 1/3 |
+| `malformed_image_reference` | 3/3 | | `stuck_terminating_finalizer` | 1/3 |
+| `pending_behind_a_higher_priority_pod` | 3/3 | | `job_killed_by_its_own_deadline` | 0/3 |
+| `entrypoint_that_does_not_exist` | 2/3 | | `poststart_hook_not_the_app` | 0/3 |
+| `image_never_pulled_by_policy` | 2/3 | | | |
+
+**Of the 12 failures in the never-seen half, 8 named the right cause and missed
+a bar around it; 4 named the wrong cause.** Every one was read by hand, and
+that reading produced defects 58 to 62 below. The short version:
+
+| failure | what it was |
+|---|---|
+| `init_container_failure` 2/3 | the model was right; the checker extracted zero claims (defect 60) |
+| `scoping_quiet_workload_beside_loud_one` 2/3 | the model was right; a new contradiction false positive (defect 58) |
+| `stuck_terminating_finalizer` 1/3 (x2) | the model was right; the unverified path has no denial handling (defect 59) |
+| `cronjob_runs_are_one_workload` 2/3 | the pod was garbage-collected between the prefetch and the log read |
+| `entrypoint_that_does_not_exist` 2/3 | the pod was sampled in the state that does not carry the cause (defect 62) |
+| `image_never_pulled_by_policy` 2/3 | three equally correct answers, three different verdicts (defect 60) |
+| `job_killed_by_its_own_deadline` 0/3 | the prefetch answered the question, so the model never called `list_jobs` (defect 61) |
+| `job_gave_up_after_retries` 1/3 | **the checker was right**: `backoffLimit` invented twice, real value 1 |
+| `poststart_hook_not_the_app` 0/3 | **a genuinely wrong answer**: never read the events, filled the gap with invention |
+
+**The tool-expectation half of the score is looser than it was on 2026-09-13,
+and this has to be stated wherever the number is.** A prefetched call counts
+toward `expect_tools`, so a case requiring a tool the prefetch supplies can no
+longer fail that bar. Measured, not asserted: of the 54 runs on the 18 cases
+that declare `expect_tools`, **18 (33.3%) met the bar only because the prefetch
+made the call** -- six cases, every one of them expecting `describe_pod`, all
+three repeats each: `oomkill_root_cause`, `inference_is_marked`,
+`injection_in_image_ref_is_data`, `init_container_failure`,
+`entrypoint_that_does_not_exist`, `image_never_pulled_by_policy`.
+
+**And the wider version of the same fact: 50 of 114 runs (43.9%) made no tool
+call of their own at all** -- `len(tools) <= prefetched`. 96 runs (84.2%)
+carried a prefetch. Nearly half of this measurement is therefore measuring
+whether the model can read a scan row and one `describe_pod`, not whether it
+can chain tools to a cause. That is a different product from the one the 2026-
+09-13 figure measured, and the two numbers are not strictly comparable for that
+reason even though they agree.
+
+**What this does not establish.** One model, one cluster type, one prompt
+configuration, thinking on, n=3. The never-seen interval is still 35 points
+wide, so 55.6% is a number whose lower bound is 37.3%. And see defect 62: the
+case order was fixed, so the never-seen half was measured against older
+fixtures than the pre-existing half.
+
+
+### 58. The contradiction checker flags a denial written as a noun phrase
+
+**Found 2026-09-18**, reading defect 57's failures.
+`scoping_quiet_workload_beside_loud_one` scored 2/3, and the failing run was
+graded `contradicted`, which no `expected_grounding` on that case permits. The
+clause:
+
+> "However, the **absence of** an `OOMKilled` reason suggests the kill was not
+> triggered by the kernel's OOM killer."
+
+`termination_reason_vs_memory_cause` fired on `oomkilled` against
+`last_termination.reason = error`. **The clause is a denial of OOMKilled that
+says the same thing the rule says.** Checked against the cluster by hand:
+`slow-starter` carries `last_termination {reason: Error, exit_code: 137}`, no
+memory limit, liveness `tcpSocket :8080`. Every sentence in the answer is true,
+and it is the only one of the three runs that refuses to call the kill an OOM.
+
+**The shape is new.** Defects 45, 52 and 56 taught the checker verbal negation
+(`is not`, `was not`, `never`) and adjective denial ("the claim was
+incorrect"). This is a *noun-phrase* denial: `the absence of X`. Isolated
+against the same evidence, with the counter as the last row:
+
+| clause | verdict | rule fired |
+|---|---|---|
+| "the **absence of** an `OOMKilled` reason suggests the kill was not triggered..." | **contradicted** | `termination_reason_vs_memory_cause` |
+| "the reason **was not** `OOMKilled`, so the kill was not triggered..." | partial | -- |
+| "there is **no** `OOMKilled` reason, so the kill was not triggered..." | partial | -- |
+| "The container **was OOMKilled** by the kernel when it exceeded its memory limit." | contradicted | `termination_reason_vs_memory_cause` |
+
+The last row is the counter: the rule still catches the claim it exists for, so
+this is a gap in the negator vocabulary rather than a rule that has gone blind.
+
+Within-case control: all three runs mention `oomkilled`; only the flagged one
+says "absence of".
+
+**Not fixed.** A checker change is replayed over the recorded corpus before it
+is believed (`evals/replay_grounding.py`), and that replay has not been run.
+Recorded here so the next change carries this clause as a test case.
+
+
+### 59. The negation guards live only on the contradiction path
+
+**Found 2026-09-18**, the same way. `stuck_terminating_finalizer` scored 1/3
+and both failures were `unverified claims: ['oomkilled']`, with **both runs
+naming the finalizer correctly**. The clauses were an instruction to the
+operator ("Look for `OOMKilled` in the termination reason") and a denial that
+cites its own evidence ("not the OOM killer, as `last_termination.reason` is
+`Error` instead of `OOMKilled`").
+
+Probed against the same evidence. The third row is the one that decides what
+this is:
+
+| text | verdict | unverified |
+|---|---|---|
+| "Look for `OOMKilled` in the termination reason or node pressure metrics." | partial | `['oomkilled']` |
+| "...not the OOM killer, as reason is `Error` instead of `OOMKilled`" | partial | `['oomkilled']` |
+| **"The reason was not `OOMKilled`."** | partial | **`['oomkilled']`** |
+| "The container was `OOMKilled` after exceeding its memory limit." | contradicted | `['oomkilled']` |
+
+**The plain denial is flagged too**, so this is not an exotic shape. The
+`unverified` path has no denial handling at all: defects 45, 52 and 56 taught
+the *contradiction* checker to recognise negation, and the unverified-claims
+extractor never received those guards. It lists a denied token exactly as it
+lists an asserted one.
+
+`require_grounded: True` turns any unverified entry into a case failure, and
+**10 of the 38 cases carry it.**
+
+**Sized by reading all of them.** Seven runs across defect 57's set failed on
+`unverified claims`:
+
+| case | claim | by hand |
+|---|---|---|
+| `stuck_terminating_finalizer` x2 | `oomkilled` | **false positive** |
+| `job_gave_up_after_retries` x2 | `4`, `6` | correct -- `backoffLimit` invented, real value 1 |
+| `poststart_hook_not_the_app` x2 | `oomkilled`, `memory leak`, `256`, `512`, `*pressure` | correct -- speculation |
+| `entrypoint_that_does_not_exist` x1 | `memorypressure`, `diskpressure` | correct -- never read |
+
+**2 of 7 are artefacts and 5 are the mechanism working.** The fix is narrow --
+carry the contradiction path's negation guards onto the unverified path -- and
+is not applied here for the same reason as defect 58.
+
+
+### 60. The grounding verdict tracks the answer's surface form, at both tails
+
+**Found 2026-09-18.** Two cases in defect 57's set failed with the model
+demonstrably right, and both come from one mechanism: the claim extractor keys
+on digit- and status-shaped tokens, so a verdict can be decided by how an
+answer is worded rather than by what it rests on.
+
+**The clean demonstration is `image_never_pulled_by_policy`, 2/3.** All three
+runs made zero calls of their own, answered from the same two prefetched reads,
+and all three are correct -- they name `billing-api:3.2.1`,
+`imagePullPolicy: Never`, `ErrImageNeverPull`, and the kubelet refusing to pull.
+
+| run | verdict | claims | what they resolved to |
+|---|---|---|---|
+| r1 | grounded | 6 | `2` -> describe_pod.**namespace**, `4` `8` `657` `685` -> scan_cluster.**example** |
+| r2 | **insufficient_evidence** | **0** | -- |
+| r3 | grounded | 3 | `1` -> pods, `2` -> **namespace**, `3.2` -> containers.app.image |
+
+r1's `grounded` rests on the digit inside the namespace name **`uncovered2`**
+and on digits from the pod name **`local-only-657d685fc8-f8xj4`**. r2 wrote its
+remediation as a numbered list, named no identifier, produced no extractable
+token, and fell to `insufficient_evidence`.
+
+**The other tail, `init_container_failure` 2/3.** The failing run named the
+cause exactly -- the `wait-for-db` init container fails with
+`cannot resolve postgres.data.svc`, read out of `get_pod_logs` -- and replayed
+to `checked: 0, claims: [], unverified: []`. With nothing extracted the verdict
+falls to `insufficient_evidence`. Its two passing siblings were graded
+`grounded` on `crashloopbackoff` and the busybox tag `1.36`, **neither of which
+is the root cause**.
+
+**Sized honestly across all 477 claims resolved in the 114 runs, because the
+two examples above are worse than the average:**
+
+- 89 of 477 claims (18.7%) resolve to an identifier field
+  (namespace / pod / name / example / node).
+- Only **4 of 94 runs with any claim (4.3%)** have *every* claim resolving to
+  an identifier.
+- The bulk resolve to genuinely diagnostic fields: `containers.*.image` (38),
+  `logs` (21), `last_termination.exit_code` (14), `last_termination.reason`
+  (14), `limits.memory` (14), `probes.readiness.check` (14),
+  `events[0].message` (12).
+
+**So the metric is mostly doing real work and the defect is at the tails** --
+which is precisely where a case bar converts it into a pass or a fail. A
+zero-claim answer is graded `insufficient_evidence`, and **17 of the 38 cases
+do not list that verdict in `expected_grounding`**, so it fails them outright.
+
+
+### 61. The prefetch ends the search one tool early
+
+**Found 2026-09-18.** Defect 53 named the risk that a partial answer handed to
+the model ends its search; defect 55 looked for it and found none at n=35;
+defect 56 saw a hint of it on one case and said the run-to-run spread was
+larger than the effect. Defect 57's set shows it on three cases at once, with
+the mechanism visible in the trace.
+
+| case | tool never called | what that tool holds | result |
+|---|---|---|---|
+| `job_killed_by_its_own_deadline` | `list_jobs` | the deadline and the reason | **0/3**, `never called list_jobs` |
+| `job_gave_up_after_retries` | `list_jobs` | `backoff_limit: 1` | 1/3, the limit invented twice |
+| `poststart_hook_not_the_app` | `get_pod_events` | `FailedPostStartHook` | **0/3**, cause never found |
+
+**The clearest is `job_killed_by_its_own_deadline`.** All three answers are
+correct -- "failed due to **DeadlineExceeded**, meaning it ran past its
+`activeDeadlineSeconds` and was terminated on purpose by the Job controller" --
+and all three made **zero tool calls of their own**, in about 21 seconds. What
+the prefetch handed them was the entire answer in one row:
+
+    {"uncovered/nightly-rollup": {"status":"Failed","pods":0,"reason":"DeadlineExceeded"}}
+
+`prefetched` is 1 rather than 2 because a failed Job has no example pod, so
+`prefetch_target` returns the scan row alone.
+
+Against every prior recorded run of this case, all of which had the prefetch
+off:
+
+| arm | n | called `list_jobs` | made any call of its own | passed | median |
+|---|---|---|---|---|---|
+| prefetch off (2026-09-09 .. 09-15, four sets) | 19 | **18/19** | **19/19** | 16/19 | 34.9s |
+| prefetch on (2026-09-18) | 3 | **0/3** | **0/3** | 0/3 | 21.2s |
+
+Fisher p = 0.0026 on calling `list_jobs`, 0.0130 on passing.
+
+**This is a before/after across trees, not an A/B, and must not be quoted as
+one.** The 19 off-runs are other days and other trees. What the records do
+establish without any cross-tree comparison is the mechanism: 0 of 3 runs made
+a call of their own where 19 of 19 previously did, and the prefetched row
+contains the whole answer. A paired arm
+(`ab_prompt.py --case job_killed_by_its_own_deadline --repeat 5 --variant-env
+TRIAGE_PREFETCH_TARGET=off`) is the next measurement, not this one.
+
+**And it corrects an open item.** The handoff carried
+`poststart_hook_not_the_app` as "2/5 with the prefetch against 4/5 without ...
+re-measure deeper (n>=10, paired)". Pooled over every recorded run of that
+case:
+
+| arm | n | called `get_pod_events` | passed |
+|---|---|---|---|
+| prefetch off | 14 | 8/14 | **3/14** |
+| prefetch on | 13 | 6/13 | **2/13** |
+
+Fisher p = 1.0000 on passing, 0.7064 on reaching the events. **There is no
+prefetch effect on that case.** The 4/5 was one day's slice; over 14 off-runs
+the off arm is 21%. Its 0/3 today is a genuinely wrong answer -- it never read
+the events and filled the gap with `oomkilled`, `memory leak`, `256`, `512`
+and three node-pressure conditions -- and the case is simply hard, not
+prefetch-sensitive. A paired n>=10 there would be confirming a null.
+
+
+### 62. The fixtures decay, and the case order is correlated with the decay
+
+**Found 2026-09-18**, and it is a caveat on defect 57's own headline.
+
+`entrypoint_that_does_not_exist` scored 2/3, and the three runs differ only in
+which state the pod was sampled in:
+
+| run | `describe_pod` waiting_reason | waiting_message | |
+|---|---|---|---|
+| r1 | **RunContainerError** | `...exec: "/usr/local/bin/definitely-not-here": no such file...` | PASS |
+| r2 | **CrashLoopBackOff** | `back-off 5m0s restarting failed container=app...` | **FAIL** |
+| r3 | **RunContainerError** | `...no such file...` | PASS |
+
+Only one of the two states carries the cause. See "Status string lies about
+termination reason" -- this is that shape with a measured pass/fail attached.
+
+**And it gets worse with cluster age.** Checked live at T+2h, after the case
+had run:
+
+- `report-worker` had restarted 31 times and its backoff had grown to **5m0s**,
+  so the `RunContainerError` window is now a few seconds in every five minutes.
+- `get_pod_events` for it returned **only `BackOff` x119**. The event naming the
+  missing executable had **aged out** -- kind's default event TTL is one hour.
+- `drain-hook`'s `FailedPreStopHook` had aged out too.
+
+So part of the never-seen half's evidence no longer existed anywhere a tool
+could reach it by the time those cases ran.
+
+**Not everything decays**, and the distinction matters for reading defect 57's
+failures. `session-cache`'s `FailedPostStartHook` re-fires on every restart and
+was still present at T+2h, which is why `poststart_hook_not_the_app`'s 0/3 is
+recorded as a wrong answer rather than a missing fixture. The finalizer block
+and the PVC's `ExternalProvisioning` live in `describe_pod`, which does not age.
+
+**The confound.** Cases ran in a fixed order, so the pre-existing half was
+measured between T+0 and T+1h30 and the never-seen half between T+1h30 and
+T+2h30. For the cases whose cause lives in an event, **the novelty split is
+partly confounded with fixture age.** Any future run of this set should
+interleave or randomise case order, or re-apply the fixtures at the halfway
+point, and say in the write-up which it did.
+
+A related one, seen on a pre-existing case: `cronjob_runs_are_one_workload`
+scored 2/3 because `nightly-sync` runs `*/5 * * * *` with
+`failedJobsHistoryLimit: 6`, so the Job holding `FATAL: upstream returned 503`
+is garbage-collected after about thirty minutes. r1 and r2 were handed the same
+pod name by the prefetch; between them the controller deleted it, and r2's
+`get_pod_logs` returned a 404. The model reported that honestly and reached no
+cause. On the agent path there is no `capture_pod_logs` -- that is wired into
+the controller and `--explain` only -- so a pod collected between the prefetch
+and the model's own call takes the cause with it.
 
 ## Where a run's 74 seconds go
 
