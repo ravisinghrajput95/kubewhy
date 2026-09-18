@@ -1288,3 +1288,87 @@ class TestEntityIdentityIsChecked:
 
         assert result["confidence"] == "partial"
         assert "oomkilled" in result["unverified"]
+
+
+class TestADeniedPhraseIsNotAnUnverifiedClaim:
+    """
+    Defect 59. `contradiction.py` learned three times over (defects 45, 52, 56)
+    that a denied phrase is not an asserted one. `check()`'s `unverified` list
+    never learned it at all, and listed a denied token exactly as it listed an
+    asserted one.
+
+    It cost case scores rather than just tidiness: `stuck_terminating_finalizer`
+    carries `require_grounded`, and on 2026-09-18 two of its three runs named
+    the finalizer correctly and failed on an `oomkilled` they had denied.
+    """
+
+    EVIDENCE = [{
+        "id": "tool-1",
+        "tool": "describe_pod",
+        "result": json.dumps({
+            "pod": "drain-hook",
+            "containers": {"app": {
+                "last_termination": {"reason": "Error", "exit_code": 137}}},
+        }),
+    }]
+
+    @pytest.mark.parametrize("answer", [
+        "The reason was not `OOMKilled`.",
+        "Look for `OOMKilled` in the termination reason or node pressure metrics.",
+        "It was killed by an external process (not the OOM killer, as "
+        "`last_termination.reason` is `Error` instead of `OOMKilled`).",
+        "This is not a resource exhaustion issue (no OOMKilled or memory "
+        "limits reported).",
+    ])
+    def test_a_denial_is_not_flagged(self, answer):
+        assert grounding.check(answer, self.EVIDENCE)["unverified"] == []
+
+    def test_the_counter_an_assertion_is_still_flagged(self):
+        """
+        Without this, a fix that simply stopped checking statuses would pass
+        every test above while blinding the mechanism completely.
+        """
+        answer = "The container was `OOMKilled` after exceeding its memory limit."
+        assert grounding.check(answer, self.EVIDENCE)["unverified"] == ["oomkilled"]
+
+    def test_a_status_whose_clause_denies_something_else_is_still_checked(self):
+        """
+        The regression the corpus replay caught before this shipped. The first
+        version asked `not contradiction.asserted(...)`, whose 78-character
+        backward window reads the "not" in "is not starting" as governing the
+        status. Seven records moved from `grounded` to `insufficient_evidence`,
+        because the only claim they had was skipped and nothing was left to
+        check.
+        """
+        evidence = [{
+            "id": "tool-1",
+            "tool": "describe_pod",
+            "result": json.dumps({
+                "pod": "missing-configmap-key",
+                "containers": {"app": {
+                    "waiting_reason": "CreateContainerConfigError"}},
+            }),
+        }]
+        answer = ('The pod "missing-configmap-key" in the "config-faults" '
+                  "namespace is not starting due to a "
+                  "CreateContainerConfigError.")
+        verdict = grounding.check(answer, evidence)
+        assert verdict["checked"] >= 1
+        assert verdict["confidence"] == "grounded"
+
+    @pytest.mark.parametrize("answer", [
+        "Check for memory leaks in the application.",
+        "This is not a memory leak.",
+    ])
+    def test_a_denied_cause_is_not_flagged_either(self, answer):
+        """
+        The status loop and the cause loop are separate loops, and a mutation
+        that removed the guard from the cause one survived the whole suite
+        until this existed. `oomkill-regression-n5.json` carries "Check for
+        memory leaks in the application." -- advice, flagged as a claim.
+        """
+        assert grounding.check(answer, self.EVIDENCE)["unverified"] == []
+
+    def test_the_counter_an_asserted_cause_is_still_flagged(self):
+        answer = "The container is leaking memory: this is a memory leak."
+        assert grounding.check(answer, self.EVIDENCE)["unverified"] == ["memory leak"]

@@ -223,8 +223,11 @@ they were not. Measured 2026-09-18, 38 cases x 3 repeats on one kind cluster:
 | the 9 they were not | 15/27, **55.6%** | [37.3-72.4] |
 
 Gap 41.0 points, Fisher p = 9.2e-07. Against the same split five days earlier,
-**neither half moved** (p = 0.2114 and p = 1.0000). The generalization gap is
-reproducible and has not closed.
+**neither half moved** (p = 0.2114 and p = 1.0000). Reading the failures
+produced two checker fixes the same day; regraded under them the halves read
+97.7% and 63.0%, and both measurements regraded under that one checker read
+60.0% then against 63.0% now, p = 1.0000. **The generalization gap is not a
+grading artefact, and it has not closed.**
 
 Every one of the 12 failures in the never-seen half was read by hand rather than
 counted. Eight named the right cause and missed a bar around it, and that
@@ -236,7 +239,7 @@ needed.
 
 One cluster, one machine, one prompt configuration. n=3 to n=5 per scenario.
 Real vLLM and EKS not tested. No browser paint automation. **Generalized
-diagnostic accuracy is measured and is not good: 55.6%, lower bound 37.3%.** In
+diagnostic accuracy is measured and is not good: 55.6% as graded, 63.0% regraded, lower bound 44.2%.** In
 that measurement 43.9% of runs answered without making a tool call of their own,
 because a prefetch hands the model two reads before it starts -- so for those
 runs the number describes reading a scan row, not chaining tools to a cause.

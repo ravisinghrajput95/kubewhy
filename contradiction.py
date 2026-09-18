@@ -271,7 +271,16 @@ _DENIED_AFTER = re.compile(
 #    only markup may separate them -- which is what keeps "lack of limits
 #    allows it to trigger the OOM killer" asserted.
 _DENIED_BEFORE = re.compile(
-    r"\b(?:lack|absence|instead|rather\s+than)(?:\s+of)?\s*$"
+    # Defect 58: a determiner may sit between the negating noun and the
+    # phrase, and one was enough to defeat this. "the absence of an
+    # `OOMKilled` reason suggests the kill was not triggered by the kernel's
+    # OOM killer" was scored `contradicted` on 2026-09-18 -- a denial that
+    # agrees with the measurement, flagged as a claim -- purely because of the
+    # "an". Only a determiner is allowed through, which is what keeps the
+    # comment above true: "lack of limits allows it to trigger the OOM killer"
+    # still asserts, because five words separate the two.
+    r"\b(?:lack|absence|instead|rather\s+than)(?:\s+of)?"
+    r"(?:\s+(?:a|an|the|any|some))?\s*$"
     # Defect 52's remainder: "This contradicts the earlier assumption of OOM
     # termination." -- the phrase named only as the thing being overturned.
     r"|\b(?:contradicts|rules\s+out|disproves|refutes|rejects)\b[^.]{0,30}?"
@@ -290,6 +299,72 @@ _CONCESSION = re.compile(r"^\W*(?:while|although|though|even though)\b")
 _MARKUP_CHARS = "`\"'*_( "
 
 _COUNTERFACTUAL = re.compile(r"^[\w'\u2019-]*\W{0,4}would\s+(?:be|have|show|say|read)\b")
+
+
+# How close a bare negator must sit to deny the phrase, for `denied()` below.
+# Markup and one determiner, and nothing else.
+#
+# **This is deliberately NOT _NEGATION_WINDOW, and the difference is the whole
+# of defect 59's second attempt.** That window is 78 characters because the
+# rule it serves is about one phrase, OOMKilled, where a "not" anywhere nearby
+# almost always governs it. Handed a general status token it is badly wrong:
+#
+#   "The pod ... is **not** starting due to a CreateContainerConfigError."
+#
+# asserts the status, and the "not" belongs to "starting". Replayed over the
+# corpus, reusing _asserted() here moved 7 records from `grounded` to
+# `insufficient_evidence` on exactly that shape. A negator that is *adjacent*
+# carries no such ambiguity: "was not `OOMKilled`", "no `OOMKilled` reason".
+_ADJACENT_NEGATOR = re.compile(
+    r"\b(?:no|not|never|without|none|neither|nor|n't)\s*"
+    r"(?:\s+(?:a|an|the|any|some))?$")
+
+
+def asserted(clause, phrase):
+    """
+    Whether this module reads `clause` as claiming `phrase`.
+
+    The predicate the contradiction rules themselves use, exposed so a test can
+    pin its behaviour. Callers deciding whether to *flag* something want
+    `denied` below instead: this one answers "is it asserted", and the two
+    differ on ambiguous sentences, where they must.
+    """
+    return _asserted(clause.lower(), phrase.lower())
+
+
+def denied(clause, phrase):
+    """
+    Whether a clause denies `phrase` outright, for callers outside this module.
+
+    grounding.check() needs this and had never asked: its `unverified` list
+    flagged a status token wherever the token appeared, so "The reason was not
+    `OOMKilled`." was recorded as an unverified claim about OOMKilled
+    (defect 59). Two parsers agreeing on one string is a coincidence -- this
+    project has been bitten by that at a security boundary -- so the vocabulary
+    stays in this module and callers ask it here.
+
+    **Only the unambiguous, positional denials**: a negating noun or a bare
+    negator directly before the phrase, a copula-and-negator directly after it,
+    or a counterfactual. Not the backward window `_asserted` uses, which is
+    tuned to one rule and does not generalise -- see _ADJACENT_NEGATOR.
+
+    So this is narrower than `not _asserted(...)` on purpose. It answers "is
+    this plainly denied", not "is this asserted", and the two differ exactly
+    where a sentence is ambiguous -- where flagging is the safer default.
+    """
+    lowered = clause.lower()
+    phrase = phrase.lower()
+    start = lowered.find(phrase)
+    if start < 0:
+        return False
+
+    before = lowered[:start].rstrip(_MARKUP_CHARS)
+    if _DENIED_BEFORE.search(before) or _ADJACENT_NEGATOR.search(before):
+        return True
+
+    tail = lowered[start + len(phrase):start + len(phrase) + 80]
+    tail = tail.replace("*", "").replace("`", "").replace('"', "")
+    return bool(_DENIED_AFTER.match(tail) or _COUNTERFACTUAL.match(tail))
 
 
 def _asserted(lowered, phrase):

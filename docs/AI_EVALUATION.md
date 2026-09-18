@@ -156,7 +156,15 @@ values and to return 1.0 on a table with no gap.
 | never-seen fault types | 8/15, 53.3% | 15/27, 55.6% | **1.0000** |
 
 **Neither half moved.** The generalization gap is reproducible, not a one-off,
-and five days of fixes to fixtures, tools and checkers did not shift it. What
+and five days of fixes to fixtures, tools and checkers did not shift it.
+
+*Regraded the same day, after reading these failures produced defects 58 and
+59: **85/87 (97.7%) and 17/27 (63.0%) [44.2–78.5]**, three runs moving and no
+others. Regrading 2026-09-12's set under that same checker gives 9/15 (60.0%)
+on its never-seen half, against today's 63.0% — **Fisher p = 1.0000.** The
+finding is therefore independent of which checker is used: as graded 53.3%
+against 55.6%, regraded 60.0% against 63.0%, and no movement either way. The
+tables are kept as graded.* What
 improved is precision: the never-seen half is nine fault types rather than five,
 so its interval narrowed from 45 points to 35.
 

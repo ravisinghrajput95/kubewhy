@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1897 passing, **0 skipped**, in 50s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1923 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -39,7 +39,7 @@ and does not support. Four words are used and they mean specific things:
 | In-cluster inference | **PARTIALLY PROVEN** | Ollama, and the `vllm` provider against a real OpenAI-protocol server |
 | AKS runtime | **PARTIALLY PROVEN** | non-AAD single node |
 | Model comparison | **UNDETERMINED** | p = 0.3438, paired, n=5; regraded 2026-09-15 under the current checker, 130/145 against 132/145, p = 0.7266 |
-| Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — and re-measured 2026-09-18 on one tree across the whole corpus for the first time since the fixtures were renamed: **38 cases × 3 = 114 runs, 0 voids — 84/87 (96.6%) [90.3–98.8] on the cases the prompts were written against, 15/27 (55.6%) [37.3–72.4] on nine fault types they were not**, gap 41.0 points, Fisher p = 9.2e-07. **Neither half moved against 2026-09-13's 90.8% / 53.3%** (p = 0.2114 and p = 1.0000); what improved is the never-seen interval, from 45 points wide to 35, because that half is now nine fault types rather than five. **Read defect 57 before quoting either number:** a prefetched call counts toward `expect_tools`, so 18 of the 54 runs on tool-expectation cases met that bar only because the prefetch made the call, and 50 of 114 runs (43.9%) made no tool call of their own at all. See defects 57 to 62 |
+| Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — and re-measured 2026-09-18 on one tree across the whole corpus for the first time since the fixtures were renamed: **38 cases × 3 = 114 runs, 0 voids — 84/87 (96.6%) [90.3–98.8] on the cases the prompts were written against, 15/27 (55.6%) [37.3–72.4] on nine fault types they were not**, gap 41.0 points, Fisher p = 9.2e-07 — **regraded the same day under defects 58 and 59: 85/87 (97.7%) against 17/27 (63.0%) [44.2–78.5]**. **Neither half moved against 2026-09-13's 90.8% / 53.3%** (p = 0.2114 and p = 1.0000); what improved is the never-seen interval, from 45 points wide to 35, because that half is now nine fault types rather than five. **Read defect 57 before quoting either number:** a prefetched call counts toward `expect_tools`, so 18 of the 54 runs on tool-expectation cases met that bar only because the prefetch made the call, and 50 of 114 runs (43.9%) made no tool call of their own at all. See defects 57 to 62 |
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
@@ -3889,6 +3889,26 @@ constant-p mutation each fail that check.
 | prompts written against it | 79/87, 90.8% [82.9-95.3] | 84/87, 96.6% [90.3-98.8] | 0.2114 |
 | never-seen fault types | 8/15, 53.3% [30.1-75.2] | 15/27, 55.6% [37.3-72.4] | **1.0000** |
 
+**Regraded 2026-09-18 under the checker defects 58 and 59 produced**, three
+runs move and no others -- the two `stuck_terminating_finalizer` runs that had
+denied an `OOMKilled` and the `scoping_quiet_workload_beside_loud_one` run that
+had written "the absence of an `OOMKilled` reason":
+
+| set | as graded | regraded |
+|---|---|---|
+| the 29 the prompts were written against | 84/87, 96.6% | **85/87, 97.7%** [92.0–99.4] |
+| the 9 they were not | 15/27, 55.6% | **17/27, 63.0%** [44.2–78.5] |
+| headline | 99/114, 86.8% | 102/114, 89.5% |
+
+The tables above are kept as graded, as defect 47's were.
+
+**And the comparison survives being made like for like.** Regrading
+2026-09-12's set under the same checker gives 9/15, 60.0% [35.7–80.2] on its
+never-seen half against today's 17/27, 63.0% -- **Fisher p = 1.0000.** So the
+finding does not depend on which checker is used: as graded it is 53.3% against
+55.6% (p = 1.0000), and regraded it is 60.0% against 63.0% (p = 1.0000). **The
+generalization gap is not a grading artefact and it has not moved.**
+
 **So the headline figure is confirmed rather than changed, and the interval is
 what improved**: the never-seen half is now 9 fault types instead of 5, which
 narrows it from 45 points wide to 35. The 41-point gap is larger than defect
@@ -3961,10 +3981,20 @@ says the same thing the rule says.** Checked against the cluster by hand:
 memory limit, liveness `tcpSocket :8080`. Every sentence in the answer is true,
 and it is the only one of the three runs that refuses to call the kill an OOM.
 
-**The shape is new.** Defects 45, 52 and 56 taught the checker verbal negation
-(`is not`, `was not`, `never`) and adjective denial ("the claim was
-incorrect"). This is a *noun-phrase* denial: `the absence of X`. Isolated
-against the same evidence, with the counter as the last row:
+**The shape is not new, and that is the finding.** Defect 52 already taught
+`_DENIED_BEFORE` the noun-phrase denial, and `absence` is in its vocabulary.
+The guard requires the negating noun to be *adjacent* to the phrase -- only
+markup may separate them -- and **one article defeated it**: "the absence of
+**an** `OOMKilled` reason". The adjacency is deliberate and load-bearing, and
+its own comment says why: it is what keeps defect 45's true positive, "the
+container's lack of limits allows it to trigger the OOM killer", asserted.
+
+**Fixed** by allowing a single determiner (`a|an|the|any|some`) between the
+negating noun and the phrase, and nothing else. Five words still separate
+"lack of" from "OOM killer" in defect 45's clause, so it still asserts -- a
+test holds that line, and removing the determiner slot fails seven tests.
+
+Isolated against the same evidence, with the counter as the last row:
 
 | clause | verdict | rule fired |
 |---|---|---|
@@ -3979,9 +4009,17 @@ this is a gap in the negator vocabulary rather than a rule that has gone blind.
 Within-case control: all three runs mention `oomkilled`; only the flagged one
 says "absence of".
 
-**Not fixed.** A checker change is replayed over the recorded corpus before it
-is believed (`evals/replay_grounding.py`), and that replay has not been run.
-Recorded here so the next change carries this clause as a test case.
+**Replayed before it was believed**, together with defect 59, over 1876
+records: **16 newly moved, every one of them toward `grounded`** (11 from
+`partial`, 5 from `contradicted`), **0 into `insufficient_evidence` and 0 into
+`contradicted`**. The five that were already moving `contradicted -> partial`
+now move `contradicted -> grounded`; no record was lost. The baseline was read
+first, so this diff is separable from it: 80 records already moved before the
+change, dominated by `service_selector_typo` (45, `insufficient_evidence ->
+grounded`) and `scoping_quiet_workload_beside_loud_one` (17), and the seven
+that move *into* `contradicted` were read by hand and are true positives --
+"restarting due to **OOMKilled**" against `reason = error`, and "does not have
+any associated pods" against a service with one endpoint.
 
 
 ### 59. The negation guards live only on the contradiction path
@@ -4022,9 +4060,48 @@ lists an asserted one.
 | `poststart_hook_not_the_app` x2 | `oomkilled`, `memory leak`, `256`, `512`, `*pressure` | correct -- speculation |
 | `entrypoint_that_does_not_exist` x1 | `memorypressure`, `diskpressure` | correct -- never read |
 
-**2 of 7 are artefacts and 5 are the mechanism working.** The fix is narrow --
-carry the contradiction path's negation guards onto the unverified path -- and
-is not applied here for the same reason as defect 58.
+**2 of 7 are artefacts and 5 are the mechanism working**, which is the
+constraint on any fix: it must stop listing denials without blunting the five.
+
+**Fixed 2026-09-18, and the first attempt was wrong in a way only the replay
+caught.** The obvious fix is to reuse the predicate the contradiction path
+already has, and reusing it directly moved **7 records from `grounded` to
+`insufficient_evidence`**. `_asserted` carries a 78-character backward window
+tuned to one rule, where a nearby "not" almost always governs `OOMKilled`.
+Handed a general status token it reads the wrong negator:
+
+> The pod "missing-configmap-key" ... is **not** starting due to a
+> `CreateContainerConfigError`.
+
+asserts the status, and the "not" belongs to "starting". Those seven records'
+only claim was the status, so skipping it left `checked = 0` and the verdict
+fell to `insufficient_evidence` -- **the fix was manufacturing defect 60.**
+
+So the module now exposes two predicates rather than one. `asserted()` is the
+contradiction rules' own question. `denied()` is narrower and deliberately so:
+only the unambiguous positional denials -- a negating noun or a bare negator
+*directly* before the phrase, a copula-and-negator directly after it, or a
+counterfactual -- and no backward window. It answers "is this plainly denied",
+not "is this asserted", and the two differ exactly where a sentence is
+ambiguous, where flagging is the safer default. The vocabulary stays in one
+module, because two parsers agreeing on one string is a coincidence and this
+project has been bitten by that at a security boundary.
+
+**Replayed:** see defect 58 -- 16 records moved, all toward `grounded`, none
+into `insufficient_evidence` or `contradicted`. Three of the newly-skipped
+clauses were read by hand:
+
+| clause | why it is not a claim |
+|---|---|
+| "Check for memory leaks in the application." | advice about a thing not found |
+| "check for OOMKilled or resource limits." | the same |
+| "This is not a resource exhaustion issue (no OOMKilled or memory limits reported)." | **the sentence quoted in `_NEGATORS`' own comment** as the example that taught `contradiction.py` about denials in the first place -- `grounding.py` had been flagging it ever since |
+
+**Seven mechanisms were each disabled in turn and each fails at least one
+test**, including a mutation that makes `denied()` always return `True`, which
+would blind the path entirely and fails 35. The cause loop and the status loop
+are separate loops: a mutation removing the guard from the cause loop survived
+the whole suite until a test for it existed.
 
 
 ### 60. The grounding verdict tracks the answer's surface form, at both tails

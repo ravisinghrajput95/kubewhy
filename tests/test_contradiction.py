@@ -1499,3 +1499,86 @@ class TestWhichNamesTheAbsenceRuleWillConsider:
 
         assert [f for f in found
                 if f["rule"] == "claimed_absent_but_measured_present"]
+
+
+class TestADeterminerDoesNotDefeatTheAbsenceGuard:
+    """
+    Defect 58. `_DENIED_BEFORE` has recognised "the absence of X" since defect
+    52, and one article walked straight past it: the guard required the
+    negating noun to be adjacent, and "the absence of **an** `OOMKilled`
+    reason" is not adjacent. That clause was scored `contradicted` on
+    2026-09-18 while agreeing with the measurement it was checked against.
+    """
+
+    CLAUSE = ("However, the absence of an `OOMKilled` reason suggests the "
+              "kill was not triggered by the kernel's OOM killer.")
+
+    def test_the_denial_is_not_read_as_a_claim(self):
+        assert not contradiction.asserted(self.CLAUSE, "oomkilled")
+
+    @pytest.mark.parametrize("determiner", ["a", "an", "the", "any", "some"])
+    def test_any_determiner(self, determiner):
+        clause = f"there was an absence of {determiner} OOMKilled reason"
+        assert not contradiction.asserted(clause, "oomkilled")
+
+    def test_the_true_positive_the_adjacency_rule_exists_for_still_asserts(self):
+        """
+        The counter. `_DENIED_BEFORE`'s own comment says adjacency is what
+        keeps this asserted, and defect 45 recorded it as a real contradiction.
+        A determiner slot must not widen into a general "a negator appears
+        somewhere before" rule, which would silence it.
+        """
+        clause = ("The node is not under memory pressure, but the container's "
+                  "lack of limits allows it to trigger the OOM killer "
+                  "independently.")
+        assert contradiction.asserted(clause, "oom killer")
+
+
+class TestDeniedIsNarrowerThanNotAsserted:
+    """
+    Defect 59's second attempt, and the reason there are two functions.
+
+    `_asserted` carries a 78-character backward window tuned to one rule.
+    Handed a general status token it reads the wrong "not": "is **not**
+    starting due to a CreateContainerConfigError" asserts the status. Reusing
+    it in grounding.check() moved 7 corpus records from `grounded` to
+    `insufficient_evidence` before the replay caught it.
+    """
+
+    ASSERTS_THE_STATUS = ('The pod "missing-configmap-key" in the '
+                          '"config-faults" namespace is not starting due to a '
+                          'CreateContainerConfigError.')
+
+    def test_the_wide_window_gets_this_wrong(self):
+        """Not a wish -- a record of why `denied` exists. If this ever starts
+        passing, `denied` can collapse back into `not asserted`."""
+        assert not contradiction.asserted(
+            self.ASSERTS_THE_STATUS, "createcontainerconfigerror")
+
+    def test_denied_gets_it_right(self):
+        assert not contradiction.denied(
+            self.ASSERTS_THE_STATUS, "createcontainerconfigerror")
+
+    @pytest.mark.parametrize("clause", [
+        "The reason was not `OOMKilled`.",
+        "Look for `OOMKilled` in the termination reason or node pressure metrics.",
+        "not the OOM killer, as `last_termination.reason` is `Error` "
+        "instead of `OOMKilled`",
+        "However, the absence of an `OOMKilled` reason suggests otherwise.",
+        "This is not a resource exhaustion issue (no OOMKilled or memory "
+        "limits reported).",
+    ])
+    def test_the_plain_denials(self, clause):
+        assert contradiction.denied(clause, "oomkilled")
+
+    @pytest.mark.parametrize("clause", [
+        "The container was `OOMKilled` after exceeding its memory limit.",
+        "The pod was OOMKilled by the kernel.",
+    ])
+    def test_the_counter_an_assertion_is_not_denied(self, clause):
+        """Without this, a `denied` that always returned True would pass every
+        test above and blind the unverified path completely."""
+        assert not contradiction.denied(clause, "oomkilled")
+
+    def test_a_phrase_that_is_absent_is_not_denied(self):
+        assert not contradiction.denied("nothing relevant here", "oomkilled")

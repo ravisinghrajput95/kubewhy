@@ -198,7 +198,7 @@ Details: [docs/INFERENCE.md](docs/INFERENCE.md).
 
 | Capability | Evidence |
 |---|---|
-| Automated tests | 1897 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
+| Automated tests | 1923 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
 | Grounding replay | 1683 recorded runs, no regressions (counted 2026-09-12; this row said 907) |
 | AI evaluation | 29 scenarios × 5 runs per configuration |
 | GKE runtime | Validated |
@@ -210,7 +210,7 @@ Details: [docs/INFERENCE.md](docs/INFERENCE.md).
 | Real vLLM | **Not tested** |
 | EKS | **Not tested** |
 | Browser paint automation | **Not tested** |
-| Generalized AI diagnostic accuracy | **Measured, and the number is not good** — 55.6% [37.3–72.4] on unseen fault types |
+| Generalized AI diagnostic accuracy | **Measured, and the number is not good** — 55.6% as graded, 63.0% [44.2–78.5] regraded, on unseen fault types |
 
 The defects found during development — an egress bypass, a target-extraction
 failure, two contradiction false-positive classes — are documented with their
@@ -235,7 +235,10 @@ hand first:
 
 **Gap 41.0 points, Fisher p = 9.2e-07.** Against the previous measurement
 (2026-09-13: 90.8% and 53.3%) **neither half moved** — p = 0.2114 and
-p = 1.0000. What improved is the interval: the never-seen half is nine fault
+p = 1.0000. *Regraded under the checker fixes made the same day (defects 58
+and 59): 97.7% and **63.0%** [44.2–78.5]. Both sets regraded under that one
+checker read 60.0% then against 63.0% now, p = 1.0000 — so the gap is not a
+grading artefact and has not moved under either grading.* What improved is the interval: the never-seen half is nine fault
 types now rather than five, which narrows it from 45 points wide to 35.
 
 **Three things to know before quoting 55.6%.** A prefetched tool call counts

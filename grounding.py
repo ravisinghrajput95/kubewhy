@@ -606,6 +606,17 @@ def check(answer, tool_outputs):
         hedged = any(word in lowered for word in HEDGES)
         for cause in KNOWN_CAUSES:
             if cause in lowered:
+                # Defect 59. A denied phrase is not a claimed one, and this
+                # side of the checker had never asked. contradiction.py learned
+                # the question three times over (defects 45, 52, 56) and the
+                # vocabulary lives there; asking it here rather than growing a
+                # second copy is the same argument the egress redaction pass
+                # makes for reusing redaction.redact(). `denied` and not
+                # `not asserted`: the latter carries a 78-character backward
+                # window tuned to one rule, and it reads "is not starting due
+                # to a CreateContainerConfigError" as a denial of the status.
+                if contradiction.denied(clause, cause):
+                    continue
                 supported = cause in scope_lower
                 if not supported and hedged:
                     claims.append(_inference(cause, "cause"))
@@ -638,6 +649,15 @@ def check(answer, tool_outputs):
         # OOMKilled" with nothing behind it is caught as before.
         for status in KNOWN_STATUSES:
             if status in lowered:
+                # Defect 59 again, and this is the one that was costing case
+                # scores: `stuck_terminating_finalizer` carries
+                # require_grounded, and two of its three runs named the
+                # finalizer correctly and failed on an `oomkilled` they had
+                # denied -- once as "not the OOM killer, as reason is Error
+                # instead of OOMKilled" and once as an instruction to go and
+                # look for it.
+                if contradiction.denied(clause, status):
+                    continue
                 # Whichever spelling the tool used, so the citation below can
                 # find it in the result it came from.
                 present = next(

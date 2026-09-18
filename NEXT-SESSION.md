@@ -8,16 +8,17 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-18 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1863 passed, 34 skipped**
-(49s, 1897 collected), CI
+authority, not this line — tree clean and pushed, **1889 passed, 34 skipped**
+(48s, 1923 collected), CI
 green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
 renumbered by the owner before tagging. **mypy and ruff are both at zero and both gate**.
 62 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
 
-**Measured 2026-09-18 as 1863 passed, 34 skipped in 49s, with `kubewhy-pg`
+**Measured 2026-09-18 as 1889 passed, 34 skipped in 48s, with `kubewhy-pg`
 running but no `TRIAGE_TEST_PG_DSN` exported** — so the 34 Postgres tests
-skipped. The sum, 1897, is the invariant the gated test checks and it is
-unchanged. The 2026-09-16 session measured the same tree as 1897 passed and 0
+skipped. The sum, 1923, is the invariant the gated test checks. The 26 added
+this session are defects 58 and 59's. The 2026-09-16 session measured its own
+tree as 1897 passed and 0
 skipped with the DSN set; that DSN was not recovered this session and guessing
 it hung the run, so the split is quoted from that session and only the total is
 quoted from this one. The previous line said 1711 passed and
@@ -574,25 +575,35 @@ AI_EVALUATION and the case study all carry it. Defect 47 is marked superseded.
 Every one of the 12 never-seen failures was read by hand, and that reading is
 defects 58 to 62.
 
-1. **Three checker defects are recorded and NOT fixed, deliberately.** Each
-   needs `evals/replay_grounding.py` over the recorded corpus before the change
-   is believed, and that is the next piece of work.
-   - **Defect 58**: the contradiction checker flags `the absence of X` as a
-     claim about X. Noun-phrase denial; the verbal ones (`was not`, `no`) are
-     already guarded. A counter is written into the defect.
-   - **Defect 59**: the `unverified` path has **no denial handling at all** —
-     even `"The reason was not OOMKilled."` is listed as an unverified claim.
-     The negation guards from defects 45/52/56 live only on the contradiction
-     path. `require_grounded: True` turns this into a case failure and 10 of 38
-     cases carry it. Fixing 59 is the bigger win of the two: 2 of the 7
-     unverified-claim failures in the set were artefacts, and the other 5 were
-     the mechanism working correctly, so the fix must not blunt it.
-   - **Defect 60**: a zero-claim answer is graded `insufficient_evidence`, and
-     17 of 38 cases fail outright on that verdict. At the other tail, 4 of 94
-     runs were graded `grounded` on claims that all resolved to identifier
-     digits — the `2` in `uncovered2`, digits from a pod name. Sized: 18.7% of
+1. **Defects 58 and 59 are fixed, replayed and published. Defect 60 is not,
+   and is the one left.**
+   - **Done: 58 and 59.** `contradiction.py` now exposes two predicates --
+     `asserted()`, the contradiction rules' own question, and `denied()`, a
+     narrower positional test with no backward window -- and `grounding.check`
+     consults `denied()` before flagging a status or a cause. Replayed over
+     1876 records: **16 moved, every one toward `grounded`, 0 into
+     `insufficient_evidence` or `contradicted`.** Seven mechanisms disabled in
+     turn, each failing at least one test.
+     **The trap, recorded because it nearly shipped:** reusing
+     `not asserted(...)` moved 7 records from `grounded` to
+     `insufficient_evidence`, because its 78-character window reads the "not"
+     in "is not starting due to a CreateContainerConfigError" as denying the
+     status. Only the corpus replay caught it. A test pins that behaviour, so
+     if the window ever stops getting it wrong, `denied` can collapse back into
+     `not asserted`.
+     **Published effect:** today's set regrades to 85/87 and **17/27 (63.0%)**,
+     three runs moving and no others. Regrading 2026-09-12's set under the same
+     checker gives 9/15 (60.0%) against today's 63.0%, p = 1.0000 -- so the
+     generalization finding holds under both gradings.
+   - **Open: defect 60.** A zero-claim answer is graded `insufficient_evidence`
+     and 17 of 38 cases fail outright on that verdict; at the other tail 4 of
+     94 runs were graded `grounded` on claims that all resolved to identifier
+     digits -- the `2` in `uncovered2`, digits from a pod name. Sized: 18.7% of
      477 claims resolve to identifier fields, so the metric is mostly sound and
-     the defect is at the tails.
+     the defect is at the tails. **This one is a design change to claim
+     extraction, not a guard**, so budget a session rather than an hour, and
+     note that defect 59's first attempt manufactured exactly this failure --
+     a fix that skips claims rather than reclassifying them makes it worse.
 
 2. **Defect 61 is measured, and the owner has a decision to make.** The paired
    A/B ran 2026-09-18 on tree `445db59`, records in `results/deadline-ab/`,
