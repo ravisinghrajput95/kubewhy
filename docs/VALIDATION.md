@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1923 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1930 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -4284,6 +4284,46 @@ pod name by the prefetch; between them the controller deleted it, and r2's
 cause. On the agent path there is no `capture_pod_logs` -- that is wired into
 the controller and `--explain` only -- so a pod collected between the prefetch
 and the model's own call takes the cause with it.
+
+### 63. Three container-derived strings reached the model unredacted
+
+**Found 2026-09-18 by a security review of the repo**, not by a failing test.
+
+`redaction.py` exists because "reading pod logs into a model context and
+printing them to a screen is how a credential ends up in a scrollback buffer".
+`get_pod_events` has applied it since it was written, and its comment says why:
+*"Events echo container args, which sometimes carry secrets."* Three sibling
+fields on the same projection carry the same class of string and did not.
+
+| field | why it carries credentials |
+|---|---|
+| `containers.*.waiting_message` | a `RunContainerError` or `CreateContainerError` message echoes the container's own argv |
+| the exec probe's `check` | **the sharpest**: a probe command is authored content, and `pg_isready -d postgres://user:pw@host/db` or `mysqladmin ping -p$PASSWORD` is ordinary |
+| `scheduling.message` | the scheduler quotes the pod spec back |
+
+**Demonstrated before it was fixed**, by running one credential-bearing string
+through both paths:
+
+    same string via get_pod_events : ...postgres://svc:[REDACTED:PASSWORD]@...
+    same string via describe_pod   : ...postgres://svc:Sup3rS3cret@db...
+
+**Where it reaches.** The local model, the console's raw-evidence panel,
+`--explain` output on the terminal, and the recorded eval evidence. External
+egress was already covered -- `inference._redacted` runs on any request to an
+external provider -- so this was never an exfiltration path, and that is
+exactly why it survived: the control that would have caught it only guards the
+boundary this data does not cross.
+
+**Fixed**, all four message fields on the projection now behave alike (the Job
+condition message was redacted too, for consistency rather than because it is
+likely to carry anything). Each of the four sites was removed in turn and each
+fails at least one test, and each test carries a counter requiring an ordinary
+message to survive untouched -- without those, a redactor that replaced
+everything would pass.
+
+**What this does not fix.** `redaction.py` is a best-effort filter and says so.
+A novel secret format still passes through.
+
 
 ## Where a run's 74 seconds go
 

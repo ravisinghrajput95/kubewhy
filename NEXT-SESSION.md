@@ -8,16 +8,16 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-18 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1889 passed, 34 skipped**
-(48s, 1923 collected), CI
+authority, not this line — tree clean and pushed, **1896 passed, 34 skipped**
+(48s, 1930 collected), CI
 green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
 renumbered by the owner before tagging. **mypy and ruff are both at zero and both gate**.
-62 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
+63 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
 
-**Measured 2026-09-18 as 1889 passed, 34 skipped in 48s, with `kubewhy-pg`
+**Measured 2026-09-18 as 1896 passed, 34 skipped in 48s, with `kubewhy-pg`
 running but no `TRIAGE_TEST_PG_DSN` exported** — so the 34 Postgres tests
-skipped. The sum, 1923, is the invariant the gated test checks. The 26 added
-this session are defects 58 and 59's. The 2026-09-16 session measured its own
+skipped. The sum, 1930, is the invariant the gated test checks. The 33 added
+this session are defects 58 and 59's and the security review's. The 2026-09-16 session measured its own
 tree as 1897 passed and 0
 skipped with the DSN set; that DSN was not recovered this session and guessing
 it hung the run, so the split is quoted from that session and only the total is

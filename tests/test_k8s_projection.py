@@ -990,6 +990,43 @@ class TestDescribePod:
         assert app["last_termination"] == {"reason": "OOMKilled", "exit_code": 137}
         assert app["limits"]["memory"] == "64Mi"
 
+    SECRET = "postgres://svc:Sup3rS3cret@db.internal:5432/orders"
+
+    def test_the_waiting_message_is_redacted(self, api):
+        """
+        Security review, 2026-09-18. `get_pod_events` has redacted its message
+        since it was written -- "Events echo container args, which sometimes
+        carry secrets" -- and this field carries the same class of string and
+        did not. A RunContainerError echoes the container's own argv.
+        """
+        pod = make_pod(
+            statuses=[container_status(ready=False,
+                                       waiting_reason="RunContainerError")])
+        pod.status.container_statuses[0].state.waiting.message = (
+            f'exec: args ["psql","-d","{self.SECRET}"]')
+        api.read_namespaced_pod.return_value = pod
+
+        message = k8s.describe_pod("app", "demo")["containers"]["app"]["waiting_message"]
+        assert "Sup3rS3cret" not in message
+        # The counter: the diagnosis survives the redaction.
+        assert "psql" in message
+
+    def test_the_counter_a_waiting_message_with_no_secret_is_untouched(self, api):
+        """
+        Without this, a redactor that replaced everything would pass the test
+        above and destroy every diagnosis this field exists to carry.
+        """
+        original = ('failed to create containerd task: exec: '
+                    '"/usr/local/bin/definitely-not-here": no such file')
+        pod = make_pod(
+            statuses=[container_status(ready=False,
+                                       waiting_reason="RunContainerError")])
+        pod.status.container_statuses[0].state.waiting.message = original
+        api.read_namespaced_pod.return_value = pod
+
+        assert k8s.describe_pod("app", "demo")["containers"]["app"][
+            "waiting_message"] == original
+
     def test_truncates_long_waiting_messages(self, api):
         pod = make_pod(
             statuses=[container_status(ready=False, waiting_reason="ImagePullBackOff")]
@@ -1016,6 +1053,30 @@ def _unscheduled(message=_SELECTOR_MESSAGE, reason="Unschedulable", **spec):
     for key, value in spec.items():
         setattr(pod.spec, key, value)
     return pod
+
+
+class TestTheSchedulingMessageIsRedacted:
+    """
+    Security review, 2026-09-18. The scheduler quotes the pod spec back, so
+    this is the same class of string as the container fields even though what
+    it usually names is a node selector.
+    """
+
+    def test_a_credential_in_the_scheduling_message_does_not_survive(self, api):
+        api.read_namespaced_pod.return_value = _unscheduled(
+            message="0/1 nodes available: token=ghp_0123456789abcdefghijklmnopqrstuvwxyz")
+        scheduling = k8s.describe_pod("gpu-scoring-1", "shop")["scheduling"]
+        assert "ghp_0123456789abcdefghijklmnopqrstuvwxyz" not in scheduling["message"]
+        assert "0/1 nodes available" in scheduling["message"]
+
+    def test_the_counter_an_ordinary_message_is_untouched(self, api):
+        """
+        Without this, a redactor that replaced everything would pass the test
+        above and destroy the scheduling diagnosis defect 53 exists to carry.
+        """
+        api.read_namespaced_pod.return_value = _unscheduled()
+        assert k8s.describe_pod("gpu-scoring-1", "shop")[
+            "scheduling"]["message"] == _SELECTOR_MESSAGE
 
 
 class TestDescribePodSaysWhyNothingScheduledIt:
@@ -1821,6 +1882,24 @@ class TestJobs:
         assert result["active_deadline_seconds"] == 20
         assert "longer than specified deadline" in result["message"]
 
+    def test_the_job_message_is_redacted(self, batch_api, api):
+        """
+        Security review, 2026-09-18. Lower risk than the container fields --
+        a Job condition message is written by the Job controller, not by the
+        container -- but redacted for the same reason and so that all four
+        message fields on this projection behave alike.
+        """
+        job = self._job(
+            conditions=[self._condition(
+                "Failed", "BackoffLimitExceeded",
+                "Job failed: DATABASE_PASSWORD=hunter2horse was rejected")],
+            failed=1, deadline=None, backoff=1,
+        )
+        message = self._list(batch_api, api, [job])["nightly-rollup"]["message"]
+        assert "hunter2horse" not in message
+        # The counter: the reason the message exists survives.
+        assert "Job failed" in message
+
     def test_reports_the_backoff_limit_that_was_reached(self, batch_api, api):
         job = self._job(
             name="schema-migrate",
@@ -2276,6 +2355,46 @@ class TestProbes:
         )
 
         assert len(info["probes"]["readiness"]["check"]) < 140
+
+    def test_an_exec_probe_command_is_redacted(self, api):
+        """
+        Security review, 2026-09-18, and the sharpest of the four sites this
+        found. A probe command is authored content that routinely carries a
+        credential -- `pg_isready -d postgres://user:pw@host/db`,
+        `mysqladmin ping -p$PASSWORD`, a curl with a bearer token -- and it
+        reaches the model, the console's raw-evidence panel and the terminal.
+        It was the one field in this projection nothing filtered.
+        """
+        info = self._pod_with(
+            api,
+            {
+                "readiness_probe": client.V1Probe(
+                    _exec=client.V1ExecAction(command=[
+                        "sh", "-c",
+                        "pg_isready -d postgres://svc:Sup3rS3cret@db:5432/orders",
+                    ])
+                )
+            },
+        )
+        check = info["probes"]["readiness"]["check"]
+        assert "Sup3rS3cret" not in check
+        # The counter: what makes the probe diagnosable must survive.
+        assert "pg_isready" in check
+
+    def test_the_counter_a_probe_with_no_secret_is_untouched(self, api):
+        """
+        Without this, a redactor that replaced everything would pass the test
+        above while destroying every probe this projection reports.
+        """
+        info = self._pod_with(
+            api,
+            {
+                "readiness_probe": client.V1Probe(
+                    _exec=client.V1ExecAction(command=["sh", "-c", "curl -sf /healthz"])
+                )
+            },
+        )
+        assert info["probes"]["readiness"]["check"] == "exec sh -c curl -sf /healthz"
 
     def test_a_pod_without_probes_carries_no_probe_key(self, api, healthy_pod):
         """Most containers have none, and an empty dict each is pure cost."""

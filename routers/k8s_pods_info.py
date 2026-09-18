@@ -1180,7 +1180,15 @@ def describe_pod(name: str, namespace: str = "default"):
             if cs.state and cs.state.waiting:
                 info["waiting_reason"] = cs.state.waiting.reason
                 if cs.state.waiting.message:
-                    info["waiting_message"] = cs.state.waiting.message[:300]
+                    # Redacted like the event message beside it. A waiting
+                    # message quotes the container runtime, and a
+                    # RunContainerError or CreateContainerError echoes the
+                    # container's own argv -- which is where a DSN or a
+                    # -p<password> lives. get_pod_events has redacted for
+                    # exactly this reason since it was written; this field
+                    # carries the same class of string and did not.
+                    info["waiting_message"] = redact(
+                        cs.state.waiting.message[:300])
 
             last = cs.last_state.terminated if cs.last_state else None
             terminated = cs.state.terminated if cs.state else None
@@ -1441,7 +1449,10 @@ def _scheduling(pod):
 
     projected = {"reason": condition.reason}
     if condition.message:
-        projected["message"] = condition.message[:400]
+        # The scheduler quotes the pod spec back, so the same argument as
+        # waiting_message applies even though the shapes it names are
+        # usually node selectors rather than credentials.
+        projected["message"] = redact(condition.message[:400])
     # Priority decides both whether this pod may preempt and whether it may be
     # preempted; "Insufficient cpu" on a low-priority pod beside a high-priority
     # one is a priority fact, not a capacity one. Only when set: a pod with no
@@ -1564,7 +1575,13 @@ def _probe(probe):
         #
         # Truncated, because an exec probe can carry a whole shell script and
         # this is a projection.
-        handler = f"exec {' '.join(probe._exec.command or [])[:120]}"
+        # Redacted, and this is the sharpest of the four sites: a probe
+        # command is authored content that routinely carries a credential
+        # -- `pg_isready -d postgres://user:pw@host/db`,
+        # `mysqladmin ping -p$PASSWORD`, a curl with a bearer token. It
+        # reaches the model, the console's raw-evidence panel and the
+        # terminal, and it was the one field here nothing filtered.
+        handler = redact(f"exec {' '.join(probe._exec.command or [])[:120]}")
     elif probe.grpc:
         handler = f"grpc :{probe.grpc.port}"
     else:
@@ -2014,7 +2031,7 @@ def list_jobs(namespace: str = "default"):
             # The reason is the whole reason this tool exists.
             entry["reason"] = terminal.reason
             if terminal.message:
-                entry["message"] = terminal.message[:300]
+                entry["message"] = redact(terminal.message[:300])
 
         # The limits, reported whether or not they fired: a Job that failed on
         # DeadlineExceeded is unreadable without the number it exceeded, and a
