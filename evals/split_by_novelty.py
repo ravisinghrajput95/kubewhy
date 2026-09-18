@@ -52,6 +52,35 @@ def wilson(passes, total, z=1.96):
     return max(0.0, centre - margin) * 100, min(1.0, centre + margin) * 100
 
 
+def fisher_two_sided(a, b, c, d):
+    """
+    Exact two-sided Fisher p for [[a, b], [c, d]].
+
+    The gap between the halves has been quoted with a p since defect 44, and
+    until now that p was computed somewhere else -- by hand in 2026-09-09, by
+    `results/prefetch/analyse.py` in 2026-09-16 -- while this file printed the
+    two proportions it belongs to. A figure computed beside the table it
+    qualifies is a figure that stops being recomputed when the table moves.
+
+    scipy is not a dependency of this project and will not become one for a
+    hypergeometric sum over at most a few hundred runs.
+    """
+    n1, n2, k = a + b, c + d, a + c
+    n = n1 + n2
+    if not n1 or not n2 or not k or k == n:
+        return 1.0
+
+    def p(x):
+        return math.comb(n1, x) * math.comb(n2, k - x) / math.comb(n, k)
+
+    observed = p(a)
+    lo, hi = max(0, k - n2), min(k, n1)
+    # The 1e-9 slack keeps a table's mirror image from being excluded by a
+    # float comparison against its own probability.
+    return min(1.0, sum(p(x) for x in range(lo, hi + 1)
+                        if p(x) <= observed * (1 + 1e-9)))
+
+
 def load(paths):
     runs = []
     for path in paths:
@@ -157,6 +186,15 @@ def report(runs, out=sys.stdout):
     say(line("never seen", groups["never seen"]))
     failure_breakdown(groups["never seen"], out, indent="               ")
 
+    old_pass = sum(1 for r in groups["pre-existing"] if r.get("passed"))
+    new_pass = sum(1 for r in groups["never seen"] if r.get("passed"))
+    if groups["pre-existing"] and groups["never seen"]:
+        gap = (100 * old_pass / len(groups["pre-existing"])
+               - 100 * new_pass / len(groups["never seen"]))
+        say(f"\ngap            {gap:.1f} points, Fisher p = "
+            f"{fisher_two_sided(old_pass, len(groups['pre-existing']) - old_pass, new_pass, len(groups['never seen']) - new_pass):.4f}"
+            "   (two-sided, exact)")
+
     if groups["unclassified"]:
         names = sorted({r.get("case") for r in groups["unclassified"]})
         say(f"\nunclassified   {len(groups['unclassified'])} runs in neither "
@@ -224,9 +262,31 @@ def self_check():
             "self-check FAILED: a run whose case name is in neither set was "
             "not reported as unclassified. It would be dropped silently.")
 
+    # The p is new here, so it is checked against numbers this project has
+    # already published rather than against itself: defect 44's n=1 table,
+    # defect 47's n=3 table, and defect 52's regrade of the same runs. A
+    # hypergeometric sum that has been mis-transcribed reproduces none of
+    # them. The counter is the last row: a table with no gap at all must come
+    # back at p = 1, and a function that always returns something small fails
+    # it.
+    published = [
+        ((28, 1, 2, 3), 0.0064, "defect 44, n=1"),
+        ((78, 9, 8, 7), 0.0020, "defect 47, n=3"),
+        ((79, 8, 8, 7), 0.0012, "defect 47 regraded, defect 52"),
+        ((10, 10, 5, 5), 1.0, "no gap at all -- the counter"),
+    ]
+    for (a, b, c, d), expected, where in published:
+        got = fisher_two_sided(a, b, c, d)
+        if abs(got - expected) > 5e-5:
+            raise SystemExit(
+                f"self-check FAILED: Fisher p for [[{a}, {b}], [{c}, {d}]] "
+                f"({where}) is {got:.4f}, and {expected} is published.")
+
     print(f"self-check passed: {len(PRE_EXISTING)} pre-existing and "
           f"{len(NOVEL)} never-seen case names, told apart, and a run "
-          "belonging to neither is surfaced rather than dropped")
+          "belonging to neither is surfaced rather than dropped; "
+          f"Fisher p reproduces {len(published) - 1} published values and "
+          "returns 1.0 on a table with no gap")
     return 0
 
 
