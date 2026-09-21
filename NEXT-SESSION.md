@@ -670,6 +670,23 @@ defects 58 to 62.
      defaults the exposure is availability, not bypass -- measured on uvicorn
      0.51.0 and `fastapi run`.
 
+5a. **Two items are open for reasons that are not code.**
+   - **HA on the released image is still untested** and needs one permission.
+     `helm install` with `sharedState.enabled=true` at two replicas requires
+     `sharedState.existingSecret`, and the chart hard-fails without it on
+     purpose -- the DSN carries a password and values files end up in git. The
+     attempt on 2026-09-21 was blocked at `kubectl create secret`. Create the
+     Secret by hand first, then the install and the two-replica lease contention
+     are straightforward. The lease itself is already covered against a real
+     Postgres; what is untested is the *image* at two replicas.
+   - **Attempted and stopped 2026-09-21: the mutation survey below.** It ran 30
+     of an estimated 50 minutes over **397 mutation sites** and was stopped by
+     the owner. **0 survivors had been reported at that point**, and nothing was
+     written -- `--json` only lands at the end, so there is no partial artefact
+     and nothing to salvage. One pytest run of the six test files costs 16.4s,
+     which is where the ~50 minute estimate comes from. Re-run it whole; a
+     third of a survey is not a survey.
+
 6. **`routers/k8s_pods_info.py` has still never had a full mutation survey**
    (2413 lines, 55 functions). Unchanged from the last handoff: `evals/mutate.py`,
    CPU-heavy, nothing else may run, budget 45–60 minutes with
