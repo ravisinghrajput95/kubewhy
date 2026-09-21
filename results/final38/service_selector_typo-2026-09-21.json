@@ -1,0 +1,393 @@
+[
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 49.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T18:40:30",
+  "load_before": 1.11,
+  "load_after": 0.78,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods"
+  ],
+  "prefetched": 0,
+  "arguments": [
+   {
+    "name": "typo-svc",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "only_unhealthy": true
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_service_endpoints",
+    "result": "{\"service\": \"typo-svc\", \"namespace\": \"demo\", \"type\": \"ClusterIP\", \"selector\": {\"app\": \"web-frontend\"}, \"ports\": [{\"port\": 80, \"target_port\": \"8080\"}], \"ready_endpoints\": [], \"not_ready_endpoints\": [], \"diagnosis\": \"no ready endpoints: the selector matches no pods at all -- check the selector against the pod labels\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"bad-image-5d98458fcd-wtt6d\": {\"status\": \"ImagePullBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"crasher-5964d99948-5krq8\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 9, \"node\": \"kubewhy-final-control-plane\"}, \"log-shipper-wmnkf\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 9, \"node\": \"kubewhy-final-control-plane\"}, \"memory-hog-bc76968c6-9vkt5\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 9, \"node\": \"kubewhy-final-control-plane\"}, \"needs-db-758f45b6c9-dpb9d\": {\"status\": \"Init:CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"never-ready-848784c697-f92bv\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833250-bmw9t\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833255-fhnkb\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833260-2l9k7\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833265-hkf5n\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833270-t67wf\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"slow-starter-7c4f8c9965-dp96h\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 11, \"node\": \"kubewhy-final-control-plane\"}}"
+   }
+  ],
+  "draft": "The service `typo-svc` has no endpoints because **no pods in the `demo` namespace match its selector** (`app: web-frontend`). All listed pods either:\n\n1. Lack the `app=web-frontend` label (required by the service), or  \n2. Are in unhealthy states (`CrashLoopBackOff`, `ImagePullBackOff`, etc.) but still lack the required label.\n\nNo pod with the correct label exists to back the service. Check the pod specifications and labels in `demo` to ensure they match the service's selector.",
+  "answer": "The service `typo-svc` has no endpoints because **no pods in the `demo` namespace match its selector** (`app: web-frontend`). All listed pods either:\n\n1. Lack the `app=web-frontend` label (required by the service), or  \n2. Are in unhealthy states (`CrashLoopBackOff`, `ImagePullBackOff`, etc.) but still lack the required label.\n\nNo pod with the correct label exists to back the service. Check the pod specifications and labels in `demo` to ensure they match the service's selector.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 49656.4,
+   "tool_ms": 31.0,
+   "rounds": 3,
+   "round_ms": [
+    13202.2,
+    13355.9,
+    23098.3
+   ],
+   "slowest_round_ms": 23098.3,
+   "model_share": 0.999,
+   "wall_ms": 49690.7,
+   "unaccounted_ms": 3.3,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "CrashLoopBackOff",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "crasher-5964d99948-5krq8.status",
+       "value": "CrashLoopBackOff"
+      }
+     ]
+    },
+    {
+     "claim": "ImagePullBackOff",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "bad-image-5d98458fcd-wtt6d.status",
+       "value": "ImagePullBackOff"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "crasher-5964d99948-5krq8.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "bad-image-5d98458fcd-wtt6d.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "has no endpoints",
+     "kind": "absence",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_service_endpoints",
+       "field": "ready_endpoints, not_ready_endpoints"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "17588dff67ba",
+  "target": {
+   "kind": "service",
+   "name": "typo-svc",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 57.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T18:41:20",
+  "load_before": 0.78,
+  "load_after": 0.99,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods"
+  ],
+  "prefetched": 0,
+  "arguments": [
+   {
+    "name": "typo-svc",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "only_unhealthy": true
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_service_endpoints",
+    "result": "{\"service\": \"typo-svc\", \"namespace\": \"demo\", \"type\": \"ClusterIP\", \"selector\": {\"app\": \"web-frontend\"}, \"ports\": [{\"port\": 80, \"target_port\": \"8080\"}], \"ready_endpoints\": [], \"not_ready_endpoints\": [], \"diagnosis\": \"no ready endpoints: the selector matches no pods at all -- check the selector against the pod labels\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"bad-image-5d98458fcd-wtt6d\": {\"status\": \"ImagePullBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"crasher-5964d99948-5krq8\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 9, \"node\": \"kubewhy-final-control-plane\"}, \"log-shipper-wmnkf\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 9, \"node\": \"kubewhy-final-control-plane\"}, \"memory-hog-bc76968c6-9vkt5\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 9, \"node\": \"kubewhy-final-control-plane\"}, \"needs-db-758f45b6c9-dpb9d\": {\"status\": \"Init:CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"never-ready-848784c697-f92bv\": {\"status\": \"Running\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833250-bmw9t\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833255-fhnkb\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833260-2l9k7\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833265-hkf5n\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"nightly-sync-29833270-t67wf\": {\"status\": \"Error\", \"ready\": \"0/1\", \"restarts\": 0, \"node\": \"kubewhy-final-control-plane\"}, \"slow-starter-7c4f8c9965-dp96h\": {\"status\": \"CrashLoopBackOff\", \"ready\": \"0/1\", \"restarts\": 11, \"node\": \"kubewhy-final-control-plane\"}}"
+   }
+  ],
+  "draft": "The service `typo-svc` in the `demo` namespace has no endpoints because **its selector `app=web-frontend` matches no pods**. All listed pods in the namespace lack this label, so the service has nowhere to route traffic.\n\n### Next steps to fix:\n1. **Verify pod labels**: Ensure pods intended for `typo-svc` have the label `app=web-frontend`.\n2. **Check deployments**: If a deployment or replica set should create these pods, confirm it is healthy and configured correctly.\n3. **Inspect failing pods**: Pods like `bad-image-5d98458fcd-wtt6d` (ImagePullBackOff) or `crasher-5964d99948-5krq8` (CrashLoopBackOff) may need troubleshooting to start successfully.\n\nWithout matching pods, the service remains unreachable.",
+  "answer": "The service `typo-svc` in the `demo` namespace has no endpoints because **its selector `app=web-frontend` matches no pods**. All listed pods in the namespace lack this label, so the service has nowhere to route traffic.\n\n### Next steps to fix:\n1. **Verify pod labels**: Ensure pods intended for `typo-svc` have the label `app=web-frontend`.\n2. **Check deployments**: If a deployment or replica set should create these pods, confirm it is healthy and configured correctly.\n3. **Inspect failing pods**: Pods like `bad-image-5d98458fcd-wtt6d` (ImagePullBackOff) or `crasher-5964d99948-5krq8` (CrashLoopBackOff) may need troubleshooting to start successfully.\n\nWithout matching pods, the service remains unreachable.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 57599.6,
+   "tool_ms": 24.5,
+   "rounds": 3,
+   "round_ms": [
+    20845.3,
+    12878.0,
+    23876.3
+   ],
+   "slowest_round_ms": 23876.3,
+   "model_share": 1.0,
+   "wall_ms": 57627.4,
+   "unaccounted_ms": 3.3,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "5",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "6",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "8",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "5964",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "98458",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "99948",
+     "kind": "number",
+     "evidence": []
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "crasher-5964d99948-5krq8.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "list_pods",
+       "field": "bad-image-5d98458fcd-wtt6d.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "has no endpoints",
+     "kind": "absence",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_service_endpoints",
+       "field": "ready_endpoints, not_ready_endpoints"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "9bcb8a6216c4",
+  "target": {
+   "kind": "service",
+   "name": "typo-svc",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "service_selector_typo",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 64.6,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T18:42:18",
+  "load_before": 0.99,
+  "load_after": 1.26,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "get_service_endpoints",
+   "list_pods",
+   "list_deployments"
+  ],
+  "prefetched": 0,
+  "arguments": [
+   {
+    "name": "typo-svc",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "workload": "typo-svc"
+   },
+   {
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "get_service_endpoints",
+    "result": "{\"service\": \"typo-svc\", \"namespace\": \"demo\", \"type\": \"ClusterIP\", \"selector\": {\"app\": \"web-frontend\"}, \"ports\": [{\"port\": 80, \"target_port\": \"8080\"}], \"ready_endpoints\": [], \"not_ready_endpoints\": [], \"diagnosis\": \"no ready endpoints: the selector matches no pods at all -- check the selector against the pod labels\"}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "list_pods",
+    "result": "{\"result\": \"no pods of workload typo-svc in namespace demo\"}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "list_deployments",
+    "result": "{\"bad-image\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"nginx:1.99.7\"]}, \"crasher\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"healthy-web\": {\"desired\": 2, \"ready\": 2, \"available\": 2, \"healthy\": true, \"images\": [\"nginx:1.27-alpine\"]}, \"memory-hog\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"polinux/stress\"]}, \"needs-db\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"never-ready\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}, \"slow-starter\": {\"desired\": 1, \"ready\": 0, \"available\": 0, \"healthy\": false, \"images\": [\"busybox:1.36\"]}}"
+   }
+  ],
+  "draft": "The service `typo-svc` in the `demo` namespace has no endpoints because **no pods match its selector** (`app=web-frontend`). The `list_deployments` shows no deployment named `typo-svc`, and the existing deployments (like `crasher`, `never-ready`, etc.) either have no pods or are misconfigured. \n\n### Next Steps:\n1. **Verify the service selector**: Ensure `typo-svc`'s selector matches labels on existing pods (e.g., `app=web-frontend`).\n2. **Check for missing deployments**: If `typo-svc` should be tied to a specific workload, confirm the deployment exists and is configured correctly.\n3. **Inspect pod logs**: For deployments like `crasher` or `never-ready`, check logs to diagnose why pods fail to start.\n\nNo pods exist for `typo-svc`, so the service cannot route traffic.",
+  "answer": "The service `typo-svc` in the `demo` namespace has no endpoints because **no pods match its selector** (`app=web-frontend`). The `list_deployments` shows no deployment named `typo-svc`, and the existing deployments (like `crasher`, `never-ready`, etc.) either have no pods or are misconfigured. \n\n### Next Steps:\n1. **Verify the service selector**: Ensure `typo-svc`'s selector matches labels on existing pods (e.g., `app=web-frontend`).\n2. **Check for missing deployments**: If `typo-svc` should be tied to a specific workload, confirm the deployment exists and is configured correctly.\n3. **Inspect pod logs**: For deployments like `crasher` or `never-ready`, check logs to diagnose why pods fail to start.\n\nNo pods exist for `typo-svc`, so the service cannot route traffic.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 64498.9,
+   "tool_ms": 37.6,
+   "rounds": 4,
+   "round_ms": [
+    16084.4,
+    10309.8,
+    14749.8,
+    23355.0
+   ],
+   "slowest_round_ms": 23355.0,
+   "model_share": 0.999,
+   "wall_ms": 64539.2,
+   "unaccounted_ms": 2.7,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "has no endpoints",
+     "kind": "absence",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "get_service_endpoints",
+       "field": "ready_endpoints, not_ready_endpoints"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "a21ee4dcd751",
+  "target": {
+   "kind": "service",
+   "name": "typo-svc",
+   "namespace": "demo"
+  }
+ }
+]

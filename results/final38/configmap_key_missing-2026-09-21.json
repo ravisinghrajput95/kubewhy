@@ -1,0 +1,605 @@
+[
+ {
+  "case": "configmap_key_missing",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 125.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T19:43:59",
+  "load_before": 1.36,
+  "load_after": 1.96,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "missing-configmap-key",
+    "namespaces": "config-faults"
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"config-faults/missing-configmap-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-configmap-key\", \"fault\": \"config\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"missing-configmap-key\", \"namespace\": \"config-faults\", \"status\": \"CreateContainerConfigError\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"CreateContainerConfigError\", \"waiting_message\": \"couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"app-settings\", \"via\": \"env\", \"updates_in_place\": false}, {\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-key\", \"events\": [{\"reason\": \"Failed\", \"count\": 396, \"age\": \"3m\", \"message\": \"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"}]}"
+   }
+  ],
+  "draft": "The pod `missing-configmap-key` in the `config-faults` namespace is not starting due to a **missing key** in the referenced ConfigMap. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n- **Error Type**: `CreateContainerConfigError`  \n- **Reason**: The container initializer detected the absence of the `LOGLEVEL` key in the `app-settings` ConfigMap.  \n- **Evidence**:  \n  - `describe_pod` revealed the container is waiting with the message:  \n    *\"couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"*.  \n  - `get_pod_events` confirmed this failure with a matching event:  \n    *\"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"*.\n\n---\n\n### **Why It\u2019s Not Starting**\nThe Kubernetes kubelet aborts container initialization when it detects missing configuration keys referenced in environment variables (`env`) or volume mounts. Since `LOGLEVEL` is missing from `app-settings`, the container cannot proceed past the initialization phase, resulting in a stuck startup state.\n\n---\n\n### **Action Required**\n1. **Verify the ConfigMap**:  \n   Check if `app-settings` exists in the `config-faults` namespace:  \n   ```bash\n   kubectl get configmap app-settings -n config-faults\n   ```\n2. **Check for the Key**:  \n   Ensure `LOGLEVEL` is present in the ConfigMap's data:  \n   ```bash\n   kubectl get configmap app-settings -n config-faults -o jsonpath='{.data}'\n   ```\n3. **Fix the Missing Key**:  \n   Add `LOGLEVEL` to the ConfigMap (e.g., set it to `\"info\"` or another valid value).  \n4. **Restart the Pod**:  \n   Once the ConfigMap is fixed, the pod will automatically restart and proceed with initialization.\n\n---\n\n### **Key Takeaways**\n- The error is **purely configuration-related**, not tied to resource limits, node issues, or container crashes.  \n- Events and `describe_pod` both point to the same root cause, confirming the diagnosis.  \n- No further investigation into node pressure, CPU/memory usage, or pod eviction is needed.",
+  "answer": "The pod `missing-configmap-key` in the `config-faults` namespace is not starting due to a **missing key** in the referenced ConfigMap. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n- **Error Type**: `CreateContainerConfigError`  \n- **Reason**: The container initializer detected the absence of the `LOGLEVEL` key in the `app-settings` ConfigMap.  \n- **Evidence**:  \n  - `describe_pod` revealed the container is waiting with the message:  \n    *\"couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"*.  \n  - `get_pod_events` confirmed this failure with a matching event:  \n    *\"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"*.\n\n---\n\n### **Why It\u2019s Not Starting**\nThe Kubernetes kubelet aborts container initialization when it detects missing configuration keys referenced in environment variables (`env`) or volume mounts. Since `LOGLEVEL` is missing from `app-settings`, the container cannot proceed past the initialization phase, resulting in a stuck startup state.\n\n---\n\n### **Action Required**\n1. **Verify the ConfigMap**:  \n   Check if `app-settings` exists in the `config-faults` namespace:  \n   ```bash\n   kubectl get configmap app-settings -n config-faults\n   ```\n2. **Check for the Key**:  \n   Ensure `LOGLEVEL` is present in the ConfigMap's data:  \n   ```bash\n   kubectl get configmap app-settings -n config-faults -o jsonpath='{.data}'\n   ```\n3. **Fix the Missing Key**:  \n   Add `LOGLEVEL` to the ConfigMap (e.g., set it to `\"info\"` or another valid value).  \n4. **Restart the Pod**:  \n   Once the ConfigMap is fixed, the pod will automatically restart and proceed with initialization.\n\n---\n\n### **Key Takeaways**\n- The error is **purely configuration-related**, not tied to resource limits, node issues, or container crashes.  \n- Events and `describe_pod` both point to the same root cause, confirming the diagnosis.  \n- No further investigation into node pressure, CPU/memory usage, or pod eviction is needed.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 125266.6,
+   "tool_ms": 17.1,
+   "rounds": 3,
+   "round_ms": [
+    35410.8,
+    38707.8,
+    51148.0
+   ],
+   "slowest_round_ms": 51148.0,
+   "model_share": 1.0,
+   "wall_ms": 125286.9,
+   "unaccounted_ms": 3.1,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "CreateContainerConfigError",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "CreateContainerConfigError"
+      }
+     ]
+    },
+    {
+     "claim": "createcontainerconfigerror",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "createcontainerconfigerror"
+      }
+     ]
+    },
+    {
+     "claim": "LOGLEVEL",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "LOGLEVEL"
+      }
+     ]
+    },
+    {
+     "claim": "app-settings",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "app-settings"
+      }
+     ]
+    },
+    {
+     "claim": "LOGLEVEL",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "LOGLEVEL"
+      }
+     ]
+    },
+    {
+     "claim": "app-settings",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "app-settings"
+      }
+     ]
+    },
+    {
+     "claim": "app-settings",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "app-settings"
+      }
+     ]
+    },
+    {
+     "claim": "LOGLEVEL",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "LOGLEVEL"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "30bfe25c3107",
+  "target": {
+   "kind": "workload",
+   "name": "missing-configmap-key",
+   "namespace": "config-faults"
+  }
+ },
+ {
+  "case": "configmap_key_missing",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 91.5,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T19:46:04",
+  "load_before": 1.96,
+  "load_after": 1.26,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "missing-configmap-key",
+    "namespaces": "config-faults"
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"config-faults/missing-configmap-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-configmap-key\", \"fault\": \"config\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"missing-configmap-key\", \"namespace\": \"config-faults\", \"status\": \"CreateContainerConfigError\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"CreateContainerConfigError\", \"waiting_message\": \"couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"app-settings\", \"via\": \"env\", \"updates_in_place\": false}, {\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-key\", \"events\": [{\"reason\": \"Failed\", \"count\": 396, \"age\": \"4m\", \"message\": \"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"}]}"
+   }
+  ],
+  "draft": "The pod **missing-configmap-key** in the **config-faults** namespace is not starting due to a **ConfigMap missing a required key**. Here's the confirmed root cause:\n\n### Root Cause:\n- The container explicitly references an environment variable `LOGLEVEL` that depends on the `app-settings` ConfigMap.\n- The **`LOGLEVEL` key is absent** from the `app-settings` ConfigMap, causing the kubelet to fail pod initialization with the error:\n  ```\n  Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\n  ```\n- This error is logged in the pod's events and is the direct reason for the pod remaining in a `CreateContainerConfigError` state.\n\n### Next Steps:\n1. **Verify the ConfigMap**:\n   ```bash\n   kubectl get configmap app-settings -n config-faults --output=yaml\n   ```\n   Check if the `LOGLEVEL` key exists. If not, add it.\n\n2. **Fix the ConfigMap**:\n   - Add the missing `LOGLEVEL` key with a valid value (e.g., `LOGLEVEL: INFO`).\n   - Ensure the ConfigMap name referenced in the pod's spec is correct.\n\n3. **Restart the Pod**:\n   Once the ConfigMap is fixed, the pod will automatically restart (since `updates_in_place: false` means the container will not reuse the old ConfigMap).\n\nThe pod will remain stuck in this state until the missing key is resolved.",
+  "answer": "The pod **missing-configmap-key** in the **config-faults** namespace is not starting due to a **ConfigMap missing a required key**. Here's the confirmed root cause:\n\n### Root Cause:\n- The container explicitly references an environment variable `LOGLEVEL` that depends on the `app-settings` ConfigMap.\n- The **`LOGLEVEL` key is absent** from the `app-settings` ConfigMap, causing the kubelet to fail pod initialization with the error:\n  ```\n  Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\n  ```\n- This error is logged in the pod's events and is the direct reason for the pod remaining in a `CreateContainerConfigError` state.\n\n### Next Steps:\n1. **Verify the ConfigMap**:\n   ```bash\n   kubectl get configmap app-settings -n config-faults --output=yaml\n   ```\n   Check if the `LOGLEVEL` key exists. If not, add it.\n\n2. **Fix the ConfigMap**:\n   - Add the missing `LOGLEVEL` key with a valid value (e.g., `LOGLEVEL: INFO`).\n   - Ensure the ConfigMap name referenced in the pod's spec is correct.\n\n3. **Restart the Pod**:\n   Once the ConfigMap is fixed, the pod will automatically restart (since `updates_in_place: false` means the container will not reuse the old ConfigMap).\n\nThe pod will remain stuck in this state until the missing key is resolved.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 91497.6,
+   "tool_ms": 23.3,
+   "rounds": 3,
+   "round_ms": [
+    37987.5,
+    22964.7,
+    30545.4
+   ],
+   "slowest_round_ms": 37987.5,
+   "model_share": 1.0,
+   "wall_ms": 91524.8,
+   "unaccounted_ms": 3.9,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "LOGLEVEL",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "LOGLEVEL"
+      }
+     ]
+    },
+    {
+     "claim": "app-settings",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "app-settings"
+      }
+     ]
+    },
+    {
+     "claim": "LOGLEVEL",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "LOGLEVEL"
+      }
+     ]
+    },
+    {
+     "claim": "app-settings",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "app-settings"
+      }
+     ]
+    },
+    {
+     "claim": "CreateContainerConfigError",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "CreateContainerConfigError"
+      }
+     ]
+    },
+    {
+     "claim": "createcontainerconfigerror",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "createcontainerconfigerror"
+      }
+     ]
+    },
+    {
+     "claim": "LOGLEVEL",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "LOGLEVEL"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "530b1349dba0",
+  "target": {
+   "kind": "workload",
+   "name": "missing-configmap-key",
+   "namespace": "config-faults"
+  }
+ },
+ {
+  "case": "configmap_key_missing",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 112.1,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T19:47:36",
+  "load_before": 1.26,
+  "load_after": 1.11,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "missing-configmap-key",
+    "namespaces": "config-faults"
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults"
+   },
+   {
+    "name": "missing-configmap-key",
+    "namespace": "config-faults",
+    "limit": 5
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"config-faults/missing-configmap-key\": {\"status\": \"CreateContainerConfigError\", \"pods\": 1, \"example\": \"missing-configmap-key\", \"fault\": \"config\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"missing-configmap-key\", \"namespace\": \"config-faults\", \"status\": \"CreateContainerConfigError\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {\"cpu\": \"10m\", \"memory\": \"16Mi\"}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"CreateContainerConfigError\", \"waiting_message\": \"couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"app-settings\", \"via\": \"env\", \"updates_in_place\": false}, {\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"missing-configmap-key\", \"events\": [{\"reason\": \"Failed\", \"count\": 420, \"age\": \"1m\", \"message\": \"Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"}]}"
+   }
+  ],
+  "draft": "The pod **missing-configmap-key** in namespace **config-faults** is not starting due to a **CreateContainerConfigError** caused by a missing key in a referenced ConfigMap. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n- The container fails during initialization because it **cannot find the `LOGLEVEL` key** in the **`app-settings` ConfigMap**.\n- This is explicitly logged in the pod's events:\n  ```\n  Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\n  ```\n\n---\n\n### **Key Evidence**\n1. **Pod Status**:  \n   - `status`: `CreateContainerConfigError`  \n   - `waiting_reason`: `CreateContainerConfigError`  \n   - `waiting_message`: *\"couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"*\n\n2. **Pod Events**:  \n   - The kubelet logs the exact error in an event with `reason: Failed` and `message` confirming the missing `LOGLEVEL` key in the `app-settings` ConfigMap.\n\n3. **ConfigMap Reference**:  \n   - The `app-settings` ConfigMap is referenced via an environment variable (`env`), but the key `LOGLEVEL` is absent.\n\n---\n\n### **Solution**\n1. **Verify the ConfigMap**:  \n   Check if `app-settings` exists in the `config-faults` namespace and contains the `LOGLEVEL` key:\n   ```bash\n   kubectl get configmap app-settings -n config-faults -o yaml\n   ```\n\n2. **Add the Missing Key**:  \n   If the key is missing, update the ConfigMap:\n   ```yaml\n   apiVersion: v1\n   kind: ConfigMap\n   metadata:\n     name: app-settings\n     namespace: config-faults\n   data:\n     LOGLEVEL: \"info\"  # or the desired value\n   ```\n\n3. **Restart the Pod**:  \n   The pod will automatically restart once the ConfigMap is corrected. If it does not, manually delete the pod to trigger a recreation:\n   ```bash\n   kubectl delete pod missing-configmap-key -n config-faults\n   ```\n\n---\n\n### **Why This Happens**\n- The container relies on the `LOGLEVEL` environment variable from the `app-settings` ConfigMap.  \n- Since the key is missing, the container cannot proceed with its configuration, leading to a failed startup.  \n- The error is not tied to the container image, resources, or other pods but solely to the missing configuration in the referenced ConfigMap.",
+  "answer": "The pod **missing-configmap-key** in namespace **config-faults** is not starting due to a **CreateContainerConfigError** caused by a missing key in a referenced ConfigMap. Here's the full breakdown:\n\n---\n\n### **Root Cause**\n- The container fails during initialization because it **cannot find the `LOGLEVEL` key** in the **`app-settings` ConfigMap**.\n- This is explicitly logged in the pod's events:\n  ```\n  Error: couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\n  ```\n\n---\n\n### **Key Evidence**\n1. **Pod Status**:  \n   - `status`: `CreateContainerConfigError`  \n   - `waiting_reason`: `CreateContainerConfigError`  \n   - `waiting_message`: *\"couldn't find key LOGLEVEL in ConfigMap config-faults/app-settings\"*\n\n2. **Pod Events**:  \n   - The kubelet logs the exact error in an event with `reason: Failed` and `message` confirming the missing `LOGLEVEL` key in the `app-settings` ConfigMap.\n\n3. **ConfigMap Reference**:  \n   - The `app-settings` ConfigMap is referenced via an environment variable (`env`), but the key `LOGLEVEL` is absent.\n\n---\n\n### **Solution**\n1. **Verify the ConfigMap**:  \n   Check if `app-settings` exists in the `config-faults` namespace and contains the `LOGLEVEL` key:\n   ```bash\n   kubectl get configmap app-settings -n config-faults -o yaml\n   ```\n\n2. **Add the Missing Key**:  \n   If the key is missing, update the ConfigMap:\n   ```yaml\n   apiVersion: v1\n   kind: ConfigMap\n   metadata:\n     name: app-settings\n     namespace: config-faults\n   data:\n     LOGLEVEL: \"info\"  # or the desired value\n   ```\n\n3. **Restart the Pod**:  \n   The pod will automatically restart once the ConfigMap is corrected. If it does not, manually delete the pod to trigger a recreation:\n   ```bash\n   kubectl delete pod missing-configmap-key -n config-faults\n   ```\n\n---\n\n### **Why This Happens**\n- The container relies on the `LOGLEVEL` environment variable from the `app-settings` ConfigMap.  \n- Since the key is missing, the container cannot proceed with its configuration, leading to a failed startup.  \n- The error is not tied to the container image, resources, or other pods but solely to the missing configuration in the referenced ConfigMap.",
+  "nudges": 0,
+  "policies": 1,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 112076.0,
+   "tool_ms": 25.1,
+   "rounds": 3,
+   "round_ms": [
+    43809.9,
+    19493.8,
+    48772.2
+   ],
+   "slowest_round_ms": 48772.2,
+   "model_share": 1.0,
+   "wall_ms": 112105.4,
+   "unaccounted_ms": 4.4,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "createcontainerconfigerror",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "createcontainerconfigerror"
+      }
+     ]
+    },
+    {
+     "claim": "LOGLEVEL",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "LOGLEVEL"
+      }
+     ]
+    },
+    {
+     "claim": "app-settings",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "app-settings"
+      }
+     ]
+    },
+    {
+     "claim": "CreateContainerConfigError",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "CreateContainerConfigError"
+      }
+     ]
+    },
+    {
+     "claim": "createcontainerconfigerror",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "createcontainerconfigerror"
+      }
+     ]
+    },
+    {
+     "claim": "CreateContainerConfigError",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "CreateContainerConfigError"
+      }
+     ]
+    },
+    {
+     "claim": "createcontainerconfigerror",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "config-faults/missing-configmap-key.status",
+       "value": "createcontainerconfigerror"
+      }
+     ]
+    },
+    {
+     "claim": "app-settings",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "app-settings"
+      }
+     ]
+    },
+    {
+     "claim": "app-settings",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "app-settings"
+      }
+     ]
+    },
+    {
+     "claim": "LOGLEVEL",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "LOGLEVEL"
+      }
+     ]
+    },
+    {
+     "claim": "LOGLEVEL",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "LOGLEVEL"
+      }
+     ]
+    },
+    {
+     "claim": "app-settings",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.waiting_message",
+       "value": "app-settings"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "78429207aa20",
+  "target": {
+   "kind": "workload",
+   "name": "missing-configmap-key",
+   "namespace": "config-faults"
+  }
+ }
+]

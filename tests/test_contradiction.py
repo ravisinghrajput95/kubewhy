@@ -1622,3 +1622,51 @@ class TestDeniedAlsoCoversTheRuleStatement:
         assert not contradiction.denied(
             "The container was `OOMKilled` after exceeding its memory limit.",
             "oomkilled")
+
+
+class TestAConditionalWithAModalClaimsNothing:
+    """
+    Defect 67, found 2026-09-21 by reading the interleaved run's one
+    `contradicted` verdict. The clause reasons about what WOULD have been seen:
+
+        "If the container's memory usage exceeded these defaults, the OOM
+         killer would trigger, but the kubelet would log the reason as
+         **OOMKilled**."
+
+    which is the model getting it right -- the reason is Error, so this did not
+    happen. `_COUNTERFACTUAL` covers the same idea only *after* the phrase and
+    only for five verbs, and "would log" before it fell through.
+
+    Structural rather than a verb list, because a verb list is what defect 45
+    already learned not to build here.
+    """
+
+    CLAUSE = ("If the container's memory usage exceeded these defaults, the "
+              "OOM killer would trigger, but the kubelet would log the reason "
+              "as **OOMKilled**.")
+
+    @pytest.mark.parametrize("phrase", ["oomkilled", "oom kill", "oom killer"])
+    def test_every_phrase_the_rule_tries_is_guarded(self, phrase):
+        """
+        The rule takes the first phrase that asserts, so guarding one and not
+        its siblings changes which phrase is reported and nothing else. The
+        first fix here guarded `oomkilled` and left `oom kill` firing.
+        """
+        assert not contradiction.asserted(self.CLAUSE, phrase)
+
+    def test_the_modal_may_fall_either_side_of_the_phrase(self):
+        """"the OOM killer **would** trigger" puts it after; "**would** log
+        the reason as OOMKilled" puts it before. One sentence, both sides."""
+        assert not contradiction.asserted(self.CLAUSE, "oom killer")
+        assert not contradiction.asserted(self.CLAUSE, "oomkilled")
+
+    def test_the_counter_a_conditional_without_a_modal_still_asserts(self):
+        """Both halves are required. Otherwise every sentence opening with
+        "If" stops being checkable."""
+        assert contradiction.asserted(
+            "If you look at the logs, the container was OOMKilled.", "oomkilled")
+
+    def test_the_counter_a_plain_assertion_still_asserts(self):
+        assert contradiction.asserted(
+            "The container was OOMKilled after exceeding its memory limit.",
+            "oomkilled")

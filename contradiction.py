@@ -296,6 +296,37 @@ _DENIED_BEFORE = re.compile(
 #       reason suggests the termination was not explicitly caused by the OOM killer."
 _CONCESSION = re.compile(r"^\W*(?:while|although|though|even though)\b")
 
+# 3b. A conditional consequent. Structural, not a verb list, because a verb
+#     list is what defect 45 already learned not to build here: the recorded
+#     clause is
+#
+#       "If the container's memory usage exceeded these defaults, the OOM
+#        killer would trigger, but the kubelet would log the reason as
+#        **"OOMKilled"**."
+#
+#     which reasons that the phrase is what WOULD have been seen, and is the
+#     model getting it right. `_COUNTERFACTUAL` covers the same idea only
+#     after the phrase and only for five verbs; "would log", before it, fell
+#     through. Requires both halves -- an "if" opening AND a modal before the
+#     phrase -- so "If you look at the logs, the container was OOMKilled"
+#     still asserts.
+_CONDITIONAL_CONSEQUENT = re.compile(r"^\W*(?:if|unless|were)\b")
+_MODAL = re.compile(r"\b(?:would|will|could|might|should)\b")
+# How far past the phrase to look for the modal that governs it. "the OOM
+# killer **would** trigger" puts it after; "the kubelet **would** log the
+# reason as OOMKilled" puts it before. Both are the same sentence, and
+# checking only one side left `oom kill` flagged while `oomkilled` was
+# guarded -- the rule tries several phrases and takes the first that asserts.
+_MODAL_WINDOW = 40
+
+
+def _hypothetical(lowered, start, phrase):
+    """A phrase inside a conditional whose verb is a modal claims nothing."""
+    if not _CONDITIONAL_CONSEQUENT.match(lowered):
+        return False
+    after = lowered[start + len(phrase):start + len(phrase) + _MODAL_WINDOW]
+    return bool(_MODAL.search(lowered[:start]) or _MODAL.search(after))
+
 _MARKUP_CHARS = "`\"'*_( "
 
 _COUNTERFACTUAL = re.compile(r"^[\w'\u2019-]*\W{0,4}would\s+(?:be|have|show|say|read)\b")
@@ -380,6 +411,8 @@ def denied(clause, phrase):
     # the contradiction rules to recognise it; defect 59 ported the positional
     # denials here and not this one, so `stuck_terminating_finalizer` went on
     # failing on exactly that sentence. Same guard, one place.
+    if _hypothetical(lowered, start, phrase):
+        return True
     return bool(_OOM_RULE_STATEMENT.search(lowered)
                 or _REASON_CONTRAST.search(lowered))
 
@@ -425,7 +458,8 @@ def _asserted(lowered, phrase):
         comma = lowered.find(",")
         if comma < 0 or start < comma:
             return False
-    return True
+
+    return not _hypothetical(lowered, start, phrase)
 
 
 # 4. A statement of the rule rather than a claim about this container:

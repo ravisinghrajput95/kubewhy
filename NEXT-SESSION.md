@@ -8,15 +8,15 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-18 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1916 passed, 34 skipped**
-(49s, 1950 collected), CI
+authority, not this line — tree clean and pushed, **1922 passed, 34 skipped**
+(50s, 1956 collected), CI
 green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
 renumbered by the owner before tagging. **mypy and ruff are both at zero and both gate**.
-66 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
+67 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
 
-**Measured 2026-09-21 as 1916 passed, 34 skipped in 49s, with `kubewhy-pg`
+**Measured 2026-09-21 as 1922 passed, 34 skipped in 50s, with `kubewhy-pg`
 running but no `TRIAGE_TEST_PG_DSN` exported** — so the 34 Postgres tests
-skipped. The sum, 1950, is the invariant the gated test checks. The 46 added
+skipped. The sum, 1956, is the invariant the gated test checks. The 46 added
 across 2026-09-18 and 09-21 are defects 58 to 60's, 63's, 64's and the
 security review's. The 2026-09-16 session measured its own
 tree as 1897 passed and 0

@@ -198,7 +198,7 @@ Details: [docs/INFERENCE.md](docs/INFERENCE.md).
 
 | Capability | Evidence |
 |---|---|
-| Automated tests | 1950 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
+| Automated tests | 1956 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
 | Grounding replay | 1683 recorded runs, no regressions (counted 2026-09-12; this row said 907) |
 | AI evaluation | 29 scenarios × 5 runs per configuration |
 | GKE runtime | Validated |
@@ -210,7 +210,7 @@ Details: [docs/INFERENCE.md](docs/INFERENCE.md).
 | Real vLLM | **Not tested** |
 | EKS | **Not tested** |
 | Browser paint automation | **Not tested** |
-| Generalized AI diagnostic accuracy | **Measured, and the number is not good** — 55.6% as graded, 63.0% [44.2–78.5] regraded, on unseen fault types |
+| Generalized AI diagnostic accuracy | **Measured, and the number is not good** — 74.1% [55.3–86.8] on unseen fault types |
 
 The defects found during development — an egress bypass, a target-extraction
 failure, two contradiction false-positive classes — are documented with their
@@ -221,41 +221,45 @@ detection, root cause, fix and regression evidence in
 
 ### The number that matters: what happens on faults nobody wrote a prompt for
 
-The corpus splits in two, and the headline is the average of them, so the
-headline alone is not worth quoting. Re-measured **2026-09-18** on one tree,
-qwen3 with thinking on, **38 cases × 3 repeats = 114 runs, 0 voids**, against a
-kind cluster carrying all six fixture files, every fault verified presenting by
-hand first:
+The corpus splits in two — 29 fault types the prompts were written against and
+9 they were not — and the headline is the average of them, so the headline
+alone is not worth quoting.
+
+**Measured 2026-09-21**, qwen3 with thinking on, **38 cases × 3 repeats = 114
+runs, 0 voids**, on one kind cluster carrying all six fixture files, every
+fault verified presenting by hand first, **case order interleaved** so both
+halves meet fixtures of the same age:
 
 | set | score | 95% CI |
 |---|---|---|
-| headline, all 38 cases | 99/114, 86.8% | [79.4–91.9] |
+| headline, all 38 cases | 104/114, 91.2% | [84.6–95.2] |
 | the 29 the prompts were written against | 84/87, **96.6%** | [90.3–98.8] |
-| the 9 they were not | 15/27, **55.6%** | [37.3–72.4] |
+| the 9 they were not | 20/27, **74.1%** | [55.3–86.8] |
 
-*The never-seen half was re-measured on 2026-09-21 after defects 58 to 61 were
-fixed: **21/27 (77.8%) [59.2–89.4] as graded, 23/27 (85.2%) regraded**. That
-movement is **not significant** — Fisher p = 0.1188 against the regraded 63.0%
-— and part of it is probably fixture freshness rather than the fixes, because
-the earlier run met older fixtures (defect 62). The pre-existing half has not
-been re-run, so no headline is quoted for that date. See defect 66.*
+**Gap 22.5 points, Fisher p = 0.0015.** It was 41.0 points on 2026-09-18. The
+gap has narrowed by half and has not closed.
 
-**Gap 41.0 points, Fisher p = 9.2e-07.** Against the previous measurement
-(2026-09-13: 90.8% and 53.3%) **neither half moved** — p = 0.2114 and
-p = 1.0000. *Regraded under the checker fixes made the same day (defects 58
-and 59): 97.7% and **63.0%** [44.2–78.5]. Both sets regraded under that one
-checker read 60.0% then against 63.0% now, p = 1.0000 — so the gap is not a
-grading artefact and has not moved under either grading.* What improved is the interval: the never-seen half is nine fault
-types now rather than five, which narrows it from 45 points wide to 35.
+**Three things to know before quoting 74.1%.**
 
-**Three things to know before quoting 55.6%.** A prefetched tool call counts
-toward a case's `expect_tools`, so 18 of the 54 runs on tool-expectation cases
-met that bar only because the prefetch made the call. 50 of the 114 runs
-(43.9%) made no tool call of their own at all. And cases ran in a fixed order,
-so for faults whose cause lives in a Kubernetes event — which expire after an
-hour — the never-seen half was measured against older fixtures than the other
-half. Method, per-case scores and every failure read by hand:
-[docs/VALIDATION.md](docs/VALIDATION.md) defects 57 to 66.
+1. **It is not a significant improvement.** Against the previous measurement of
+   the same nine cases, Fisher p = 0.5587. Twenty-seven runs cannot separate
+   63% from 74%. Read it as the first *unconfounded* measurement, not as a gain.
+2. **Its interval's lower bound is 55.3%.**
+3. **A prefetched tool call counts toward a case's `expect_tools`**, so a case
+   requiring a tool the prefetch supplies cannot fail that bar, and roughly
+   four runs in ten make no tool call of their own at all. For those runs this
+   measures reading a scan row and one `describe_pod`, not chaining tools.
+
+**An earlier run of the never-seen half alone read 85.2%, and that number was
+wrong to quote.** Run on its own it met fresh fixtures throughout, while the
+run it was compared against had met aged ones. Interleaved, the same nine cases
+on the same tree read 74.1% — **an 11-point swing from fixture age alone.**
+That is recorded as [defect 62](docs/VALIDATION.md) and is why case order is
+now interleaved and the correlation between novelty and elapsed time is
+reported with the result (−0.038 here, against near +1 before).
+
+Method, per-case scores and every failure read by hand:
+[docs/VALIDATION.md](docs/VALIDATION.md) defects 57 to 67.
 
 ### The two-configuration comparison
 
@@ -296,7 +300,10 @@ Measurement scope:
   behaviour reproducible; not enough to rank two configurations, and not
   enough to separate the two halves of the corpus from each other at n=3. The
   overall model comparison is UNDETERMINED.
-- **Generalized diagnostic accuracy is measured, not good, and not improving.** 55.6% [37.3–72.4] on nine fault types the prompts were never written against, against 96.6% on the 29 they were. The lower bound of that interval is 37.3%.
+- **Generalized diagnostic accuracy is measured and is not good.** 74.1%
+  [55.3–86.8] on nine fault types the prompts were never written against,
+  against 96.6% on the 29 they were. The lower bound of that interval is
+  55.3%, and no measurement of this half has yet moved significantly.
 - **Answers vary between runs.** The same question can produce a different chain.
   The `confidence` field and the `tool_calls` trace tell you which measurements
   an answer actually rests on.

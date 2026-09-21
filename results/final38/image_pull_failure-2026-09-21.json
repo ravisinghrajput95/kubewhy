@@ -1,0 +1,763 @@
+[
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 29.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T18:32:53",
+  "load_before": 1.29,
+  "load_after": 0.91,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "bad-image",
+    "namespaces": "demo"
+   },
+   {
+    "name": "bad-image-5d98458fcd-wtt6d",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/bad-image\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"bad-image-5d98458fcd-wtt6d\", \"fault\": \"image-pull\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"bad-image-5d98458fcd-wtt6d\", \"namespace\": \"demo\", \"status\": \"ImagePullBackOff\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"bad-image\": {\"image\": \"nginx:1.99.7\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ImagePullBackOff\", \"waiting_message\": \"Back-off pulling image \\\"nginx:1.99.7\\\": ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack image \\\"docker.io/library/nginx:1.99.7\\\": failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod `bad-image-5d98458fcd-wtt6d` in the `demo` namespace is stuck in `ImagePullBackOff` because the container image `nginx:1.99.7` cannot be found in the registry. The error message explicitly states:  \n**\"docker.io/library/nginx:1.99.7: not found\"**  \n\n### Likely Causes:  \n1. **Invalid Image Tag**: The tag `1.99.7` might be incorrect or deprecated. For example, `nginx:1.99.7` is an old version that may no longer exist in public registries.  \n2. **Typo in Image Name**: The image name might have a typo (e.g., missing a slash, incorrect registry).  \n3. **Private Registry Access**: If the image is in a private registry, the pod might lack credentials to pull it.  \n\n### Solution:  \n- **Update the Image Tag**: Use a valid tag like `nginx:latest` or check if `1.99.7` is a supported version.  \n- **Verify Registry**: Ensure the image exists in the specified registry (`docker.io/library/nginx`).  \n- **Check Permissions**: If using a private registry, ensure the pod has the correct secrets or pull credentials configured.  \n\nExample fix:  \n```yaml\ncontainers:\n  - name: bad-image\n    image: nginx:latest  # Replace with a valid tag\n```  \nAfter fixing the image reference, redeploy the pod.",
+  "answer": "The pod `bad-image-5d98458fcd-wtt6d` in the `demo` namespace is stuck in `ImagePullBackOff` because the container image `nginx:1.99.7` cannot be found in the registry. The error message explicitly states:  \n**\"docker.io/library/nginx:1.99.7: not found\"**  \n\n### Likely Causes:  \n1. **Invalid Image Tag**: The tag `1.99.7` might be incorrect or deprecated. For example, `nginx:1.99.7` is an old version that may no longer exist in public registries.  \n2. **Typo in Image Name**: The image name might have a typo (e.g., missing a slash, incorrect registry).  \n3. **Private Registry Access**: If the image is in a private registry, the pod might lack credentials to pull it.  \n\n### Solution:  \n- **Update the Image Tag**: Use a valid tag like `nginx:latest` or check if `1.99.7` is a supported version.  \n- **Verify Registry**: Ensure the image exists in the specified registry (`docker.io/library/nginx`).  \n- **Check Permissions**: If using a private registry, ensure the pod has the correct secrets or pull credentials configured.  \n\nExample fix:  \n```yaml\ncontainers:\n  - name: bad-image\n    image: nginx:latest  # Replace with a valid tag\n```  \nAfter fixing the image reference, redeploy the pod.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 28952.2,
+   "tool_ms": 21.8,
+   "rounds": 1,
+   "round_ms": [
+    28952.2
+   ],
+   "slowest_round_ms": 28952.2,
+   "model_share": 0.999,
+   "wall_ms": 28977.5,
+   "unaccounted_ms": 3.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "5",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.example",
+       "value": "5"
+      }
+     ]
+    },
+    {
+     "claim": "6",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.example",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "98458",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.example",
+       "value": "98458"
+      }
+     ]
+    },
+    {
+     "claim": "ImagePullBackOff",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "ImagePullBackOff"
+      }
+     ]
+    },
+    {
+     "claim": "nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "nginx:1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "nginx:1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "docker.io/library/nginx",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.waiting_message",
+       "value": "docker.io/library/nginx"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "78c42bd7d063",
+  "target": {
+   "kind": "workload",
+   "name": "bad-image",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 31.1,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T18:33:22",
+  "load_before": 0.91,
+  "load_after": 1.91,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "bad-image",
+    "namespaces": "demo"
+   },
+   {
+    "name": "bad-image-5d98458fcd-wtt6d",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/bad-image\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"bad-image-5d98458fcd-wtt6d\", \"fault\": \"image-pull\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"bad-image-5d98458fcd-wtt6d\", \"namespace\": \"demo\", \"status\": \"ImagePullBackOff\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"bad-image\": {\"image\": \"nginx:1.99.7\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ImagePullBackOff\", \"waiting_message\": \"Back-off pulling image \\\"nginx:1.99.7\\\": ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack image \\\"docker.io/library/nginx:1.99.7\\\": failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod \"bad-image\" in the demo namespace is stuck in **ImagePullBackOff** because the specified Docker image `nginx:1.99.7` cannot be found. The error message explicitly states:\n\n```\nfailed to resolve reference \"docker.io/library/nginx:1.99.7\": docker.io/library/nginx:1.99.7: not found\n```\n\n### Root Cause:\n- The image `nginx:1.99.7` does not exist in the registry (likely Docker Hub). This could be due to:\n  - A typo in the image name or tag.\n  - Using an outdated or non-existent tag (e.g., `1.99.7` is no longer supported).\n  - The registry requiring authentication (e.g., private registry) but no pull secret configured.\n\n### Solution:\n1. **Verify the image exists**:\n   - Check Docker Hub or your registry to confirm `nginx:1.99.7` is valid.\n   - Consider using a supported tag like `nginx:latest` or `nginx:1.21`.\n\n2. **Update the pod spec**:\n   - Correct the image name/tag in the deployment or pod configuration.\n\n3. **Check registry access**:\n   - If using a private registry, ensure a `pullSecret` is added to the pod's spec.\n\nNo action is needed on the cluster or pod itself\u2014just fix the image reference.",
+  "answer": "The pod \"bad-image\" in the demo namespace is stuck in **ImagePullBackOff** because the specified Docker image `nginx:1.99.7` cannot be found. The error message explicitly states:\n\n```\nfailed to resolve reference \"docker.io/library/nginx:1.99.7\": docker.io/library/nginx:1.99.7: not found\n```\n\n### Root Cause:\n- The image `nginx:1.99.7` does not exist in the registry (likely Docker Hub). This could be due to:\n  - A typo in the image name or tag.\n  - Using an outdated or non-existent tag (e.g., `1.99.7` is no longer supported).\n  - The registry requiring authentication (e.g., private registry) but no pull secret configured.\n\n### Solution:\n1. **Verify the image exists**:\n   - Check Docker Hub or your registry to confirm `nginx:1.99.7` is valid.\n   - Consider using a supported tag like `nginx:latest` or `nginx:1.21`.\n\n2. **Update the pod spec**:\n   - Correct the image name/tag in the deployment or pod configuration.\n\n3. **Check registry access**:\n   - If using a private registry, ensure a `pullSecret` is added to the pod's spec.\n\nNo action is needed on the cluster or pod itself\u2014just fix the image reference.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 31021.1,
+   "tool_ms": 34.7,
+   "rounds": 1,
+   "round_ms": [
+    31021.1
+   ],
+   "slowest_round_ms": 31021.1,
+   "model_share": 0.999,
+   "wall_ms": 31057.9,
+   "unaccounted_ms": 2.0,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "nginx:1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "nginx:1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "nginx:1.99.7"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "eeba2b145eba",
+  "target": {
+   "kind": "workload",
+   "name": "bad-image",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "image_pull_failure",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 26.6,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-21T18:33:53",
+  "load_before": 1.91,
+  "load_after": 1.66,
+  "low_power_mode": true,
+  "unverified": [
+   "1.26",
+   "2018"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "bad-image",
+    "namespaces": "demo"
+   },
+   {
+    "name": "bad-image-5d98458fcd-wtt6d",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/bad-image\": {\"status\": \"ErrImagePull\", \"pods\": 1, \"example\": \"bad-image-5d98458fcd-wtt6d\", \"fault\": \"image-pull\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"bad-image-5d98458fcd-wtt6d\", \"namespace\": \"demo\", \"status\": \"ErrImagePull\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"bad-image\": {\"image\": \"nginx:1.99.7\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ErrImagePull\", \"waiting_message\": \"rpc error: code = NotFound desc = failed to pull and unpack image \\\"docker.io/library/nginx:1.99.7\\\": failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The pod `bad-image` cannot start because the specified image `nginx:1.99.7` cannot be pulled. The error indicates the image `docker.io/library/nginx:1.99.7` does not exist in the registry. \n\n### Likely Causes:\n1. **Invalid Image Tag**: The tag `1.99.7` may be incorrect or deprecated. nginx version `1.99.7` is outdated (nginx 1.99.x was released in 2018, and the current stable version is 1.26.x).  \n2. **Registry Issue**: The image might not be pushed to `docker.io` or requires a different registry (e.g., a private registry or a different base URL).  \n\n### Solution:\n- **Fix the Image Name**: Use a valid tag, e.g., `nginx:latest` or a specific stable version like `nginx:1.26.2`.  \n- **Verify Registry Access**: Ensure the registry `docker.io` is reachable and the image exists there.  \n- **Check Pull Secrets**: If using a private registry, ensure the pod has the correct credentials configured via `imagePullSecrets`.  \n\nExample fix:  \n```yaml\nimage: nginx:latest\n```",
+  "answer": "The pod `bad-image` cannot start because the specified image `nginx:1.99.7` cannot be pulled. The error indicates the image `docker.io/library/nginx:1.99.7` does not exist in the registry. \n\n### Likely Causes:\n1. **Invalid Image Tag**: The tag `1.99.7` may be incorrect or deprecated. nginx version `1.99.7` is outdated (nginx 1.99.x was released in [unverified: 2018], and the current stable version is [unverified: 1.26].x).  \n2. **Registry Issue**: The image might not be pushed to `docker.io` or requires a different registry (e.g., a private registry or a different base URL).  \n\n### Solution:\n- **Fix the Image Name**: Use a valid tag, e.g., `nginx:latest` or a specific stable version like `nginx:1.26.2`.  \n- **Verify Registry Access**: Ensure the registry `docker.io` is reachable and the image exists there.  \n- **Check Pull Secrets**: If using a private registry, ensure the pod has the correct credentials configured via `imagePullSecrets`.  \n\nExample fix:  \n```yaml\nimage: nginx:latest\n```\n\n---\n**Evidence audit.**\n2 of 15 stated values could not be traced to any tool result for the workload they were stated about: `1.26`, `2018`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "stated ['1.26', '2018'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 26532.5,
+   "tool_ms": 35.5,
+   "rounds": 1,
+   "round_ms": [
+    26532.5
+   ],
+   "slowest_round_ms": 26532.5,
+   "model_share": 0.999,
+   "wall_ms": 26572.1,
+   "unaccounted_ms": 4.1,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "nginx:1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "docker.io/library/nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.waiting_message",
+       "value": "docker.io/library/nginx:1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "docker.io",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.waiting_message",
+       "value": "docker.io"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "1.26",
+     "kind": "number"
+    },
+    {
+     "claim": "2018",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "1.26",
+    "2018"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "8dfaf316d776",
+  "target": {
+   "kind": "workload",
+   "name": "bad-image",
+   "namespace": "demo"
+  }
+ }
+]

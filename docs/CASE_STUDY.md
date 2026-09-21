@@ -220,14 +220,15 @@ they were not. Measured 2026-09-18, 38 cases x 3 repeats on one kind cluster:
 | set | score | 95% CI |
 |---|---|---|
 | the 29 the prompts were written against | 84/87, **96.6%** | [90.3-98.8] |
-| the 9 they were not | 15/27, **55.6%** | [37.3-72.4] |
+| the 9 they were not | 20/27, **74.1%** | [55.3-86.8] |
 
-Gap 41.0 points, Fisher p = 9.2e-07. Against the same split five days earlier,
-**neither half moved** (p = 0.2114 and p = 1.0000). Reading the failures
-produced two checker fixes the same day; regraded under them the halves read
-97.7% and 63.0%, and both measurements regraded under that one checker read
-60.0% then against 63.0% now, p = 1.0000. **The generalization gap is not a
-grading artefact, and it has not closed.**
+Gap 22.5 points, Fisher p = 0.0015, down from 41.0 a week earlier. Reading the
+failures produced six checker and loop fixes; none of the movement between
+measurements is statistically significant at n=27, and part of an earlier
+apparent gain turned out to be fixture age rather than code — which is why
+case order is now interleaved and the correlation between novelty and elapsed
+time is published with the result. **The generalization gap has narrowed by
+half and has not closed.**
 
 Every one of the 12 failures in the never-seen half was read by hand rather than
 counted. Eight named the right cause and missed a bar around it, and that
@@ -239,7 +240,7 @@ needed.
 
 One cluster, one machine, one prompt configuration. n=3 to n=5 per scenario.
 Real vLLM and EKS not tested. No browser paint automation. **Generalized
-diagnostic accuracy is measured and is not good: 55.6% as graded, 63.0% regraded, lower bound 44.2%.** In
+diagnostic accuracy is measured and is not good: 74.1%, lower bound 55.3%, and no measurement of it has yet moved significantly.** In
 that measurement 43.9% of runs answered without making a tool call of their own,
 because a prefetch hands the model two reads before it starts -- so for those
 runs the number describes reading a scan row, not chaining tools to a cause.

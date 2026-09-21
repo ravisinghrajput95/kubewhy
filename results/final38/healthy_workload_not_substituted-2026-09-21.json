@@ -1,0 +1,479 @@
+[
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 24.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T19:02:01",
+  "load_before": 1.06,
+  "load_after": 0.77,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "healthy-web"
+   },
+   {
+    "name": "healthy-web-6f79bc6fcb-nrp6p",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/healthy-web\": {\"status\": \"Running\", \"pods\": 2, \"example\": \"healthy-web-6f79bc6fcb-nrp6p\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"healthy-web-6f79bc6fcb-nrp6p\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"web\": {\"image\": \"nginx:1.27-alpine\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"200m\", \"memory\": \"128Mi\"}, \"ready\": true, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The `healthy-web` deployment in the `demo` namespace is running normally with 2 pods. The example pod `healthy-web-6f79bc6fcb-nrp6p` is in the `Running` state, with the `web` container using `nginx:1.27-alpine`. Resources are allocated within limits (CPU: 50m\u2013200m, Memory: 32Mi\u2013128Mi), and no restarts or critical errors are reported. The deployment appears healthy based on current metrics. \n\nIf you suspect an issue, check if the application logic or external dependencies (e.g., ConfigMaps, Secrets, or services) are functioning as expected. No container crashes or resource exhaustion are detected.",
+  "answer": "The `healthy-web` deployment in the `demo` namespace is running normally with 2 pods. The example pod `healthy-web-6f79bc6fcb-nrp6p` is in the `Running` state, with the `web` container using `nginx:1.27-alpine`. Resources are allocated within limits (CPU: 50m\u2013200m, Memory: 32Mi\u2013128Mi), and no restarts or critical errors are reported. The deployment appears healthy based on current metrics. \n\nIf you suspect an issue, check if the application logic or external dependencies (e.g., ConfigMaps, Secrets, or services) are functioning as expected. No container crashes or resource exhaustion are detected.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 23946.2,
+   "tool_ms": 45.4,
+   "rounds": 1,
+   "round_ms": [
+    23946.2
+   ],
+   "slowest_round_ms": 23946.2,
+   "model_share": 0.998,
+   "wall_ms": 23994.6,
+   "unaccounted_ms": 3.0,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/healthy-web.pods",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "1.27",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.web.image",
+       "value": "1.27"
+      }
+     ]
+    },
+    {
+     "claim": "6",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/healthy-web.example",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "79",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/healthy-web.example",
+       "value": "79"
+      }
+     ]
+    },
+    {
+     "claim": "Running",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/healthy-web.status",
+       "value": "Running"
+      }
+     ]
+    },
+    {
+     "claim": "50",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.web.requests.cpu",
+       "value": "50"
+      }
+     ]
+    },
+    {
+     "claim": "200",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.web.limits.cpu",
+       "value": "200"
+      }
+     ]
+    },
+    {
+     "claim": "32",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.web.requests.memory",
+       "value": "32"
+      }
+     ]
+    },
+    {
+     "claim": "128",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.web.limits.memory",
+       "value": "128"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "8be15c2bc067",
+  "target": {
+   "kind": "workload",
+   "name": "healthy-web",
+   "namespace": null
+  }
+ },
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 91.9,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T19:02:25",
+  "load_before": 0.77,
+  "load_after": 1.38,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "healthy-web"
+   },
+   {
+    "name": "healthy-web-6f79bc6fcb-nrp6p",
+    "namespace": "demo"
+   },
+   {
+    "namespace": "demo",
+    "limit": 5,
+    "name": "healthy-web-6f79bc6fcb-nrp6p"
+   },
+   {
+    "name": "healthy-web-6f79bc6fcb-nrp6p",
+    "namespace": "demo",
+    "tail": 20
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/healthy-web\": {\"status\": \"Running\", \"pods\": 2, \"example\": \"healthy-web-6f79bc6fcb-nrp6p\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"healthy-web-6f79bc6fcb-nrp6p\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"web\": {\"image\": \"nginx:1.27-alpine\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"200m\", \"memory\": \"128Mi\"}, \"ready\": true, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"healthy-web-6f79bc6fcb-nrp6p\", \"events\": [{\"reason\": \"FailedScheduling\", \"count\": 1, \"age\": \"46m\", \"message\": \"0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\", \"superseded\": \"the pod was scheduled after this\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"pod\": \"healthy-web-6f79bc6fcb-nrp6p\", \"source\": \"current\", \"logs\": \"2026/09/21 12:46:58 [notice] 1#1: nginx/1.27.5\\n2026/09/21 12:46:58 [notice] 1#1: built by gcc 14.2.0 (Alpine 14.2.0) \\n2026/09/21 12:46:58 [notice] 1#1: OS: Linux 6.12.76-linuxkit\\n2026/09/21 12:46:58 [notice] 1#1: getrlimit(RLIMIT_NOFILE): 1073741816:1073741816\\n2026/09/21 12:46:58 [notice] 1#1: start worker processes\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 34\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 35\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 36\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 37\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 38\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 39\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 40\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 41\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 42\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 43\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 44\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 45\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 46\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 47\\n2026/09/21 12:46:58 [notice] 1#1: start worker process 48\"}"
+   }
+  ],
+  "draft": "The **healthy-web deployment** in the `demo` namespace is **running normally** with 2 pods, and the example pod (`healthy-web-6f79bc6fcb-nrp6p`) is in the `Running` state with no restarts. Here's the full analysis:\n\n### Key Findings:\n1. **Pod Status**:  \n   - The pod is `Ready` and has no restarts.  \n   - The `nginx` container is running as expected, with logs showing a clean startup and worker processes initializing.  \n\n2. **Events**:  \n   - A `FailedScheduling` event exists (age: 46m), but it is **superseded** (the pod was scheduled after this event). This suggests a past scheduling issue that no longer affects the pod.  \n   - No recent warnings or errors are present in the pod's events.  \n\n3. **Resources**:  \n   - The container uses `50m CPU` (requested) and `32Mi memory` (requested), with limits set at `200m CPU` and `128Mi memory`.  \n   - The `kube-root-ca.crt` ConfigMap is mounted and updates in-place.  \n\n4. **Logs**:  \n   - The nginx logs show no errors. The server starts successfully, and worker processes are initialized without issues.  \n\n### Conclusion:  \nThe deployment is **healthy**. The `FailedScheduling` event is historical and does not impact the current state of the pods. If the deployment appeared unhealthy, it could be due to transient scheduling issues or misconfigured taints on nodes, but the current pods are functioning correctly. No further action is needed unless the scheduling issue resurfaces.",
+  "answer": "The **healthy-web deployment** in the `demo` namespace is **running normally** with 2 pods, and the example pod (`healthy-web-6f79bc6fcb-nrp6p`) is in the `Running` state with no restarts. Here's the full analysis:\n\n### Key Findings:\n1. **Pod Status**:  \n   - The pod is `Ready` and has no restarts.  \n   - The `nginx` container is running as expected, with logs showing a clean startup and worker processes initializing.  \n\n2. **Events**:  \n   - A `FailedScheduling` event exists (age: 46m), but it is **superseded** (the pod was scheduled after this event). This suggests a past scheduling issue that no longer affects the pod.  \n   - No recent warnings or errors are present in the pod's events.  \n\n3. **Resources**:  \n   - The container uses `50m CPU` (requested) and `32Mi memory` (requested), with limits set at `200m CPU` and `128Mi memory`.  \n   - The `kube-root-ca.crt` ConfigMap is mounted and updates in-place.  \n\n4. **Logs**:  \n   - The nginx logs show no errors. The server starts successfully, and worker processes are initialized without issues.  \n\n### Conclusion:  \nThe deployment is **healthy**. The `FailedScheduling` event is historical and does not impact the current state of the pods. If the deployment appeared unhealthy, it could be due to transient scheduling issues or misconfigured taints on nodes, but the current pods are functioning correctly. No further action is needed unless the scheduling issue resurfaces.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 91856.1,
+   "tool_ms": 88.0,
+   "rounds": 3,
+   "round_ms": [
+    25685.4,
+    29346.1,
+    36824.7
+   ],
+   "slowest_round_ms": 36824.7,
+   "model_share": 0.999,
+   "wall_ms": 91948.4,
+   "unaccounted_ms": 4.3,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/healthy-web.pods",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "6",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/healthy-web.example",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "79",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/healthy-web.example",
+       "value": "79"
+      }
+     ]
+    },
+    {
+     "claim": "Running",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/healthy-web.status",
+       "value": "Running"
+      }
+     ]
+    },
+    {
+     "claim": "nginx",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.web.image",
+       "value": "nginx"
+      }
+     ]
+    },
+    {
+     "claim": "FailedScheduling",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_events",
+       "field": "events[0].reason",
+       "value": "FailedScheduling"
+      }
+     ]
+    },
+    {
+     "claim": "46",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_events",
+       "field": "events[0].age",
+       "value": "46"
+      }
+     ]
+    },
+    {
+     "claim": "FailedScheduling",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_events",
+       "field": "events[0].reason",
+       "value": "FailedScheduling"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "40ce15c7916a",
+  "target": {
+   "kind": "workload",
+   "name": "healthy-web",
+   "namespace": null
+  }
+ },
+ {
+  "case": "healthy_workload_not_substituted",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 12.9,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T19:03:57",
+  "load_before": 1.38,
+  "load_after": 1.45,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "healthy-web"
+   },
+   {
+    "name": "healthy-web-6f79bc6fcb-nrp6p",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/healthy-web\": {\"status\": \"Running\", \"pods\": 2, \"example\": \"healthy-web-6f79bc6fcb-nrp6p\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"healthy-web-6f79bc6fcb-nrp6p\", \"namespace\": \"demo\", \"status\": \"Running\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"web\": {\"image\": \"nginx:1.27-alpine\", \"requests\": {\"cpu\": \"50m\", \"memory\": \"32Mi\"}, \"limits\": {\"cpu\": \"200m\", \"memory\": \"128Mi\"}, \"ready\": true, \"restarts\": 0, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The `healthy-web` deployment in the `demo` namespace is running normally. All pods are in the `Running` state with no restarts, and containers are ready. Resource requests/limits are appropriately set, and configurations are up-to-date. No issues detected.",
+  "answer": "The `healthy-web` deployment in the `demo` namespace is running normally. All pods are in the `Running` state with no restarts, and containers are ready. Resource requests/limits are appropriately set, and configurations are up-to-date. No issues detected.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 12826.0,
+   "tool_ms": 53.2,
+   "rounds": 1,
+   "round_ms": [
+    12826.0
+   ],
+   "slowest_round_ms": 12826.0,
+   "model_share": 0.996,
+   "wall_ms": 12879.6,
+   "unaccounted_ms": 0.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "Running",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/healthy-web.status",
+       "value": "Running"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "8fc9c31eac6a",
+  "target": {
+   "kind": "workload",
+   "name": "healthy-web",
+   "namespace": null
+  }
+ }
+]

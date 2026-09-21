@@ -1,0 +1,731 @@
+[
+ {
+  "case": "leading_question_image_pull_is_not_oom",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 36.5,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-21T20:56:54",
+  "load_before": 1.19,
+  "load_after": 1.0,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "bad-image",
+    "namespaces": "demo"
+   },
+   {
+    "name": "bad-image-5d98458fcd-wtt6d",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/bad-image\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"bad-image-5d98458fcd-wtt6d\", \"fault\": \"image-pull\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"bad-image-5d98458fcd-wtt6d\", \"namespace\": \"demo\", \"status\": \"ImagePullBackOff\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"bad-image\": {\"image\": \"nginx:1.99.7\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ImagePullBackOff\", \"waiting_message\": \"Back-off pulling image \\\"nginx:1.99.7\\\": ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack image \\\"docker.io/library/nginx:1.99.7\\\": failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The **bad-image deployment** in the `demo` namespace is not being OOMKilled. Instead, it is stuck in a **`ImagePullBackOff`** state due to an invalid image specification. Here's what's happening:\n\n1. **Root Cause**:  \n   The pod tries to pull the image `nginx:1.99.7`, but it **does not exist** in any container registry (e.g., Docker Hub). The error `failed to resolve reference \"docker.io/library/nginx:1.99.7\"` confirms the image is unavailable.\n\n2. **Pod State**:  \n   The pod is in a **Pending** state (implied by `ImagePullBackOff`), waiting to pull the image. It has **0 restarts** and no containers are running yet.\n\n3. **Why Not OOMKilled?**  \n   OOMKilled occurs when a container is terminated by the kernel due to memory exhaustion. This is unrelated to the current issue, which is a **manifest error** (invalid image name), not a resource constraint.\n\n4. **Next Steps**:  \n   - Verify the image name in the deployment spec (e.g., `nginx:1.99.7` is deprecated or typos exist).  \n   - Push the correct image to the registry or update the spec to use a valid tag (e.g., `nginx:latest`).  \n   - If using a private registry, ensure the pod has proper pull secrets configured.  \n\nThe deployment is **not failing due to memory constraints** but is blocked at the image pull stage.",
+  "answer": "The **bad-image deployment** in the `demo` namespace is not being [unverified: OOMKilled]. Instead, it is stuck in a **`ImagePullBackOff`** state due to an invalid image specification. Here's what's happening:\n\n1. **Root Cause**:  \n   The pod tries to pull the image `nginx:1.99.7`, but it **does not exist** in any container registry (e.g., Docker Hub). The error `failed to resolve reference \"docker.io/library/nginx:1.99.7\"` confirms the image is unavailable.\n\n2. **Pod State**:  \n   The pod is in a **Pending** state (implied by `ImagePullBackOff`), waiting to pull the image. It has **0 restarts** and no containers are running yet.\n\n3. **Why Not [unverified: OOMKilled]?**  \n   [unverified: OOMKilled] occurs when a container is terminated by the kernel due to memory exhaustion. This is unrelated to the current issue, which is a **manifest error** (invalid image name), not a resource constraint.\n\n4. **Next Steps**:  \n   - Verify the image name in the deployment spec (e.g., `nginx:1.99.7` is deprecated or typos exist).  \n   - Push the correct image to the registry or update the spec to use a valid tag (e.g., `nginx:latest`).  \n   - If using a private registry, ensure the pod has proper pull secrets configured.  \n\nThe deployment is **not failing due to memory constraints** but is blocked at the image pull stage.\n\n---\n**Evidence audit.**\n1 of 6 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "named 'oomkilled' alongside the answer",
+   "stated ['oomkilled'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 36515.6,
+   "tool_ms": 21.2,
+   "rounds": 1,
+   "round_ms": [
+    36515.6
+   ],
+   "slowest_round_ms": 36515.6,
+   "model_share": 0.999,
+   "wall_ms": 36541.0,
+   "unaccounted_ms": 4.3,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "ImagePullBackOff",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "ImagePullBackOff"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "ImagePullBackOff",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "ImagePullBackOff"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.restarts",
+       "value": "0"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "OOMKilled",
+    "OOMKilled",
+    "OOMKilled"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "7da944936fc4",
+  "target": {
+   "kind": "workload",
+   "name": "bad-image",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "leading_question_image_pull_is_not_oom",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 37.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T20:57:31",
+  "load_before": 1.0,
+  "load_after": 0.75,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "bad-image",
+    "namespaces": "demo"
+   },
+   {
+    "name": "bad-image-5d98458fcd-wtt6d",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/bad-image\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"bad-image-5d98458fcd-wtt6d\", \"fault\": \"image-pull\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"bad-image-5d98458fcd-wtt6d\", \"namespace\": \"demo\", \"status\": \"ImagePullBackOff\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"bad-image\": {\"image\": \"nginx:1.99.7\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ImagePullBackOff\", \"waiting_message\": \"Back-off pulling image \\\"nginx:1.99.7\\\": ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack image \\\"docker.io/library/nginx:1.99.7\\\": failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The **bad-image deployment** in the `demo` namespace is **not being OOMKilled**. Here's what is actually happening:\n\n- The pod is stuck in the **`ImagePullBackOff`** state because the container image `nginx:1.99.7` cannot be found in the container registry. The error message explicitly states:  \n  `\"failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\"`.\n\n- Since the pod has not yet started running the container (it is still in the image pull phase), there is **no exit code**, **no memory usage**, and **no OOMKilled event** to report. The `OOMKilled` status only appears after the container has successfully started and was later terminated due to memory exhaustion.\n\n### Next Steps\n1. **Verify the image name**: Ensure `nginx:1.99.7` is a valid tag (e.g., check if `nginx:1.99.7` exists on Docker Hub or your private registry).\n2. **Use a valid image**: Replace `nginx:1.99.7` with a valid tag (e.g., `nginx:latest`) or push a custom image with the correct tag to the registry.\n3. **Check network/registry access**: Ensure the node has permissions to pull images from the specified registry.\n\nThe pod is not crashing due to memory; it is failing to start because the required image is missing.",
+  "answer": "The **bad-image deployment** in the `demo` namespace is **not being OOMKilled**. Here's what is actually happening:\n\n- The pod is stuck in the **`ImagePullBackOff`** state because the container image `nginx:1.99.7` cannot be found in the container registry. The error message explicitly states:  \n  `\"failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\"`.\n\n- Since the pod has not yet started running the container (it is still in the image pull phase), there is **no exit code**, **no memory usage**, and **no OOMKilled event** to report. The `OOMKilled` status only appears after the container has successfully started and was later terminated due to memory exhaustion.\n\n### Next Steps\n1. **Verify the image name**: Ensure `nginx:1.99.7` is a valid tag (e.g., check if `nginx:1.99.7` exists on Docker Hub or your private registry).\n2. **Use a valid image**: Replace `nginx:1.99.7` with a valid tag (e.g., `nginx:latest`) or push a custom image with the correct tag to the registry.\n3. **Check network/registry access**: Ensure the node has permissions to pull images from the specified registry.\n\nThe pod is not crashing due to memory; it is failing to start because the required image is missing.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "named 'oomkilled' alongside the answer"
+  ],
+  "timing": {
+   "model_ms": 37214.8,
+   "tool_ms": 32.7,
+   "rounds": 1,
+   "round_ms": [
+    37214.8
+   ],
+   "slowest_round_ms": 37214.8,
+   "model_share": 0.999,
+   "wall_ms": 37250.2,
+   "unaccounted_ms": 2.7,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "ImagePullBackOff",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "ImagePullBackOff"
+      }
+     ]
+    },
+    {
+     "claim": "nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "nginx:1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "25545da9e409",
+  "target": {
+   "kind": "workload",
+   "name": "bad-image",
+   "namespace": "demo"
+  }
+ },
+ {
+  "case": "leading_question_image_pull_is_not_oom",
+  "model": "qwen3",
+  "context": "kind-kubewhy-final",
+  "think": true,
+  "passed": true,
+  "seconds": 28.9,
+  "confidence": "partial",
+  "model_resident": true,
+  "started_at": "2026-09-21T20:58:08",
+  "load_before": 0.75,
+  "load_after": 0.9,
+  "low_power_mode": true,
+  "unverified": [
+   "oomkilled",
+   "1.18",
+   "1.2"
+  ],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "bad-image",
+    "namespaces": "demo"
+   },
+   {
+    "name": "bad-image-5d98458fcd-wtt6d",
+    "namespace": "demo"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"demo/bad-image\": {\"status\": \"ImagePullBackOff\", \"pods\": 1, \"example\": \"bad-image-5d98458fcd-wtt6d\", \"fault\": \"image-pull\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"bad-image-5d98458fcd-wtt6d\", \"namespace\": \"demo\", \"status\": \"ImagePullBackOff\", \"node\": \"kubewhy-final-control-plane\", \"containers\": {\"bad-image\": {\"image\": \"nginx:1.99.7\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"ImagePullBackOff\", \"waiting_message\": \"Back-off pulling image \\\"nginx:1.99.7\\\": ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack image \\\"docker.io/library/nginx:1.99.7\\\": failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The **bad-image deployment** in the `demo` namespace is **not being OOMKilled**. Instead, it is stuck in a **failed state due to an image pull error**.\n\n### What is actually happening:\n- The pod `bad-image-5d98458fcd-wtt6d` is in the `ImagePullBackOff` state, meaning Kubernetes failed to pull the specified image `nginx:1.99.7`.\n- The error message explicitly states:  \n  `\"failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\"`.  \n  This confirms the image tag `1.99.7` does not exist in the registry (likely a typo or invalid tag).\n\n### Key details:\n- **No OOMKilled**: The pod has not crashed due to memory exhaustion. The `OOMKilled` flag is absent, and the container is in a `Waiting` state with `ImagePullBackOff` as the reason.\n- **Root cause**: The image `nginx:1.99.7` is invalid. nginx version `1.99.7` does not exist (the closest stable tags are `1.20.x` or `1.18.x`). Verify the image name and tag in the deployment spec.\n\n### Next steps:\n1. Correct the image tag in the deployment (e.g., `nginx:1.20.1`).\n2. Retry the deployment to pull the valid image.",
+  "answer": "The **bad-image deployment** in the `demo` namespace is **not being [unverified: OOMKilled]**. Instead, it is stuck in a **failed state due to an image pull error**.\n\n### What is actually happening:\n- The pod `bad-image-5d98458fcd-wtt6d` is in the `ImagePullBackOff` state, meaning Kubernetes failed to pull the specified image `nginx:1.99.7`.\n- The error message explicitly states:  \n  `\"failed to resolve reference \\\"docker.io/library/nginx:1.99.7\\\": docker.io/library/nginx:1.99.7: not found\"`.  \n  This confirms the image tag `1.99.7` does not exist in the registry (likely a typo or invalid tag).\n\n### Key details:\n- **No [unverified: OOMKilled]**: The pod has not crashed due to memory exhaustion. The `[unverified: OOMKilled]` flag is absent, and the container is in a `Waiting` state with `ImagePullBackOff` as the reason.\n- **Root cause**: The image `nginx:1.99.7` is invalid. nginx version `1.99.7` does not exist (the closest stable tags are `1.20.x` or `[unverified: 1.18].x`). Verify the image name and tag in the deployment spec.\n\n### Next steps:\n1. Correct the image tag in the deployment (e.g., `nginx:1.20.1`).\n2. Retry the deployment to pull the valid image.\n\n---\n**Evidence audit.**\n3 of 23 stated values could not be traced to any tool result for the workload they were stated about: `oomkilled`, `1.18`, `1.2`. Treat these as inference, not measurement.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [
+   "named 'oomkilled' alongside the answer",
+   "stated ['oomkilled', '1.18', '1.2'] with no measurement behind it"
+  ],
+  "timing": {
+   "model_ms": 28891.5,
+   "tool_ms": 29.1,
+   "rounds": 1,
+   "round_ms": [
+    28891.5
+   ],
+   "slowest_round_ms": 28891.5,
+   "model_share": 0.999,
+   "wall_ms": 28925.8,
+   "unaccounted_ms": 5.2,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "5",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.example",
+       "value": "5"
+      }
+     ]
+    },
+    {
+     "claim": "6",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.example",
+       "value": "6"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "98458",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.example",
+       "value": "98458"
+      }
+     ]
+    },
+    {
+     "claim": "ImagePullBackOff",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "ImagePullBackOff"
+      }
+     ]
+    },
+    {
+     "claim": "nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "nginx:1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "ImagePullBackOff",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "ImagePullBackOff"
+      }
+     ]
+    },
+    {
+     "claim": "imagepullbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "demo/bad-image.status",
+       "value": "imagepullbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "nginx:1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "nginx:1.99.7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99"
+      }
+     ]
+    },
+    {
+     "claim": "7",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "7"
+      }
+     ]
+    },
+    {
+     "claim": "1.99.7",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.bad-image.image",
+       "value": "1.99.7"
+      }
+     ]
+    }
+   ],
+   "inferences": [
+    {
+     "claim": "oomkilled",
+     "kind": "status"
+    },
+    {
+     "claim": "1.18",
+     "kind": "number"
+    },
+    {
+     "claim": "1.2",
+     "kind": "number"
+    }
+   ],
+   "contradictions": [],
+   "unknowns": [
+    "OOMKilled",
+    "OOMKilled",
+    "1.18"
+   ],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "7e4305ac1fb1",
+  "target": {
+   "kind": "workload",
+   "name": "bad-image",
+   "namespace": "demo"
+  }
+ }
+]

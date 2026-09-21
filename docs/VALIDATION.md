@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1950 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1956 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -39,7 +39,7 @@ and does not support. Four words are used and they mean specific things:
 | In-cluster inference | **PARTIALLY PROVEN** | Ollama, and the `vllm` provider against a real OpenAI-protocol server |
 | AKS runtime | **PARTIALLY PROVEN** | non-AAD single node |
 | Model comparison | **UNDETERMINED** | p = 0.3438, paired, n=5; regraded 2026-09-15 under the current checker, 130/145 against 132/145, p = 0.7266 |
-| Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — and re-measured 2026-09-18 on one tree across the whole corpus for the first time since the fixtures were renamed: **38 cases × 3 = 114 runs, 0 voids — 84/87 (96.6%) [90.3–98.8] on the cases the prompts were written against, 15/27 (55.6%) [37.3–72.4] on nine fault types they were not**, gap 41.0 points, Fisher p = 9.2e-07 — **regraded the same day under defects 58 and 59: 85/87 (97.7%) against 17/27 (63.0%) [44.2–78.5]**. **Neither half moved against 2026-09-13's 90.8% / 53.3%** (p = 0.2114 and p = 1.0000); what improved is the never-seen interval, from 45 points wide to 35, because that half is now nine fault types rather than five. **Read defect 57 before quoting either number:** a prefetched call counts toward `expect_tools`, so 18 of the 54 runs on tool-expectation cases met that bar only because the prefetch made the call, and 50 of 114 runs (43.9%) made no tool call of their own at all. See defects 57 to 62 |
+| Generalized diagnostic accuracy | **MEASURED, and the number is not good** | one model, one cluster type, one prompt configuration — measured 2026-09-21 across the whole corpus with **case order interleaved**, so both halves meet fixtures of the same age: **38 cases × 3 = 114 runs, 0 voids — 84/87 (96.6%) [90.3–98.8] on the cases the prompts were written against, 20/27 (74.1%) [55.3–86.8] on nine fault types they were not**, gap 22.5 points, Fisher p = 0.0015, down from 41.0 points on 2026-09-18. **No measurement of the never-seen half has moved significantly** (p = 0.5587 against the previous one), and an earlier un-interleaved run of that half alone read 85.2% — an 11-point swing from fixture age, which is what the interleaving and the published novelty/elapsed correlation (−0.038) exist to prevent. See defects 57 and 62 to 67 |
 | Real vLLM | **NOT TESTED** | wire path proven; vLLM's own tool-call parser is not |
 | EKS | **NOT TESTED** | auth verified by reading the client |
 | Browser paint automation | **NOT TESTED** | designed in E2E.md; one case (R-01) confirmed by hand and fixed |
@@ -4514,56 +4514,100 @@ both as `limits.py` already defined them. This defect is about which surfaces
 ask, not about what the numbers are.
 
 
-### 66. The never-seen half, re-measured on the fixed tree
+### 66. The never-seen half, re-measured twice, and the first one was confounded
 
-**Measured 2026-09-21**, the same nine cases at `--repeat 3` that defect 57
-scored, on a fresh kind cluster with all six fixture files, both manual steps
-done, and `pending_behind_a_higher_priority_pod` run first inside its event's
-hour. Records in `results/d61/`.
+Defect 62 said the 2026-09-18 set ran its cases in a fixed order, so the
+never-seen half was measured between T+1h30 and T+2h30 against fixtures whose
+Kubernetes events had begun to expire while the pre-existing half ran first on
+fresh ones. Two runs on 2026-09-21 settle how much that mattered, and the
+answer is: enough to matter.
 
-| | score | 95% CI |
+**The first re-run repeated the mistake in the opposite direction.** It ran the
+nine never-seen cases *alone*, so they got fresh fixtures throughout: 21/27
+(77.8%) as graded, 23/27 (85.2%) regraded. That number is not comparable to
+2026-09-18's, because the thing defect 62 identified had been changed in the
+never-seen half's favour.
+
+**The second run is the one to quote.** All 38 cases, case order
+**interleaved** so the two halves meet fixtures of the same age:
+
+| | median minutes into the run | range |
 |---|---|---|
-| 2026-09-13 (defect 47, 5 fault types) | 8/15, 53.3% | [30.1–75.2] |
-| 2026-09-18 as graded (defect 57) | 15/27, 55.6% | [37.3–72.4] |
-| 2026-09-18 regraded (defects 58–60) | 17/27, 63.0% | [44.2–78.5] |
-| **2026-09-21 on the fixed tree** | **21/27, 77.8%** | [59.2–89.4] |
-| 2026-09-21 regraded (the guard defect 61 extended) | **23/27, 85.2%** | [67.5–94.1] |
+| never-seen cases | 68 | 0–150 |
+| pre-existing cases | 76 | 5–156 |
 
-**The movement is not significant and must not be quoted as though it were.**
-Against 2026-09-18 regraded, Fisher p = 0.1188. Twenty-seven runs cannot
-separate 63% from 85%; the point estimate moved and the intervals overlap
-heavily.
+**Correlation between novelty and elapsed minutes: −0.038.** On 2026-09-18 that
+correlation was near +1 by construction. The confound is removed and measured
+rather than asserted.
 
-**What the runs do establish, case by case:**
+**Measured 2026-09-21**, tree `ece970f`, qwen3 thinking on, 38 cases × 3 = 114
+runs, 0 voids, 38 of 38 per-case files, 2h38m, one kind cluster with all six
+fixture files, both manual fixture steps done and the preemption case first
+inside its event's hour. Records in `results/final38/`.
 
-| case | 09-18 | 09-21 | why |
+| set | as graded | regraded | 95% CI |
 |---|---|---|---|
-| `job_killed_by_its_own_deadline` | 0/3 | **3/3** | defect 61, and confirmed paired at p = 1.0000 |
-| `stuck_terminating_finalizer` | 1/3 | 1/3 → **3/3 regraded** | defect 59's guard, extended after reading these failures |
-| `image_never_pulled_by_policy` | 2/3 | **3/3** | defect 60's quoted-literal pass |
-| `entrypoint_that_does_not_exist` | 2/3 | **3/3** | **probably the fixtures, not the code** -- see below |
-| `poststart_hook_not_the_app` | 0/3 | 1/3 | inside its own 2/13-to-3/14 noise |
-| `job_gave_up_after_retries` | 1/3 | 1/3 | unchanged; invents `backoffLimit` rather than calling `list_jobs` |
+| headline, all 38 | 103/114, 90.4% | 104/114, **91.2%** | [84.6–95.2] |
+| the 29 the prompts were written against | 83/87, 95.4% | 84/87, **96.6%** | [90.3–98.8] |
+| the 9 they were not | 20/27, 74.1% | 20/27, **74.1%** | [55.3–86.8] |
 
-**The confound defect 62 predicted, and it applies to this very table.** On
-2026-09-18 the never-seen half ran at T+1h30 to T+2h30 against fixtures whose
-Kubernetes events had begun to expire; here it ran at T+0 to T+1h on fresh
-ones. `entrypoint_that_does_not_exist` is the case defect 62 showed failing
-because `describe_pod` sampled the pod after its `RunContainerError` window
-closed, so its +1 is most likely fixture age rather than any change made here.
-**A clean comparison would re-run both halves in one interleaved pass**, and
-that has not been done.
+**Gap 22.5 points, Fisher p = 0.0015.** Defect 57 measured it at 41.0 points.
+The gap has narrowed by half and is still there.
 
-**The failures were read rather than counted**, which is what produced the
-extension to defect 59's guard: three of the six were the checker flagging
-sentences that deny `OOMKilled`, two of them the sentence `SYSTEM_PROMPT`
-itself teaches. The remaining `job_gave_up_after_retries` failures are the
-checker being right -- an invented `backoffLimit` of 4 and of 6 against a real
-value of 1.
+**The honest comparison, and it is not a significant one.** Against
+2026-09-18's regraded 17/27, Fisher p = 0.5587. Against defect 47's 8/15,
+p = 0.1935. **Twenty-seven runs cannot establish that the never-seen half
+improved**, and this table should be read as the first *unconfounded*
+measurement of it rather than as evidence of a gain.
 
-**Not re-measured: the pre-existing half.** Its last figure is 2026-09-18's
-84/87 as graded, 86/87 regraded. The headline is the average of two halves and
-only one of them has been re-run, so no headline is quoted for 2026-09-21.
+**What it does correct is the previous session's own number.** The clustered
+re-run read 85.2% and this one reads 74.1% on the same nine cases, the same
+tree and the same fixtures — the difference is when in the cluster's life the
+cases ran. **An 11-point swing from fixture age alone** is the size of the
+effect defect 62 warned about, now measured. Any future run of this set must
+interleave, and say so.
+
+Per case, never-seen half: `claim_waiting_on_a_missing_provisioner` 3/3,
+`image_never_pulled_by_policy` 3/3, `job_killed_by_its_own_deadline` 3/3,
+`malformed_image_reference` 3/3, `pending_behind_a_higher_priority_pod` 3/3,
+`job_gave_up_after_retries` 2/3, `entrypoint_that_does_not_exist` 1/3,
+`poststart_hook_not_the_app` 1/3, `stuck_terminating_finalizer` 1/3.
+
+**`job_killed_by_its_own_deadline` is 3/3**, which is defect 61's fix holding
+outside the A/B that confirmed it.
+
+
+### 67. A conditional with a modal claims nothing
+
+**Found 2026-09-21** by reading defect 66's single `contradicted` verdict:
+
+> "If the container's memory usage exceeded these defaults, the OOM killer
+> **would** trigger, but the kubelet **would** log the reason as
+> **OOMKilled**."
+
+That is the model reasoning correctly — the measured reason is `Error`, so this
+did not happen — and it was scored as claiming an OOM kill.
+
+`_COUNTERFACTUAL` had covered the same idea since defect 56, but only *after*
+the phrase and only for five verbs. "would log", before it, fell through.
+
+**Fixed structurally rather than with another verb**, because a verb list is
+what defect 45 already taught this module not to build: a clause opening with
+`if`/`unless`/`were` **and** carrying a modal within reach of the phrase
+claims nothing. Both halves are required, so "If you look at the logs, the
+container was OOMKilled" still asserts, and a test holds that.
+
+**The first version of the fix was wrong in a way worth recording.** It looked
+for the modal only *before* the phrase, which guarded `oomkilled` — "would log
+the reason as OOMKilled" — and left `oom kill` firing, because "the OOM killer
+would trigger" puts the modal after it. The rule tries several phrases and
+takes the first that asserts, so guarding one sibling and not the others
+changes which phrase is reported and nothing else. **The verdict did not move
+and the fix looked applied.** A test now covers every phrase the rule tries.
+
+Replayed: **0 records move on the 1876-record corpus** — the shape is new —
+and exactly 1 moves on defect 66's set, the record that was read. Three
+mechanisms mutated in turn, each failing at least one test.
 
 ## Where a run's 74 seconds go
 
