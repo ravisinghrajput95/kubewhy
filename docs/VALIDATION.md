@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1943 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1950 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -4258,6 +4258,26 @@ no accuracy loss; this is the case where the trade is visible, and it is
 visible because the prefetched row is a *complete* answer rather than a partial
 one.
 
+**Closed 2026-09-21. The prefetch now hands over both reads or neither.** A
+workload with no example pod has no `describe_pod` to give, and the shape is
+identifiable before any model time is spent: *a prefetch that cannot supply
+`describe_pod` is one whose scan row has to carry the whole diagnosis by
+itself.* So it supplies nothing, and the run behaves as it did with the switch
+off. Every case defect 55 measured has an example pod, so the rounds it bought
+are untouched -- a counter test asserts that, because a fix which disabled the
+prefetch outright would pass every other test here.
+
+Re-measured paired on the fixed tree, same harness, same cluster:
+
+| arm | called `list_jobs` | own call | passed | median |
+|---|---|---|---|---|
+| control (prefetch **on**, fixed) | **5/5** | 5/5 | **5/5** | 34.1s |
+| variant (prefetch **off**) | 5/5 | 5/5 | 5/5 | 29.0s |
+
+**Fisher p = 1.0000 on both**, against 0.0476 before the fix, and
+`prefetched = 0` on every control run confirms the new path fired. Records in
+`results/d61/`.
+
 **And it corrects an open item.** The handoff carried
 `poststart_hook_not_the_app` as "2/5 with the prefetch against 4/5 without ...
 re-measure deeper (n>=10, paired)". Pooled over every recorded run of that
@@ -4447,6 +4467,57 @@ shape this console has had once already.
 both as `limits.py` already defined them. This defect is about which surfaces
 ask, not about what the numbers are.
 
+
+### 66. The never-seen half, re-measured on the fixed tree
+
+**Measured 2026-09-21**, the same nine cases at `--repeat 3` that defect 57
+scored, on a fresh kind cluster with all six fixture files, both manual steps
+done, and `pending_behind_a_higher_priority_pod` run first inside its event's
+hour. Records in `results/d61/`.
+
+| | score | 95% CI |
+|---|---|---|
+| 2026-09-13 (defect 47, 5 fault types) | 8/15, 53.3% | [30.1–75.2] |
+| 2026-09-18 as graded (defect 57) | 15/27, 55.6% | [37.3–72.4] |
+| 2026-09-18 regraded (defects 58–60) | 17/27, 63.0% | [44.2–78.5] |
+| **2026-09-21 on the fixed tree** | **21/27, 77.8%** | [59.2–89.4] |
+| 2026-09-21 regraded (the guard defect 61 extended) | **23/27, 85.2%** | [67.5–94.1] |
+
+**The movement is not significant and must not be quoted as though it were.**
+Against 2026-09-18 regraded, Fisher p = 0.1188. Twenty-seven runs cannot
+separate 63% from 85%; the point estimate moved and the intervals overlap
+heavily.
+
+**What the runs do establish, case by case:**
+
+| case | 09-18 | 09-21 | why |
+|---|---|---|---|
+| `job_killed_by_its_own_deadline` | 0/3 | **3/3** | defect 61, and confirmed paired at p = 1.0000 |
+| `stuck_terminating_finalizer` | 1/3 | 1/3 → **3/3 regraded** | defect 59's guard, extended after reading these failures |
+| `image_never_pulled_by_policy` | 2/3 | **3/3** | defect 60's quoted-literal pass |
+| `entrypoint_that_does_not_exist` | 2/3 | **3/3** | **probably the fixtures, not the code** -- see below |
+| `poststart_hook_not_the_app` | 0/3 | 1/3 | inside its own 2/13-to-3/14 noise |
+| `job_gave_up_after_retries` | 1/3 | 1/3 | unchanged; invents `backoffLimit` rather than calling `list_jobs` |
+
+**The confound defect 62 predicted, and it applies to this very table.** On
+2026-09-18 the never-seen half ran at T+1h30 to T+2h30 against fixtures whose
+Kubernetes events had begun to expire; here it ran at T+0 to T+1h on fresh
+ones. `entrypoint_that_does_not_exist` is the case defect 62 showed failing
+because `describe_pod` sampled the pod after its `RunContainerError` window
+closed, so its +1 is most likely fixture age rather than any change made here.
+**A clean comparison would re-run both halves in one interleaved pass**, and
+that has not been done.
+
+**The failures were read rather than counted**, which is what produced the
+extension to defect 59's guard: three of the six were the checker flagging
+sentences that deny `OOMKilled`, two of them the sentence `SYSTEM_PROMPT`
+itself teaches. The remaining `job_gave_up_after_retries` failures are the
+checker being right -- an invented `backoffLimit` of 4 and of 6 against a real
+value of 1.
+
+**Not re-measured: the pre-existing half.** Its last figure is 2026-09-18's
+84/87 as graded, 86/87 regraded. The headline is the average of two halves and
+only one of them has been re-run, so no headline is quoted for 2026-09-21.
 
 ## Where a run's 74 seconds go
 

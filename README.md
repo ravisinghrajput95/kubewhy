@@ -198,7 +198,7 @@ Details: [docs/INFERENCE.md](docs/INFERENCE.md).
 
 | Capability | Evidence |
 |---|---|
-| Automated tests | 1943 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
+| Automated tests | 1950 passing, 0 skipped (a real Postgres; 34 skip silently without one) |
 | Grounding replay | 1683 recorded runs, no regressions (counted 2026-09-12; this row said 907) |
 | AI evaluation | 29 scenarios × 5 runs per configuration |
 | GKE runtime | Validated |
@@ -232,6 +232,13 @@ hand first:
 | headline, all 38 cases | 99/114, 86.8% | [79.4–91.9] |
 | the 29 the prompts were written against | 84/87, **96.6%** | [90.3–98.8] |
 | the 9 they were not | 15/27, **55.6%** | [37.3–72.4] |
+
+*The never-seen half was re-measured on 2026-09-21 after defects 58 to 61 were
+fixed: **21/27 (77.8%) [59.2–89.4] as graded, 23/27 (85.2%) regraded**. That
+movement is **not significant** — Fisher p = 0.1188 against the regraded 63.0%
+— and part of it is probably fixture freshness rather than the fixes, because
+the earlier run met older fixtures (defect 62). The pre-existing half has not
+been re-run, so no headline is quoted for that date. See defect 66.*
 
 **Gap 41.0 points, Fisher p = 9.2e-07.** Against the previous measurement
 (2026-09-13: 90.8% and 53.3%) **neither half moved** — p = 0.2114 and
