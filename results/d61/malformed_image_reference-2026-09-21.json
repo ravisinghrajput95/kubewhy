@@ -1,0 +1,386 @@
+[
+ {
+  "case": "malformed_image_reference",
+  "model": "qwen3",
+  "context": "kind-kubewhy-d61",
+  "think": true,
+  "passed": true,
+  "seconds": 17.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T12:45:14",
+  "load_before": 1.34,
+  "load_after": 1.12,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "catalog-api",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "catalog-api-77544dc879-8t6xj",
+    "namespace": "uncovered"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/catalog-api\": {\"status\": \"InvalidImageName\", \"pods\": 1, \"example\": \"catalog-api-77544dc879-8t6xj\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"catalog-api-77544dc879-8t6xj\", \"namespace\": \"uncovered\", \"status\": \"InvalidImageName\", \"node\": \"kubewhy-d61-control-plane\", \"containers\": {\"app\": {\"image\": \"REGISTRY.example.com/Catalog_Api:::v1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"InvalidImageName\", \"waiting_message\": \"Failed to apply default image tag \\\"REGISTRY.example.com/Catalog_Api:::v1\\\": couldn't parse image name \\\"REGISTRY.example.com/Catalog_Api:::v1\\\": invalid reference format: repository name (Catalog_Api) must be lowercase\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The `catalog-api` deployment fails because the container image name is invalid. The image `REGISTRY.example.com/Catalog_Api:::v1` has two issues:\n\n1. **Uppercase repository name**: Docker image names require the repository part (before `:`) to be lowercase. `Catalog_Api` has an uppercase `A`.\n2. **Invalid tag format**: The tag `:::v1` is malformed. Tags should be a single string (e.g., `v1`).\n\n**Fix**: Update the image name in your deployment spec to use lowercase and a valid tag, e.g., `REGISTRY.example.com/catalog_api:v1`. Reapply the configuration to resolve the error.",
+  "answer": "The `catalog-api` deployment fails because the container image name is invalid. The image `REGISTRY.example.com/Catalog_Api:::v1` has two issues:\n\n1. **Uppercase repository name**: Docker image names require the repository part (before `:`) to be lowercase. `Catalog_Api` has an uppercase `A`.\n2. **Invalid tag format**: The tag `:::v1` is malformed. Tags should be a single string (e.g., `v1`).\n\n**Fix**: Update the image name in your deployment spec to use lowercase and a valid tag, e.g., `REGISTRY.example.com/catalog_api:v1`. Reapply the configuration to resolve the error.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 17658.6,
+   "tool_ms": 13.0,
+   "rounds": 1,
+   "round_ms": [
+    17658.6
+   ],
+   "slowest_round_ms": 17658.6,
+   "model_share": 0.999,
+   "wall_ms": 17673.5,
+   "unaccounted_ms": 1.9,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/catalog-api.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "REGISTRY.example.com/Catalog_Api:::v1",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "REGISTRY.example.com/Catalog_Api:::v1"
+      }
+     ]
+    },
+    {
+     "claim": "Catalog_Api",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "Catalog_Api"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/catalog-api.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": ":::v1",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": ":::v1"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "dae823c56a81",
+  "target": {
+   "kind": "workload",
+   "name": "catalog-api",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "malformed_image_reference",
+  "model": "qwen3",
+  "context": "kind-kubewhy-d61",
+  "think": true,
+  "passed": true,
+  "seconds": 19.0,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T12:45:32",
+  "load_before": 1.12,
+  "load_after": 1.12,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "catalog-api",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "catalog-api-77544dc879-8t6xj",
+    "namespace": "uncovered"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/catalog-api\": {\"status\": \"InvalidImageName\", \"pods\": 1, \"example\": \"catalog-api-77544dc879-8t6xj\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"catalog-api-77544dc879-8t6xj\", \"namespace\": \"uncovered\", \"status\": \"InvalidImageName\", \"node\": \"kubewhy-d61-control-plane\", \"containers\": {\"app\": {\"image\": \"REGISTRY.example.com/Catalog_Api:::v1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"InvalidImageName\", \"waiting_message\": \"Failed to apply default image tag \\\"REGISTRY.example.com/Catalog_Api:::v1\\\": couldn't parse image name \\\"REGISTRY.example.com/Catalog_Api:::v1\\\": invalid reference format: repository name (Catalog_Api) must be lowercase\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The `catalog-api` deployment fails because the container image name is invalid. The error shows the image name `REGISTRY.example.com/Catalog_Api:::v1` is malformed:\n\n- **Repository name must be lowercase**: `Catalog_Api` (with uppercase `C` and `_`) is invalid. Kubernetes image names require repository names to be lowercase (e.g., `catalog-api`).\n- **Invalid tag syntax**: The triple colon `:::` in the tag is incorrect. Tags use a single colon (e.g., `v1`).\n\n**Fix**: Correct the image name in your deployment configuration to use lowercase letters and fix the tag format. For example:\n```\nREGISTRY.example.com/catalog-api:v1\n```\nAfter updating, redeploy the workload. The pod will pull the corrected image and start.",
+  "answer": "The `catalog-api` deployment fails because the container image name is invalid. The error shows the image name `REGISTRY.example.com/Catalog_Api:::v1` is malformed:\n\n- **Repository name must be lowercase**: `Catalog_Api` (with uppercase `C` and `_`) is invalid. Kubernetes image names require repository names to be lowercase (e.g., `catalog-api`).\n- **Invalid tag syntax**: The triple colon `:::` in the tag is incorrect. Tags use a single colon (e.g., `v1`).\n\n**Fix**: Correct the image name in your deployment configuration to use lowercase letters and fix the tag format. For example:\n```\nREGISTRY.example.com/catalog-api:v1\n```\nAfter updating, redeploy the workload. The pod will pull the corrected image and start.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 18952.8,
+   "tool_ms": 16.2,
+   "rounds": 1,
+   "round_ms": [
+    18952.8
+   ],
+   "slowest_round_ms": 18952.8,
+   "model_share": 0.999,
+   "wall_ms": 18970.5,
+   "unaccounted_ms": 1.5,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/catalog-api.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "REGISTRY.example.com/Catalog_Api:::v1",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "REGISTRY.example.com/Catalog_Api:::v1"
+      }
+     ]
+    },
+    {
+     "claim": "Catalog_Api",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "Catalog_Api"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "ed0bdccf8d80",
+  "target": {
+   "kind": "workload",
+   "name": "catalog-api",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "malformed_image_reference",
+  "model": "qwen3",
+  "context": "kind-kubewhy-d61",
+  "think": true,
+  "passed": true,
+  "seconds": 16.1,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T12:45:51",
+  "load_before": 1.12,
+  "load_after": 0.87,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "catalog-api",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "catalog-api-77544dc879-8t6xj",
+    "namespace": "uncovered"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/catalog-api\": {\"status\": \"InvalidImageName\", \"pods\": 1, \"example\": \"catalog-api-77544dc879-8t6xj\", \"fault\": \"not-ready\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"catalog-api-77544dc879-8t6xj\", \"namespace\": \"uncovered\", \"status\": \"InvalidImageName\", \"node\": \"kubewhy-d61-control-plane\", \"containers\": {\"app\": {\"image\": \"REGISTRY.example.com/Catalog_Api:::v1\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 0, \"waiting_reason\": \"InvalidImageName\", \"waiting_message\": \"Failed to apply default image tag \\\"REGISTRY.example.com/Catalog_Api:::v1\\\": couldn't parse image name \\\"REGISTRY.example.com/Catalog_Api:::v1\\\": invalid reference format: repository name (Catalog_Api) must be lowercase\", \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   }
+  ],
+  "draft": "The catalog-api deployment fails because the container image name is invalid. The repository name `Catalog_Api` in the image `REGISTRY.example.com/Catalog_Api:::v1` must be lowercase. Kubernetes enforces this rule, and the registry rejects uppercase names like `Catalog_Api`. \n\n**Fix:**  \nUpdate the image name to use lowercase, e.g., `REGISTRY.example.com/catalog-api:v1`, and ensure the tag format follows `repository:tag` without extra colons. Verify the registry supports the corrected name and tag.",
+  "answer": "The catalog-api deployment fails because the container image name is invalid. The repository name `Catalog_Api` in the image `REGISTRY.example.com/Catalog_Api:::v1` must be lowercase. Kubernetes enforces this rule, and the registry rejects uppercase names like `Catalog_Api`. \n\n**Fix:**  \nUpdate the image name to use lowercase, e.g., `REGISTRY.example.com/catalog-api:v1`, and ensure the tag format follows `repository:tag` without extra colons. Verify the registry supports the corrected name and tag.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 16098.4,
+   "tool_ms": 15.8,
+   "rounds": 1,
+   "round_ms": [
+    16098.4
+   ],
+   "slowest_round_ms": 16098.4,
+   "model_share": 0.999,
+   "wall_ms": 16115.0,
+   "unaccounted_ms": 0.8,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/catalog-api.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "Catalog_Api",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "Catalog_Api"
+      }
+     ]
+    },
+    {
+     "claim": "REGISTRY.example.com/Catalog_Api:::v1",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "REGISTRY.example.com/Catalog_Api:::v1"
+      }
+     ]
+    },
+    {
+     "claim": "Catalog_Api",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "Catalog_Api"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "f3fa05ff231f",
+  "target": {
+   "kind": "workload",
+   "name": "catalog-api",
+   "namespace": "uncovered"
+  }
+ }
+]

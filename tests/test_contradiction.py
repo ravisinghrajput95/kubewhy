@@ -1582,3 +1582,43 @@ class TestDeniedIsNarrowerThanNotAsserted:
 
     def test_a_phrase_that_is_absent_is_not_denied(self):
         assert not contradiction.denied("nothing relevant here", "oomkilled")
+
+
+class TestDeniedAlsoCoversTheRuleStatement:
+    """
+    Defect 59 was ported narrower than the problem. It carried the positional
+    denials to `denied()` and left behind defect 56's rule-statement guard and
+    defect 52's reason-contrast, so `stuck_terminating_finalizer` went on
+    failing 2 of 3 runs on `oomkilled` -- twice on the sentence
+    SYSTEM_PROMPT teaches. Found 2026-09-21 by reading its failures.
+    """
+
+    @pytest.mark.parametrize("clause", [
+        "the kubelet only sets `OOMKilled` when the kernel's OOM killer "
+        "terminates a container",
+        'The kubelet sets the reason to `"OOMKilled"` **only if** the '
+        "kernel's OOM killer terminated the container.",
+        "note that `last_termination.reason = Error` does not confirm OOMKilled.",
+    ])
+    def test_the_three_shapes_its_own_failures_carried(self, clause):
+        assert contradiction.denied(clause, "oomkilled")
+
+    def test_one_word_may_sit_between_the_negator_and_the_phrase(self):
+        """"does not confirm X" and "did not report X" -- one verb, no more."""
+        assert contradiction.denied("the kubelet did not report OOMKilled", "oomkilled")
+
+    def test_the_counter_four_words_may_not(self):
+        """
+        The regression defect 59 was written against. Widening the adjacency
+        without a bound puts "is not starting due to a
+        CreateContainerConfigError" back to reading as a denial of the status,
+        which moved 7 corpus records from grounded to insufficient_evidence.
+        """
+        clause = ('The pod "missing-configmap-key" is not starting due to a '
+                  "CreateContainerConfigError.")
+        assert not contradiction.denied(clause, "createcontainerconfigerror")
+
+    def test_the_counter_an_assertion_is_still_not_denied(self):
+        assert not contradiction.denied(
+            "The container was `OOMKilled` after exceeding its memory limit.",
+            "oomkilled")

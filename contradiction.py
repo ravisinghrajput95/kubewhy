@@ -317,7 +317,13 @@ _COUNTERFACTUAL = re.compile(r"^[\w'\u2019-]*\W{0,4}would\s+(?:be|have|show|say|
 # carries no such ambiguity: "was not `OOMKilled`", "no `OOMKilled` reason".
 _ADJACENT_NEGATOR = re.compile(
     r"\b(?:no|not|never|without|none|neither|nor|n't)\s*"
-    r"(?:\s+(?:a|an|the|any|some))?$")
+    # A determiner, or one verb, may sit between the negator and the phrase:
+    # "does **not confirm** OOMKilled", "did **not report** OOMKilled". One
+    # word and no more -- "is **not starting due to a** CreateContainerConfig-
+    # Error" asserts the status, and four words separate them there. Found
+    # 2026-09-21: defect 59's first vocabulary was adjacency-only and left
+    # this shape flagged.
+    r"(?:\s+(?:a|an|the|any|some|\w+))?$")
 
 
 def asserted(clause, phrase):
@@ -364,7 +370,18 @@ def denied(clause, phrase):
 
     tail = lowered[start + len(phrase):start + len(phrase) + 80]
     tail = tail.replace("*", "").replace("`", "").replace('"', "")
-    return bool(_DENIED_AFTER.match(tail) or _COUNTERFACTUAL.match(tail))
+    if _DENIED_AFTER.match(tail) or _COUNTERFACTUAL.match(tail):
+        return True
+
+    # A statement of the rule is not a claim about this container, and it is
+    # the sentence SYSTEM_PROMPT teaches -- "the kubelet only sets `OOMKilled`
+    # when the kernel's OOM killer terminates a container". Defect 45 recorded
+    # this checker penalising the prompt's own sentences and defect 56 taught
+    # the contradiction rules to recognise it; defect 59 ported the positional
+    # denials here and not this one, so `stuck_terminating_finalizer` went on
+    # failing on exactly that sentence. Same guard, one place.
+    return bool(_OOM_RULE_STATEMENT.search(lowered)
+                or _REASON_CONTRAST.search(lowered))
 
 
 def _asserted(lowered, phrase):

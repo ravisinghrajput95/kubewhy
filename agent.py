@@ -547,14 +547,30 @@ def prefetch_target(target):
         return []
 
     # Rows come largest blast radius first, so the first example is the one
-    # the model would have been pointed at. A failed Job or a controller with
-    # no pods has no example, and its scan row is the whole of what exists.
+    # the model would have been pointed at.
+    #
+    # **Both reads or neither (defect 61).** A failed Job, or any controller
+    # with no pods, has no example to describe -- and its scan row alone is
+    # not half an answer, it is a whole one: `{"uncovered/nightly-rollup":
+    # {"status":"Failed","pods":0,"reason":"DeadlineExceeded"}}` contains the
+    # status, the cause and the fact that nothing is left to look at. Handed
+    # that, the model answered in about 21 seconds and never called
+    # `list_jobs`, which is where the deadline it exceeded actually lives.
+    # Measured paired: 1/5 with the scan row against 5/5 without it, and
+    # 0 of 3 runs made any call of their own where 19 of 19 previously did.
+    #
+    # This is exactly defect 53's stop-searching risk, and the shape that
+    # triggers it is identifiable in advance: a prefetch that cannot supply
+    # `describe_pod` is a prefetch whose scan row has to carry the whole
+    # diagnosis by itself. So it supplies nothing, the run behaves as it did
+    # with the switch off, and the rounds this saves elsewhere are untouched
+    # -- every case defect 55 measured has an example pod.
     for key, row in rows.items():
         if isinstance(row, dict) and row.get("example"):
             namespace = key.split("/", 1)[0]
             pod, _ = read("describe_pod", {"name": row["example"], "namespace": namespace})
-            return [scan, pod] if pod else [scan]
-    return [scan]
+            return [scan, pod] if pod else []
+    return []
 
 
 def _captured_note(prefetched):

@@ -1,0 +1,520 @@
+[
+ {
+  "case": "entrypoint_that_does_not_exist",
+  "model": "qwen3",
+  "context": "kind-kubewhy-d61",
+  "think": true,
+  "passed": true,
+  "seconds": 121.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T12:57:29",
+  "load_before": 1.36,
+  "load_after": 1.17,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs",
+   "get_pod_events"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "report-worker",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-q58pw",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-q58pw",
+    "namespace": "uncovered",
+    "tail": 100
+   },
+   {
+    "namespace": "uncovered",
+    "limit": 5,
+    "name": "report-worker-66d8ddbf9f-q58pw"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/report-worker\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"report-worker-66d8ddbf9f-q58pw\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"report-worker-66d8ddbf9f-q58pw\", \"namespace\": \"uncovered\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-d61-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 9, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=app pod=report-worker-66d8ddbf9f-q58pw_uncovered(fefca862-03cf-4001-b540-4e5dbd2efc3f)\", \"last_termination\": {\"reason\": \"StartError\", \"exit_code\": 128}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"result\": \"no logs available for pod report-worker-66d8ddbf9f-q58pw\"}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"report-worker-66d8ddbf9f-q58pw\", \"events\": [{\"reason\": \"BackOff\", \"count\": 21, \"age\": \"3m\", \"message\": \"Back-off restarting failed container app in pod report-worker-66d8ddbf9f-q58pw_uncovered(fefca862-03cf-4001-b540-4e5dbd2efc3f)\"}, {\"reason\": \"Failed\", \"count\": 9, \"age\": \"7m\", \"message\": \"Error: failed to create containerd task: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: \\\"/usr/local/bin/definitely-not-here\\\": stat /usr/local/bin/definitely-not-here: no such file or directory\"}, {\"reason\": \"FailedScheduling\", \"count\": 1, \"age\": \"24m\", \"message\": \"0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\", \"superseded\": \"the pod was scheduled after this\"}]}"
+   }
+  ],
+  "draft": "The `report-worker` deployment in the `uncovered` namespace is failing to start due to a **missing executable in the container image**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n1. **CrashLoopBackOff with StartError (Exit Code 128)**:\n   - The pod crashes immediately upon startup and retries every 5 minutes.\n   - The container fails during initialization, likely due to an invalid or missing command in the `busybox:1.36` image.\n\n2. **Critical Error from Pod Events**:\n   - The container attempts to execute a binary at `/usr/local/bin/definitely-not-here`, which does **not exist** in the image.\n   - This indicates the container's **entrypoint** or **command** is misconfigured. For example:\n     - The `CMD` or `ENTRYPOINT` in the Dockerfile might point to a script or executable that isn't present.\n     - The image might be missing critical binaries required for the application to run.\n\n3. **BusyBox Image Limitation**:\n   - `busybox:1.36` is a minimal image that includes only basic utilities (e.g., `sh`, `ls`, `echo`). If the deployment expects additional tools (e.g., a custom script or external binary), they must be explicitly included in the image or mounted via a volume.\n\n---\n\n### **Next Steps**\n1. **Verify the Dockerfile**:\n   - Ensure the `CMD` or `ENTRYPOINT` in the `busybox:1.36` image points to a valid command (e.g., `sh` or a script included in the image).\n   - If a custom script is required, rebuild the image with the script included or use a larger base image (e.g., `alpine` or `ubuntu`).\n\n2. **Check Volume Mounts**:\n   - The `kube-root-ca.crt` ConfigMap is mounted via a volume, but the error suggests the container's execution path is broken. Ensure no volume mounts interfere with the container's binary paths.\n\n3. **Test the Image Locally**:\n   - Run the `busybox:1.36` image locally to confirm it can execute the expected command. For example:\n     ```bash\n     docker run --rm busybox:1.36 sh\n     ```\n   - If the command fails, the image is misconfigured.\n\n---\n\n### **Summary**\nThe deployment fails because the container image lacks the necessary executable for the entrypoint/command specified. Fix the image configuration or use a compatible base image to resolve the issue.",
+  "answer": "The `report-worker` deployment in the `uncovered` namespace is failing to start due to a **missing executable in the container image**. Here's the full diagnosis:\n\n---\n\n### **Root Cause**\n1. **CrashLoopBackOff with StartError (Exit Code 128)**:\n   - The pod crashes immediately upon startup and retries every 5 minutes.\n   - The container fails during initialization, likely due to an invalid or missing command in the `busybox:1.36` image.\n\n2. **Critical Error from Pod Events**:\n   - The container attempts to execute a binary at `/usr/local/bin/definitely-not-here`, which does **not exist** in the image.\n   - This indicates the container's **entrypoint** or **command** is misconfigured. For example:\n     - The `CMD` or `ENTRYPOINT` in the Dockerfile might point to a script or executable that isn't present.\n     - The image might be missing critical binaries required for the application to run.\n\n3. **BusyBox Image Limitation**:\n   - `busybox:1.36` is a minimal image that includes only basic utilities (e.g., `sh`, `ls`, `echo`). If the deployment expects additional tools (e.g., a custom script or external binary), they must be explicitly included in the image or mounted via a volume.\n\n---\n\n### **Next Steps**\n1. **Verify the Dockerfile**:\n   - Ensure the `CMD` or `ENTRYPOINT` in the `busybox:1.36` image points to a valid command (e.g., `sh` or a script included in the image).\n   - If a custom script is required, rebuild the image with the script included or use a larger base image (e.g., `alpine` or `ubuntu`).\n\n2. **Check Volume Mounts**:\n   - The `kube-root-ca.crt` ConfigMap is mounted via a volume, but the error suggests the container's execution path is broken. Ensure no volume mounts interfere with the container's binary paths.\n\n3. **Test the Image Locally**:\n   - Run the `busybox:1.36` image locally to confirm it can execute the expected command. For example:\n     ```bash\n     docker run --rm busybox:1.36 sh\n     ```\n   - If the command fails, the image is misconfigured.\n\n---\n\n### **Summary**\nThe deployment fails because the container image lacks the necessary executable for the entrypoint/command specified. Fix the image configuration or use a compatible base image to resolve the issue.",
+  "nudges": 1,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 121685.0,
+   "tool_ms": 33.0,
+   "rounds": 4,
+   "round_ms": [
+    19345.9,
+    47697.9,
+    12457.6,
+    42183.5
+   ],
+   "slowest_round_ms": 47697.9,
+   "model_share": 1.0,
+   "wall_ms": 121726.4,
+   "unaccounted_ms": 8.4,
+   "slept_ms": 0.2
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "128",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "128"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/report-worker.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "5",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/report-worker.example",
+       "value": "5"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "busybox:1.36",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "busybox:1.36"
+      }
+     ]
+    },
+    {
+     "claim": "/usr/local/bin/definitely-not-here",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[1].message",
+       "value": "/usr/local/bin/definitely-not-here"
+      }
+     ]
+    },
+    {
+     "claim": " or ",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-4",
+       "tool": "get_pod_events",
+       "field": "events[1].message",
+       "value": " or "
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "busybox:1.36",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "busybox:1.36"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1.36"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "68e26792f17a",
+  "target": {
+   "kind": "workload",
+   "name": "report-worker",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "entrypoint_that_does_not_exist",
+  "model": "qwen3",
+  "context": "kind-kubewhy-d61",
+  "think": true,
+  "passed": true,
+  "seconds": 100.3,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T12:59:31",
+  "load_before": 1.17,
+  "load_after": 0.89,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_events",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "report-worker",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-q58pw",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-q58pw",
+    "namespace": "uncovered",
+    "limit": 5
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-q58pw",
+    "namespace": "uncovered",
+    "tail": 50
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/report-worker\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"report-worker-66d8ddbf9f-q58pw\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"report-worker-66d8ddbf9f-q58pw\", \"namespace\": \"uncovered\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-d61-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 9, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=app pod=report-worker-66d8ddbf9f-q58pw_uncovered(fefca862-03cf-4001-b540-4e5dbd2efc3f)\", \"last_termination\": {\"reason\": \"StartError\", \"exit_code\": 128}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_events",
+    "result": "{\"pod\": \"report-worker-66d8ddbf9f-q58pw\", \"events\": [{\"reason\": \"BackOff\", \"count\": 21, \"age\": \"4m\", \"message\": \"Back-off restarting failed container app in pod report-worker-66d8ddbf9f-q58pw_uncovered(fefca862-03cf-4001-b540-4e5dbd2efc3f)\"}, {\"reason\": \"Failed\", \"count\": 9, \"age\": \"8m\", \"message\": \"Error: failed to create containerd task: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: \\\"/usr/local/bin/definitely-not-here\\\": stat /usr/local/bin/definitely-not-here: no such file or directory\"}, {\"reason\": \"FailedScheduling\", \"count\": 1, \"age\": \"25m\", \"message\": \"0/1 nodes are available: 1 node(s) had untolerated taint(s). no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.\", \"superseded\": \"the pod was scheduled after this\"}]}"
+   },
+   {
+    "id": "tool-4",
+    "tool": "get_pod_logs",
+    "result": "{\"result\": \"no logs available for pod report-worker-66d8ddbf9f-q58pw\"}"
+   }
+  ],
+  "draft": "The scan identified **uncovered/report-worker** as the sole problematic workload. Here's its full status:\n\n**uncovered/report-worker**  \n- **Status**: CrashLoopBackOff (pod repeatedly crashing and restarting)  \n- **Root Cause**: The container failed to start because it tried to execute a non-existent binary (`definitely-not-here`).  \n- **Key Evidence**:  \n  - Pod events show: `Error: failed to create containerd task: ... /usr/local/bin/definitely-not-here: no such file or directory`.  \n  - No logs were available, but the error is definitive: the container lacks the required executable.  \n- **Fix**: Update the container's `CMD` or `ENTRYPOINT` to use an existing tool in the `busybox` image (e.g., `sh`, `echo`) or switch to a full distro image if dependencies are needed.  \n\nNo other workloads were reported in the scan.",
+  "answer": "The scan identified **uncovered/report-worker** as the sole problematic workload. Here's its full status:\n\n**uncovered/report-worker**  \n- **Status**: CrashLoopBackOff (pod repeatedly crashing and restarting)  \n- **Root Cause**: The container failed to start because it tried to execute a non-existent binary (`definitely-not-here`).  \n- **Key Evidence**:  \n  - Pod events show: `Error: failed to create containerd task: ... /usr/local/bin/definitely-not-here: no such file or directory`.  \n  - No logs were available, but the error is definitive: the container lacks the required executable.  \n- **Fix**: Update the container's `CMD` or `ENTRYPOINT` to use an existing tool in the `busybox` image (e.g., `sh`, `echo`) or switch to a full distro image if dependencies are needed.  \n\nNo other workloads were reported in the scan.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 1,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 100303.9,
+   "tool_ms": 38.7,
+   "rounds": 3,
+   "round_ms": [
+    28518.2,
+    24757.3,
+    47028.4
+   ],
+   "slowest_round_ms": 47028.4,
+   "model_share": 1.0,
+   "wall_ms": 100347.4,
+   "unaccounted_ms": 4.8,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/report-worker.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "definitely-not-here",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-3",
+       "tool": "get_pod_events",
+       "field": "events[1].message",
+       "value": "definitely-not-here"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "a7bdc401f5b7",
+  "target": {
+   "kind": "workload",
+   "name": "report-worker",
+   "namespace": "uncovered"
+  }
+ },
+ {
+  "case": "entrypoint_that_does_not_exist",
+  "model": "qwen3",
+  "context": "kind-kubewhy-d61",
+  "think": true,
+  "passed": true,
+  "seconds": 56.6,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T13:01:11",
+  "load_before": 0.89,
+  "load_after": 1.6,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod",
+   "get_pod_logs"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "report-worker",
+    "namespaces": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-q58pw",
+    "namespace": "uncovered"
+   },
+   {
+    "name": "report-worker-66d8ddbf9f-q58pw",
+    "namespace": "uncovered",
+    "container": "app",
+    "tail": 100
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered/report-worker\": {\"status\": \"CrashLoopBackOff\", \"pods\": 1, \"example\": \"report-worker-66d8ddbf9f-q58pw\", \"fault\": \"crash\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"report-worker-66d8ddbf9f-q58pw\", \"namespace\": \"uncovered\", \"status\": \"CrashLoopBackOff\", \"node\": \"kubewhy-d61-control-plane\", \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"ready\": false, \"restarts\": 9, \"waiting_reason\": \"CrashLoopBackOff\", \"waiting_message\": \"back-off 5m0s restarting failed container=app pod=report-worker-66d8ddbf9f-q58pw_uncovered(fefca862-03cf-4001-b540-4e5dbd2efc3f)\", \"last_termination\": {\"reason\": \"StartError\", \"exit_code\": 128}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}}"
+   },
+   {
+    "id": "tool-3",
+    "tool": "get_pod_logs",
+    "result": "{\"result\": \"no logs available for pod report-worker-66d8ddbf9f-q58pw\"}"
+   }
+  ],
+  "draft": "The `report-worker` pod is crashing with `CrashLoopBackOff` due to a container startup failure. Here's why:\n\n1. **Exit Code 128**: This typically indicates a signal (SIGUSR2), but in Kubernetes, it often correlates with container startup errors (e.g., missing entry points or failed initialization). The `StartError` suggests the container failed to launch.\n\n2. **BusyBox Image**: The `busybox:1.36` image is minimal and requires explicit commands to run. If no `command` or `args` are specified in the pod's spec, the container exits immediately after starting, triggering the crash loop.\n\n3. **No Logs**: The lack of logs confirms the container either isn't writing output or the logs are not accessible. This could be due to misconfigured logging drivers or the container exiting too quickly to generate logs.\n\n**Fix**:  \nCheck the deployment's container configuration to ensure a valid `command` or `entrypoint` is specified. For example:\n```yaml\ncontainers:\n  - name: app\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"echo 'Hello from BusyBox' && sleep infinity\"]\n```\nThis ensures the container runs a valid process. If the issue persists, verify network access to the image and check for resource constraints (CPU/memory).",
+  "answer": "The `report-worker` pod is crashing with `CrashLoopBackOff` due to a container startup failure. Here's why:\n\n1. **Exit Code 128**: This typically indicates a signal (SIGUSR2), but in Kubernetes, it often correlates with container startup errors (e.g., missing entry points or failed initialization). The `StartError` suggests the container failed to launch.\n\n2. **BusyBox Image**: The `busybox:1.36` image is minimal and requires explicit commands to run. If no `command` or `args` are specified in the pod's spec, the container exits immediately after starting, triggering the crash loop.\n\n3. **No Logs**: The lack of logs confirms the container either isn't writing output or the logs are not accessible. This could be due to misconfigured logging drivers or the container exiting too quickly to generate logs.\n\n**Fix**:  \nCheck the deployment's container configuration to ensure a valid `command` or `entrypoint` is specified. For example:\n```yaml\ncontainers:\n  - name: app\n    image: busybox:1.36\n    command: [\"sh\", \"-c\", \"echo 'Hello from BusyBox' && sleep infinity\"]\n```\nThis ensures the container runs a valid process. If the issue persists, verify network access to the image and check for resource constraints (CPU/memory).",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 56560.3,
+   "tool_ms": 42.0,
+   "rounds": 2,
+   "round_ms": [
+    22335.6,
+    34224.8
+   ],
+   "slowest_round_ms": 34224.8,
+   "model_share": 0.999,
+   "wall_ms": 56606.0,
+   "unaccounted_ms": 3.6,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "CrashLoopBackOff",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/report-worker.status",
+       "value": "CrashLoopBackOff"
+      }
+     ]
+    },
+    {
+     "claim": "crashloopbackoff",
+     "kind": "status",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered/report-worker.status",
+       "value": "crashloopbackoff"
+      }
+     ]
+    },
+    {
+     "claim": "128",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.last_termination.exit_code",
+       "value": "128"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1.36"
+      }
+     ]
+    },
+    {
+     "claim": "busybox:1.36",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "busybox:1.36"
+      }
+     ]
+    },
+    {
+     "claim": "1.36",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "containers.app.image",
+       "value": "1.36"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "6ef2e2e6809e",
+  "target": {
+   "kind": "workload",
+   "name": "report-worker",
+   "namespace": "uncovered"
+  }
+ }
+]

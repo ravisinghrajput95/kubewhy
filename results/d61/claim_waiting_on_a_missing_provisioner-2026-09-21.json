@@ -1,0 +1,446 @@
+[
+ {
+  "case": "claim_waiting_on_a_missing_provisioner",
+  "model": "qwen3",
+  "context": "kind-kubewhy-d61",
+  "think": true,
+  "passed": true,
+  "seconds": 28.5,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T13:14:23",
+  "load_before": 1.42,
+  "load_after": 0.98,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "ledger-writer",
+    "namespaces": "uncovered2"
+   },
+   {
+    "name": "ledger-writer",
+    "namespace": "uncovered2"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/ledger-writer\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"ledger-writer\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"ledger-writer\", \"namespace\": \"uncovered2\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"ledger-data\", \"phase\": \"Pending\", \"storage_class\": \"ghost-provisioner\", \"storage_class_exists\": true, \"provisioner\": \"example.com/no-such-csi-driver\", \"event\": {\"type\": \"Normal\", \"reason\": \"ExternalProvisioning\", \"count\": 163, \"age\": \"1s\", \"message\": \"Waiting for a volume to be created either by the external provisioner 'example.com/no-such-csi-driver' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.\"}}]}}"
+   }
+  ],
+  "draft": "The **ledger-writer pod** is stuck in **Pending** due to a **PersistentVolumeClaim (PVC)** issue. Here's the breakdown:\n\n1. **Root Cause**:  \n   The PVC `ledger-data` in the `uncovered2` namespace is **Pending** because the specified storage class `ghost-provisioner` does not exist. The CSI driver `example.com/no-such-csi-driver` is also not registered, so the external provisioner cannot create the volume.\n\n2. **Immediate Action Needed**:  \n   - Verify if the storage class `ghost-provisioner` is correctly configured.  \n   - Check if the CSI driver `example.com/no-such-csi-driver` is installed and running.  \n   - If the provisioner is unavailable, manually create a `PersistentVolume` (PV) that matches the PVC's requirements or update the PVC to use an existing PV.  \n   - Alternatively, correct the PVC to use a valid storage class that exists in the cluster.\n\nOnce the PVC is bound, the pod will be able to schedule and start.",
+  "answer": "The **ledger-writer pod** is stuck in **Pending** due to a **PersistentVolumeClaim (PVC)** issue. Here's the breakdown:\n\n1. **Root Cause**:  \n   The PVC `ledger-data` in the `uncovered2` namespace is **Pending** because the specified storage class `ghost-provisioner` does not exist. The CSI driver `example.com/no-such-csi-driver` is also not registered, so the external provisioner cannot create the volume.\n\n2. **Immediate Action Needed**:  \n   - Verify if the storage class `ghost-provisioner` is correctly configured.  \n   - Check if the CSI driver `example.com/no-such-csi-driver` is installed and running.  \n   - If the provisioner is unavailable, manually create a `PersistentVolume` (PV) that matches the PVC's requirements or update the PVC to use an existing PV.  \n   - Alternatively, correct the PVC to use a valid storage class that exists in the cluster.\n\nOnce the PVC is bound, the pod will be able to schedule and start.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 28507.8,
+   "tool_ms": 15.8,
+   "rounds": 1,
+   "round_ms": [
+    28507.8
+   ],
+   "slowest_round_ms": 28507.8,
+   "model_share": 0.999,
+   "wall_ms": 28526.8,
+   "unaccounted_ms": 3.2,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "2",
+     "kind": "identifier",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "namespace",
+       "value": "2"
+      }
+     ]
+    },
+    {
+     "claim": "ghost-provisioner",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].storage_class",
+       "value": "ghost-provisioner"
+      }
+     ]
+    },
+    {
+     "claim": "example.com/no-such-csi-driver",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].provisioner",
+       "value": "example.com/no-such-csi-driver"
+      }
+     ]
+    },
+    {
+     "claim": "ghost-provisioner",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].storage_class",
+       "value": "ghost-provisioner"
+      }
+     ]
+    },
+    {
+     "claim": "example.com/no-such-csi-driver",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].provisioner",
+       "value": "example.com/no-such-csi-driver"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "33d21705a46d",
+  "target": {
+   "kind": "workload",
+   "name": "ledger-writer",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "claim_waiting_on_a_missing_provisioner",
+  "model": "qwen3",
+  "context": "kind-kubewhy-d61",
+  "think": true,
+  "passed": true,
+  "seconds": 26.7,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T13:14:51",
+  "load_before": 0.98,
+  "load_after": 0.83,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "ledger-writer",
+    "namespaces": "uncovered2"
+   },
+   {
+    "name": "ledger-writer",
+    "namespace": "uncovered2"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/ledger-writer\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"ledger-writer\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"ledger-writer\", \"namespace\": \"uncovered2\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"ledger-data\", \"phase\": \"Pending\", \"storage_class\": \"ghost-provisioner\", \"storage_class_exists\": true, \"provisioner\": \"example.com/no-such-csi-driver\", \"event\": {\"type\": \"Normal\", \"reason\": \"ExternalProvisioning\", \"count\": 163, \"age\": \"29s\", \"message\": \"Waiting for a volume to be created either by the external provisioner 'example.com/no-such-csi-driver' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.\"}}]}}"
+   }
+  ],
+  "draft": "The **ledger-writer pod** is stuck in **Pending** because it depends on a **PersistentVolumeClaim (PVC)** named `ledger-data` that cannot be provisioned. Here's why:\n\n1. **PVC is unbound**: The PVC `ledger-data` is in the **Pending** state because the storage class `ghost-provisioner` requires a CSI driver that does not exist. The provisioner `example.com/no-such-csi-driver` is invalid or not installed.\n\n2. **No available storage**: The cluster has no CSI driver for `ghost-provisioner`, so the PVC cannot be created. Without this PVC, the pod cannot be scheduled (hence `Pending`).\n\n### Solution:\n- **Fix the PVC**: Either:\n  - Replace the invalid storage class with one that uses a registered CSI driver (e.g., `local-path-provisioner` or a cloud provider's class).\n  - Manually create the PVC if the storage is pre-provisioned.\n- **Install the missing driver**: If the CSI driver is supposed to be used, ensure it is correctly installed and registered in the cluster.\n\nWithout resolving the PVC issue, the pod will remain in **Pending**.",
+  "answer": "The **ledger-writer pod** is stuck in **Pending** because it depends on a **PersistentVolumeClaim (PVC)** named `ledger-data` that cannot be provisioned. Here's why:\n\n1. **PVC is unbound**: The PVC `ledger-data` is in the **Pending** state because the storage class `ghost-provisioner` requires a CSI driver that does not exist. The provisioner `example.com/no-such-csi-driver` is invalid or not installed.\n\n2. **No available storage**: The cluster has no CSI driver for `ghost-provisioner`, so the PVC cannot be created. Without this PVC, the pod cannot be scheduled (hence `Pending`).\n\n### Solution:\n- **Fix the PVC**: Either:\n  - Replace the invalid storage class with one that uses a registered CSI driver (e.g., `local-path-provisioner` or a cloud provider's class).\n  - Manually create the PVC if the storage is pre-provisioned.\n- **Install the missing driver**: If the CSI driver is supposed to be used, ensure it is correctly installed and registered in the cluster.\n\nWithout resolving the PVC issue, the pod will remain in **Pending**.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 26683.9,
+   "tool_ms": 29.6,
+   "rounds": 1,
+   "round_ms": [
+    26683.9
+   ],
+   "slowest_round_ms": 26683.9,
+   "model_share": 0.999,
+   "wall_ms": 26716.4,
+   "unaccounted_ms": 3.0,
+   "slept_ms": 0.1
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "ghost-provisioner",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].storage_class",
+       "value": "ghost-provisioner"
+      }
+     ]
+    },
+    {
+     "claim": "example.com/no-such-csi-driver",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].provisioner",
+       "value": "example.com/no-such-csi-driver"
+      }
+     ]
+    },
+    {
+     "claim": "ghost-provisioner",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].storage_class",
+       "value": "ghost-provisioner"
+      }
+     ]
+    },
+    {
+     "claim": "Pending",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/ledger-writer.status",
+       "value": "Pending"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "9bc539192218",
+  "target": {
+   "kind": "workload",
+   "name": "ledger-writer",
+   "namespace": "uncovered2"
+  }
+ },
+ {
+  "case": "claim_waiting_on_a_missing_provisioner",
+  "model": "qwen3",
+  "context": "kind-kubewhy-d61",
+  "think": true,
+  "passed": true,
+  "seconds": 25.4,
+  "confidence": "grounded",
+  "model_resident": true,
+  "started_at": "2026-09-21T13:15:18",
+  "load_before": 0.83,
+  "load_after": 0.67,
+  "low_power_mode": true,
+  "unverified": [],
+  "tools": [
+   "scan_cluster",
+   "describe_pod"
+  ],
+  "prefetched": 2,
+  "arguments": [
+   {
+    "workload": "ledger-writer",
+    "namespaces": "uncovered2"
+   },
+   {
+    "name": "ledger-writer",
+    "namespace": "uncovered2"
+   }
+  ],
+  "evidence": [
+   {
+    "id": "tool-1",
+    "tool": "scan_cluster",
+    "result": "{\"uncovered2/ledger-writer\": {\"status\": \"Pending\", \"pods\": 1, \"example\": \"ledger-writer\"}}"
+   },
+   {
+    "id": "tool-2",
+    "tool": "describe_pod",
+    "result": "{\"pod\": \"ledger-writer\", \"namespace\": \"uncovered2\", \"status\": \"Pending\", \"node\": null, \"containers\": {\"app\": {\"image\": \"busybox:1.36\", \"requests\": {}, \"limits\": {}, \"config\": [{\"kind\": \"ConfigMap\", \"name\": \"kube-root-ca.crt\", \"via\": \"volume\", \"updates_in_place\": true}]}}, \"scheduling\": {\"reason\": \"Unschedulable\", \"message\": \"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found\", \"volume_claims\": [{\"name\": \"ledger-data\", \"phase\": \"Pending\", \"storage_class\": \"ghost-provisioner\", \"storage_class_exists\": true, \"provisioner\": \"example.com/no-such-csi-driver\", \"event\": {\"type\": \"Normal\", \"reason\": \"ExternalProvisioning\", \"count\": 163, \"age\": \"56s\", \"message\": \"Waiting for a volume to be created either by the external provisioner 'example.com/no-such-csi-driver' or manually by the system administrator. If volume creation is delayed, please verify that the provisioner is running and correctly registered.\"}}]}}"
+   }
+  ],
+  "draft": "The **ledger-writer pod** is stuck in **Pending** because it depends on a **PersistentVolumeClaim (PVC)** named `ledger-data` that cannot be provisioned. Here's why:\n\n1. **Unbound PVC**:  \n   The PVC `ledger-data` is unbound, meaning no PersistentVolume (PV) has been created to satisfy it. The error message explicitly states:  \n   `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.\"`\n\n2. **Storage Class Issue**:  \n   The PVC uses the storage class `ghost-provisioner`, which exists, but the associated CSI driver `example.com/no-such-csi-driver` is **not found**. This means:  \n   - The CSI driver is either not installed, misconfigured, or not registered with Kubernetes.  \n   - The provisioner is likely not running, causing the PVC to remain in a `Pending` state.\n\n3. **Next Steps**:  \n   - Verify if the CSI driver `example.com/no-such-csi-driver` is installed and running.  \n   - Check the logs of the CSI driver pod (if any) for errors.  \n   - Ensure the storage class `ghost-provisioner` is correctly configured to use the available provisioner.  \n   - If the provisioner is unreachable, manually create a PV for the PVC or fix the provisioner setup.\n\nWithout a valid PV, the pod cannot schedule, and the PVC will stay in `Pending` until the issue is resolved.",
+  "answer": "The **ledger-writer pod** is stuck in **Pending** because it depends on a **PersistentVolumeClaim (PVC)** named `ledger-data` that cannot be provisioned. Here's why:\n\n1. **Unbound PVC**:  \n   The PVC `ledger-data` is unbound, meaning no PersistentVolume (PV) has been created to satisfy it. The error message explicitly states:  \n   `\"0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.\"`\n\n2. **Storage Class Issue**:  \n   The PVC uses the storage class `ghost-provisioner`, which exists, but the associated CSI driver `example.com/no-such-csi-driver` is **not found**. This means:  \n   - The CSI driver is either not installed, misconfigured, or not registered with Kubernetes.  \n   - The provisioner is likely not running, causing the PVC to remain in a `Pending` state.\n\n3. **Next Steps**:  \n   - Verify if the CSI driver `example.com/no-such-csi-driver` is installed and running.  \n   - Check the logs of the CSI driver pod (if any) for errors.  \n   - Ensure the storage class `ghost-provisioner` is correctly configured to use the available provisioner.  \n   - If the provisioner is unreachable, manually create a PV for the PVC or fix the provisioner setup.\n\nWithout a valid PV, the pod cannot schedule, and the PVC will stay in `Pending` until the issue is resolved.",
+  "nudges": 0,
+  "policies": 0,
+  "coverage": 0,
+  "reconciles": 0,
+  "failures": [],
+  "notes": [],
+  "timing": {
+   "model_ms": 25337.9,
+   "tool_ms": 29.8,
+   "rounds": 1,
+   "round_ms": [
+    25337.9
+   ],
+   "slowest_round_ms": 25337.9,
+   "model_share": 0.999,
+   "wall_ms": 25371.9,
+   "unaccounted_ms": 4.2,
+   "slept_ms": 0.0
+  },
+  "rca": {
+   "observations": [
+    {
+     "claim": "0",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.message",
+       "value": "0"
+      }
+     ]
+    },
+    {
+     "claim": "1",
+     "kind": "number",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/ledger-writer.pods",
+       "value": "1"
+      }
+     ]
+    },
+    {
+     "claim": "ghost-provisioner",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].storage_class",
+       "value": "ghost-provisioner"
+      }
+     ]
+    },
+    {
+     "claim": "example.com/no-such-csi-driver",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].provisioner",
+       "value": "example.com/no-such-csi-driver"
+      }
+     ]
+    },
+    {
+     "claim": "Pending",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/ledger-writer.status",
+       "value": "Pending"
+      }
+     ]
+    },
+    {
+     "claim": "example.com/no-such-csi-driver",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].provisioner",
+       "value": "example.com/no-such-csi-driver"
+      }
+     ]
+    },
+    {
+     "claim": "ghost-provisioner",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-2",
+       "tool": "describe_pod",
+       "field": "scheduling.volume_claims[0].storage_class",
+       "value": "ghost-provisioner"
+      }
+     ]
+    },
+    {
+     "claim": "Pending",
+     "kind": "quoted",
+     "evidence": [
+      {
+       "id": "tool-1",
+       "tool": "scan_cluster",
+       "field": "uncovered2/ledger-writer.status",
+       "value": "Pending"
+      }
+     ]
+    }
+   ],
+   "inferences": [],
+   "contradictions": [],
+   "unknowns": [],
+   "corrections": []
+  },
+  "contradictions": [],
+  "termination": null,
+  "budget_s": null,
+  "run_id": "006a18abe392",
+  "target": {
+   "kind": "workload",
+   "name": "ledger-writer",
+   "namespace": "uncovered2"
+  }
+ }
+]

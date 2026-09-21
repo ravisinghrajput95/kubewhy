@@ -828,16 +828,41 @@ class TestTargetPrefetch:
         assert result["unverified"] == []
         assert result["confidence"] == "grounded"
 
-    def test_a_row_with_no_example_pod_reads_only_the_scan(self, monkeypatch):
-        """A failed Job whose pods were deleted: the row is all there is."""
+    def test_a_row_with_no_example_pod_hands_over_nothing(self, monkeypatch):
+        """
+        Defect 61. A failed Job whose pods were deleted has no example to
+        describe, and its scan row is not half an answer -- it carries the
+        status, the cause and the fact that nothing is left to look at. Handed
+        that alone the model answered in ~21s and never called `list_jobs`,
+        where the deadline it exceeded actually lives: measured paired, 1/5
+        against 5/5, and 0 of 3 runs made any call of their own where 19 of 19
+        previously did.
+
+        So the prefetch is both reads or neither. The scan still happens --
+        that is how the shape is detected -- and its result is dropped.
+        """
         job = {"demo/crasher": {"status": "Failed", "pods": 0,
                                 "reason": "DeadlineExceeded"}}
         result, messages, calls = self._ask(monkeypatch, "on", scan=job)
 
         assert [name for name, _ in calls] == ["scan_cluster"]
-        names, results = self._handed(messages)
-        assert names == ["scan_cluster"] and "DeadlineExceeded" in results[0]
-        assert len(result["tool_calls"]) == 1
+        # No prefetched turn exists at all, which is the whole claim. The row
+        # may still reach the model later, through a call the model makes
+        # itself -- that is the point of the fix, not a leak.
+        assert self._handed(messages) == ([], [])
+        assert result["tool_calls"] == []
+
+    def test_the_counter_a_row_with_an_example_still_hands_over_both(
+            self, monkeypatch):
+        """
+        Without this, defect 61's fix could disable the prefetch entirely and
+        every test above it would still pass -- giving back the two rounds
+        defect 55 measured. Every case defect 55 covered has an example pod.
+        """
+        result, messages, _ = self._ask(monkeypatch, "on")
+
+        assert self._handed(messages)[0] == ["scan_cluster", "describe_pod"]
+        assert len(result["tool_calls"]) == 2
 
     @pytest.mark.parametrize("scan", [
         {"error": "Forbidden"},
@@ -851,11 +876,16 @@ class TestTargetPrefetch:
         assert [m["role"] for m in messages] == ["system", "user"]
         assert result["tool_calls"] == []
 
-    def test_a_describe_that_failed_keeps_the_scan(self, monkeypatch):
+    def test_a_describe_that_failed_hands_over_nothing(self, monkeypatch):
+        """
+        Defect 61, same rule from the other side. A scan row delivered without
+        the describe_pod beside it is the shape that ends the search early,
+        however it came to be alone. The error is still not passed on.
+        """
         result, messages, _ = self._ask(monkeypatch, "on", describe={"error": "NotFound"})
 
-        assert [c["name"] for c in result["tool_calls"]] == ["scan_cluster"]
-        assert self._handed(messages)[0] == ["scan_cluster"]
+        assert result["tool_calls"] == []
+        assert self._handed(messages) == ([], [])
         assert "NotFound" not in json.dumps(messages, default=str)
 
     @pytest.mark.parametrize("question", [
