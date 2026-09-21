@@ -557,32 +557,35 @@ def prefetch_target(target):
     return [scan]
 
 
-def _prefetched_block(prefetched):
+def _captured_note(prefetched):
     """
-    Render captured evidence for the user message.
+    The note that frames captured evidence. **Names the tools, never their
+    output.**
 
-    Captured evidence (the controller, --explain) was collected because the
-    subject may no longer be there to re-read. It says so explicitly: a tool
-    returning 404 for this pod is expected, and does not mean the evidence
-    below is wrong.
+    Captured evidence (the controller, `--explain`) was collected because the
+    subject may no longer be there to re-read, and the model has to be told
+    that so it does not withhold a diagnosis waiting for a 404 to resolve.
+    That framing is the operator talking and belongs in the user turn.
 
-    Target evidence (prefetch_target) is not rendered here. It goes into the
-    conversation as tool calls and results -- see prefetched_messages.
+    What does *not* belong there is what the cluster said. Defect 56 moved the
+    target prefetch out of the user message on the grounds that an image
+    reference or a log line is data and a user turn is where instructions live,
+    and it left this path behind (defect 64). `get_pod_logs` output is the
+    project's own canonical injection vector -- `injection_in_logs_is_data`
+    exists for it -- and it was being pasted inside an imperative block. The
+    results now arrive as tool results beside the target's; this is the
+    sentence that explains them.
     """
-    parts = []
-    for item in prefetched:
-        args = ", ".join(f"{k}={v!r}" for k, v in (item.get("arguments") or {}).items())
-        parts.append(
-            f"{item['name']}({args}) returned, at {item.get('captured_at', 'an earlier time')}:\n"
-            f"{item['result']}"
-        )
+    named = ", ".join(sorted({item["name"] for item in prefetched}))
+    when = next((item.get("captured_at") for item in prefetched
+                 if item.get("captured_at")), "an earlier time")
     return (
-        "\n\nEvidence already collected for you, while the pod was still "
-        "running. The pod may have been deleted since — if a tool now returns "
-        "a 404 for it, that is expected and does not contradict this. For a "
-        "Job or CronJob pod this is the only record that will ever exist, so "
-        "do not ask for it again and do not withhold a diagnosis for want of "
-        "it:\n\n" + "\n\n".join(parts)
+        f"\n\n{named} was already run for you at {when}, while the pod was "
+        "still running, and the results are below. The pod may have been "
+        "deleted since — if a tool now returns a 404 for it, that is expected "
+        "and does not contradict those results. For a Job or CronJob pod they "
+        "are the only record that will ever exist, so do not ask for it again "
+        "and do not withhold a diagnosis for want of it."
     )
 
 
@@ -1308,17 +1311,19 @@ def _stream(question, model=MODEL, think=None, prefetched=None, target=None):
     ]
 
     captured = [item for item in prefetched if item.get("source") != "target"]
-    content = question + (_prefetched_block(captured) if captured else "")
+    content = question + (_captured_note(captured) if captured else "")
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": content},
     ]
-    # Target evidence goes in as the model's own first calls, not as text in the
-    # user's message: what a cluster says -- an image reference, a log line --
-    # is data, and a user turn is where instructions live. Wire-neutral here;
-    # each backend shapes it in chat(). See backends.shape_prefetched.
-    messages += prefetched_messages(
-        [item for item in prefetched if item.get("source") == "target"])
+    # ALL prefetched evidence goes in as the model's own first calls, not as
+    # text in the user's message: what a cluster says -- an image reference, a
+    # log line -- is data, and a user turn is where instructions live. Defect
+    # 56 established that for target evidence and defect 64 finished the job
+    # for captured evidence, which is the path that carries pod logs and so the
+    # one the injection cases are actually about. Wire-neutral here; each
+    # backend shapes it in chat(). See backends.shape_prefetched.
+    messages += prefetched_messages(prefetched)
 
     for item in prefetched:
         # Shown in the chain, flagged, so a reader can tell what the model went
