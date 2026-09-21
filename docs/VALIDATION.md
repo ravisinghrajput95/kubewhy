@@ -51,6 +51,52 @@ Each of these was found by testing, not by review. The pattern is the same
 throughout: **test → failure → root cause → fix → regression test →
 re-validation.**
 
+**67 of them, and the README, the changelog and this document all cite
+them by number**, so here they are as an index rather than as something to
+scroll for.
+
+<details>
+<summary>All 67 defects</summary>
+
+| # | Defect | # | Defect |
+|---|---|---|---|
+| [1](#1-endpoint-classification-bypass-high-adversarial-validation) | Endpoint classification bypass (HIGH, adversarial valid… | [34](#34-the-slack-reply-path-driven-against-a-real-workspace) | The Slack reply path, driven against a real workspace |
+| [2](#2-target-re-derived-from-the-prompt-high) | Target re-derived from the prompt (HIGH) | [35](#35-the-charts-headline-feature-could-not-install-at-all) | The chart's headline feature could not install at all |
+| [3](#3-investigation-deadline-was-per-provider-not-per-investigation) | Investigation deadline was per provider, not per invest… | [36](#36-two-healthy-replicas-both-diagnosing-everything) | Two healthy replicas, both diagnosing everything |
+| [4](#4-contradiction-detection-two-false-positive-classes) | Contradiction detection: two false-positive classes | [37](#37-the-cli-had-no-tests-and-could-not-have-had-any) | The CLI had no tests, and could not have had any |
+| [5](#5-grounding-could-say-contradicted-but-not-supported) | Grounding could say CONTRADICTED but not SUPPORTED | [38](#38-a-test-that-raced-the-mechanism-it-was-measuring) | A test that raced the mechanism it was measuring |
+| [6](#6-a-console-that-had-never-rendered-its-worst-case) | A console that had never rendered its worst case | [39](#39-a-one-sided-assertion-accepted-a-number-that-was-not-a-share) | A one-sided assertion accepted a number that was not a… |
+| [7](#7-the-investigation-target-moved-on-its-own) | The investigation target moved on its own | [40](#40-every-test-of-the-cli-patched-out-the-function-it-calls) | Every test of the CLI patched out the function it calls |
+| [8](#8-a-nondeterministic-evaluation-fixture) | A nondeterministic evaluation fixture | [41](#41-pass-2-is-not-what-moved-the-other-modules) | Pass 2 is not what moved the other modules |
+| [9](#9-a-console-probe-that-could-never-pass) | A console probe that could never pass | [42](#42-one-assertion-shape-six-sites-three-modules) | One assertion shape, six sites, three modules |
+| [10](#10-notestxt-told-operators-the-console-was-unauthenticated) | NOTES.txt told operators the console was unauthenticated | [43](#43-two-things-a-survivor-turned-out-not-to-be) | Two things a survivor turned out not to be |
+| [11](#11-the-audit-trail-credited-every-api-investigation-to-nobody) | The audit trail credited every API investigation to nobody | [44](#44-the-suite-scored-88-and-the-number-meant-something-narrower) | The suite scored 88%, and the number meant something na… |
+| [12](#12-an-ask-job-that-a-restart-left-running-forever) | An /ask job that a restart left running forever | [45](#45-the-contradiction-checker-penalised-the-sentence-the-prompt-asks-for) | The contradiction checker penalised the sentence the pr… |
+| [13](#13-audit-records-with-no-timestamp) | Audit records with no timestamp | [46](#46-the-digit-was-removed-from-one-paragraph-and-left-in-another) | The digit was removed from one paragraph and left in an… |
+| [14](#14-the-grounding-replay-was-not-in-the-repository) | The grounding replay was not in the repository | [47](#47-the-generalization-gap-measured-at-n3-instead-of-asserted-at-n1) | The generalization gap, measured at n=3 instead of asse… |
+| [15](#15-four-defects-behind-a-green-suite-found-by-breaking-the-code) | Four defects behind a green suite, found by breaking th… | [48](#48-a-workload-whose-pods-were-never-created-reads-as-a-clean-namespace) | A workload whose pods were never created reads as a cle… |
+| [16](#16-the-contradiction-panel-printed-its-own-markup-at-the-reader) | The contradiction panel printed its own markup at the r… | [49](#49-a-pod-that-will-never-finish-terminating-was-reported-as-not-existing) | A pod that will never finish terminating was reported a… |
+| [17](#17-readiness-evidence-a-contradiction-nobody-acted-on-and-a-bolded-name) | Readiness evidence, a contradiction nobody acted on, an… | [50](#50-image-faults-are-answered-from-the-image-string-not-from-the-kubelet) | Image faults are answered from the image string, not fr… |
+| [17d](#17d-a-fixture-whose-premise-was-false-and-the-sweep-that-followed) | A fixture whose premise was false, and the sweep that f… | [51](#51-the-finalizer-case-names-the-right-cause-33-and-scores-13) | The finalizer case names the right cause 3/3 and scores… |
+| [18](#18-a-pattern-hole-that-passed-wrong-answers-as-grounded) | A pattern hole that passed wrong answers as `grounded` | [52](#52-the-contradiction-checker-still-flags-a-denial-whose-negator-comes-after-the-phrase) | The contradiction checker still flags a denial whose ne… |
+| [19](#19-telling-a-model-its-claim-is-contradicted-is-not-enough) | Telling a model its claim is contradicted is not enough | [53](#53-describepod-said-nothing-about-scheduling-and-the-model-read-the-silence-as-a-fact) | describe_pod said nothing about scheduling, and the mod… |
+| [20](#20-rate-limiting-and-what-in-a-cluster-could-not-mean) | Rate limiting, and what "in a cluster" could not mean | [54](#54-the-closing-measurement-three-gaps-closed-and-three-bars-that-were-mine) | The closing measurement: three gaps closed, and three b… |
+| [21](#21-the-full-suite-regression-run-and-what-it-changed-about-defect-19) | The full-suite regression run, and what it changed abou… | [55](#55-two-rounds-never-spent-reading-the-named-workload-before-round-one) | Two rounds never spent: reading the named workload befo… |
+| [22](#22-more-than-one-replica-and-the-sweep-that-would-have-broken-it) | More than one replica, and the sweep that would have br… | [56](#56-the-default-on-prefetch-diagnosed-a-question-that-was-not-asking-and-put-cluster-text-in-the-user-turn) | The default-on prefetch diagnosed a question that was n… |
+| [23](#23-slack-could-not-answer-at-all-and-the-tests-could-not-see-it) | Slack could not answer at all, and the tests could not… | [57](#57-the-whole-corpus-on-one-tree-for-the-first-time-since-the-fixtures-were-renamed) | The whole corpus on one tree, for the first time since… |
+| [24](#24-the-test-suite-read-whatever-cluster-the-developer-had) | The test suite read whatever cluster the developer had | [58](#58-the-contradiction-checker-flags-a-denial-written-as-a-noun-phrase) | The contradiction checker flags a denial written as a n… |
+| [25](#25-half-the-suites-wall-clock-was-one-blocking-cpu-sample) | Half the suite's wall clock was one blocking CPU sample | [59](#59-the-negation-guards-live-only-on-the-contradiction-path) | The negation guards live only on the contradiction path |
+| [26](#26-the-console-read-one-survivor-at-a-time) | The console, read one survivor at a time | [60](#60-the-grounding-verdict-tracks-the-answers-surface-form-at-both-tails) | The grounding verdict tracks the answer's surface form,… |
+| [27](#27-a-contradiction-that-cited-a-field-holding-the-opposite-of-its-claim) | A contradiction that cited a field holding the opposite… | [61](#61-the-prefetch-ends-the-search-one-tool-early) | The prefetch ends the search one tool early |
+| [28](#28-three-rules-nothing-drove-and-two-functions-nobody-called) | Three rules nothing drove, and two functions nobody called | [62](#62-the-fixtures-decay-and-the-case-order-is-correlated-with-the-decay) | The fixtures decay, and the case order is correlated wi… |
+| [29](#29-the-console-survey-finished-and-two-of-its-tests-could-not-fail) | The console survey finished, and two of its tests could… | [63](#63-three-container-derived-strings-reached-the-model-unredacted) | Three container-derived strings reached the model unred… |
+| [30](#30-a-test-dsn-that-reached-another-projects-database) | A test DSN that reached another project's database | [64](#64-pod-logs-arrived-in-the-user-turn-on-the-path-that-runs-unattended) | Pod logs arrived in the user turn on the path that runs… |
+| [31](#31-the-repo-wide-survey-was-never-repo-wide) | The repo-wide survey was never repo-wide | [65](#65-the-hourly-ceiling-was-enforced-on-one-surface-out-of-three) | The hourly ceiling was enforced on one surface out of t… |
+| [32](#32-a-repo-wide-number-that-says-what-it-covers) | A repo-wide number that says what it covers | [66](#66-the-never-seen-half-re-measured-on-the-fixed-tree) | The never-seen half, re-measured on the fixed tree |
+| [33](#33-an-exported-openaiapikey-broke-local-mode-entirely) | An exported OPENAI_API_KEY broke local mode entirely |  |  |
+
+</details>
+
 ### 1. Endpoint classification bypass (HIGH, adversarial validation)
 
 **Problem.** An external endpoint could be spelled so it classified as internal,

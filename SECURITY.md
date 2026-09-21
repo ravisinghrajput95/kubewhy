@@ -5,6 +5,10 @@
 Open a [private security advisory](https://github.com/ravisinghrajput95/kubewhy/security/advisories/new).
 Please don't file a public issue for anything exploitable.
 
+The threat model — assets, trust boundaries, each control and what it was
+tested against — is [docs/SECURITY.md](docs/SECURITY.md). This file is the
+short version and the reporting route.
+
 ## What this tool touches
 
 It reads. It never writes — no tool scales, restarts, patches or deletes
@@ -18,7 +22,7 @@ What it *reads* is sensitive:
 | Pod logs | Credentials, tokens, connection strings, user data |
 | Pod specs | Env var names, image registries, resource limits |
 | Events | Container arguments, scheduling detail |
-| Host process table | Usernames, command lines |
+| Host process table | Usernames, process names and PIDs. **Not command lines** — no collector reads `cmdline`, deliberately, because that is where credentials passed as flags live |
 
 ## Running it safely
 

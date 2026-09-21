@@ -25,6 +25,57 @@ signatures and response shapes may still change.
   tree over 35 paired runs: median rounds 4 to 2, wall clock 84.6s to 54.5s,
   32/35 correct by hand with it off and on. VALIDATION.md defect 56.
 
+### Security
+
+- **Pod logs no longer reach the model in the user turn.** The controller and
+  `--explain` captured a pod's logs and passed them as text inside the user
+  message — the turn where instructions live, and the one an attacker controls
+  through a workload's own log output. All prefetched evidence now arrives as
+  tool results; the user turn keeps a note naming the tools and quoting none of
+  them. Every tool is read-only, so the realistic harm was a falsified or
+  suppressed finding posted to a channel, not an executed instruction.
+  `evals/run_controller_eval.py` gains the first adversarial case that path has
+  ever had. VALIDATION.md defect 64.
+- **Three container-derived strings are redacted that were not.** A container's
+  waiting message echoes its own argv on a start failure, an exec probe's
+  command routinely carries a DSN or a password flag, and the scheduler quotes
+  the pod spec back. The event message beside them had been redacted since it
+  was written; these three had not. External egress was already covered, so this
+  was never an exfiltration path — it reached the local model, the console's
+  evidence panel and the terminal. VALIDATION.md defect 63.
+- **The hourly investigation ceiling applies to the console and Slack.** It was
+  enforced only on the REST API, so two of the three surfaces that drive the
+  model had none. Slack additionally answered bare `message` events, which with
+  the `message.channels` scope meant every message in any channel it sat in
+  started an investigation; it now answers only when addressed, and honours
+  `SLACK_CHANNEL` on input as well as output. VALIDATION.md defect 65.
+- **Documented:** the API must run with `--no-proxy-headers`, and widening
+  `FORWARDED_ALLOW_IPS` turns the loopback identity check into an
+  authentication bypass. With the shipped defaults the exposure is availability,
+  not bypass. See SECURITY.md.
+
+### Fixed
+
+- **The prefetch no longer ends the investigation one tool early.** A workload
+  with no example pod — a failed Job whose pods the deadline kill deleted — got
+  a `scan_cluster` row that is a whole answer by itself, and the model stopped
+  before the tool holding the detail. It now hands over both reads or neither.
+  Measured paired: before, 1/5 against 5/5 at Fisher p = 0.0476; after, 5/5
+  against 5/5 at p = 1.0000. The rounds saved elsewhere are untouched — every
+  case that measurement covered has an example pod. VALIDATION.md defect 61.
+- **The claim checker stops reading denials as claims.** Three separate gaps: a
+  determiner defeated the "absence of X" guard; the negation guards existed
+  only on the contradiction path, so the unverified-claims list flagged "the
+  reason was not OOMKilled"; and the rule statement the system prompt itself
+  teaches was flagged as a claim about the container. Replayed over 1876
+  recorded runs, every movement toward `grounded` and none into
+  `insufficient_evidence` or `contradicted`. VALIDATION.md defects 58, 59, 61.
+- **A verdict no longer rests on digits inside a pod name.** A number that
+  resolves only to an identifier field is recorded and not counted, and a
+  quoted literal the evidence carries verbatim now counts — an answer whose
+  whole diagnosis was a quoted log line had been graded as stating nothing
+  traceable. VALIDATION.md defect 60.
+
 ## [0.3.0] - 2026-09-16
 
 Everything a diagnosis could not previously see about a pod that never

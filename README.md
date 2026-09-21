@@ -47,7 +47,7 @@ are deterministic code, covered by unit tests. See the
 ## Key capabilities
 
 - **Evidence-first investigation** — a bounded loop that collects before it concludes
-- **Kubernetes-native tools** — fifteen read-only collectors returning projections, not raw API objects
+- **Kubernetes-native tools** — ten read-only Kubernetes collectors returning projections, not raw API objects (fifteen tools in all; five read the host)
 - **Entity-scoped investigations** — the target is enforced on every tool call
 - **Grounded claims** — each observation carries the `tool.field` it came from
 - **Contradiction detection** — a separate deterministic stage; "the tools did not say" and "the tools said otherwise" are different verdicts
@@ -255,7 +255,7 @@ met that bar only because the prefetch made the call. 50 of the 114 runs
 so for faults whose cause lives in a Kubernetes event — which expire after an
 hour — the never-seen half was measured against older fixtures than the other
 half. Method, per-case scores and every failure read by hand:
-[docs/VALIDATION.md](docs/VALIDATION.md) defects 57 to 62.
+[docs/VALIDATION.md](docs/VALIDATION.md) defects 57 to 66.
 
 ### The two-configuration comparison
 
@@ -292,9 +292,10 @@ Measurement scope:
 
 - **One cluster, one machine, one prompt configuration.** Everything measured
   here was measured there.
-- **n=5 per scenario, 29 scenarios.** Enough to make per-scenario behaviour
-  reproducible; not enough to rank two configurations. The overall model
-  comparison is UNDETERMINED.
+- **n=3 to n=5 per scenario, 38 scenarios.** Enough to make per-scenario
+  behaviour reproducible; not enough to rank two configurations, and not
+  enough to separate the two halves of the corpus from each other at n=3. The
+  overall model comparison is UNDETERMINED.
 - **Generalized diagnostic accuracy is measured, not good, and not improving.** 55.6% [37.3–72.4] on nine fault types the prompts were never written against, against 96.6% on the 29 they were. The lower bound of that interval is 37.3%.
 - **Answers vary between runs.** The same question can produce a different chain.
   The `confidence` field and the `tool_calls` trace tell you which measurements
@@ -312,8 +313,6 @@ Not tested:
   painted page — escaped markup, clipping and invisible text are structurally
   invisible to it. [docs/E2E.md](docs/E2E.md) designs the browser suite; none of
   it is implemented.
-- **Mutation testing.** The harness used during development is not part of this
-  repository.
 
 Product boundaries:
 
@@ -362,6 +361,7 @@ Product boundaries:
 | [`evals/mutate.py`](evals/mutate.py) | Break the code one change at a time and report what the tests did not notice |
 | [AI_EVALUATION.md](docs/AI_EVALUATION.md) | Corpus, metrics, methodology |
 | [UI.md](docs/UI.md) | The operator console |
+| [PORTABILITY.md](docs/PORTABILITY.md) | What runs where: distributions, cloud providers, and what each was tested against |
 | [DEMO.md](docs/DEMO.md) | Fault set and a 5–10 minute walkthrough |
 | [CASE_STUDY.md](docs/CASE_STUDY.md) | How it was built, and what broke |
 | [E2E.md](docs/E2E.md) | A browser suite, designed and not built |
