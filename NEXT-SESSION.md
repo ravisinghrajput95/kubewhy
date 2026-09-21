@@ -8,16 +8,17 @@ Six surfaces share one tool set — CLI (agent.py, `--scan`), REST (app.py), MCP
 via Socket Mode (slack_socket.py).
 
 **State: `main` at the 2026-09-18 head — `git log --oneline -1` is the
-authority, not this line — tree clean and pushed, **1896 passed, 34 skipped**
-(48s, 1930 collected), CI
+authority, not this line — tree clean and pushed, **1909 passed, 34 skipped**
+(56s, 1943 collected), CI
 green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
 renumbered by the owner before tagging. **mypy and ruff are both at zero and both gate**.
-63 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
+65 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
 
-**Measured 2026-09-18 as 1896 passed, 34 skipped in 48s, with `kubewhy-pg`
+**Measured 2026-09-21 as 1909 passed, 34 skipped in 56s, with `kubewhy-pg`
 running but no `TRIAGE_TEST_PG_DSN` exported** — so the 34 Postgres tests
-skipped. The sum, 1930, is the invariant the gated test checks. The 33 added
-this session are defects 58 and 59's and the security review's. The 2026-09-16 session measured its own
+skipped. The sum, 1943, is the invariant the gated test checks. The 46 added
+across 2026-09-18 and 09-21 are defects 58 to 60's, 63's, 64's and the
+security review's. The 2026-09-16 session measured its own
 tree as 1897 passed and 0
 skipped with the DSN set; that DSN was not recovered this session and guessing
 it hung the run, so the split is quoted from that session and only the total is
@@ -645,45 +646,29 @@ defects 58 to 62.
    `failedJobsHistoryLimit: 6` on a `*/5` schedule, so its pod — the only place
    `FATAL: upstream returned 503` exists — is collected after ~30 minutes.
 
-5. **A security review ran 2026-09-18 and found four things. None is fixed and
-   none is recorded as a defect yet — that was left as the owner's call.**
-   - **Pod logs reach the model inside the *user* turn on the controller and
-     `--explain` paths.** `_prefetched_block` (agent.py) is reached from
-     `controller.py` via `capture_pod_logs`. Defect 56 moved the target
-     prefetch out of the user message for exactly this reason and left this
-     path behind, and the wrapper text is imperative ("do not ask for it again
-     and do not withhold a diagnosis for want of it"), so injected log text
-     sits inside an instruction block. Demonstrated with the real
-     `log-injector` payload. **The two injection eval cases only cover the
-     agent path**, where logs arrive as tool results;
-     `evals/run_controller_eval.py` has five cases and none is adversarial.
-     Impact is bounded — every tool is read-only — so the realistic harm is a
-     falsified or suppressed finding posted to Slack.
-   - **Three container-derived strings bypass redaction** while the event
-     message beside them is redacted: `waiting_message`, the probe `exec`
-     handler, and the PodScheduled condition message in
-     `routers/k8s_pods_info.py`. Proven by running one credential-bearing
-     string through both paths. The probe command is the sharpest — a probe
-     routinely carries a DSN or `-p$PASSWORD`.
-   - **The hourly ceiling is enforced on one of three human-driven surfaces.**
-     `limits.check/record` appears only in `app.py`; neither `ui.py` nor
-     `slack_socket.py` imports `limits`. Slack also answers plain `message`
-     events, not only `app_mention`, ignores `SLACK_CHANNEL` on input, and
-     spawns one unbounded thread per message.
-   - **uvicorn's proxy-header rewrite vs the loopback check** (`identity.py`).
-     Verified: uvicorn 0.51.0 and `fastapi run` default to
-     `proxy_headers=True, forwarded_allow_ips=127.0.0.1`, so with the defaults
-     this is availability (valid proxied requests refused), **not** a bypass.
-     It becomes a bypass if `FORWARDED_ALLOW_IPS` is widened — which is the
-     obvious "fix" for the refusals. Nothing pins `--no-proxy-headers`.
-
-   Verified clean in the same review: no `subprocess`/`eval`/`exec`/`pickle`/
-   `yaml.load`; SQL parameterised; constant-time bearer compare that fails
-   closed on an empty token; read-only RBAC with no `secrets` verb; literal
-   `env.value` never projected; audit stores `result_chars` and never tool
-   output; chart defaults `runAsNonRoot`, `drop: ALL`, `readOnlyRootFilesystem`,
-   seccomp `RuntimeDefault`; the egress classifier agrees with httpx on 12 of 13
-   adversarial host strings and httpx rejects the 13th.
+5. **The security review's four findings are fixed** (2026-09-21), as defects
+   63, 64 and 65 plus a documentation change. Each carries a counter test, and
+   defect 64 was verified live on kind as well as in tests.
+   - **63**: `waiting_message`, the exec probe's command and the scheduling
+     message reached the model, the console and the terminal unredacted while
+     the event message beside them was redacted. All four message fields on
+     that projection now behave alike.
+   - **64**: pod logs arrived in the **user turn** on the controller and
+     `--explain` paths -- the half defect 56 left behind, and the half that
+     carries the injection vector. All prefetched evidence now arrives as tool
+     results; the user turn keeps a note that names the tools and quotes none
+     of them. `run_controller_eval.py` gains the only adversarial case that
+     path has ever had.
+   - **65**: `limits.check`/`record` ran on one of three model-driving
+     surfaces. The console and Slack now enforce the same hourly ceiling, and
+     Slack additionally answers only `app_mention` (it used to accept bare
+     `message` events, so every message in every channel it sat in started an
+     investigation) and honours `SLACK_CHANNEL` on input as well as output.
+   - **Documentation**: `docs/SECURITY.md` now states that the API must run
+     with `--no-proxy-headers` and that widening `FORWARDED_ALLOW_IPS` turns
+     the loopback check into an authentication bypass. With the shipped
+     defaults the exposure is availability, not bypass -- measured on uvicorn
+     0.51.0 and `fastapi run`.
 
 6. **`routers/k8s_pods_info.py` has still never had a full mutation survey**
    (2413 lines, 55 functions). Unchanged from the last handoff: `evals/mutate.py`,

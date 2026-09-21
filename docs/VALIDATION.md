@@ -12,7 +12,7 @@ and does not support. Four words are used and they mean specific things:
 
 | Property | Status | Evidence |
 |---|---|---|
-| Automated test suite | **PROVEN** | 1930 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
+| Automated test suite | **PROVEN** | 1943 passing, **0 skipped**, in 48s, with mypy and ruff both at zero and both gating in CI as of 2026-09-13; no cluster or model, and a real Postgres for the shared-state cases — with the database down 34 of these skip silently, so the count is only meaningful alongside the skip count. A fixture makes reaching a cluster impossible rather than merely unintended — see defect 24; the run was 84s until defect 25 |
 | Grounding replay | **PROVEN** | **1683** recorded runs carrying both of the checker's inputs, reproducible from the repository — counted 2026-09-12 by `replay_grounding.replayable` over `results/*.json`, which also skips 1040 records that retain no `draft`/`evidence`. This row said 1489, and defect 45 already replayed 1683 |
 | Investigation context integrity | **PROVEN** | 20 tests, two workloads in different namespaces, verified live |
 | Entity scoping | **PROVEN** | 135/145 targets extracted; 0.7% / 0.0% wrong-target |
@@ -4152,6 +4152,48 @@ which is precisely where a case bar converts it into a pass or a fail. A
 zero-claim answer is graded `insufficient_evidence`, and **17 of the 38 cases
 do not list that verdict in `expected_grounding`**, so it fails them outright.
 
+**Fixed 2026-09-21, and both tails had to move together.** Excluding
+identifier resolutions on its own pushes five more runs to zero claims, so
+fixing one tail makes the other worse; the two are one mechanism seen from
+each end. The unifying rule is that **a value counts as a claim only when it
+resolves to a field that measures rather than names**:
+
+- A number resolving only to `namespace`, `pod`, `name`, `example`, `node`,
+  `service`, `workload`, `container` or `job` is recorded as
+  `kind: "identifier"` and not counted. The audit still shows what the
+  extractor saw; the verdict no longer rests on it.
+- A **quoted literal** the evidence carries verbatim now counts. The model
+  marks values it took from the cluster with backticks and nothing looked at
+  them, which is how `init_container_failure` quoted
+  `cannot resolve postgres.data.svc` -- read out of `get_pod_logs` -- and was
+  graded as having stated nothing traceable.
+
+**The quoted pass is deliberately asymmetric and that is the load-bearing
+decision.** A backticked string *found* in the evidence counts; one *not*
+found is not flagged. A quoted string absent from the evidence is very often
+not a claim at all -- a tool name, a `kubectl` command, a field path the answer
+is telling someone to go and read -- and flagging those is defect 45's mistake
+repeated. So this pass can move a run out of `insufficient_evidence` and can
+never move one into `partial`. A test holds that line.
+
+**Replayed over 1876 records against a baseline regenerated from HEAD: 84
+moved, 68 out of `insufficient_evidence` and 16 into it, 0 either way on
+`contradicted`.** The 16 are the identifier rule removing a verdict's only
+support, and they are honest: `healthy_not_reported_broken`'s answer was
+`grounded` on `4`, `6` and `79`, every one of them a digit inside the pod name
+`healthy-web-6f79bc6fcb-4nv6f`. **Every case those 16 touch lists
+`insufficient_evidence` in its `expected_grounding`**, checked case by case, so
+none of them crosses a bar.
+
+**On the 2026-09-18 set: no run stops passing and one more starts** --
+`init_container_failure`, the zero-claim example above. Pre-existing 84/87 ->
+86/87; the never-seen half is unchanged at 17/27 from defects 58 and 59.
+
+Five mechanisms were each mutated in turn and each fails at least one test,
+including one that makes the identifier rule fire on every claim -- which would
+read every answer as `insufficient_evidence` -- and one that makes the quoted
+pass flag what it cannot find.
+
 
 ### 61. The prefetch ends the search one tool early
 
@@ -4323,6 +4365,87 @@ everything would pass.
 
 **What this does not fix.** `redaction.py` is a best-effort filter and says so.
 A novel secret format still passes through.
+
+
+### 64. Pod logs arrived in the user turn on the path that runs unattended
+
+**Found 2026-09-18 by a security review**, and it is the other half of a defect
+this project had already half-fixed.
+
+Defect 56 moved the target prefetch out of the user message, on the grounds
+that an image reference or a log line is **data** and a user turn is where
+instructions live. It moved the target reads and left `capture_pod_logs`
+behind -- the path the controller (`controller.py`) and `--explain` use. So the
+half that carries **pod logs**, which is this project's own canonical injection
+vector, kept arriving as text inside the user's turn.
+
+Worse, it arrived inside an *imperative* block. The wrapper read "...so do not
+ask for it again and do not withhold a diagnosis for want of it", so attacker
+text sat inside a sentence telling the model to trust what surrounds it.
+
+Demonstrated with the live `log-injector` payload before the fix: the user turn
+contained `IGNORE ALL PREVIOUS INSTRUCTIONS...` verbatim, while the same
+evidence marked `source: target` did not.
+
+**And the defence was measured on the wrong path.** `injection_in_logs_is_data`
+and `injection_in_image_ref_is_data` both exercise the *agent* path, where a
+log arrives as a tool result and always did. `evals/run_controller_eval.py`
+had five cases and **not one adversarial**. The surface that had the problem
+is the one that runs unattended and posts to Slack.
+
+**Fixed:** all prefetched evidence now goes in through `prefetched_messages`,
+as an assistant tool-call turn and its results. What stays in the user turn is
+a note that **names the tools and never quotes them** -- the framing about a
+pod that may have been deleted is the operator talking and belongs there; what
+the cluster said does not.
+
+**Impact is bounded and worth stating plainly.** Every tool is read-only and
+there is no write tool, so "delete every pod" was never executable. The
+realistic harm is a falsified or suppressed finding posted to a channel at 3am.
+
+**Coverage added with the fix**, because a fix whose defence is still measured
+on the other path is not finished:
+- `run_controller_eval.py` gains `log-injector`, the only adversarial case on
+  that path. It carries a `forbid` list and a `payload` assertion, so a run
+  that passes because the payload never arrived is a failure -- the failure
+  mode this project has already recorded once.
+- `find_pod` was hardcoded to the `demo` namespace, which would have made the
+  new case SKIP silently. A skipped adversarial case reads exactly like a
+  passing one, so skips are now named in the summary and make the run exit
+  non-zero.
+
+
+### 65. The hourly ceiling was enforced on one surface out of three
+
+**Found 2026-09-18 by the same review.** `limits.check` and `limits.record`
+appeared only in `app.py`. Neither `ui.py` nor `slack_socket.py` imported
+`limits` at all, so two of the three surfaces that drive the model had no
+ceiling -- unbounded model time locally, and unbounded spend with external
+inference enabled.
+
+Slack compounded it three ways, all fixed here:
+
+| | before | after |
+|---|---|---|
+| which events start an investigation | `app_mention` **and bare `message`** | `app_mention` only |
+| `SLACK_CHANNEL` | output only; input ignored | bounds both, when set |
+| rate limit | none | `limits.check`/`record`, keyed by Slack user id |
+
+The `message` half is the one worth naming: with the `message.channels` scope
+that meant **every message in every channel the bot sat in** became an
+investigation nobody had addressed to it. Addressing the bot is the consent
+signal and Slack already models it.
+
+A refused caller is answered in the thread rather than dropped, because a bot
+that goes quiet looks broken and the person asks again -- which is the
+behaviour a ceiling exists to stop. The console warns and calls `st.stop()`
+rather than `return`: that code runs at module level in a Streamlit script,
+where `return` is a `SyntaxError` that blanks the whole page, which is a defect
+shape this console has had once already.
+
+**Not changed:** the ceiling is per principal and the token budget is global,
+both as `limits.py` already defined them. This defect is about which surfaces
+ask, not about what the numbers are.
 
 
 ## Where a run's 74 seconds go

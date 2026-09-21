@@ -224,6 +224,26 @@ structural.
   header arriving from off the pod's loopback is refused, because that request
   has proved the premise the header trust rests on is false. Streamlit exposes
   no peer address, so the console relies on the bind alone.
+- **Run the API with `--no-proxy-headers`, and never widen
+  `FORWARDED_ALLOW_IPS`.** uvicorn rewrites `request.client.host` from
+  `X-Forwarded-For` by default, which is the address the check above reads.
+  Measured on uvicorn 0.51.0, and `fastapi run` — the image's own command —
+  keeps the default: `proxy_headers=True` with `forwarded_allow_ips` resolving
+  to `127.0.0.1`.
+
+  With those defaults the exposure is **availability, not bypass**: the rewrite
+  only applies when the immediate peer is already loopback, so a direct request
+  from elsewhere keeps its real address and is refused correctly. What it does
+  break is the legitimate proxied request, which arrives from the sidecar on
+  loopback, gets rewritten to the client's public address, and is refused.
+
+  **It becomes an authentication bypass if `FORWARDED_ALLOW_IPS` is widened**
+  — to `*`, or to the pod network — because then any client can assert both
+  its own peer address and its identity in the same request. Widening it is
+  the obvious-looking fix for the refusals in the paragraph above, which is
+  exactly why it is called out here. The chart ships the controller and the
+  console, not the API, so there is no template to pin the flag in and this is
+  documentation rather than something enforced.
 
 **Validated on kind v1.32.2 against a real OIDC issuer** (Dex v2.41.1,
 oauth2-proxy v7.7.1), from a separate pod: the console's port is

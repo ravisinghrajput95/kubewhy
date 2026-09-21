@@ -303,3 +303,95 @@ class TestTheOperatorFacingDetails:
             "the one line that says the bot is listening would sit in the "
             "buffer and never reach kubectl logs")
         assert "listening" in printed["args"][0]
+
+
+class TestOnlyAnAddressedMessageIsAnInvestigation:
+    """
+    Security review, 2026-09-18. `handle` accepted bare `message` events as
+    well as mentions, so with the message.channels scope every message in
+    every channel the bot sat in started an investigation nobody had asked
+    for. Addressing the bot is the consent signal and Slack already models it.
+    """
+
+    def test_a_bare_message_is_not_answered(self):
+        client = MagicMock()
+        event = {"type": "message", "text": "why is crasher failing?",
+                 "channel": "C1", "ts": "1.1"}
+        with patch.object(slack_socket, "answer") as answer:
+            slack_socket.handle(client, request(event))
+
+        answer.assert_not_called()
+
+    def test_the_counter_a_mention_is_still_answered(self):
+        """Without this, a filter that dropped everything would pass above."""
+        client = MagicMock()
+        with patch.object(slack_socket, "answer") as answer, \
+                patch.object(slack_socket.threading, "Thread") as thread:
+            thread.side_effect = lambda **kw: MagicMock(start=lambda: kw["target"](*kw["args"]))
+            slack_socket.handle(client, request(mention()))
+
+        answer.assert_called_once()
+
+
+class TestTheConfiguredChannelBoundsInputToo:
+    """
+    Security review, 2026-09-18. SLACK_CHANNEL was used for output and ignored
+    on input, so the bot answered in any channel it had been invited to
+    regardless of what was configured.
+    """
+
+    def _handle(self, channel, configured, monkeypatch):
+        monkeypatch.setattr(slack_socket, "CHANNEL", configured)
+        client = MagicMock()
+        with patch.object(slack_socket, "answer") as answer, \
+                patch.object(slack_socket.threading, "Thread") as thread:
+            thread.side_effect = lambda **kw: MagicMock(
+                start=lambda: kw["target"](*kw["args"]))
+            slack_socket.handle(client, request(mention(channel=channel)))
+        return answer
+
+    def test_another_channel_is_ignored(self, monkeypatch):
+        assert not self._handle("C-other", "C1", monkeypatch).called
+
+    def test_the_configured_channel_is_answered(self, monkeypatch):
+        assert self._handle("C1", "C1", monkeypatch).called
+
+    def test_unset_means_any_channel_it_was_invited_to(self, monkeypatch):
+        """The old behaviour, kept for anyone who never set it."""
+        assert self._handle("C-anything", "", monkeypatch).called
+
+
+class TestTheHourlyCeilingAppliesHereToo:
+    """
+    Security review, 2026-09-18. `limits.check`/`record` appeared only in
+    app.py, so this surface -- which anyone in the workspace can drive, and
+    which spawns a thread per message -- had no ceiling at all. With external
+    inference enabled that is unbounded spend.
+    """
+
+    def test_a_refused_caller_is_not_diagnosed(self, monkeypatch):
+        refused = slack_socket.limits.Refused("2 per hour; try again in 900s", 900)
+        monkeypatch.setattr(slack_socket.limits, "check",
+                            MagicMock(side_effect=refused))
+        with patch.object(slack_socket.agent, "ask") as ask, \
+                patch.object(sinks, "build") as build:
+            slack_socket.answer("why?", "C1", "1.1", user="U9")
+
+        ask.assert_not_called()
+        # and it says so in the thread rather than going silent
+        sent = build.return_value.send.call_args.args[0]
+        assert "Not right now" in sent["answer"]
+        assert sent["thread_ts"] == "1.1"
+
+    def test_the_counter_an_allowed_caller_is_diagnosed_and_recorded(self, monkeypatch):
+        monkeypatch.setattr(slack_socket.limits, "check", MagicMock())
+        record = MagicMock()
+        monkeypatch.setattr(slack_socket.limits, "record", record)
+        with patch.object(slack_socket.agent, "ask") as ask, \
+                patch.object(sinks, "build"):
+            ask.return_value = {"answer": "a", "confidence": "grounded",
+                                "unverified": []}
+            slack_socket.answer("why?", "C1", "1.1", user="U9")
+
+        ask.assert_called_once()
+        record.assert_called_once_with("slack:U9")

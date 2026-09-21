@@ -33,6 +33,7 @@ from slack_sdk.web import WebClient
 
 import agent
 import audit
+import limits
 import observability
 import sinks
 
@@ -60,6 +61,33 @@ def answer(question, channel, thread_ts, user=""):
     # audit log keys on, so the two can be joined. Slack authenticated them,
     # which is what `auth` records -- kubewhy did not.
     audit.actor(user or "unknown-slack-user", surface="slack", auth="slack")
+
+    # The same hourly ceiling app.py enforces. It was enforced on one of the
+    # three surfaces that drive the model: `limits.check`/`record` appeared
+    # only in app.py, so anyone in the workspace could start unbounded
+    # investigations here -- unbounded spend with external inference on, and
+    # an unbounded thread per message either way. Keyed by Slack user id, the
+    # same principal the audit record carries.
+    principal = f"slack:{user}" if user else "slack:unknown"
+    try:
+        limits.check(principal)
+    except limits.Refused as refused:
+        log.warning("slack_rate_limited",
+                    extra={"principal": principal, "reason": refused.reason})
+        # Answered in the thread rather than dropped: a bot that goes silent
+        # when someone is over the ceiling looks broken, and they will ask
+        # again, which is the behaviour the ceiling exists to stop.
+        sinks.build(name="slack", channel=channel or CHANNEL).send({
+            "kind": "answer",
+            "question": question[:80],
+            "answer": f"Not right now — {refused.reason}",
+            "confidence": "insufficient_evidence",
+            "unverified": [],
+            "thread_ts": thread_ts,
+        })
+        return
+    limits.record(principal)
+
     try:
         result = agent.ask(question)
     except Exception as exc:  # noqa: BLE001 - a failed diagnosis must still reply
@@ -112,18 +140,34 @@ def handle(client, request: SocketModeRequest):
         return
 
     event = (request.payload or {}).get("event", {})
-    if event.get("type") not in ("app_mention", "message"):
+
+    # `app_mention` only. This used to accept bare `message` events too, which
+    # with the message.channels scope means every message in every channel the
+    # bot is in becomes an investigation -- nobody addressed it, and a
+    # diagnosis lands in the thread unasked. Addressing the bot is the consent
+    # signal, and it is the one Slack already models. A thread reply that does
+    # not mention it is not an instruction to diagnose.
+    if event.get("type") != "app_mention":
         return
 
     # Its own messages come back down the socket. Answering them is a loop.
     if event.get("bot_id") or event.get("subtype") == "bot_message":
         return
 
+    # SLACK_CHANNEL was used for output and ignored on input, so the bot
+    # answered anywhere it had been invited regardless of what was configured.
+    # Set, it is now the boundary in both directions; unset, any channel the
+    # bot was deliberately invited to is allowed, which is the old behaviour
+    # for anyone who never set it.
+    channel = event.get("channel", "")
+    if CHANNEL and channel and channel.lstrip("#") != CHANNEL.lstrip("#"):
+        log.info("slack_ignored_channel", extra={"channel": channel})
+        return
+
     question = strip_mention(event.get("text", ""))
     if not question:
         return
 
-    channel = event.get("channel", "")
     thread = event.get("thread_ts") or event.get("ts")
     log.info("slack_question", extra={"channel": channel})
 

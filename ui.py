@@ -29,6 +29,7 @@ import agent
 import audit
 import grounding
 import identity
+import limits
 import store
 from routers.k8s_pods_info import (
     active_context,
@@ -1100,6 +1101,25 @@ if submitted and question:
     # scoped_question exist to prevent; it should not come back in through the
     # UI's own state.
     st.session_state.pop("answer", None)
+
+    # The same hourly ceiling app.py enforces, keyed by the same principal the
+    # audit record carries. It was enforced on one of the three surfaces that
+    # drive the model: `limits.check`/`record` appeared only in app.py, so the
+    # console could start investigations without bound -- unbounded spend with
+    # external inference on. Checked before the status widget, so a refusal is
+    # a message rather than a spinner that never resolves.
+    principal = WHO.label() if WHO.authenticated else "anonymous"
+    try:
+        limits.check(principal)
+    except limits.Refused as refused:
+        # st.stop(), not return: this runs at module level in a Streamlit
+        # script, where `return` is a SyntaxError that takes the whole page
+        # down -- which is the shape of defect this console has already had
+        # once, a refusal path that blanks the page instead of explaining
+        # itself.
+        st.warning(f"Not right now — {refused.reason}")
+        st.stop()
+    limits.record(principal)
 
     steps = st.status("Thinking...", expanded=True)
     result = None
