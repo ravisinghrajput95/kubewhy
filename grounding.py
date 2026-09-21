@@ -431,6 +431,33 @@ def _inference(value, kind):
     return {"value": value, "kind": kind, "status": "inferred", "evidence": []}
 
 
+# Fields that name a thing rather than measure it. Defect 60: a number that
+# resolves only to one of these is not a claim -- `image_never_pulled_by_policy`
+# scored `grounded` on the digit inside the namespace name `uncovered2` and on
+# four digits lifted out of the pod name `local-only-657d685fc8-f8xj4`, and
+# nothing about the diagnosis was checked at all. Measured over the 2026-09-18
+# set: 89 of 477 resolved claims (18.7%) land on one of these.
+_IDENTIFIER_FIELD = re.compile(
+    r"(^|\.)(namespace|pod|name|example|node|service|workload|container|job)$")
+
+# A literal the answer quotes. The model marks values it took from the cluster
+# with backticks, and the extractor never looked at them -- so an answer whose
+# whole diagnosis is a quoted string reached `checked = 0` and the verdict fell
+# to `insufficient_evidence`. `init_container_failure` quoted
+# `cannot resolve postgres.data.svc`, read out of get_pod_logs, and was graded
+# as having stated nothing traceable.
+#
+# Four characters minimum, because `1`/`on`/`up` inside backticks are noise,
+# and a cap because a quoted block is not a value.
+_QUOTED = re.compile(r"`([^`\n]{4,80})`")
+
+
+def _identifier_only(entries):
+    """Whether every citation for a value points at a field that names."""
+    return bool(entries) and all(
+        _IDENTIFIER_FIELD.search(str(e.get("field") or "")) for e in entries)
+
+
 def check(answer, tool_outputs):
     """
     Compare an answer against the tool results behind it.
@@ -541,15 +568,53 @@ def check(answer, tool_outputs):
             return []
 
         for claim in sorted(_numbers(clause, strip_ordinals=True)):
-            checked += 1
             supported = _matches(claim, scope_numbers)
+            entries_for = cite(_format(claim)) if supported else []
+            # Defect 60. A digit that only appears inside an identifier was
+            # never a claim about the cluster; counting it made "the answer
+            # mentioned the pod name" indistinguishable from "the answer's
+            # figures were measured". Recorded so the audit still shows what
+            # the extractor saw, and not counted.
+            if supported and _identifier_only(entries_for):
+                claims.append({
+                    "value": _format(claim),
+                    "kind": "identifier",
+                    "status": "observed",
+                    "evidence": entries_for,
+                })
+                continue
+            checked += 1
             if not supported:
                 flag(_format(claim))
             claims.append({
                 "value": _format(claim),
                 "kind": "number",
                 "status": "observed" if supported else "unverified",
-                "evidence": cite(_format(claim)) if supported else [],
+                "evidence": entries_for,
+            })
+
+        # Defect 60's other tail. A literal the answer quotes and the evidence
+        # carries verbatim is a measurement, and the extractor's vocabulary --
+        # numbers, statuses, causes, absences -- had no room for it.
+        #
+        # **Deliberately asymmetric: found counts, not-found does not flag.**
+        # A backticked string that is absent from the evidence is very often
+        # not a claim at all -- a tool name, a kubectl command, a field path
+        # the answer is telling someone to go and read. Flagging those would
+        # be defect 45's mistake again. So this can only move a run out of
+        # `insufficient_evidence`; it can never put one into `partial`.
+        for literal in dict.fromkeys(_QUOTED.findall(clause)):
+            if literal.lower() not in scope_lower:
+                continue
+            entries_for = cite(literal)
+            if not entries_for or _identifier_only(entries_for):
+                continue
+            checked += 1
+            claims.append({
+                "value": literal,
+                "kind": "quoted",
+                "status": "observed",
+                "evidence": entries_for,
             })
 
         lowered = clause.lower()

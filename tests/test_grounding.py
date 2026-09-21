@@ -559,9 +559,14 @@ class TestNamingSomethingTheEvidenceDoesNotHold:
 
         verdict = grounding.check("The namespace demo-1 is affected.", evidence)
 
-        assert [c["kind"] for c in verdict["claims"]] == ["number"], (
+        # The kind moved from "number" to "identifier" with defect 60 -- the
+        # digit is inside a namespace name -- and what this test is about is
+        # the kind it must NOT be. `entity` is the flag that fires on almost
+        # every correct answer when the index is asked for too much.
+        assert [c["kind"] for c in verdict["claims"]] == ["identifier"], (
             "demo-1 was flagged as an entity the evidence does not hold, but "
             "the evidence says it plainly")
+        assert verdict["unverified"] == []
 
     def test_a_workload_is_known_through_the_pod_the_tool_keyed(self):
         """
@@ -1372,3 +1377,90 @@ class TestADeniedPhraseIsNotAnUnverifiedClaim:
     def test_the_counter_an_asserted_cause_is_still_flagged(self):
         answer = "The container is leaking memory: this is a memory leak."
         assert grounding.check(answer, self.EVIDENCE)["unverified"] == ["memory leak"]
+
+
+class TestADigitInsideAnIdentifierIsNotAClaim:
+    """
+    Defect 60, first tail. `image_never_pulled_by_policy` scored `grounded` on
+    the `2` in the namespace name `uncovered2` and on four digits lifted out
+    of the pod name `local-only-657d685fc8-f8xj4`. Nothing about the diagnosis
+    was checked; the verdict said it had been.
+    """
+
+    EVIDENCE = [{
+        "id": "tool-1",
+        "tool": "describe_pod",
+        "result": json.dumps({
+            "pod": "local-only-657d685fc8-f8xj4",
+            "namespace": "uncovered2",
+            "containers": {"app": {"image": "billing-api:3.2.1",
+                                   "waiting_reason": "ErrImageNeverPull"}},
+        }),
+    }]
+
+    def test_pod_name_digits_do_not_count_as_checked(self):
+        answer = ("The pod local-only-657d685fc8-f8xj4 in uncovered2 will not "
+                  "start.")
+        verdict = grounding.check(answer, self.EVIDENCE)
+        assert verdict["checked"] == 0
+        assert {c["kind"] for c in verdict["claims"]} <= {"identifier"}
+
+    def test_they_are_still_recorded_rather_than_dropped(self):
+        """The audit should show what the extractor saw, not a silent gap."""
+        answer = "The pod local-only-657d685fc8-f8xj4 will not start."
+        kinds = [c["kind"] for c in grounding.check(answer, self.EVIDENCE)["claims"]]
+        assert "identifier" in kinds
+
+    def test_the_counter_a_real_measurement_still_counts(self):
+        """
+        Without this, excluding identifiers could quietly exclude everything
+        and every answer would read `insufficient_evidence`.
+        """
+        answer = "The image is `billing-api:3.2.1` and the pull policy is Never."
+        verdict = grounding.check(answer, self.EVIDENCE)
+        assert verdict["checked"] >= 1
+        assert verdict["confidence"] == "grounded"
+
+
+class TestAQuotedLiteralTheEvidenceCarriesIsAMeasurement:
+    """
+    Defect 60, second tail. The extractor read numbers, statuses, causes and
+    absences, and nothing else -- so an answer whose whole diagnosis is a
+    quoted string reached `checked = 0` and fell to `insufficient_evidence`.
+    `init_container_failure` quoted `cannot resolve postgres.data.svc`, read
+    out of get_pod_logs, and was graded as having stated nothing traceable.
+    """
+
+    EVIDENCE = [{
+        "id": "tool-1",
+        "tool": "get_pod_logs",
+        "result": json.dumps({
+            "pod": "needs-db-758f45b6c9-4ppp4",
+            "logs": "cannot resolve postgres.data.svc",
+        }),
+    }]
+
+    def test_a_quoted_literal_from_the_evidence_is_checked(self):
+        answer = ("The init container fails with "
+                  "`cannot resolve postgres.data.svc`.")
+        verdict = grounding.check(answer, self.EVIDENCE)
+        assert verdict["checked"] >= 1
+        assert verdict["confidence"] == "grounded"
+        assert any(c["kind"] == "quoted" for c in verdict["claims"])
+
+    def test_the_counter_a_quoted_string_the_evidence_lacks_is_not_flagged(self):
+        """
+        Deliberately asymmetric. A backticked string absent from the evidence
+        is very often not a claim -- a tool name, a kubectl command, a field
+        path the answer is telling someone to read -- and flagging those is
+        defect 45's mistake. This can move a run out of
+        `insufficient_evidence` and must never move one into `partial`.
+        """
+        answer = "Run `kubectl describe pod needs-db` to see more."
+        assert grounding.check(answer, self.EVIDENCE)["unverified"] == []
+
+    def test_the_counter_a_quoted_identifier_does_not_count(self):
+        """Otherwise this tail reopens the one above: quoting the pod name
+        would be enough to read as grounded."""
+        answer = "The pod is `needs-db-758f45b6c9-4ppp4`."
+        assert grounding.check(answer, self.EVIDENCE)["checked"] == 0
