@@ -4609,6 +4609,62 @@ Replayed: **0 records move on the 1876-record corpus** — the shape is new —
 and exactly 1 moves on defect 66's set, the record that was read. Three
 mechanisms mutated in turn, each failing at least one test.
 
+### 68. The largest module, surveyed at last: 75.3%
+
+**Measured 2026-09-22.** `routers/k8s_pods_info.py` -- 2430 lines, 61
+functions, the module that produces every tool output the model reads -- had
+never had a full mutation survey. Defect 31 records why `--all` structurally
+cannot reach it, and an attempt on 2026-09-17 was stopped a third of the way
+through.
+
+`evals/mutate.py`, six test files driving it, **397 mutants, 299 killed, 98
+survived, 0 equivalent-skipped: 75.3%**, about 50 minutes. Records in
+`results/mutation/k8s_pods_info-2026-09-21.json`.
+
+**Against the repo-wide 87.2% this is the weakest-covered significant surface
+in the project**, which is the answer the survey existed to produce.
+
+**The test set was proven not to skip first.** 612 passed, 0 skipped, with
+Docker down -- checked rather than assumed, because a survey run with a
+dependency down makes a skipped test look like a passing one and inflates the
+survivor count. None of these six files needs Postgres.
+
+**Survivors are a question, not a defect**, so the 98 are classified rather
+than counted:
+
+| | what it is |
+|---|---|
+| 28 | a condition in live logic -- the real questions |
+| 17 | **a guard whose body is an early `return`/`continue`** -- an untested branch |
+| 17 | a defensive `x or <default>` fallback, killable only by constructing the falsy case |
+| 5 | a truncation or page-size bound (`[:300]`, `limit=20`) |
+| 31 | other |
+
+**The shape, and it is consistent: the happy paths are tested and the guards
+are not.** `_port_mismatch` carries 13 survivors on its own and has four
+careful tests -- numeric mismatch flagged, numeric mismatch hedged, named
+mismatch stated as fact, named match silent. Every one of those exercises the
+function working. Nothing exercises a Service with no selector, a Service with
+no ports, or backing pods that declare no ports at all, and all three are
+early returns at the top of the function.
+
+`scan_cluster` (16 survivors), `failed` (10) and `_claim_status` (5) are the
+other clusters.
+
+**Not acted on.** This is a coverage measurement, not a defect list: no
+survivor here has been shown to be a behaviour anyone depends on. The next
+step is to read the 17 guards and the 28 live conditions one at a time and
+decide which deserve a test, which is a different piece of work from running
+the survey.
+
+**A note on how it was nearly mis-reported.** The progress check used to watch
+this run grepped for `SURVIVED` while `mutate.py` prints `survived`, so it
+returned 0 for fifty minutes and was read as "the tests are killing
+everything". The real figure is 75.3%. A counter that cannot fail is not a
+counter -- the same lesson this project recorded for the mechanisms under
+test, applied this time to the monitoring around one.
+
+
 ## Where a run's 74 seconds go
 
 Every latency figure this project has published is a report. None of them said

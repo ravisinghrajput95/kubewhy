@@ -12,7 +12,7 @@ authority, not this line — tree clean and pushed, **1922 passed, 34 skipped**
 (50s, 1956 collected), CI
 green, tags through **v0.3.0** (2026-09-16), prepared as 0.2.2 and
 renumbered by the owner before tagging. **mypy and ruff are both at zero and both gate**.
-67 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
+68 defects recorded, 38 eval cases of which 9 are never-seen-fault-type cases.
 
 **Measured 2026-09-21 as 1922 passed, 34 skipped in 50s, with `kubewhy-pg`
 running but no `TRIAGE_TEST_PG_DSN` exported** — so the 34 Postgres tests
@@ -670,29 +670,29 @@ defects 58 to 62.
      defaults the exposure is availability, not bypass -- measured on uvicorn
      0.51.0 and `fastapi run`.
 
-5a. **Two items are open for reasons that are not code.**
-   - **HA on the released image is still untested** and needs one permission.
-     `helm install` with `sharedState.enabled=true` at two replicas requires
-     `sharedState.existingSecret`, and the chart hard-fails without it on
-     purpose -- the DSN carries a password and values files end up in git. The
-     attempt on 2026-09-21 was blocked at `kubectl create secret`. Create the
-     Secret by hand first, then the install and the two-replica lease contention
-     are straightforward. The lease itself is already covered against a real
-     Postgres; what is untested is the *image* at two replicas.
-   - **Attempted and stopped 2026-09-21: the mutation survey below.** It ran 30
-     of an estimated 50 minutes over **397 mutation sites** and was stopped by
-     the owner. **0 survivors had been reported at that point**, and nothing was
-     written -- `--json` only lands at the end, so there is no partial artefact
-     and nothing to salvage. One pytest run of the six test files costs 16.4s,
-     which is where the ~50 minute estimate comes from. Re-run it whole; a
-     third of a survey is not a survey.
+5a. **The HA test is open for a reason that is not code.** `helm install` with
+   `sharedState.enabled=true` at two replicas requires
+   `sharedState.existingSecret`, and the chart hard-fails without it on
+   purpose -- the DSN carries a password and values files end up in git. The
+   attempt on 2026-09-21 was blocked at `kubectl create secret`, which this
+   environment denies. Create the Secret by hand first and the install and the
+   two-replica lease contention are straightforward. The lease itself is
+   already covered against a real Postgres; what is untested is the *image* at
+   two replicas.
 
-6. **`routers/k8s_pods_info.py` has still never had a full mutation survey**
-   (2413 lines, 55 functions). Unchanged from the last handoff: `evals/mutate.py`,
-   CPU-heavy, nothing else may run, budget 45–60 minutes with
-   `--tests tests/test_k8s_projection.py tests/test_agent_loop.py tests/test_api.py
-   tests/test_controller.py tests/test_mcp_server.py tests/test_redaction.py`.
-   The 2026-09-17 attempt was stopped at ~line 795 of 2413 and nothing was kept.
+6. **Done 2026-09-22: `routers/k8s_pods_info.py` is surveyed. 397 mutants,
+   299 killed, 98 survived, 75.3%** -- defect 68, records in
+   `results/mutation/k8s_pods_info-2026-09-21.json`. Against the repo-wide
+   87.2% this is the weakest-covered significant surface in the project.
+   **The follow-up is reading survivors, not running anything:** 17 are guards
+   whose body is an early return (an untested branch), 28 are conditions in
+   live logic, and 17 are defensive `x or <default>` fallbacks that are
+   near-equivalent. The consistent shape is that happy paths are tested and
+   guards are not -- `_port_mismatch` has four careful tests of the function
+   working and 13 survivors, none of which any test reaches.
+   **Prove the test set does not skip before re-running anything like this:**
+   612 passed and 0 skipped was checked first, because a dependency that is
+   down turns a skipped test into an inflated survivor count.
 
 7. **Still open, with evidence, not acted on.**
    - `scan_references` is never called for an unbound claim — 0 of 15 runs
