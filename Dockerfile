@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS base
+FROM python:3.15-slim AS base
 
 # Unbuffered so logs appear immediately under docker logs; no .pyc in a
 # layer that is thrown away anyway.
